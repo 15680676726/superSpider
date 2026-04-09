@@ -209,12 +209,12 @@ def test_submit_identity_prefers_model_generated_next_question(tmp_path) -> None
 
     result = service.submit_identity(
         display_name="阿泽",
-        profession="交易员",
+        profession="探索者",
         current_stage="重启",
-        interests=["股票", "交易"],
+        interests=["复盘", "独立成长"],
         strengths=["复盘"],
         constraints=["资金有限"],
-        goal_intention="我想靠炒股建立长期稳定的收入能力。",
+        goal_intention="我想找到一条真正值得长期投入的人生主方向。",
     )
 
     assert result.next_question == "你想先做哪一类股票交易，短线、波段还是中长线？"

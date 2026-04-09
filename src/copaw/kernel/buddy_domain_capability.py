@@ -107,13 +107,6 @@ _DOMAIN_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
             "writing",
             "content",
             "creator",
-            "设计",
-            "系统",
-            "design",
-            "designer",
-            "system",
-            "systems",
-            "copy",
         ),
     ),
     (

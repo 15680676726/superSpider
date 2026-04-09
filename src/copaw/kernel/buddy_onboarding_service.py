@@ -23,6 +23,7 @@ from .buddy_onboarding_reasoner import (
     BuddyOnboardingGrowthPlan,
     BuddyOnboardingReasonedTurn,
     BuddyOnboardingReasoner,
+    BuddyOnboardingReasonerUnavailableError,
     BuddyOnboardingReasonerTimeoutError,
 )
 from .buddy_domain_capability_growth import BuddyDomainCapabilityGrowthService
@@ -611,9 +612,10 @@ class BuddyOnboardingService:
         existing_session = self._onboarding_session_repository.get_latest_session_for_profile(
             profile.profile_id,
         )
+        transcript = [profile.goal_intention]
         reasoned_turn = self._resolve_reasoned_turn(
             profile=profile,
-            transcript=[profile.goal_intention],
+            transcript=transcript,
             question_count=1,
             tightened=False,
         )
@@ -628,10 +630,10 @@ class BuddyOnboardingService:
                 else _build_buddy_question(
                     profile=profile,
                     question_count=1,
-                    transcript=[profile.goal_intention],
+                    transcript=transcript,
                 )
             ),
-            transcript=[profile.goal_intention],
+            transcript=transcript,
             candidate_directions=(
                 list(reasoned_turn.candidate_directions)
                 if reasoned_turn is not None
@@ -1121,9 +1123,13 @@ class BuddyOnboardingService:
             raise
         except TimeoutError:
             raise
+        except BuddyOnboardingReasonerUnavailableError:
+            raise
         except Exception:
-            logger.debug("Buddy onboarding reasoned turn failed; falling back.", exc_info=True)
-            return None
+            logger.warning("Buddy onboarding reasoned turn failed.", exc_info=True)
+            raise BuddyOnboardingReasonerUnavailableError(
+                "Buddy onboarding model failed to return a valid result.",
+            ) from None
 
     def _resolve_growth_plan(
         self,
@@ -1144,9 +1150,13 @@ class BuddyOnboardingService:
             raise
         except TimeoutError:
             raise
+        except BuddyOnboardingReasonerUnavailableError:
+            raise
         except Exception:
-            logger.debug("Buddy onboarding growth plan failed; falling back.", exc_info=True)
-            return None
+            logger.warning("Buddy onboarding growth plan failed.", exc_info=True)
+            raise BuddyOnboardingReasonerUnavailableError(
+                "Buddy onboarding model failed to return a valid result.",
+            ) from None
 
     def _validate_selected_direction(
         self,

@@ -41,6 +41,14 @@ class _DelayedIndustryService:
         }
 
 
+class _BrokenReasoner:
+    def plan_turn(self, **kwargs):
+        raise RuntimeError("provider exploded")
+
+    def build_growth_plan(self, **kwargs):
+        raise RuntimeError("provider exploded")
+
+
 def _build_service(tmp_path, *, reasoner=None) -> BuddyOnboardingService:
     store = SQLiteStateStore(tmp_path / "buddy-onboarding-route-latency.sqlite3")
     return BuddyOnboardingService(
@@ -53,7 +61,9 @@ def _build_service(tmp_path, *, reasoner=None) -> BuddyOnboardingService:
     )
 
 
-def test_identity_returns_gateway_timeout_when_reasoner_times_out(tmp_path) -> None:
+def test_identity_returns_gateway_timeout_when_reasoner_times_out_for_ambiguous_goal(
+    tmp_path,
+) -> None:
     app = FastAPI()
     app.state.buddy_onboarding_service = _build_service(tmp_path, reasoner=_TimeoutReasoner())
     app.include_router(buddy_router)
@@ -68,12 +78,35 @@ def test_identity_returns_gateway_timeout_when_reasoner_times_out(tmp_path) -> N
             "interests": ["stocks"],
             "strengths": ["review"],
             "constraints": ["capital"],
-            "goal_intention": "Build a real stock trading path.",
+            "goal_intention": "Find a real long-term path.",
         },
     )
 
     assert response.status_code == 504
     assert "timed out" in response.json()["detail"].lower()
+
+
+def test_identity_returns_service_unavailable_when_reasoner_fails(tmp_path) -> None:
+    app = FastAPI()
+    app.state.buddy_onboarding_service = _build_service(tmp_path, reasoner=_BrokenReasoner())
+    app.include_router(buddy_router)
+    client = TestClient(app)
+
+    response = client.post(
+        "/buddy/onboarding/identity",
+        json={
+            "display_name": "Kai",
+            "profession": "Operator",
+            "current_stage": "restart",
+            "interests": ["systems"],
+            "strengths": ["follow-through"],
+            "constraints": ["time"],
+            "goal_intention": "Find a real long-term path.",
+        },
+    )
+
+    assert response.status_code == 503
+    assert "model" in response.json()["detail"].lower()
 
 
 def test_confirm_direction_queues_activation_instead_of_waiting_for_kickoff(tmp_path) -> None:

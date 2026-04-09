@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from ...app.crons.models import CronJobSpec
 from ...kernel.buddy_onboarding_service import BuddyOnboardingService
+from ...kernel.buddy_onboarding_reasoner import BuddyOnboardingReasonerUnavailableError
 from ...kernel.buddy_projection_service import BuddyProjectionService
 
 router = APIRouter(prefix="/buddy", tags=["buddy"])
@@ -135,6 +136,8 @@ async def submit_buddy_identity(
         result = service.submit_identity(**payload.model_dump())
     except TimeoutError as exc:
         raise HTTPException(504, detail=str(exc) or "Buddy onboarding model timed out.") from exc
+    except BuddyOnboardingReasonerUnavailableError as exc:
+        raise HTTPException(503, detail=str(exc) or "Buddy onboarding model is unavailable.") from exc
     except ValueError as exc:
         raise HTTPException(400, detail=str(exc)) from exc
     return result.model_dump(mode="json")
@@ -150,6 +153,8 @@ async def answer_buddy_clarification(
         result = service.answer_clarification_turn(**payload.model_dump())
     except TimeoutError as exc:
         raise HTTPException(504, detail=str(exc) or "Buddy onboarding model timed out.") from exc
+    except BuddyOnboardingReasonerUnavailableError as exc:
+        raise HTTPException(503, detail=str(exc) or "Buddy onboarding model is unavailable.") from exc
     except ValueError as exc:
         raise HTTPException(400, detail=str(exc)) from exc
     return result.model_dump(mode="json")
@@ -178,6 +183,8 @@ async def confirm_buddy_direction(
         result = service.confirm_primary_direction(**payload.model_dump())
     except TimeoutError as exc:
         raise HTTPException(504, detail=str(exc) or "Buddy onboarding model timed out.") from exc
+    except BuddyOnboardingReasonerUnavailableError as exc:
+        raise HTTPException(503, detail=str(exc) or "Buddy onboarding model is unavailable.") from exc
     except ValueError as exc:
         raise HTTPException(400, detail=str(exc)) from exc
     await _maybe_register_buddy_schedules(

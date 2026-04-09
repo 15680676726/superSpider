@@ -97,6 +97,10 @@ class BuddyOnboardingReasonerTimeoutError(TimeoutError):
     """Raised when Buddy onboarding waits too long for the active chat model."""
 
 
+class BuddyOnboardingReasonerUnavailableError(RuntimeError):
+    """Raised when Buddy onboarding cannot get a valid AI result."""
+
+
 def _response_to_text(response: object) -> str:
     content = getattr(response, "content", None)
     if isinstance(content, str):
@@ -282,7 +286,9 @@ class ModelDrivenBuddyOnboardingReasoner:
             model = self._model_factory()
         except Exception:
             logger.debug("Buddy onboarding reasoner could not resolve an active chat model.", exc_info=True)
-            return None
+            raise BuddyOnboardingReasonerUnavailableError(
+                "Buddy onboarding model is not available.",
+            ) from None
         request_payload = {
             "profile": profile.model_dump(mode="json"),
             "transcript": list(transcript),
@@ -314,8 +320,10 @@ class ModelDrivenBuddyOnboardingReasoner:
             logger.warning("Buddy onboarding reasoner timed out.", exc_info=True)
             raise
         except Exception:
-            logger.debug("Buddy onboarding reasoner failed; falling back to heuristics.", exc_info=True)
-            return None
+            logger.warning("Buddy onboarding reasoner failed.", exc_info=True)
+            raise BuddyOnboardingReasonerUnavailableError(
+                "Buddy onboarding model failed to return a valid result.",
+            ) from None
         return payload
 
 
@@ -325,5 +333,6 @@ __all__ = [
     "BuddyOnboardingReasonedTurn",
     "BuddyOnboardingReasoner",
     "BuddyOnboardingReasonerTimeoutError",
+    "BuddyOnboardingReasonerUnavailableError",
     "ModelDrivenBuddyOnboardingReasoner",
 ]

@@ -208,6 +208,11 @@ def test_derive_buddy_domain_key_normalizes_same_domain_variants() -> None:
     assert derive_buddy_domain_key("炒股赚 10 万") != derive_buddy_domain_key("写作副业变现")
 
 
+def test_derive_buddy_domain_key_does_not_fold_design_into_writing() -> None:
+    assert derive_buddy_domain_key("建立写作收入") == "writing"
+    assert derive_buddy_domain_key("建立设计系统与品牌能力") != "writing"
+
+
 def test_preview_domain_transition_prefers_same_domain_extension() -> None:
     preview = preview_domain_transition(
         selected_direction="股票赚 100 万",
