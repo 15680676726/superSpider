@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import threading
 from typing import Any, Literal
 
@@ -14,12 +16,16 @@ from .query_execution_intent_policy import (
     is_hypothetical_control_text as _is_hypothetical_control_text,
     looks_like_goal_setting_text as _looks_like_goal_setting_text,
 )
+
+logger = logging.getLogger(__name__)
 _CHAT_WRITEBACK_MODEL_TARGETS = frozenset({"strategy", "backlog", "schedule"})
 _CHAT_WRITEBACK_MODEL_CACHE_MAX = 128
 _CHAT_WRITEBACK_MODEL_CACHE_LOCK = threading.Lock()
 _CHAT_WRITEBACK_MODEL_CACHE = BoundedLRUCache[str, "_ChatWritebackModelDecision"](
     max_entries=_CHAT_WRITEBACK_MODEL_CACHE_MAX,
 )
+_CHAT_WRITEBACK_DECISION_MODEL_FACTORY = None
+_CHAT_WRITEBACK_MODEL_TIMEOUT_SECONDS = 8.0
 _CHAT_WRITEBACK_MODEL_PLANNER_PROMPT = """
 You are the governed execution-core chat frontdoor for CoPaw.
 
@@ -481,6 +487,52 @@ def _get_cached_chat_writeback_decision(
 def clear_chat_writeback_decision_cache() -> None:
     with _CHAT_WRITEBACK_MODEL_CACHE_LOCK:
         _CHAT_WRITEBACK_MODEL_CACHE.clear()
+
+
+def _resolve_chat_writeback_decision_model() -> object | None:
+    factory = _CHAT_WRITEBACK_DECISION_MODEL_FACTORY
+    if callable(factory):
+        try:
+            return factory()
+        except Exception:
+            logger.debug("Chat writeback decision model factory failed.", exc_info=True)
+            return None
+    try:
+        from ..providers.runtime_provider_facade import build_compat_runtime_provider_facade
+
+        runtime = build_compat_runtime_provider_facade()
+        return runtime.get_active_chat_model()
+    except Exception:
+        logger.debug("Chat writeback decision model is unavailable.", exc_info=True)
+        return None
+
+
+async def _resolve_model_chat_writeback_decision(
+    text: str,
+) -> _ChatWritebackModelDecision | None:
+    model = _resolve_chat_writeback_decision_model()
+    if model is None:
+        return None
+    try:
+        response = await asyncio.wait_for(
+            model(
+                messages=_decision_messages(text),
+                structured_model=_ChatWritebackModelDecision,
+            ),
+            timeout=_CHAT_WRITEBACK_MODEL_TIMEOUT_SECONDS,
+        )
+        response = await asyncio.wait_for(
+            _materialize_response(response),
+            timeout=_CHAT_WRITEBACK_MODEL_TIMEOUT_SECONDS,
+        )
+        payload = _response_to_payload(response)
+        return _ChatWritebackModelDecision.model_validate(payload)
+    except TimeoutError:
+        logger.warning("Chat writeback decision model timed out.", exc_info=True)
+        return None
+    except Exception:
+        logger.debug("Chat writeback decision model failed; falling back to heuristics.", exc_info=True)
+        return None
 
 
 def _contains_any(text: str, needles: tuple[str, ...]) -> bool:
@@ -965,7 +1017,20 @@ async def resolve_chat_writeback_model_decision(
         return cached
 
     heuristic = _heuristic_chat_writeback_model_decision(normalized)
-    return _cache_chat_writeback_decision(normalized, heuristic)
+    if (
+        heuristic.intent_kind in {"status-query", "discussion"}
+        or heuristic.team_role_gap_action is not None
+        or heuristic.team_role_gap_notice
+    ):
+        return _cache_chat_writeback_decision(normalized, heuristic)
+
+    model_decision = await _resolve_model_chat_writeback_decision(normalized)
+    if model_decision is None:
+        return _cache_chat_writeback_decision(normalized, heuristic)
+    return _cache_chat_writeback_decision(
+        normalized,
+        _merge_model_decision_with_heuristic(model_decision, heuristic),
+    )
 
 
 def resolve_chat_writeback_model_decision_sync(
@@ -978,9 +1043,8 @@ def resolve_chat_writeback_model_decision_sync(
     cached = _get_cached_chat_writeback_decision(normalized)
     if cached is not None:
         return cached
-    return _cache_chat_writeback_decision(
-        normalized,
-        _heuristic_chat_writeback_model_decision(normalized),
+    return asyncio.run(
+        resolve_chat_writeback_model_decision(text=normalized),
     )
 
 

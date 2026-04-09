@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from copaw.evidence import EvidenceRecord
 from copaw.industry.chat_writeback import build_chat_writeback_plan
 from copaw.kernel import ActorMailboxService, ActorWorker, KernelTurnExecutor, TaskDelegationService
+from copaw.kernel import query_execution_writeback as writeback_module
 from copaw.kernel.main_brain_chat_service import MainBrainChatService
 from copaw.kernel.main_brain_intake import MainBrainIntakeContract
 from copaw.kernel.main_brain_orchestrator import MainBrainOrchestrator
@@ -35,6 +36,26 @@ class _StaticResponseModel:
         return SimpleNamespace(content=self.text)
 
 
+class _StaticStructuredDecisionModel:
+    stream = False
+
+    async def __call__(self, *, messages, structured_model=None, **kwargs):
+        _ = (messages, kwargs)
+        assert structured_model is not None
+        return SimpleNamespace(
+            metadata=structured_model(
+                intent_kind="execute-task",
+                intent_confidence=0.98,
+                intent_signals=["model-actionable"],
+                should_writeback=True,
+                approved_targets=["backlog"],
+                kickoff_allowed=True,
+                confidence=0.98,
+                rationale="model-driven",
+            ),
+        )
+
+
 class _CanonicalFlowQueryExecutionService:
     def __init__(
         self,
@@ -46,6 +67,7 @@ class _CanonicalFlowQueryExecutionService:
         self._industry_service = industry_service
         self.calls: list[dict[str, object]] = []
         self.writeback_result: dict[str, object] | None = None
+        self.kickoff_result: dict[str, object] | None = None
 
     def set_session_backend(self, session_backend) -> None:
         self._chat_service.set_session_backend(session_backend)
@@ -74,6 +96,14 @@ class _CanonicalFlowQueryExecutionService:
                 session_id=request.session_id,
                 channel=request.channel,
                 writeback_plan=intake_contract.writeback_plan,
+            )
+        if intake_contract is not None and intake_contract.should_kickoff:
+            self.kickoff_result = await self._industry_service.kickoff_execution_from_chat(
+                industry_instance_id=request.industry_instance_id,
+                message_text=intake_contract.message_text,
+                owner_agent_id=getattr(request, "agent_id", None) or "copaw-agent-runner",
+                session_id=request.session_id,
+                channel=request.channel,
             )
 
         if buffered:
@@ -491,6 +521,115 @@ def test_runtime_canonical_flow_harness_auto_writeback_requested_actions_routes_
     )
     assert backlog_item["metadata"]["control_thread_id"] == control_thread_id
     assert backlog_item["metadata"]["source"] == "chat-writeback"
+
+
+def test_runtime_canonical_flow_harness_model_driven_content_creation_request_kicks_off_execution(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    instruction = "现在去写一篇短篇小说，保存成实际文件，并完成后主动告诉我结果。"
+    control_ack = "我会把这件事落成实际产物，完成后回到同一线程汇报。"
+    monkeypatch.setattr(
+        writeback_module,
+        "_CHAT_WRITEBACK_DECISION_MODEL_FACTORY",
+        lambda: _StaticStructuredDecisionModel(),
+        raising=False,
+    )
+    writeback_module.clear_chat_writeback_decision_cache()
+
+    chat_service = MainBrainChatService(
+        session_backend=app.state.session_backend,
+        industry_service=app.state.industry_service,
+        agent_profile_service=app.state.agent_profile_service,
+        model_factory=lambda: _StaticResponseModel(control_ack),
+    )
+    query_execution_service = _CanonicalFlowQueryExecutionService(
+        chat_service=chat_service,
+        industry_service=app.state.industry_service,
+    )
+
+    app.state.turn_executor = KernelTurnExecutor(
+        session_backend=app.state.session_backend,
+        query_execution_service=query_execution_service,
+        main_brain_chat_service=chat_service,
+        main_brain_orchestrator=MainBrainOrchestrator(
+            query_execution_service=query_execution_service,
+            session_backend=app.state.session_backend,
+        ),
+    )
+
+    client = TestClient(app)
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Content Operations",
+            "company_name": "Northwind Studio",
+            "product": "artifact execution",
+            "goals": ["turn executable requests into durable work"],
+        },
+    )
+    assert preview.status_code == 200
+
+    bootstrap = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": preview.json()["profile"],
+            "draft": preview.json()["draft"],
+            "auto_activate": True,
+        },
+    )
+    assert bootstrap.status_code == 200
+    instance_id = bootstrap.json()["team"]["team_id"]
+    control_thread_id = f"industry-chat:{instance_id}:execution-core"
+
+    response = client.post(
+        "/runtime-center/chat/run",
+        json={
+            "id": "req-model-driven-content-artifact",
+            "session_id": control_thread_id,
+            "thread_id": control_thread_id,
+            "user_id": "copaw-agent-runner",
+            "channel": "console",
+            "agent_id": "copaw-agent-runner",
+            "industry_instance_id": instance_id,
+            "industry_role_id": "execution-core",
+            "session_kind": "industry-control-thread",
+            "control_thread_id": control_thread_id,
+            "interaction_mode": "auto",
+            "input": [
+                {
+                    "role": "user",
+                    "type": "message",
+                    "content": [{"type": "text", "text": instruction}],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert len(query_execution_service.calls) == 1
+    routed_request = query_execution_service.calls[0]["request"]
+    assert getattr(routed_request, "_copaw_resolved_interaction_mode") == "orchestrate"
+    assert query_execution_service.writeback_result is not None
+    assert query_execution_service.kickoff_result is not None
+    assert "started_assignment_ids" in query_execution_service.kickoff_result
+
+    writeback = query_execution_service.writeback_result
+    created_backlog_ids = list(writeback["created_backlog_ids"])
+    assert created_backlog_ids
+
+    detail = client.get(f"/runtime-center/industry/{instance_id}")
+    assert detail.status_code == 200
+    detail_payload = detail.json()
+    created_backlog = {
+        item["backlog_item_id"]: item for item in detail_payload["backlog"]
+    }
+    backlog_item = created_backlog[created_backlog_ids[0]]
+    assert backlog_item["metadata"]["source"] == "chat-writeback"
+    assert backlog_item["metadata"]["control_thread_id"] == control_thread_id
 
 
 def test_runtime_canonical_flow_harness_auto_frontdoor_replan_materializes_followup_assignment_on_same_thread_contract(

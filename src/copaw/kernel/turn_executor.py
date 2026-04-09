@@ -42,6 +42,7 @@ from .main_brain_intake import (
     extract_main_brain_intake_text,
     normalize_main_brain_runtime_context,
     read_attached_main_brain_intake_contract,
+    resolve_main_brain_intake_contract,
     resolve_request_main_brain_intake_contract,
 )
 from .main_brain_chat_service import MainBrainChatService
@@ -553,6 +554,14 @@ async def _resolve_auto_chat_mode(
             )
         except Exception:
             logger.debug("Main-brain attached intake contract resolution failed", exc_info=True)
+        if intake_contract is None:
+            try:
+                intake_contract = await resolve_main_brain_intake_contract(
+                    text=text,
+                    msgs=msgs,
+                )
+            except Exception:
+                logger.debug("Main-brain model intake contract resolution failed", exc_info=True)
     if intake_contract is not None:
         if intake_contract.should_route_to_orchestrate:
             return "orchestrate"

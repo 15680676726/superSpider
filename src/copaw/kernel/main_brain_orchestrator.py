@@ -16,6 +16,7 @@ from .main_brain_execution_planner import MainBrainExecutionPlanner
 from .main_brain_intake import (
     MainBrainIntakeContract,
     read_attached_main_brain_intake_contract,
+    resolve_main_brain_intake_contract,
     resolve_request_main_brain_intake_contract,
 )
 from .main_brain_recovery_coordinator import MainBrainRecoveryCoordinator
@@ -417,6 +418,12 @@ class MainBrainOrchestrator:
         except Exception:
             logger.debug("Main-brain intake resolution failed during orchestration", exc_info=True)
             return None
+        if contract is None:
+            try:
+                contract = await resolve_main_brain_intake_contract(msgs=msgs)
+            except Exception:
+                logger.debug("Main-brain model intake fallback failed during orchestration", exc_info=True)
+                return None
         if contract is not None:
             try:
                 setattr(request, "_copaw_main_brain_intake_contract", contract)

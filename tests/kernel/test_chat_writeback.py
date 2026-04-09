@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import asyncio
+from types import SimpleNamespace
+
 from copaw.industry.chat_writeback import build_chat_writeback_plan
 from copaw.kernel import query_execution_writeback as writeback_module
 from copaw.kernel.query_execution_shared import (
@@ -78,3 +81,67 @@ def test_build_chat_writeback_plan_from_model_decision_structures_fuzzy_goal() -
     assert "可用本金/账户规模" in plan.goal.summary
     assert plan.goal.plan_steps
     assert "风险边界" in plan.goal.plan_steps[0] or "风险边界" in plan.goal.plan_steps[1]
+class _FakeStructuredDecisionModel:
+    stream = False
+
+    async def __call__(self, *, messages, structured_model=None, **kwargs):
+        _ = (messages, kwargs)
+        assert structured_model is not None
+        return SimpleNamespace(
+            metadata=structured_model(
+                intent_kind="execute-task",
+                intent_confidence=0.97,
+                intent_signals=["model-actionable"],
+                should_writeback=True,
+                approved_targets=["backlog"],
+                kickoff_allowed=True,
+                confidence=0.97,
+                rationale="model-driven",
+            ),
+        )
+
+
+def test_actionable_content_creation_request_does_not_degrade_into_plain_chat(
+    monkeypatch,
+) -> None:
+    writeback_module.clear_chat_writeback_decision_cache()
+    monkeypatch.setattr(
+        writeback_module,
+        "_CHAT_WRITEBACK_DECISION_MODEL_FACTORY",
+        lambda: _FakeStructuredDecisionModel(),
+        raising=False,
+    )
+
+    decision = writeback_module.resolve_chat_writeback_model_decision_sync(
+        text="现在去写一篇短篇小说，保存成实际文件，并完成后主动告诉我结果。",
+    )
+
+    assert decision is not None
+    assert decision.intent_kind == "execute-task"
+    assert decision.should_writeback is True
+    assert "backlog" in decision.approved_targets
+    assert decision.kickoff_allowed is True
+
+
+def test_chat_writeback_decision_prefers_model_for_actionable_creation_request(
+    monkeypatch,
+) -> None:
+    writeback_module.clear_chat_writeback_decision_cache()
+    monkeypatch.setattr(
+        writeback_module,
+        "_CHAT_WRITEBACK_DECISION_MODEL_FACTORY",
+        lambda: _FakeStructuredDecisionModel(),
+        raising=False,
+    )
+
+    decision = asyncio.run(
+        writeback_module.resolve_chat_writeback_model_decision(
+            text="现在去写一篇短篇小说，保存成实际文件，并完成后主动告诉我结果。",
+        ),
+    )
+
+    assert decision is not None
+    assert decision.intent_kind == "execute-task"
+    assert decision.should_writeback is True
+    assert decision.kickoff_allowed is True
+    assert decision.intent_signals == ["model-actionable"]

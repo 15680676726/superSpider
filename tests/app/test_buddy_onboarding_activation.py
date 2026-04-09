@@ -561,7 +561,8 @@ def test_buddy_confirm_direction_writes_back_completed_reports_to_control_thread
             and not active_tasks
             and reports
             and len(reports) >= len(all_tasks)
-            and report_messages
+            and len(report_messages) >= len(reports)
+            and all(report.processed for report in reports)
         ):
             break
         time.sleep(0.25)
@@ -570,6 +571,7 @@ def test_buddy_confirm_direction_writes_back_completed_reports_to_control_thread
     assert reports
     assert report_messages
     assert all(report.processed for report in reports)
+    assert len(report_messages) >= len(reports)
     assert {report.assignment_id for report in reports if report.assignment_id}
     assert {
         message.get("metadata", {}).get("control_thread_id")
