@@ -83,6 +83,66 @@ function resolveChatRouteRecoveryTarget({
   return recoveryTarget === "/chat" ? null : recoveryTarget;
 }
 
+function resolveChatThreadBootstrapState({
+  requestedThreadId,
+  buddySessionId,
+  requestedBuddyProfileId,
+  activeThreadId,
+  activeThreadMeta,
+}: {
+  requestedThreadId: string | null;
+  buddySessionId: string | null;
+  requestedBuddyProfileId: string | null;
+  activeThreadId: string | null | undefined;
+  activeThreadMeta: unknown;
+}): {
+  effectiveThreadId: string | null;
+  initialThreadMeta: Record<string, unknown>;
+  initialThreadBootstrapPending: boolean;
+  initialAutoBindingPending: boolean;
+  recoveryTarget: string | null;
+} {
+  const normalizedRequestedThreadId = normalizeThreadId(requestedThreadId);
+  const normalizedActiveThreadId = normalizeThreadId(activeThreadId);
+  const recoveryTarget = resolveChatRouteRecoveryTarget({
+    requestedThreadId: normalizedRequestedThreadId,
+    buddySessionId,
+    requestedBuddyProfileId,
+    activeThreadId: normalizedActiveThreadId,
+  });
+
+  if (normalizedRequestedThreadId) {
+    return {
+      effectiveThreadId: normalizedRequestedThreadId,
+      initialThreadMeta:
+        normalizedActiveThreadId === normalizedRequestedThreadId
+          ? normalizeThreadMeta(activeThreadMeta)
+          : {},
+      initialThreadBootstrapPending: true,
+      initialAutoBindingPending: false,
+      recoveryTarget: null,
+    };
+  }
+
+  if (recoveryTarget && normalizedActiveThreadId) {
+    return {
+      effectiveThreadId: normalizedActiveThreadId,
+      initialThreadMeta: normalizeThreadMeta(activeThreadMeta),
+      initialThreadBootstrapPending: false,
+      initialAutoBindingPending: false,
+      recoveryTarget,
+    };
+  }
+
+  return {
+    effectiveThreadId: null,
+    initialThreadMeta: {},
+    initialThreadBootstrapPending: false,
+    initialAutoBindingPending: true,
+    recoveryTarget: null,
+  };
+}
+
 function shouldAutoRefreshRuntimeThread({
   threadId,
   threadMeta,
@@ -110,6 +170,7 @@ export {
   normalizeThreadMeta,
   isFormalRuntimeThreadId,
   parseIndustryThreadId,
+  resolveChatThreadBootstrapState,
   resolveChatRouteRecoveryTarget,
   shouldAutoRefreshRuntimeThread,
 };

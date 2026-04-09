@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   countPendingChatApprovals,
+  resolveChatThreadBootstrapState,
   resolveChatRouteRecoveryTarget,
   shouldAutoRefreshRuntimeThread,
 } from "./chatPageHelpers";
@@ -41,6 +42,50 @@ describe("countPendingChatApprovals", () => {
         activeThreadId: "industry-chat:industry-1:execution-core",
       }),
     ).toBeNull();
+  });
+
+  it("restores the active formal runtime thread immediately for a bare chat revisit", () => {
+    expect(
+      resolveChatThreadBootstrapState({
+        requestedThreadId: null,
+        buddySessionId: null,
+        requestedBuddyProfileId: null,
+        activeThreadId: "industry-chat:industry-1:execution-core",
+        activeThreadMeta: {
+          session_kind: "industry-control-thread",
+          industry_instance_id: "industry-1",
+        },
+      }),
+    ).toEqual({
+      effectiveThreadId: "industry-chat:industry-1:execution-core",
+      initialThreadMeta: {
+        session_kind: "industry-control-thread",
+        industry_instance_id: "industry-1",
+      },
+      initialThreadBootstrapPending: false,
+      initialAutoBindingPending: false,
+      recoveryTarget: "/chat?threadId=industry-chat%3Aindustry-1%3Aexecution-core",
+    });
+  });
+
+  it("does not overwrite a fresh onboarding entry with the previously active thread", () => {
+    expect(
+      resolveChatThreadBootstrapState({
+        requestedThreadId: null,
+        buddySessionId: "session-1",
+        requestedBuddyProfileId: "profile-1",
+        activeThreadId: "industry-chat:industry-1:execution-core",
+        activeThreadMeta: {
+          session_kind: "industry-control-thread",
+        },
+      }),
+    ).toEqual({
+      effectiveThreadId: null,
+      initialThreadMeta: {},
+      initialThreadBootstrapPending: false,
+      initialAutoBindingPending: true,
+      recoveryTarget: null,
+    });
   });
 
   it("auto refreshes bound runtime control threads so background writeback can surface", () => {

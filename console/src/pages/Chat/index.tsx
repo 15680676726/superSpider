@@ -40,6 +40,7 @@ import {
   countPendingChatApprovals,
   normalizeThreadId,
   normalizeThreadMeta,
+  resolveChatThreadBootstrapState,
   resolveChatRouteRecoveryTarget,
   shouldAutoRefreshRuntimeThread,
 } from "./chatPageHelpers";
@@ -292,7 +293,7 @@ export default function ChatPage() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const requestedThreadId = useMemo(
+  const requestedThreadIdFromQuery = useMemo(
     () => normalizeThreadId(new URLSearchParams(location.search).get("threadId")),
     [location.search],
   );
@@ -308,6 +309,14 @@ export default function ChatPage() {
     () => resolveRequestedBuddyProfileId(buddyProfileIdFromQuery),
     [buddyProfileIdFromQuery],
   );
+  const threadBootstrapState = resolveChatThreadBootstrapState({
+    requestedThreadId: requestedThreadIdFromQuery,
+    buddySessionId,
+    requestedBuddyProfileId,
+    activeThreadId: sessionApi.getActiveThreadId(),
+    activeThreadMeta: window.currentThreadMeta,
+  });
+  const requestedThreadId = threadBootstrapState.effectiveThreadId;
   const [resolvedBuddyProfileId, setResolvedBuddyProfileId] = useState<string | null>(
     () => requestedBuddyProfileId,
   );
@@ -316,11 +325,11 @@ export default function ChatPage() {
   const [suggestedTeams, setSuggestedTeams] = useState<IndustryInstanceSummary[]>([]);
   const [industryTeamsError, setIndustryTeamsError] = useState<string | null>(null);
   const [threadBootstrapPending, setThreadBootstrapPending] = useState(
-    Boolean(requestedThreadId),
+    threadBootstrapState.initialThreadBootstrapPending,
   );
   const [threadBootstrapError, setThreadBootstrapError] = useState<string | null>(null);
   const [threadMeta, setThreadMeta] = useState<Record<string, unknown>>(
-    normalizeThreadMeta(requestedThreadId ? window.currentThreadMeta : null),
+    threadBootstrapState.initialThreadMeta,
   );
   const canonicalThreadBuddyProfileId = useMemo(
     () => resolveThreadBuddyProfileId(threadMeta),
@@ -357,7 +366,9 @@ export default function ChatPage() {
     windowThreadId: window.currentThreadId,
   });
 
-  const [autoBindingPending, setAutoBindingPending] = useState(!Boolean(requestedThreadId));
+  const [autoBindingPending, setAutoBindingPending] = useState(
+    threadBootstrapState.initialAutoBindingPending,
+  );
   const [runtimeWaitState, setRuntimeWaitState] = useState<RuntimeWaitState | null>(null);
   const [runtimeHealthNotice, setRuntimeHealthNotice] = useState<RuntimeHealthNotice | null>(null);
   const [runtimeLifecycleState, setRuntimeLifecycleState] =
@@ -504,14 +515,10 @@ export default function ChatPage() {
   }, [loadGovernanceStatus]);
 
   useEffect(() => {
-    if (!requestedThreadId) {
-      const recoveryTarget = resolveChatRouteRecoveryTarget({
-        requestedThreadId,
-        buddySessionId,
-        requestedBuddyProfileId,
-        activeThreadId: sessionApi.getActiveThreadId(),
-      });
+    if (!requestedThreadIdFromQuery) {
+      const recoveryTarget = threadBootstrapState.recoveryTarget;
       if (recoveryTarget) {
+        sessionApi.setPreferredThreadId(requestedThreadId);
         navigate(recoveryTarget, { replace: true });
         return;
       }
@@ -520,6 +527,7 @@ export default function ChatPage() {
       setThreadBootstrapPending(false);
       setThreadBootstrapError(null);
       setThreadMeta({});
+      setAutoBindingPending(threadBootstrapState.initialAutoBindingPending);
       return;
     }
     if (!requestedThreadLooksBound) {
@@ -554,8 +562,11 @@ export default function ChatPage() {
     buddySessionId,
     navigate,
     requestedBuddyProfileId,
+    requestedThreadIdFromQuery,
     requestedThreadId,
     requestedThreadLooksBound,
+    threadBootstrapState.initialAutoBindingPending,
+    threadBootstrapState.recoveryTarget,
   ]);
 
   useEffect(() => {
