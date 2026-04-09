@@ -85,9 +85,67 @@ describe("CapabilityMarketPage", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByRole("tab", { name: "Projects" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "项目" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "安装模板" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "MCP" })).toBeInTheDocument();
+  });
+
+  it("localizes the project search controls for regular users", () => {
+    stateMock.mockReturnValue({
+      ...baseState,
+      activeTab: "projects",
+    });
+
+    render(
+      <MemoryRouter>
+        <CapabilityMarketPage />
+      </MemoryRouter>,
+    );
+
+    expect(
+      screen.getByPlaceholderText("输入 GitHub 仓库地址或搜索词"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /搜\s*索/ })).toBeInTheDocument();
+  });
+
+  it("shows stable local market counts in the page header instead of blank remote counters", () => {
+    stateMock.mockReturnValue({
+      ...baseState,
+      installedCapabilities: [
+        { id: "project:black", name: "Black", enabled: true },
+        { id: "project:ruff", name: "Ruff", enabled: true },
+      ],
+      skills: [
+        {
+          name: "research",
+          source: "customized",
+          enabled: true,
+          content: "# skill",
+        },
+      ],
+      mcpClients: [{ key: "filesystem", name: "filesystem", enabled: true }],
+      templates: [
+        ...baseState.templates,
+        {
+          id: "desktop-companion",
+          name: "桌面伴随体",
+          install_kind: "builtin-runtime",
+          ready: true,
+          installed: true,
+        },
+      ],
+    });
+
+    render(
+      <MemoryRouter>
+        <CapabilityMarketPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("已装能力")).toBeInTheDocument();
+    expect(screen.getByText("可用技能")).toBeInTheDocument();
+    expect(screen.getAllByText("安装模板").length).toBeGreaterThan(0);
+    expect(screen.getByText("MCP 客户端")).toBeInTheDocument();
   });
 
   it("renders installed capabilities and skills from page state instead of hard-coded empty lists", () => {

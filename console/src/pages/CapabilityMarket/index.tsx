@@ -70,6 +70,7 @@ export default function CapabilityMarketPage() {
     loadProjects,
     mcpCatalog,
     mcpCatalogLoading,
+    mcpClients,
     mcpQuery,
     installedCapabilities,
     projectInstallKey,
@@ -99,7 +100,7 @@ export default function CapabilityMarketPage() {
   const handleTabChange = useCallback(
     (nextTab: string) => {
       updateSearchParams({
-        tab: MARKET_TAB_KEY_SET.has(nextTab) ? nextTab : "curated",
+        tab: MARKET_TAB_KEY_SET.has(nextTab) ? nextTab : "installed",
         template: nextTab === "install-templates" ? requestedTemplateId : null,
       });
     },
@@ -187,7 +188,7 @@ export default function CapabilityMarketPage() {
           overwrite: true,
           enable: true,
         });
-        message.success("Installed");
+        message.success("安装成功");
         await handleRefreshAll();
       } catch (error) {
         message.error(error instanceof Error ? error.message : String(error));
@@ -208,14 +209,14 @@ export default function CapabilityMarketPage() {
   return (
     <div className={`${styles.page} page-container`}>
       <PageHeader
-        eyebrow="Capability Market"
+        eyebrow="能力市场"
         title="能力市场"
         description="统一发现、评估、安装和启用 skill、MCP 与外扩项目能力，不再让能力入口散落在各处。"
         stats={[
-          { label: "精选候选", value: String(filteredCuratedItems.length).padStart(2, "0") },
-          { label: "安装模板", value: String(templates.length).padStart(2, "0") },
           { label: "已装能力", value: String(installedCapabilities.length).padStart(2, "0") },
-          { label: "Project 命中", value: String(projectResults.length).padStart(2, "0") },
+          { label: "可用技能", value: String(skills.length).padStart(2, "0") },
+          { label: "安装模板", value: String(templates.length).padStart(2, "0") },
+          { label: "MCP 客户端", value: String(mcpClients.length).padStart(2, "0") },
         ]}
         actions={(
           <Button icon={<ReloadOutlined />} onClick={() => void handleRefreshAll()} className="baize-btn">
@@ -270,7 +271,7 @@ export default function CapabilityMarketPage() {
           },
           {
             key: "projects",
-            label: "Projects",
+            label: "项目",
             children: (
               <Card>
                 <Space direction="vertical" style={{ width: "100%" }}>
@@ -279,14 +280,24 @@ export default function CapabilityMarketPage() {
                       value={projectQuery}
                       onChange={(e) => setProjectQuery(e.currentTarget.value)}
                       onPressEnter={() => void handleProjectSearch()}
-                      placeholder="GitHub repo or query"
+                      placeholder="输入 GitHub 仓库地址或搜索词"
                     />
-                    <Button onClick={() => void handleProjectSearch()}>Search</Button>
+                    <Button onClick={() => void handleProjectSearch()}>搜索</Button>
                   </Space.Compact>
                   {projectLoading ? <Spin /> : null}
                   <List
                     dataSource={projectResults}
-                    locale={{ emptyText: <Empty /> }}
+                    locale={{
+                      emptyText: (
+                        <Empty
+                          description={
+                            projectQuery.trim()
+                              ? "暂无可安装项目"
+                              : "输入 GitHub 仓库地址或搜索词后开始搜索"
+                          }
+                        />
+                      ),
+                    }}
                     renderItem={(item) => (
                       <List.Item
                         actions={[
@@ -295,7 +306,7 @@ export default function CapabilityMarketPage() {
                             loading={projectInstallKey === (item.source_url || item.display_name)}
                             onClick={() => void installProject(item)}
                           >
-                            Install
+                            安装
                           </Button>,
                         ]}
                       >

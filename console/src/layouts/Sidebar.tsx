@@ -58,7 +58,7 @@ const MENU_PARENT_PATHS: Record<string, string[]> = {
   chat: ["chat-group"],
   "runtime-center": ["runtime-group"],
   industry: ["runtime-group"],
-  "capability-market": ["runtime-group", "build-subgroup"],
+  "capability-market": ["runtime-group"],
   knowledge: ["runtime-group", "insight-subgroup"],
   reports: ["runtime-group", "insight-subgroup"],
   performance: ["runtime-group", "insight-subgroup"],
@@ -71,9 +71,9 @@ const MENU_PARENT_PATHS: Record<string, string[]> = {
   "agent-config": ["settings-group"],
 };
 
-const UPDATE_MD = `### 更新 Spider Mesh
+const UPDATE_MD = `### 更新超级伙伴
 
-Spider Mesh 当前以本地 / 私有化部署包的形式分发。
+超级伙伴当前以本地 / 私有化部署包的形式分发。
 如需更新，请向维护者获取最新安装包，并在安装完成后重启服务。`;
 
 interface SidebarProps {
@@ -141,16 +141,9 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
           icon: <Building2 size={16} />,
         },
         {
-          key: "build-subgroup",
-          label: "构建",
-          icon: <Box size={16} />,
-          children: [
-            {
-              key: "capability-market",
-              label: "能力市场",
-              icon: <Waypoints size={16} />,
-            },
-          ],
+          key: "capability-market",
+          label: "能力市场",
+          icon: <Waypoints size={16} />,
         },
         {
           key: "insight-subgroup",
@@ -247,14 +240,14 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
           <div className={styles.logo}></div>
           {!collapsed ? (
             <div className={styles.brandCopy}>
-              <span className={styles.productName}>CoPaw Console</span>
-              <span className={styles.productTagline}>Buddy-first runtime command center</span>
+              <span className={styles.productName}>超级伙伴</span>
+              <span className={styles.productTagline}>Super Partner 长期自治运行中心</span>
             </div>
           ) : null}
         </div>
         {!collapsed ? (
           <div className={styles.version}>
-            <span className={styles.statusBadge}>Live</span>
+            <span className={styles.statusBadge}>运行中</span>
             {version ? <span>{version}</span> : null}
             {version && hasUpdate ? (
               <Badge dot className={styles.updateBadge}>
@@ -289,7 +282,7 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
         />
       </div>
       <Modal
-        title="版本更新"
+        title="超级伙伴更新"
         open={updateModalOpen}
         onCancel={() => setUpdateModalOpen(false)}
         footer={null}

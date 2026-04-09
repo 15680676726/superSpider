@@ -60,7 +60,7 @@ const CURATED_CATEGORY_RULES: Record<Exclude<ConcreteCuratedCategoryKey, "genera
 };
 
 export function normalizeMarketTabKey(value: string | null): MarketTabKey {
-  return MARKET_TAB_KEY_SET.has(value || "") ? (value as MarketTabKey) : "curated";
+  return MARKET_TAB_KEY_SET.has(value || "") ? (value as MarketTabKey) : "installed";
 }
 
 function normalizeText(value: unknown): string {

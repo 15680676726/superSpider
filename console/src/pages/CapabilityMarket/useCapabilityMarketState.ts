@@ -268,12 +268,21 @@ export function useCapabilityMarketState({
 
   useEffect(() => {
     void loadOverview();
-    void loadProjects("");
-    void loadMcpCatalog({ query: "", category: "all", cursor: null, page: 1 });
     void loadTemplates();
-    void loadCurated("");
     void loadIndustryInstances();
-  }, [loadCurated, loadIndustryInstances, loadMcpCatalog, loadOverview, loadProjects, loadTemplates]);
+  }, [loadIndustryInstances, loadOverview, loadTemplates]);
+
+  useEffect(() => {
+    if (activeTab === "curated" && !curatedPayload && !curatedLoading && !curatedError) {
+      void loadCurated(curatedQuery.trim());
+    }
+  }, [activeTab, curatedError, curatedLoading, curatedPayload, curatedQuery, loadCurated]);
+
+  useEffect(() => {
+    if (activeTab === "mcp" && !mcpCatalog && !mcpCatalogLoading && !mcpCatalogError) {
+      void loadMcpCatalog({ query: "", category: "all", cursor: null, page: 1 });
+    }
+  }, [activeTab, loadMcpCatalog, mcpCatalog, mcpCatalogError, mcpCatalogLoading]);
 
   useEffect(() => {
     if (activeTab === "install-templates" && !requestedTemplateId && templates[0]?.id) {
@@ -415,19 +424,24 @@ export function useCapabilityMarketState({
   }, [mcpTargetAgentIds.length, mcpTargetAgentOptions]);
 
   const handleRefreshAll = useCallback(async () => {
-    await Promise.all([
-      loadOverview(),
-      loadProjects(projectQuery.trim()),
-      loadMcpCatalog({
-        query: mcpQuery,
-        category: mcpCategory,
-        cursor: mcpCursorHistory[mcpPage - 1] || null,
-        page: mcpPage,
-      }),
-      loadTemplates(),
-      loadCurated(curatedQuery.trim()),
-      loadIndustryInstances(),
-    ]);
+    const tasks: Promise<unknown>[] = [loadOverview(), loadTemplates(), loadIndustryInstances()];
+    if (activeTab === "curated") {
+      tasks.push(loadCurated(curatedQuery.trim()));
+    }
+    if (activeTab === "projects" && projectQuery.trim()) {
+      tasks.push(loadProjects(projectQuery.trim()));
+    }
+    if (activeTab === "mcp") {
+      tasks.push(
+        loadMcpCatalog({
+          query: mcpQuery,
+          category: mcpCategory,
+          cursor: mcpCursorHistory[mcpPage - 1] || null,
+          page: mcpPage,
+        }),
+      );
+    }
+    await Promise.all(tasks);
     if (requestedTemplateId) {
       await loadTemplateDetail(requestedTemplateId);
     }
@@ -435,6 +449,7 @@ export function useCapabilityMarketState({
       await loadMcpDetail(mcpDetail.item.server_name);
     }
   }, [
+    activeTab,
     curatedQuery,
     loadCurated,
     loadIndustryInstances,

@@ -38,7 +38,7 @@ describe("useCapabilityMarketState", () => {
     mockedSearchCurated.mockReset();
   });
 
-  it("loads and refreshes market surfaces through the extracted page-state hook", async () => {
+  it("loads and refreshes stable local market surfaces through the extracted page-state hook", async () => {
     mockedGetOverview.mockResolvedValue({ installed: [], mcp_clients: [] } as never);
     mockedSearchProjects.mockResolvedValue([] as never);
     mockedSearchMcpCatalog.mockResolvedValue({
@@ -75,8 +75,73 @@ describe("useCapabilityMarketState", () => {
 
     await waitFor(() => {
       expect(mockedGetOverview.mock.calls.length).toBeGreaterThan(initialOverviewCalls);
-      expect(mockedSearchProjects).toHaveBeenCalled();
       expect(mockedListTemplates.mock.calls.length).toBeGreaterThan(initialTemplateCalls);
+    });
+
+    expect(mockedSearchProjects).not.toHaveBeenCalled();
+    expect(mockedSearchCurated).not.toHaveBeenCalled();
+  });
+
+  it("defaults to the installed tab and does not auto-fire remote blank searches", async () => {
+    mockedGetOverview.mockResolvedValue({ installed: [], mcp_clients: [] } as never);
+    mockedSearchProjects.mockResolvedValue([] as never);
+    mockedSearchMcpCatalog.mockResolvedValue({
+      items: [],
+      categories: [{ key: "all", label: "全部" }],
+      next_cursor: null,
+    } as never);
+    mockedListTemplates.mockResolvedValue([] as never);
+    mockedSearchCurated.mockResolvedValue({ items: [] } as never);
+
+    const { result } = renderHook(() => {
+      const [templateForm] = Form.useForm<Record<string, unknown>>();
+      const [mcpForm] = Form.useForm<Record<string, any>>();
+      const [searchParams, setSearchParams] = useState(new URLSearchParams());
+      return useCapabilityMarketState({
+        templateForm,
+        mcpForm,
+        searchParams,
+        setSearchParams,
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.overview).not.toBeNull();
+    });
+
+    expect(result.current.activeTab).toBe("installed");
+    expect(mockedSearchProjects).not.toHaveBeenCalled();
+    expect(mockedSearchCurated).not.toHaveBeenCalled();
+  });
+
+  it("loads curated content when the curated tab is explicitly requested", async () => {
+    mockedGetOverview.mockResolvedValue({ installed: [], mcp_clients: [] } as never);
+    mockedSearchProjects.mockResolvedValue([] as never);
+    mockedSearchMcpCatalog.mockResolvedValue({
+      items: [],
+      categories: [{ key: "all", label: "全部" }],
+      next_cursor: null,
+    } as never);
+    mockedListTemplates.mockResolvedValue([] as never);
+    mockedSearchCurated.mockResolvedValue({ items: [] } as never);
+
+    const { result } = renderHook(() => {
+      const [templateForm] = Form.useForm<Record<string, unknown>>();
+      const [mcpForm] = Form.useForm<Record<string, any>>();
+      const [searchParams, setSearchParams] = useState(
+        new URLSearchParams("tab=curated"),
+      );
+      return useCapabilityMarketState({
+        templateForm,
+        mcpForm,
+        searchParams,
+        setSearchParams,
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.activeTab).toBe("curated");
+      expect(mockedSearchCurated).toHaveBeenCalledWith("", 500);
     });
   });
 
