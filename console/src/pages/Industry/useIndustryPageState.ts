@@ -40,18 +40,27 @@ import {
 export function resolvePreferredIndustryInstanceId({
   instances,
   preferredInstanceId,
+  buddyCarrierInstanceId,
   buddyProfileId,
 }: {
   instances: IndustryInstanceSummary[];
   preferredInstanceId?: string | null;
+  buddyCarrierInstanceId?: string | null;
   buddyProfileId?: string | null;
 }): string | null {
-  const buddyCarrierId = buddyProfileId?.trim()
+  const canonicalBuddyCarrierId = buddyCarrierInstanceId?.trim() || null;
+  if (
+    canonicalBuddyCarrierId
+    && instances.some((item) => item.instance_id === canonicalBuddyCarrierId)
+  ) {
+    return canonicalBuddyCarrierId;
+  }
+  const legacyBuddyCarrierId = buddyProfileId?.trim()
     ? `buddy:${buddyProfileId.trim()}`
     : null;
-  if (buddyCarrierId) {
-    return instances.some((item) => item.instance_id === buddyCarrierId)
-      ? buddyCarrierId
+  if (legacyBuddyCarrierId) {
+    return instances.some((item) => item.instance_id === legacyBuddyCarrierId)
+      ? legacyBuddyCarrierId
       : null;
   }
   if (
@@ -64,8 +73,18 @@ export function resolvePreferredIndustryInstanceId({
 }
 
 export function resolveProtectedCarrierInstanceId(
-  buddyProfileId?: string | null,
+  {
+    buddyCarrierInstanceId,
+    buddyProfileId,
+  }: {
+    buddyCarrierInstanceId?: string | null;
+    buddyProfileId?: string | null;
+  },
 ): string | null {
+  const canonical = buddyCarrierInstanceId?.trim();
+  if (canonical) {
+    return canonical;
+  }
   const normalized = buddyProfileId?.trim();
   return normalized ? `buddy:${normalized}` : null;
 }
@@ -87,6 +106,7 @@ type IndustryPageStateCache = {
   retiredInstances: IndustryInstanceSummary[];
   selectedInstanceId: string | null;
   currentBuddyProfileId: string | null;
+  currentBuddyCarrierInstanceId: string | null;
   detailByInstanceId: Record<string, IndustryInstanceDetail>;
 };
 
@@ -95,6 +115,7 @@ let industryPageStateCache: IndustryPageStateCache = {
   retiredInstances: [],
   selectedInstanceId: null,
   currentBuddyProfileId: null,
+  currentBuddyCarrierInstanceId: null,
   detailByInstanceId: {},
 };
 
@@ -150,8 +171,14 @@ export function useIndustryPageState({
   const [currentBuddyProfileId, setCurrentBuddyProfileId] = useState<string | null>(
     () => industryPageStateCache.currentBuddyProfileId,
   );
+  const [currentBuddyCarrierInstanceId, setCurrentBuddyCarrierInstanceId] = useState<string | null>(
+    () => industryPageStateCache.currentBuddyCarrierInstanceId,
+  );
   const protectedCarrierInstanceId = resolveProtectedCarrierInstanceId(
-    currentBuddyProfileId,
+    {
+      buddyCarrierInstanceId: currentBuddyCarrierInstanceId,
+      buddyProfileId: currentBuddyProfileId,
+    },
   );
 
   const watchedExperienceMode =
@@ -210,26 +237,63 @@ export function useIndustryPageState({
         const resolvedBuddyProfileId = resolveCanonicalBuddyProfileId(
           buddySurface?.profile?.profile_id,
         );
+        const resolvedBuddyCarrierInstanceId =
+          typeof buddySurface?.execution_carrier?.instance_id === "string"
+            ? buddySurface.execution_carrier.instance_id.trim() || null
+            : null;
         setCurrentBuddyProfileId(resolvedBuddyProfileId || null);
+        setCurrentBuddyCarrierInstanceId(resolvedBuddyCarrierInstanceId);
         const nextInstances = Array.isArray(activePayload) ? activePayload : [];
         const nextRetiredInstances = Array.isArray(retiredPayload)
           ? retiredPayload
           : [];
+        const knownInstanceIds = new Set(
+          [...nextInstances, ...nextRetiredInstances].map((item) => item.instance_id),
+        );
+        let hydratedCurrentCarrier: IndustryInstanceDetail | null = null;
+        if (
+          resolvedBuddyCarrierInstanceId
+          && !knownInstanceIds.has(resolvedBuddyCarrierInstanceId)
+        ) {
+          try {
+            hydratedCurrentCarrier = await api.getRuntimeIndustryDetail(
+              resolvedBuddyCarrierInstanceId,
+            );
+          } catch {
+            hydratedCurrentCarrier = null;
+          }
+          if (hydratedCurrentCarrier) {
+            const targetBucket =
+              hydratedCurrentCarrier.status === "retired"
+                ? nextRetiredInstances
+                : nextInstances;
+            targetBucket.unshift(hydratedCurrentCarrier);
+          }
+        }
         setInstances(nextInstances);
         setRetiredInstances(nextRetiredInstances);
         const candidateId = preferredInstanceId ?? selectedInstanceIdRef.current;
         const nextSelected = resolvePreferredIndustryInstanceId({
-          instances: nextInstances,
+          instances: [...nextInstances, ...nextRetiredInstances],
           preferredInstanceId: candidateId,
+          buddyCarrierInstanceId: resolvedBuddyCarrierInstanceId,
           buddyProfileId: resolvedBuddyProfileId,
         });
         setSelectedInstanceId(nextSelected);
+        const nextDetailByInstanceId = hydratedCurrentCarrier
+          ? {
+              ...industryPageStateCache.detailByInstanceId,
+              [hydratedCurrentCarrier.instance_id]: hydratedCurrentCarrier,
+            }
+          : industryPageStateCache.detailByInstanceId;
         industryPageStateCache = {
           ...industryPageStateCache,
           instances: nextInstances,
           retiredInstances: nextRetiredInstances,
           selectedInstanceId: nextSelected,
           currentBuddyProfileId: resolvedBuddyProfileId || null,
+          currentBuddyCarrierInstanceId: resolvedBuddyCarrierInstanceId,
+          detailByInstanceId: nextDetailByInstanceId,
         };
       } catch (fetchError) {
         setError(
@@ -541,9 +605,10 @@ export function useIndustryPageState({
   const selectedSummary = useMemo(
     () =>
       instances.find((item) => item.instance_id === selectedInstanceId) ||
+      retiredInstances.find((item) => item.instance_id === selectedInstanceId) ||
       instances[0] ||
       null,
-    [instances, selectedInstanceId],
+    [instances, retiredInstances, selectedInstanceId],
   );
   const selectedExecutionCoreRole = useMemo(
     () => (detail ? resolveIndustryExecutionCoreRole(detail) : null),
@@ -885,6 +950,7 @@ export function useIndustryPageState({
     recommendationDisplayGroups,
     recommendationSections,
     recommendationWarnings,
+    currentBuddyProfileId,
     retiredInstances,
     roleOptions,
     protectedCarrierInstanceId,
@@ -908,6 +974,7 @@ export function resetIndustryPageStateCache(): void {
     retiredInstances: [],
     selectedInstanceId: null,
     currentBuddyProfileId: null,
+    currentBuddyCarrierInstanceId: null,
     detailByInstanceId: {},
   };
 }

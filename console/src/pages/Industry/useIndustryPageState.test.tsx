@@ -125,25 +125,31 @@ describe("useIndustryPageState", () => {
       profile: {
         profile_id: "profile-1",
       },
+      execution_carrier: {
+        instance_id: "buddy:profile-1:stocks",
+      },
     } as never);
-    mockedListIndustryInstances.mockResolvedValue([
-      {
-        instance_id: "industry-other",
-        label: "Other Team",
-        owner_scope: "industry-other",
-        team: { agents: [] },
-      },
-      {
-        instance_id: "buddy:profile-1",
-        label: "Buddy Carrier",
-        owner_scope: "profile-1",
-        team: { agents: [] },
-      },
-    ] as never);
+    mockedListIndustryInstances.mockImplementation(async (options) => {
+      const status =
+        typeof options === "object" && options ? options.status : undefined;
+      if (status === "retired") {
+        return [] as never;
+      }
+      return [
+        {
+          instance_id: "industry-other",
+          label: "Other Team",
+          owner_scope: "industry-other",
+          team: { agents: [] },
+        },
+      ] as never;
+    });
     mockedGetRuntimeIndustryDetail.mockImplementation(async (instanceId) => ({
       instance_id: instanceId,
-      label: instanceId === "buddy:profile-1" ? "Buddy Carrier" : "Other Team",
-      owner_scope: instanceId === "buddy:profile-1" ? "profile-1" : "industry-other",
+      label:
+        instanceId === "buddy:profile-1:stocks" ? "Buddy Carrier" : "Other Team",
+      owner_scope:
+        instanceId === "buddy:profile-1:stocks" ? "profile-1" : "industry-other",
       profile: { industry: "Retail" },
       team: { agents: [] },
       media_analyses: [],
@@ -160,14 +166,15 @@ describe("useIndustryPageState", () => {
     });
 
     await waitFor(() => {
-      expect(result.current.selectedInstanceId).toBe("buddy:profile-1");
-      expect(result.current.detail?.instance_id).toBe("buddy:profile-1");
+      expect(result.current.selectedInstanceId).toBe("buddy:profile-1:stocks");
+      expect(result.current.detail?.instance_id).toBe("buddy:profile-1:stocks");
     });
 
-    expect(mockedGetRuntimeIndustryDetail).toHaveBeenCalledWith(
-      "buddy:profile-1",
-      undefined,
-    );
+    expect(
+      mockedGetRuntimeIndustryDetail.mock.calls.some(
+        ([instanceId]) => instanceId === "buddy:profile-1:stocks",
+      ),
+    ).toBe(true);
   });
 
   it("protects the current buddy carrier from server truth even when local storage is empty", async () => {
@@ -175,25 +182,31 @@ describe("useIndustryPageState", () => {
       profile: {
         profile_id: "profile-7",
       },
+      execution_carrier: {
+        instance_id: "buddy:profile-7:design",
+      },
     } as never);
-    mockedListIndustryInstances.mockResolvedValue([
-      {
-        instance_id: "industry-other",
-        label: "Other Team",
-        owner_scope: "industry-other",
-        team: { agents: [] },
-      },
-      {
-        instance_id: "buddy:profile-7",
-        label: "Buddy Carrier",
-        owner_scope: "profile-7",
-        team: { agents: [] },
-      },
-    ] as never);
+    mockedListIndustryInstances.mockImplementation(async (options) => {
+      const status =
+        typeof options === "object" && options ? options.status : undefined;
+      if (status === "retired") {
+        return [] as never;
+      }
+      return [
+        {
+          instance_id: "industry-other",
+          label: "Other Team",
+          owner_scope: "industry-other",
+          team: { agents: [] },
+        },
+      ] as never;
+    });
     mockedGetRuntimeIndustryDetail.mockImplementation(async (instanceId) => ({
       instance_id: instanceId,
-      label: instanceId === "buddy:profile-7" ? "Buddy Carrier" : "Other Team",
-      owner_scope: instanceId === "buddy:profile-7" ? "profile-7" : "industry-other",
+      label:
+        instanceId === "buddy:profile-7:design" ? "Buddy Carrier" : "Other Team",
+      owner_scope:
+        instanceId === "buddy:profile-7:design" ? "profile-7" : "industry-other",
       profile: { industry: "Retail" },
       team: { agents: [] },
       media_analyses: [],
@@ -210,16 +223,36 @@ describe("useIndustryPageState", () => {
     });
 
     await waitFor(() => {
-      expect(result.current.protectedCarrierInstanceId).toBe("buddy:profile-7");
-      expect(result.current.selectedInstanceId).toBe("buddy:profile-7");
+      expect(result.current.protectedCarrierInstanceId).toBe("buddy:profile-7:design");
+      expect(result.current.selectedInstanceId).toBe("buddy:profile-7:design");
     });
   });
 
   it("resolves the current buddy carrier as the protected instance id", () => {
-    expect(resolveProtectedCarrierInstanceId("profile-1")).toBe("buddy:profile-1");
-    expect(resolveProtectedCarrierInstanceId("  profile-2  ")).toBe("buddy:profile-2");
-    expect(resolveProtectedCarrierInstanceId("")).toBeNull();
-    expect(resolveProtectedCarrierInstanceId(null)).toBeNull();
+    expect(
+      resolveProtectedCarrierInstanceId({
+        buddyCarrierInstanceId: "buddy:profile-1:stocks",
+        buddyProfileId: "profile-1",
+      }),
+    ).toBe("buddy:profile-1:stocks");
+    expect(
+      resolveProtectedCarrierInstanceId({
+        buddyCarrierInstanceId: "  ",
+        buddyProfileId: "  profile-2  ",
+      }),
+    ).toBe("buddy:profile-2");
+    expect(
+      resolveProtectedCarrierInstanceId({
+        buddyCarrierInstanceId: "",
+        buddyProfileId: "",
+      }),
+    ).toBeNull();
+    expect(
+      resolveProtectedCarrierInstanceId({
+        buddyCarrierInstanceId: null,
+        buddyProfileId: null,
+      }),
+    ).toBeNull();
   });
 
   it("reuses the last industry list and detail snapshot on remount while refreshing in the background", async () => {

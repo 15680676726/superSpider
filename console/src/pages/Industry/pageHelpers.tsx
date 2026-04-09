@@ -27,7 +27,7 @@ import { runtimeRiskLabel, runtimeStatusColor } from "../../runtime/tagSemantics
 const { TextArea } = Input;
 
 const INDUSTRY_TEXT = {
-  pageTitle: "执行载体中心",
+  pageTitle: "行业工作台",
   prepareBrief: "填写载体调整简报",
   formIndustry: "正式方向",
   formIndustryRequired: "请输入正式方向",
@@ -133,9 +133,10 @@ const INDUSTRY_TEXT = {
 } as const;
 
 const INDUSTRY_EXPERIENCE_TEXT = {
-  pageDescription: "这里负责查看、校准和调整当前执行载体，不再承担首次建档。",
+  pageDescription:
+    "这里查看当前主方向对应的执行载体、团队分工、运行状态和调整入口，不是重新建档页。",
   prepareBriefHint:
-    "尽量把当前要承接的正式方向、客户、目标和限制写清楚。这里填的是主脑当前执行方向，不是用户当前职业。",
+    "尽量把当前要承接的正式方向、客户、目标和限制写清楚。这里调整的是主脑当前执行方向对应的行业执行载体，不是用户当前职业档案的重填。",
   formExperienceMode: "协作模式",
   formExperienceModeSystemLed: "系统主导",
   formExperienceModeOperatorGuided: "人工引导",

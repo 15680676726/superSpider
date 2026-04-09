@@ -212,6 +212,7 @@ function createPageState(overrides: Record<string, unknown> = {}) {
     recommendationWarnings: [],
     retiredInstances: [],
     roleOptions: [],
+    currentBuddyProfileId: null,
     protectedCarrierInstanceId: null,
     selectedExecutionCoreRole: null,
     selectedInstanceId: "industry-1",
@@ -357,10 +358,31 @@ describe("IndustryPage", () => {
 
     expect(screen.queryByTestId("industry-create-carrier")).toBeNull();
     expect(screen.getByTestId("industry-adjust-current-carrier")).toBeTruthy();
-    expect(screen.getByText("当前执行载体")).toBeTruthy();
+    expect(screen.getByText("行业工作台")).toBeTruthy();
+    expect(screen.getByText("当前行业载体")).toBeTruthy();
 
     fireEvent.click(screen.getByTestId("industry-open-buddy-onboarding"));
     expect(mockNavigate).toHaveBeenCalledWith("/buddy-onboarding");
+  });
+
+  it("explains that the buddy profile exists but no current carrier has been generated yet", () => {
+    useIndustryPageStateMock.mockReturnValue(
+      createPageState({
+        allTeams: [],
+        detail: null,
+        currentBuddyProfileId: "profile-1",
+        selectedInstanceId: null,
+      }),
+    );
+
+    render(<IndustryPage />);
+
+    expect(
+      screen.getByText("伙伴档案已经建立，但当前主方向还没有生成可用的行业执行载体。"),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "回到伙伴档案继续完成" }),
+    ).toBeTruthy();
   });
 
   it("uses carrier-adjustment copy instead of team-bootstrap copy when editing the current carrier", () => {

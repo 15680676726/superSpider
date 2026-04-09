@@ -133,6 +133,7 @@ export default function IndustryPage() {
     recommendationById,
     recommendationDisplayGroups,
     recommendationWarnings,
+    currentBuddyProfileId,
     retiredInstances,
     roleOptions,
     selectedExecutionCoreRole,
@@ -158,7 +159,7 @@ export default function IndustryPage() {
   return (
     <div className="page-container" style={{ display: "flex", flexDirection: "column", gap: 16, paddingBottom: 24 }}>
       <PageHeader
-        eyebrow="Industry Runtime"
+        eyebrow="当前主方向"
         title={INDUSTRY_TEXT.pageTitle}
         description={INDUSTRY_EXPERIENCE_TEXT.pageDescription}
         stats={[
@@ -184,8 +185,8 @@ export default function IndustryPage() {
       <Alert
         type="info"
         showIcon
-        message="这里不再是第一次创建身份的入口"
-        description="伙伴建档确认主方向后，系统会自动生成当前执行载体和执行位骨架。这里现在只负责查看和调整已经生成好的执行载体。"
+        message="这里展示的是当前主方向对应的行业工作台"
+        description="伙伴建档确认主方向后，系统会自动生成当前执行载体和执行位骨架。这里负责查看当前载体、团队分工、运行状态，以及需要调整时的入口。"
         action={(
           <Button
             type="link"
@@ -371,15 +372,22 @@ export default function IndustryPage() {
         {/* Left: Team List */}
         <Card
           className="baize-card"
-          title={<span style={{ color: "var(--baize-text-main)" }}>当前执行载体</span>}
+          title={<span style={{ color: "var(--baize-text-main)" }}>当前行业载体</span>}
           bodyStyle={{ padding: 0 }}
         >
           {loadingInstances ? (
             <div style={{ padding: 24, textAlign: "center" }}><Spin /></div>
           ) : allTeams.length === 0 ? (
-            <Empty description="当前还没有为这位伙伴生成执行载体。" style={{ padding: 24 }}>
+            <Empty
+              description={
+                currentBuddyProfileId
+                  ? "伙伴档案已经建立，但当前主方向还没有生成可用的行业执行载体。"
+                  : "还没有伙伴档案，先完成主方向建档后，这里才会出现行业工作台。"
+              }
+              style={{ padding: 24 }}
+            >
               <Button onClick={() => navigate(BUDDY_IDENTITY_CENTER_ROUTE)}>
-                返回伙伴建档
+                {currentBuddyProfileId ? "回到伙伴档案继续完成" : "去建立伙伴档案"}
               </Button>
             </Empty>
           ) : (
