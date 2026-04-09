@@ -691,6 +691,7 @@ def build_runtime_bootstrap(
         backlog_service=backlog_service,
         operating_cycle_service=operating_cycle_service,
         assignment_service=assignment_service,
+        schedule_repository=repositories.schedule_repository,
         domain_capability_growth_service=buddy_domain_capability_growth_service,
         onboarding_reasoner=ModelDrivenBuddyOnboardingReasoner(
             provider_runtime=runtime_provider,

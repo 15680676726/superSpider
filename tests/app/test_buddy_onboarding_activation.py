@@ -194,6 +194,7 @@ def test_buddy_confirm_direction_real_kickoff_creates_leaf_tasks_for_specialist_
         backlog_service=app.state.backlog_service,
         operating_cycle_service=app.state.operating_cycle_service,
         assignment_service=app.state.assignment_service,
+        schedule_repository=app.state.schedule_repository,
         domain_capability_growth_service=growth_service,
     )
     projection_service = BuddyProjectionService(
@@ -304,6 +305,7 @@ def test_buddy_surface_repairs_legacy_buddy_execution_binding_before_chat(
         backlog_service=app.state.backlog_service,
         operating_cycle_service=app.state.operating_cycle_service,
         assignment_service=app.state.assignment_service,
+        schedule_repository=app.state.schedule_repository,
         domain_capability_growth_service=growth_service,
     )
     projection_service = BuddyProjectionService(
@@ -469,6 +471,7 @@ def test_buddy_confirm_direction_writes_back_completed_reports_to_control_thread
         backlog_service=app.state.backlog_service,
         operating_cycle_service=app.state.operating_cycle_service,
         assignment_service=app.state.assignment_service,
+        schedule_repository=app.state.schedule_repository,
         domain_capability_growth_service=growth_service,
     )
     projection_service = BuddyProjectionService(
@@ -572,3 +575,100 @@ def test_buddy_confirm_direction_writes_back_completed_reports_to_control_thread
         message.get("metadata", {}).get("control_thread_id")
         for message in report_messages
     } == {control_thread_id}
+
+
+def test_buddy_confirm_direction_seeds_durable_execution_core_schedules(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    store = app.state.state_store
+    profile_repository = SqliteHumanProfileRepository(store)
+    growth_target_repository = SqliteGrowthTargetRepository(store)
+    relationship_repository = SqliteCompanionRelationshipRepository(store)
+    domain_capability_repository = SqliteBuddyDomainCapabilityRepository(store)
+    session_repository = SqliteBuddyOnboardingSessionRepository(store)
+    growth_service = BuddyDomainCapabilityGrowthService(
+        domain_capability_repository=domain_capability_repository,
+        industry_instance_repository=app.state.industry_instance_repository,
+        operating_lane_service=app.state.operating_lane_service,
+        backlog_service=app.state.backlog_service,
+        operating_cycle_service=app.state.operating_cycle_service,
+        assignment_service=app.state.assignment_service,
+        agent_report_service=app.state.agent_report_service,
+    )
+    onboarding_service = BuddyOnboardingService(
+        profile_repository=profile_repository,
+        growth_target_repository=growth_target_repository,
+        relationship_repository=relationship_repository,
+        domain_capability_repository=domain_capability_repository,
+        onboarding_session_repository=session_repository,
+        industry_instance_repository=app.state.industry_instance_repository,
+        operating_lane_service=app.state.operating_lane_service,
+        backlog_service=app.state.backlog_service,
+        operating_cycle_service=app.state.operating_cycle_service,
+        assignment_service=app.state.assignment_service,
+        schedule_repository=app.state.schedule_repository,
+        domain_capability_growth_service=growth_service,
+    )
+    projection_service = BuddyProjectionService(
+        profile_repository=profile_repository,
+        growth_target_repository=growth_target_repository,
+        relationship_repository=relationship_repository,
+        domain_capability_repository=domain_capability_repository,
+        onboarding_session_repository=session_repository,
+        domain_capability_growth_service=growth_service,
+        current_focus_resolver=lambda _profile_id: {},
+    )
+    app.include_router(buddy_router)
+    app.state.buddy_onboarding_service = onboarding_service
+    app.state.buddy_projection_service = projection_service
+    client = TestClient(app)
+
+    identity = client.post(
+        "/buddy/onboarding/identity",
+        json={
+            "display_name": "Kai",
+            "profession": "Analyst",
+            "current_stage": "restart",
+            "interests": ["stocks", "trading"],
+            "strengths": ["discipline"],
+            "constraints": ["money"],
+            "goal_intention": "I want a real stock trading path.",
+        },
+    ).json()
+    clarification = client.post(
+        "/buddy/onboarding/clarify",
+        json={
+            "session_id": identity["session_id"],
+            "answer": "I want a durable trading system with clear risk control.",
+        },
+    ).json()
+    confirmation = client.post(
+        "/buddy/onboarding/confirm-direction",
+        json={
+            "session_id": identity["session_id"],
+            "selected_direction": clarification["recommended_direction"],
+            "capability_action": "start-new",
+        },
+    )
+
+    assert confirmation.status_code == 200
+    payload = confirmation.json()
+    instance_id = payload["execution_carrier"]["instance_id"]
+    control_thread_id = payload["execution_carrier"]["control_thread_id"]
+    schedules = [
+        schedule
+        for schedule in app.state.schedule_repository.list_schedules()
+        if schedule.status != "deleted"
+        and (
+            schedule.spec_payload.get("meta", {}).get("industry_instance_id") == instance_id
+            or schedule.spec_payload.get("request", {}).get("industry_instance_id") == instance_id
+        )
+    ]
+
+    assert schedules
+    assert {
+        schedule.target_session_id
+        for schedule in schedules
+    } == {control_thread_id}
+    assert all(schedule.enabled for schedule in schedules)

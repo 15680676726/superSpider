@@ -22,6 +22,7 @@ from copaw.state.repositories import (
     SqliteIndustryInstanceRepository,
     SqliteOperatingCycleRepository,
     SqliteOperatingLaneRepository,
+    SqliteScheduleRepository,
 )
 from copaw.state.repositories_buddy import (
     SqliteBuddyDomainCapabilityRepository,
@@ -79,6 +80,7 @@ def _build_client_with_growth(tmp_path) -> tuple[TestClient, SQLiteStateStore]:
     cycle_service = OperatingCycleService(repository=SqliteOperatingCycleRepository(store))
     assignment_service = AssignmentService(repository=SqliteAssignmentRepository(store))
     report_service = AgentReportService(repository=SqliteAgentReportRepository(store))
+    schedule_repository = SqliteScheduleRepository(store)
     growth_service = BuddyDomainCapabilityGrowthService(
         domain_capability_repository=domain_capability_repository,
         industry_instance_repository=industry_repository,
@@ -99,6 +101,7 @@ def _build_client_with_growth(tmp_path) -> tuple[TestClient, SQLiteStateStore]:
         backlog_service=backlog_service,
         operating_cycle_service=cycle_service,
         assignment_service=assignment_service,
+        schedule_repository=schedule_repository,
         domain_capability_growth_service=growth_service,
     )
     projection_service = BuddyProjectionService(
@@ -117,6 +120,7 @@ def _build_client_with_growth(tmp_path) -> tuple[TestClient, SQLiteStateStore]:
     app.include_router(buddy_router)
     app.state.buddy_onboarding_service = onboarding_service
     app.state.buddy_projection_service = projection_service
+    app.state.schedule_repository = schedule_repository
     return TestClient(app), store
 
 
@@ -177,6 +181,73 @@ def test_buddy_surface_without_profile_returns_no_content(tmp_path) -> None:
 
     assert response.status_code == 204
     assert response.text == ""
+
+
+def test_buddy_surface_repairs_missing_durable_schedules_for_active_domain(
+    tmp_path,
+) -> None:
+    client, _store = _build_client_with_growth(tmp_path)
+    identity = client.post(
+        "/buddy/onboarding/identity",
+        json={
+            "display_name": "Mina",
+            "profession": "Trader",
+            "current_stage": "restart",
+            "interests": ["stocks", "trading"],
+            "strengths": ["consistency"],
+            "constraints": ["money"],
+            "goal_intention": "Find a real stock trading direction.",
+        },
+    ).json()
+    clarification = client.post(
+        "/buddy/onboarding/clarify",
+        json={
+            "session_id": identity["session_id"],
+            "answer": "I want a durable trading system with strict risk control.",
+            "existing_question_count": 9,
+        },
+    ).json()
+    confirmation = client.post(
+        "/buddy/onboarding/confirm-direction",
+        json={
+            "session_id": identity["session_id"],
+            "selected_direction": clarification["recommended_direction"],
+            "capability_action": "start-new",
+        },
+    ).json()
+    instance_id = confirmation["execution_carrier"]["instance_id"]
+    schedule_repository = client.app.state.schedule_repository
+    for schedule in schedule_repository.list_schedules():
+        if (
+            schedule.spec_payload.get("meta", {}).get("industry_instance_id") == instance_id
+            or schedule.spec_payload.get("request", {}).get("industry_instance_id") == instance_id
+        ):
+            schedule_repository.delete_schedule(schedule.id)
+
+    before = [
+        schedule
+        for schedule in schedule_repository.list_schedules()
+        if schedule.status != "deleted"
+        and (
+            schedule.spec_payload.get("meta", {}).get("industry_instance_id") == instance_id
+            or schedule.spec_payload.get("request", {}).get("industry_instance_id") == instance_id
+        )
+    ]
+    assert before == []
+
+    response = client.get(f"/buddy/surface?profile_id={identity['profile']['profile_id']}")
+
+    assert response.status_code == 200
+    repaired = [
+        schedule
+        for schedule in schedule_repository.list_schedules()
+        if schedule.status != "deleted"
+        and (
+            schedule.spec_payload.get("meta", {}).get("industry_instance_id") == instance_id
+            or schedule.spec_payload.get("request", {}).get("industry_instance_id") == instance_id
+        )
+    ]
+    assert repaired
 
 
 def test_runtime_center_legacy_buddy_summary_route_is_removed(tmp_path) -> None:

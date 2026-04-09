@@ -7,6 +7,7 @@ import threading
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
+from ...app.crons.models import CronJobSpec
 from ...kernel.buddy_onboarding_service import BuddyOnboardingService
 from ...kernel.buddy_projection_service import BuddyProjectionService
 
@@ -111,6 +112,19 @@ def _maybe_activate_buddy_execution(
     }
 
 
+async def _maybe_register_buddy_schedules(
+    request: Request,
+    *,
+    schedule_specs: list[dict[str, object]] | None,
+) -> None:
+    cron_manager = getattr(request.app.state, "cron_manager", None)
+    create_or_replace = getattr(cron_manager, "create_or_replace_job", None)
+    if not callable(create_or_replace):
+        return
+    for spec in list(schedule_specs or []):
+        await create_or_replace(CronJobSpec.model_validate(spec))
+
+
 @router.post("/onboarding/identity")
 async def submit_buddy_identity(
     request: Request,
@@ -166,6 +180,10 @@ async def confirm_buddy_direction(
         raise HTTPException(504, detail=str(exc) or "Buddy onboarding model timed out.") from exc
     except ValueError as exc:
         raise HTTPException(400, detail=str(exc)) from exc
+    await _maybe_register_buddy_schedules(
+        request,
+        schedule_specs=result.schedule_specs,
+    )
     activation = _maybe_activate_buddy_execution(
         request,
         execution_carrier=result.execution_carrier,
@@ -215,6 +233,12 @@ async def get_buddy_surface(
     request: Request,
     profile_id: str | None = None,
 ):
+    onboarding_service = getattr(request.app.state, "buddy_onboarding_service", None)
+    if isinstance(onboarding_service, BuddyOnboardingService) and profile_id:
+        try:
+            onboarding_service.repair_active_domain_schedules(profile_id=profile_id)
+        except Exception:
+            logger.debug("Buddy surface schedule repair failed.", exc_info=True)
     service = _get_buddy_projection_service(request)
     try:
         surface = service.build_optional_chat_surface(profile_id=profile_id)

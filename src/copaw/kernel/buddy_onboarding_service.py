@@ -6,9 +6,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import logging
 import unicodedata
+from typing import Any
 
 from pydantic import BaseModel, Field
 
+from ..app.crons.models import CronJobSpec
+from ..industry import compile_industry_schedule_seeds
 from .buddy_execution_carrier import (
     EXECUTION_CORE_ROLE_ID,
     build_buddy_domain_control_thread_id,
@@ -29,6 +32,8 @@ from .buddy_domain_capability import (
 )
 from ..industry.identity import EXECUTION_CORE_AGENT_ID
 from ..industry.models import (
+    IndustryDraftPlan,
+    IndustryDraftSchedule,
     IndustryProfile,
     IndustryRoleBlueprint,
     IndustryTeamBlueprint,
@@ -38,6 +43,7 @@ from ..state import (
     CompanionRelationship,
     GrowthTarget,
     HumanProfile,
+    ScheduleRecord,
 )
 from ..state.main_brain_service import (
     AssignmentService,
@@ -46,7 +52,10 @@ from ..state.main_brain_service import (
     OperatingLaneService,
 )
 from ..state.models import IndustryInstanceRecord
-from ..state.repositories import SqliteIndustryInstanceRepository
+from ..state.repositories import (
+    SqliteIndustryInstanceRepository,
+    SqliteScheduleRepository,
+)
 from ..state.repositories_buddy import (
     BuddyOnboardingSessionRecord,
     SqliteBuddyDomainCapabilityRepository,
@@ -95,6 +104,7 @@ class BuddyDirectionConfirmationResult:
     relationship: CompanionRelationship
     domain_capability: BuddyDomainCapabilityRecord
     execution_carrier: dict[str, object] | None = None
+    schedule_specs: list[dict[str, object]] | None = None
 
 
 _DEFAULT_DIRECTION = "建立稳定、自主、长期向上的人生主方向"
@@ -547,6 +557,7 @@ class BuddyOnboardingService:
         backlog_service: BacklogService | None = None,
         operating_cycle_service: OperatingCycleService | None = None,
         assignment_service: AssignmentService | None = None,
+        schedule_repository: SqliteScheduleRepository | None = None,
         domain_capability_growth_service: BuddyDomainCapabilityGrowthService | None = None,
         onboarding_reasoner: BuddyOnboardingReasoner | None = None,
     ) -> None:
@@ -560,6 +571,7 @@ class BuddyOnboardingService:
         self._backlog_service = backlog_service
         self._operating_cycle_service = operating_cycle_service
         self._assignment_service = assignment_service
+        self._schedule_repository = schedule_repository
         self._domain_capability_growth_service = domain_capability_growth_service
         self._onboarding_reasoner = onboarding_reasoner
 
@@ -858,7 +870,7 @@ class BuddyOnboardingService:
             target_domain_id=target_domain_id,
             preview=preview,
         )
-        growth_target, domain_capability, execution_carrier = self._ensure_growth_scaffold(
+        growth_target, domain_capability, execution_carrier, schedule_specs = self._ensure_growth_scaffold(
             profile=profile,
             growth_target=growth_target,
             domain_capability=domain_capability,
@@ -890,6 +902,7 @@ class BuddyOnboardingService:
             relationship=relationship,
             domain_capability=domain_capability,
             execution_carrier=execution_carrier,
+            schedule_specs=schedule_specs,
         )
 
     def record_chat_interaction(
@@ -968,6 +981,39 @@ class BuddyOnboardingService:
             session.model_copy(update={"status": "named"}),
         )
         return updated
+
+    def repair_active_domain_schedules(self, *, profile_id: str) -> int:
+        if (
+            self._domain_capability_repository is None
+            or self._industry_instance_repository is None
+            or self._schedule_repository is None
+        ):
+            return 0
+        profile = self._profile_repository.get_profile(profile_id)
+        growth_target = self._growth_target_repository.get_active_target(profile_id)
+        active_domain = self._domain_capability_repository.get_active_domain_capability(profile_id)
+        instance_id = str(getattr(active_domain, "industry_instance_id", "") or "").strip()
+        if profile is None or growth_target is None or active_domain is None or not instance_id:
+            return 0
+        instance = self._industry_instance_repository.get_instance(instance_id)
+        if instance is None:
+            return 0
+        control_thread_id = str(getattr(active_domain, "control_thread_id", "") or "").strip()
+        if not control_thread_id:
+            control_thread_id = build_buddy_domain_control_thread_id(instance_id=instance_id)
+        team_roles = self._resolve_initial_team_roles(
+            profile=profile,
+            instance_id=instance_id,
+            existing_instance=instance,
+        )
+        specs = self._ensure_durable_review_schedules(
+            profile=profile,
+            growth_target=growth_target,
+            instance_id=instance_id,
+            control_thread_id=control_thread_id,
+            team_roles=team_roles,
+        )
+        return len(specs)
 
     def _require_session(self, session_id: str) -> BuddyOnboardingSessionRecord:
         session = self._onboarding_session_repository.get_session(session_id)
@@ -1260,7 +1306,12 @@ class BuddyOnboardingService:
         domain_capability: BuddyDomainCapabilityRecord,
         capability_action: str,
         growth_plan: BuddyOnboardingGrowthPlan | None = None,
-    ) -> tuple[GrowthTarget, BuddyDomainCapabilityRecord, dict[str, object] | None]:
+    ) -> tuple[
+        GrowthTarget,
+        BuddyDomainCapabilityRecord,
+        dict[str, object] | None,
+        list[dict[str, object]],
+    ]:
         instance_id, control_thread_id = self._resolve_domain_carrier_binding(
             profile=profile,
             domain_capability=domain_capability,
@@ -1285,7 +1336,7 @@ class BuddyOnboardingService:
                 label=profile.display_name,
                 current_cycle_id=growth_target.current_cycle_label or "Cycle 1",
                 team_generated=False,
-            )
+            ), []
         existing_instance = self._industry_instance_repository.get_instance(instance_id)
         team_roles = self._resolve_initial_team_roles(
             profile=profile,
@@ -1401,6 +1452,13 @@ class BuddyOnboardingService:
                 for index, item in enumerate(backlog_items)
             ],
         )
+        schedule_specs = self._ensure_durable_review_schedules(
+            profile=profile,
+            growth_target=growth_target,
+            instance_id=instance_id,
+            control_thread_id=control_thread_id,
+            team_roles=team_roles,
+        )
         self._industry_instance_repository.upsert_instance(
             persisted_instance.model_copy(
                 update={
@@ -1426,6 +1484,171 @@ class BuddyOnboardingService:
             label=persisted_instance.label,
             current_cycle_id=cycle.id,
             team_generated=True,
+        ), schedule_specs
+
+    def _ensure_durable_review_schedules(
+        self,
+        *,
+        profile: HumanProfile,
+        growth_target: GrowthTarget,
+        instance_id: str,
+        control_thread_id: str,
+        team_roles: list[IndustryRoleBlueprint],
+    ) -> list[dict[str, object]]:
+        if self._schedule_repository is None:
+            return []
+        profile_payload = _build_buddy_industry_profile(
+            profile=profile,
+            growth_target=growth_target,
+        )
+        execution_core_role = IndustryRoleBlueprint(
+            role_id=EXECUTION_CORE_ROLE_ID,
+            agent_id=EXECUTION_CORE_AGENT_ID,
+            actor_key=EXECUTION_CORE_AGENT_ID,
+            name=f"{profile.display_name} Execution Core",
+            role_name="Execution Core",
+            role_summary="Runs durable main-brain reviews and routes the next governed move.",
+            mission="Review progress, backlog, assignments, and evidence, then route the next governed move.",
+            goal_kind=EXECUTION_CORE_ROLE_ID,
+            agent_class="system",
+            employment_mode="career",
+            activation_mode="persistent",
+            suspendable=False,
+            reports_to=None,
+            risk_level="guarded",
+            allowed_capabilities=["system:dispatch_query"],
+            preferred_capability_families=["planning", "coordination"],
+            evidence_expectations=["execution-core review note"],
+        )
+        draft = IndustryDraftPlan(
+            team=IndustryTeamBlueprint(
+                team_id=instance_id,
+                label=profile.display_name,
+                summary=growth_target.final_goal,
+                agents=[execution_core_role, *team_roles],
+            ),
+            goals=[],
+            schedules=[
+                IndustryDraftSchedule(
+                    schedule_id=f"{instance_id}-main-brain-morning-review",
+                    owner_agent_id=EXECUTION_CORE_AGENT_ID,
+                    title=f"{profile.display_name} Spider Mesh Morning Review",
+                    summary="Morning main-brain review over reports, backlog, assignments, blockers, and next moves.",
+                    cron="0 9 * * *",
+                    timezone="Asia/Shanghai",
+                    dispatch_mode="final",
+                ),
+                IndustryDraftSchedule(
+                    schedule_id=f"{instance_id}-main-brain-evening-review",
+                    owner_agent_id=EXECUTION_CORE_AGENT_ID,
+                    title=f"{profile.display_name} Spider Mesh Evening Review",
+                    summary="Evening main-brain review over execution results, unresolved blockers, and tomorrow routing.",
+                    cron="0 19 * * *",
+                    timezone="Asia/Shanghai",
+                    dispatch_mode="final",
+                ),
+            ],
+        )
+        seeds = compile_industry_schedule_seeds(
+            profile_payload,
+            draft=draft,
+            owner_scope=profile.profile_id,
+        )
+        normalized_specs: list[dict[str, object]] = []
+        for seed in seeds:
+            if seed.dispatch_session_id != control_thread_id:
+                seed = seed.model_copy(
+                    update={
+                        "dispatch_session_id": control_thread_id,
+                        "request_payload": {
+                            **dict(seed.request_payload),
+                            "session_id": control_thread_id,
+                            "control_thread_id": control_thread_id,
+                        },
+                    },
+                )
+            spec = self._build_schedule_spec(seed)
+            self._upsert_schedule_record(spec)
+            normalized_specs.append(spec)
+        return normalized_specs
+
+    def _build_schedule_spec(self, seed) -> dict[str, Any]:
+        return {
+            "id": seed.schedule_id,
+            "name": seed.title,
+            "enabled": True,
+            "schedule": {
+                "type": "cron",
+                "cron": seed.cron,
+                "timezone": seed.timezone,
+            },
+            "task_type": "agent",
+            "request": dict(seed.request_payload),
+            "dispatch": {
+                "type": "channel",
+                "channel": seed.dispatch_channel,
+                "target": {
+                    "user_id": seed.dispatch_user_id,
+                    "session_id": seed.dispatch_session_id,
+                },
+                "mode": seed.dispatch_mode,
+                "meta": {
+                    "summary": seed.summary,
+                    "owner_agent_id": seed.owner_agent_id,
+                    **dict(seed.metadata),
+                },
+            },
+            "runtime": {
+                "max_concurrency": 1,
+                "timeout_seconds": 180,
+                "misfire_grace_seconds": 60,
+            },
+            "meta": {
+                "summary": seed.summary,
+                "owner_agent_id": seed.owner_agent_id,
+                **dict(seed.metadata),
+            },
+        }
+
+    def _upsert_schedule_record(self, spec: dict[str, object]) -> None:
+        if self._schedule_repository is None:
+            return
+        job = CronJobSpec.model_validate(spec)
+        existing = self._schedule_repository.get_schedule(job.id)
+        preserved = existing or ScheduleRecord(
+            id=job.id,
+            title=job.name,
+            cron=job.schedule.cron,
+        )
+        meta = dict(job.meta or {})
+        trigger_target = str(meta.get("trigger_target") or "").strip() or preserved.trigger_target
+        lane_id = str(meta.get("lane_id") or "").strip() or preserved.lane_id
+        status = preserved.status
+        if status == "deleted":
+            status = "paused" if job.enabled is False else "scheduled"
+        self._schedule_repository.upsert_schedule(
+            ScheduleRecord(
+                id=job.id,
+                title=job.name,
+                cron=job.schedule.cron,
+                timezone=job.schedule.timezone,
+                status=status,
+                enabled=job.enabled,
+                task_type=job.task_type,
+                target_channel=job.dispatch.channel,
+                target_user_id=job.dispatch.target.user_id,
+                target_session_id=job.dispatch.target.session_id,
+                last_run_at=preserved.last_run_at,
+                next_run_at=preserved.next_run_at,
+                last_error=preserved.last_error,
+                source_ref="state:/cron-sole-repository",
+                spec_payload=job.model_dump(mode="json"),
+                schedule_kind=str(meta.get("schedule_kind") or preserved.schedule_kind or "cadence"),
+                trigger_target=trigger_target,
+                lane_id=lane_id,
+                created_at=preserved.created_at,
+                updated_at=_utc_now(),
+            ),
         )
 
     def _resolve_domain_carrier_binding(
