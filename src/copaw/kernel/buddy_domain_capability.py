@@ -150,6 +150,49 @@ _BUDDY_SPECIALIST_DOMAIN_FAMILIES: dict[str, dict[str, tuple[str, ...]]] = {
     },
 }
 
+_BUDDY_ROLE_BROWSER_HINTS: tuple[str, ...] = (
+    "proof",
+    "publish",
+    "publishing",
+    "platform",
+    "content",
+    "listing",
+    "launch",
+    "browser",
+)
+
+_BUDDY_ROLE_FAMILY_HINTS: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
+    (
+        ("research", "analysis", "market", "insight", "strategy", "plan"),
+        ("planning", "coordination", "research", "data"),
+    ),
+    (
+        ("publish", "publishing", "platform", "content", "listing", "copy", "launch"),
+        ("execution", "evidence", "content", "browser", "workflow"),
+    ),
+    (
+        ("ops", "operations", "execution", "execute", "delivery", "proof"),
+        ("execution", "evidence", "workflow", "browser"),
+    ),
+)
+
+
+def _role_prefers_browser(role_id: str) -> bool:
+    return any(token in role_id for token in _BUDDY_ROLE_BROWSER_HINTS)
+
+
+def _infer_specialist_families(*, domain_key: str, role_id: str) -> list[str]:
+    inferred: list[str] = []
+    for tokens, families in _BUDDY_ROLE_FAMILY_HINTS:
+        if any(token in role_id for token in tokens):
+            inferred.extend(families)
+    if not inferred:
+        if domain_key in {"stocks", "writing"}:
+            inferred.extend(("execution", "evidence", "browser"))
+        else:
+            inferred.extend(("planning", "coordination"))
+    return list(dict.fromkeys(inferred))
+
 
 def _clamp_capability_score(score: int) -> int:
     return max(0, min(100, int(score)))
@@ -334,7 +377,11 @@ def buddy_specialist_allowed_capabilities(*, domain_key: str, role_id: str) -> l
     capabilities = list(_BUDDY_SPECIALIST_BASE_ALLOWED_CAPABILITIES)
     normalized_role_id = role_id.strip().lower()
     normalized_domain_key = domain_key.strip().lower() or "general"
-    if normalized_role_id == "proof-of-work" or normalized_domain_key in {"stocks", "writing"}:
+    if (
+        normalized_role_id == "proof-of-work"
+        or normalized_domain_key in {"stocks", "writing"}
+        or _role_prefers_browser(normalized_role_id)
+    ):
         capabilities.append("tool:browser_use")
     return list(dict.fromkeys(capabilities))
 
@@ -348,7 +395,12 @@ def buddy_specialist_preferred_capability_families(
     normalized_domain_key = domain_key.strip().lower() or "general"
     family_map = _BUDDY_SPECIALIST_DOMAIN_FAMILIES.get(normalized_role_id, {})
     families = family_map.get(normalized_domain_key) or family_map.get("general") or ()
-    return list(dict.fromkeys(families))
+    if families:
+        return list(dict.fromkeys(families))
+    return _infer_specialist_families(
+        domain_key=normalized_domain_key,
+        role_id=normalized_role_id,
+    )
 
 
 def preview_domain_transition(

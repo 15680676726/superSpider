@@ -149,6 +149,55 @@ class _FakeWritingBuddyReasoner:
         )
 
 
+class _FakeCommerceBuddyReasoner:
+    def plan_turn(
+        self,
+        *,
+        profile,
+        transcript,
+        question_count: int,
+        tightened: bool,
+    ) -> BuddyOnboardingReasonedTurn:
+        _ = (profile, transcript, tightened)
+        finished = question_count >= 2
+        return BuddyOnboardingReasonedTurn(
+            finished=finished,
+            next_question="" if finished else "你是先做选品调研，还是先做平台上架和首批内容发布？",
+            candidate_directions=["建立稳定的跨境电商选品与平台发布增长路径"],
+            recommended_direction="建立稳定的跨境电商选品与平台发布增长路径",
+        )
+
+    def build_growth_plan(
+        self,
+        *,
+        profile,
+        transcript,
+        selected_direction: str,
+    ) -> BuddyOnboardingGrowthPlan:
+        _ = (profile, transcript)
+        return BuddyOnboardingGrowthPlan(
+            primary_direction=selected_direction,
+            final_goal="先建立可持续的跨境电商选品、上架和首批成交验证链路。",
+            why_it_matters="把跨境电商从模糊想法收成能持续验证、能逐步放大的真实业务主线。",
+            backlog_items=[
+                BuddyOnboardingBacklogSeed(
+                    lane_hint="market-research",
+                    title="完成首轮选品调研",
+                    summary="先明确目标平台、目标客群和首批可验证商品池。",
+                    priority=3,
+                    source_key="market-research",
+                ),
+                BuddyOnboardingBacklogSeed(
+                    lane_hint="platform-publishing",
+                    title="完成首批平台上架草稿",
+                    summary="把首批商品图文、卖点和上架草稿准备到可直接发布的状态。",
+                    priority=2,
+                    source_key="platform-publishing",
+                ),
+            ],
+        )
+
+
 def _build_service(tmp_path, *, reasoner=None) -> BuddyOnboardingService:
     store = SQLiteStateStore(tmp_path / "buddy-onboarding-model.sqlite3")
     return BuddyOnboardingService(
@@ -321,3 +370,131 @@ def test_confirm_primary_direction_shapes_domain_specific_specialist_capabilitie
     assert "browser" in list(proof.get("preferred_capability_families") or [])
     assert "workflow" in list(proof.get("preferred_capability_families") or [])
     assert "content" in list(growth.get("preferred_capability_families") or [])
+
+
+def test_confirm_primary_direction_materializes_model_lane_hints_into_dynamic_specialist_roles(
+    tmp_path,
+) -> None:
+    service, store = _build_service_with_planning(
+        tmp_path,
+        reasoner=_FakeCommerceBuddyReasoner(),
+    )
+    identity = service.submit_identity(
+        display_name="Lina",
+        profession="Operator",
+        current_stage="restart",
+        interests=["跨境电商", "选品", "平台上架"],
+        strengths=["执行", "整理"],
+        constraints=["需要先验证第一批商品"],
+        goal_intention="我想把跨境电商做成能持续经营的业务。",
+    )
+    clarification = service.answer_clarification_turn(
+        session_id=identity.session_id,
+        answer="我想先把选品和平台上架这两条线跑起来。",
+    )
+
+    result = service.confirm_primary_direction(
+        session_id=identity.session_id,
+        selected_direction=clarification.recommended_direction,
+        capability_action="start-new",
+    )
+
+    industry_repository = SqliteIndustryInstanceRepository(store)
+    lane_repository = SqliteOperatingLaneRepository(store)
+    assignment_repository = SqliteAssignmentRepository(store)
+    stored_instance = industry_repository.get_instance(result.domain_capability.industry_instance_id)
+    assert stored_instance is not None
+    agents = list((stored_instance.team_payload or {}).get("agents") or [])
+    by_role = {
+        str(item.get("role_id") or "").strip(): item
+        for item in agents
+        if str(item.get("role_id") or "").strip()
+    }
+
+    assert "market-research" in by_role
+    assert "platform-publishing" in by_role
+    assert "growth-focus" not in by_role
+    assert "proof-of-work" not in by_role
+
+    lanes = lane_repository.list_lanes(industry_instance_id=result.domain_capability.industry_instance_id)
+    assert {lane.owner_role_id for lane in lanes} == {"market-research", "platform-publishing"}
+
+    assignments = assignment_repository.list_assignments(
+        industry_instance_id=result.domain_capability.industry_instance_id,
+        limit=None,
+    )
+    assert {assignment.owner_role_id for assignment in assignments} == {
+        "market-research",
+        "platform-publishing",
+    }
+
+
+def test_growth_refresh_restores_dynamic_specialist_roles_from_agent_ids_when_team_payload_is_missing(
+    tmp_path,
+) -> None:
+    service, store = _build_service_with_planning(
+        tmp_path,
+        reasoner=_FakeCommerceBuddyReasoner(),
+    )
+    identity = service.submit_identity(
+        display_name="Lina",
+        profession="Operator",
+        current_stage="restart",
+        interests=["跨境电商", "选品", "平台上架"],
+        strengths=["执行", "整理"],
+        constraints=["需要先验证第一批商品"],
+        goal_intention="我想把跨境电商做成能持续经营的业务。",
+    )
+    clarification = service.answer_clarification_turn(
+        session_id=identity.session_id,
+        answer="我想先把选品和平台上架这两条线跑起来。",
+    )
+    result = service.confirm_primary_direction(
+        session_id=identity.session_id,
+        selected_direction=clarification.recommended_direction,
+        capability_action="start-new",
+    )
+
+    instance_repository = SqliteIndustryInstanceRepository(store)
+    instance_id = result.domain_capability.industry_instance_id
+    stored_instance = instance_repository.get_instance(instance_id)
+    assert stored_instance is not None
+    instance_repository.upsert_instance(
+        stored_instance.model_copy(
+            update={
+                "team_payload": {
+                    "team_id": instance_id,
+                    "label": stored_instance.label,
+                    "summary": stored_instance.summary,
+                    "agents": [],
+                },
+            },
+        ),
+    )
+
+    growth_service = BuddyDomainCapabilityGrowthService(
+        domain_capability_repository=SqliteBuddyDomainCapabilityRepository(store),
+        industry_instance_repository=instance_repository,
+        operating_lane_service=OperatingLaneService(
+            repository=SqliteOperatingLaneRepository(store),
+        ),
+        assignment_service=AssignmentService(
+            repository=SqliteAssignmentRepository(store),
+        ),
+    )
+    growth_service.refresh_active_domain_capability(
+        profile_id=result.domain_capability.profile_id,
+    )
+
+    repaired = instance_repository.get_instance(instance_id)
+    assert repaired is not None
+    agents = list((repaired.team_payload or {}).get("agents") or [])
+    by_role = {
+        str(item.get("role_id") or "").strip(): item
+        for item in agents
+        if str(item.get("role_id") or "").strip()
+    }
+    assert "market-research" in by_role
+    assert "platform-publishing" in by_role
+    assert "growth-focus" not in by_role
+    assert "proof-of-work" not in by_role

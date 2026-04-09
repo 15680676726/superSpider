@@ -16,6 +16,7 @@ from .buddy_execution_carrier import (
     build_buddy_domain_control_thread_id,
 )
 from ..industry.identity import normalize_industry_role_id
+from ..industry.identity import EXECUTION_CORE_AGENT_ID
 from ..industry.models import IndustryRoleBlueprint, IndustryTeamBlueprint
 from ..state import BuddyDomainCapabilityRecord
 from ..state.repositories_buddy import SqliteBuddyDomainCapabilityRepository
@@ -406,6 +407,63 @@ class BuddyDomainCapabilityGrowthService:
         domain_key = derive_buddy_domain_key(
             _string(getattr(record, "summary", None)) or label,
         )
+        restored_role_ids: list[str] = []
+        normalized_prefix = f"{instance_id}:"
+        for agent_id in list(getattr(record, "agent_ids", None) or []):
+            normalized_agent_id = _string(agent_id)
+            if normalized_agent_id is None or normalized_agent_id == EXECUTION_CORE_AGENT_ID:
+                continue
+            if normalized_agent_id.startswith(normalized_prefix):
+                candidate_role_id = normalized_agent_id[len(normalized_prefix) :]
+            else:
+                candidate_role_id = normalized_agent_id.rsplit(":", 1)[-1]
+            normalized_role_id = normalize_industry_role_id(candidate_role_id)
+            if normalized_role_id is None or normalized_role_id == EXECUTION_CORE_ROLE_ID:
+                continue
+            if normalized_role_id not in restored_role_ids:
+                restored_role_ids.append(normalized_role_id)
+        if restored_role_ids:
+            rebuilt_roles: list[IndustryRoleBlueprint] = []
+            for role_id in restored_role_ids:
+                parts = [part for part in role_id.replace("_", "-").split("-") if part]
+                role_name = (
+                    " ".join(part.capitalize() for part in parts)
+                    if parts and all(part.isascii() for part in parts)
+                    else role_id
+                )
+                role_summary = (
+                    f"Own the {role_name} lane for {label}, keep it moving, and report structured evidence "
+                    "back to the execution core."
+                )
+                rebuilt_roles.append(
+                    IndustryRoleBlueprint(
+                        role_id=role_id,
+                        agent_id=f"{instance_id}:{role_id}",
+                        actor_key=f"{instance_id}:{role_id}",
+                        name=f"{label} {role_name}",
+                        role_name=role_name,
+                        role_summary=role_summary,
+                        mission=role_summary,
+                        goal_kind=role_id,
+                        agent_class="business",
+                        employment_mode="career",
+                        activation_mode="persistent",
+                        suspendable=False,
+                        reports_to=EXECUTION_CORE_ROLE_ID,
+                        risk_level="guarded",
+                        allowed_capabilities=buddy_specialist_allowed_capabilities(
+                            domain_key=domain_key,
+                            role_id=role_id,
+                        ),
+                        preferred_capability_families=buddy_specialist_preferred_capability_families(
+                            domain_key=domain_key,
+                            role_id=role_id,
+                        ),
+                        evidence_expectations=[f"{role_id} evidence"],
+                    ),
+                )
+            if rebuilt_roles:
+                return rebuilt_roles
         return [
             IndustryRoleBlueprint(
                 role_id="growth-focus",

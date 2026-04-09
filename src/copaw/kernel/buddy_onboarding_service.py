@@ -138,6 +138,46 @@ def _normalize_text(value: str | None) -> str:
     return text.lower().strip()
 
 
+def _normalize_buddy_lane_hint(value: str | None) -> str:
+    normalized = unicodedata.normalize("NFKC", str(value or "")).strip().lower()
+    if not normalized:
+        return ""
+    parts: list[str] = []
+    current: list[str] = []
+    for char in normalized:
+        if char.isalnum():
+            current.append(char)
+            continue
+        if current:
+            parts.append("".join(current))
+            current = []
+    if current:
+        parts.append("".join(current))
+    return "-".join(part for part in parts if part).strip("-")
+
+
+def _present_buddy_lane_label(role_id: str) -> str:
+    normalized = _normalize_buddy_lane_hint(role_id)
+    if not normalized:
+        return "Specialist"
+    parts = [part for part in normalized.split("-") if part]
+    if all(part.isascii() for part in parts):
+        return " ".join(part.capitalize() for part in parts)
+    return normalized
+
+
+def _resolve_growth_plan_lane_hints(
+    growth_plan: BuddyOnboardingGrowthPlan | None,
+) -> list[str]:
+    if growth_plan is None:
+        return []
+    lane_hints = [
+        _normalize_buddy_lane_hint(item.lane_hint)
+        for item in (growth_plan.backlog_items or [])
+    ]
+    return _unique([hint for hint in lane_hints if hint])
+
+
 def _contains_any(source: str, tokens: tuple[str, ...]) -> bool:
     return any(token in source for token in tokens)
 
@@ -1356,6 +1396,7 @@ class BuddyOnboardingService:
             instance_id=instance_id,
             existing_instance=existing_instance,
             direction_text=growth_target.final_goal,
+            growth_plan=growth_plan,
         )
         instance = IndustryInstanceRecord(
             instance_id=instance_id,
@@ -1787,6 +1828,7 @@ class BuddyOnboardingService:
         instance_id: str,
         existing_instance: IndustryInstanceRecord | None,
         direction_text: str | None,
+        growth_plan: BuddyOnboardingGrowthPlan | None = None,
     ) -> list[IndustryRoleBlueprint]:
         existing_agents = (
             list((existing_instance.team_payload or {}).get("agents") or [])
@@ -1803,6 +1845,47 @@ class BuddyOnboardingService:
             return restored_roles
         label = profile.display_name.strip() or "Buddy"
         domain_key = derive_buddy_domain_key(direction_text or "")
+        lane_hints = _resolve_growth_plan_lane_hints(growth_plan)
+        if lane_hints:
+            dynamic_roles: list[IndustryRoleBlueprint] = []
+            for position, lane_hint in enumerate(lane_hints, start=1):
+                role_id = lane_hint or f"specialist-{position}"
+                lane_label = _present_buddy_lane_label(role_id)
+                allowed_capabilities = buddy_specialist_allowed_capabilities(
+                    domain_key=domain_key,
+                    role_id=role_id,
+                )
+                preferred_families = buddy_specialist_preferred_capability_families(
+                    domain_key=domain_key,
+                    role_id=role_id,
+                )
+                lane_summary = (
+                    f"Owns the {lane_label} lane for {label} and turns it into concrete progress, "
+                    "evidence, and next actions."
+                )
+                dynamic_roles.append(
+                    IndustryRoleBlueprint(
+                        role_id=role_id,
+                        agent_id=f"{instance_id}:{role_id}",
+                        actor_key=f"{instance_id}:{role_id}",
+                        name=f"{label} {lane_label}",
+                        role_name=lane_label,
+                        role_summary=lane_summary,
+                        mission=lane_summary,
+                        goal_kind=role_id,
+                        agent_class="business",
+                        employment_mode="career",
+                        activation_mode="persistent",
+                        suspendable=False,
+                        reports_to=EXECUTION_CORE_ROLE_ID,
+                        risk_level="guarded",
+                        allowed_capabilities=allowed_capabilities,
+                        preferred_capability_families=preferred_families,
+                        evidence_expectations=[f"{role_id} evidence"],
+                    ),
+                )
+            if dynamic_roles:
+                return dynamic_roles
         growth_allowed = buddy_specialist_allowed_capabilities(
             domain_key=domain_key,
             role_id="growth-focus",
@@ -1879,10 +1962,18 @@ class BuddyOnboardingService:
         lane_ids = [getattr(lane, "id", None) for lane in lanes]
         primary_lane_id = lane_ids[0] if lane_ids else None
         proof_lane_id = lane_ids[1] if len(lane_ids) > 1 else primary_lane_id
+        lane_id_by_role = {
+            _normalize_buddy_lane_hint(getattr(lane, "owner_role_id", None)): getattr(lane, "id", None)
+            for lane in lanes
+            if _normalize_buddy_lane_hint(getattr(lane, "owner_role_id", None))
+        }
         if growth_plan is not None and growth_plan.backlog_items:
             generated_specs: list[tuple[str | None, str, str, int, str]] = []
             for index, item in enumerate(growth_plan.backlog_items, start=1):
-                lane_id = proof_lane_id if item.lane_hint == "proof-of-work" else primary_lane_id
+                normalized_lane_hint = _normalize_buddy_lane_hint(item.lane_hint)
+                lane_id = lane_id_by_role.get(normalized_lane_hint)
+                if lane_id is None:
+                    lane_id = proof_lane_id if normalized_lane_hint == "proof-of-work" else primary_lane_id
                 title = item.title.strip()
                 summary = item.summary.strip()
                 if not title or not summary:

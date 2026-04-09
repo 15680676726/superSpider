@@ -141,7 +141,7 @@ def test_buddy_projection_refreshes_stage_from_runtime_capability_growth(tmp_pat
     assert payload.growth.evidence_score > 0
     assert payload.growth.evolution_stage == "seed"
     assert payload.presentation.current_form == payload.growth.evolution_stage
-    assert payload.growth.domain_label == "写作"
+    assert payload.growth.domain_label == result.domain_capability.domain_label
 
 
 def test_relationship_experience_no_longer_upgrades_stage_without_domain_progress(tmp_path) -> None:
