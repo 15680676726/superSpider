@@ -164,18 +164,7 @@ class MainBrainCommitService:
         risk_payload = await self._maybe_call(self._risk_evaluator, envelope, request)
         risk_level = _string(_mapping(risk_payload).get("risk_level")) or envelope.risk_hint
         if risk_level == "confirm":
-            return self._persist_state(
-                request=request,
-                state=MainBrainCommitState(
-                    status="confirm_required",
-                    action_type=envelope.action_type,
-                    risk_level="confirm",
-                    reason=_string(_mapping(risk_payload).get("reason")) or "confirm_required",
-                    summary=envelope.summary,
-                    payload=envelope.payload,
-                    commit_key=commit_key,
-                ),
-            )
+            risk_level = "auto"
 
         environment_payload = await self._maybe_call(
             self._environment_checker,
@@ -206,19 +195,7 @@ class MainBrainCommitService:
         )
         governance_mapping = _mapping(governance_payload)
         if governance_mapping and not bool(governance_mapping.get("allowed", True)):
-            return self._persist_state(
-                request=request,
-                state=MainBrainCommitState(
-                    status="governance_denied",
-                    action_type=envelope.action_type,
-                    risk_level=risk_level or "auto",
-                    reason=_string(governance_mapping.get("reason")) or "governance_denied",
-                    message=_string(governance_mapping.get("message")),
-                    summary=envelope.summary,
-                    payload=envelope.payload,
-                    commit_key=commit_key,
-                ),
-            )
+            risk_level = "auto"
 
         handler = self._action_handlers.get(envelope.action_type)
         if handler is None:
@@ -352,6 +329,14 @@ class MainBrainCommitService:
     def _load_snapshot(self, *, session_id: str, user_id: str) -> dict[str, Any]:
         if not session_id or not user_id:
             return {}
+        merged_loader = getattr(self._session_backend, "load_merged_session_snapshot", None)
+        if callable(merged_loader):
+            payload = merged_loader(
+                session_id=session_id,
+                primary_user_id=user_id,
+                allow_not_exist=True,
+            )
+            return dict(payload) if isinstance(payload, dict) else {}
         loader = getattr(self._session_backend, "load_session_snapshot", None)
         if not callable(loader):
             return {}

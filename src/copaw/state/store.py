@@ -70,6 +70,10 @@ CREATE TABLE IF NOT EXISTS buddy_onboarding_sessions (
     candidate_directions_json TEXT NOT NULL DEFAULT '[]',
     recommended_direction TEXT NOT NULL DEFAULT '',
     selected_direction TEXT NOT NULL DEFAULT '',
+    draft_direction TEXT NOT NULL DEFAULT '',
+    draft_final_goal TEXT NOT NULL DEFAULT '',
+    draft_why_it_matters TEXT NOT NULL DEFAULT '',
+    draft_backlog_items_json TEXT NOT NULL DEFAULT '[]',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY(profile_id) REFERENCES human_profiles(profile_id) ON DELETE CASCADE
@@ -1734,6 +1738,15 @@ CREATE INDEX IF NOT EXISTS idx_skill_lifecycle_decisions_attribution
 """
 
 _ADDITIVE_SCHEMA_COLUMNS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
+    (
+        "buddy_onboarding_sessions",
+        (
+            ("draft_direction", "TEXT NOT NULL DEFAULT ''"),
+            ("draft_final_goal", "TEXT NOT NULL DEFAULT ''"),
+            ("draft_why_it_matters", "TEXT NOT NULL DEFAULT ''"),
+            ("draft_backlog_items_json", "TEXT NOT NULL DEFAULT '[]'"),
+        ),
+    ),
     (
         "buddy_domain_capabilities",
         (

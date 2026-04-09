@@ -134,6 +134,41 @@ def test_human_assist_task_service_returns_current_active_task_for_thread(tmp_pa
     assert current.id == second.id
 
 
+def test_human_assist_task_service_skips_stale_fresh_host_handoff_current_task(tmp_path) -> None:
+    service = _build_service(tmp_path)
+    service.ensure_host_handoff_task(
+        chat_thread_id="industry-chat:buddy:profile-1:domain-stock:execution-core",
+        title="Return host handoff",
+        summary="Runtime handoff is active for the buddy execution thread.",
+        required_action='Return after "fresh".',
+        resume_checkpoint_ref="fresh",
+        verification_anchor="fresh",
+        block_evidence_refs=[
+            "session:console:industry-chat:buddy:profile-1:domain-stock:execution-core",
+        ],
+        continuation_context={
+            "session_id": "industry-chat:buddy:profile-1:domain-stock:execution-core",
+            "control_thread_id": "industry-chat:buddy:profile-1:domain-stock:execution-core",
+            "environment_ref": (
+                "session:console:industry-chat:buddy:profile-1:domain-stock:execution-core"
+            ),
+            "main_brain_runtime": {
+                "environment_binding_kind": "host-handoff",
+                "environment_ref": (
+                    "session:console:industry-chat:buddy:profile-1:domain-stock:execution-core"
+                ),
+                "recovery_mode": "fresh",
+            },
+        },
+    )
+
+    current = service.get_current_task(
+        chat_thread_id="industry-chat:buddy:profile-1:domain-stock:execution-core",
+    )
+
+    assert current is None
+
+
 def test_human_assist_task_service_ensures_exception_absorption_task_per_thread_anchor(
     tmp_path,
 ) -> None:

@@ -17,6 +17,7 @@ from ..providers.runtime_provider_facade import (
 from ..state import HumanProfile
 
 logger = logging.getLogger(__name__)
+_DEFAULT_REASONING_TIMEOUT_SECONDS = 15.0
 
 _BUDDY_ONBOARDING_REASONER_PROMPT = """
 你负责 CoPaw Buddy onboarding。
@@ -51,6 +52,9 @@ class BuddyOnboardingReasonedTurn(BaseModel):
     next_question: str = ""
     candidate_directions: list[str] = Field(default_factory=list)
     recommended_direction: str = ""
+    final_goal: str = ""
+    why_it_matters: str = ""
+    backlog_items: list[BuddyOnboardingBacklogSeed] = Field(default_factory=list)
 
 
 class BuddyOnboardingGrowthPlan(BaseModel):
@@ -87,6 +91,10 @@ class _ReasonerResponse(BaseModel):
     final_goal: str = ""
     why_it_matters: str = ""
     backlog_items: list[BuddyOnboardingBacklogSeed] = Field(default_factory=list)
+
+
+class BuddyOnboardingReasonerTimeoutError(TimeoutError):
+    """Raised when Buddy onboarding waits too long for the active chat model."""
 
 
 def _response_to_text(response: object) -> str:
@@ -130,7 +138,11 @@ async def _materialize_response(response: object) -> object:
     return last_item if last_item is not None else response
 
 
-def _run_async_blocking(awaitable: object) -> object:
+def _run_async_blocking(
+    awaitable: object,
+    *,
+    timeout_seconds: float | None = None,
+) -> object:
     async def _coerce() -> object:
         return await awaitable  # type: ignore[misc]
 
@@ -150,7 +162,11 @@ def _run_async_blocking(awaitable: object) -> object:
 
     thread = threading.Thread(target=_runner, daemon=True)
     thread.start()
-    thread.join()
+    thread.join(timeout_seconds)
+    if thread.is_alive():
+        raise BuddyOnboardingReasonerTimeoutError(
+            f"Buddy onboarding model timed out after {timeout_seconds:g} seconds.",
+        )
     if "value" in error:
         raise error["value"]
     return result.get("value")
@@ -179,6 +195,7 @@ class ModelDrivenBuddyOnboardingReasoner:
         *,
         model_factory: Callable[[], object] | None = None,
         provider_runtime: ProviderRuntimeSurface | None = None,
+        reasoning_timeout_seconds: float = _DEFAULT_REASONING_TIMEOUT_SECONDS,
     ) -> None:
         resolved_runtime = (
             provider_runtime
@@ -187,6 +204,7 @@ class ModelDrivenBuddyOnboardingReasoner:
         )
         self._provider_runtime = resolved_runtime or build_compat_runtime_provider_facade()
         self._model_factory = model_factory or self._provider_runtime.get_active_chat_model
+        self._reasoning_timeout_seconds = max(1.0, float(reasoning_timeout_seconds))
 
     def plan_turn(
         self,
@@ -214,6 +232,13 @@ class ModelDrivenBuddyOnboardingReasoner:
             next_question="" if payload.finished else str(payload.next_question or "").strip(),
             candidate_directions=directions[:3],
             recommended_direction=recommended,
+            final_goal=str(payload.final_goal or "").strip(),
+            why_it_matters=str(payload.why_it_matters or "").strip(),
+            backlog_items=[
+                item
+                for item in payload.backlog_items
+                if item.title.strip() and item.summary.strip()
+            ][:3],
         )
 
     def build_growth_plan(
@@ -278,9 +303,16 @@ class ModelDrivenBuddyOnboardingReasoner:
         try:
             response = _run_async_blocking(
                 model(messages=messages, structured_model=_ReasonerResponse),
+                timeout_seconds=self._reasoning_timeout_seconds,
             )
-            response = _run_async_blocking(_materialize_response(response))
+            response = _run_async_blocking(
+                _materialize_response(response),
+                timeout_seconds=self._reasoning_timeout_seconds,
+            )
             payload = _ReasonerResponse.model_validate(_response_to_payload(response))
+        except BuddyOnboardingReasonerTimeoutError:
+            logger.warning("Buddy onboarding reasoner timed out.", exc_info=True)
+            raise
         except Exception:
             logger.debug("Buddy onboarding reasoner failed; falling back to heuristics.", exc_info=True)
             return None
@@ -292,5 +324,6 @@ __all__ = [
     "BuddyOnboardingGrowthPlan",
     "BuddyOnboardingReasonedTurn",
     "BuddyOnboardingReasoner",
+    "BuddyOnboardingReasonerTimeoutError",
     "ModelDrivenBuddyOnboardingReasoner",
 ]

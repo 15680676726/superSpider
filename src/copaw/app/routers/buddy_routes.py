@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import logging
+import threading
+
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
@@ -8,6 +11,7 @@ from ...kernel.buddy_onboarding_service import BuddyOnboardingService
 from ...kernel.buddy_projection_service import BuddyProjectionService
 
 router = APIRouter(prefix="/buddy", tags=["buddy"])
+logger = logging.getLogger(__name__)
 
 
 class BuddyIdentityRequest(BaseModel):
@@ -57,7 +61,31 @@ def _get_buddy_projection_service(request: Request) -> BuddyProjectionService:
     raise HTTPException(503, detail="Buddy projection service is not available")
 
 
-async def _maybe_activate_buddy_execution(
+def _spawn_buddy_activation_job(*, kickoff, instance_id: str) -> None:
+    async def _run() -> None:
+        await kickoff(
+            industry_instance_id=instance_id,
+            message_text="Buddy onboarding confirmed. Start the first concrete task now.",
+            trigger_source="buddy-onboarding",
+            trigger_reason_override="Buddy onboarding confirmed. Start the first concrete task now.",
+        )
+
+    def _runner() -> None:
+        try:
+            import asyncio
+
+            asyncio.run(_run())
+        except Exception:
+            logger.warning("Buddy onboarding activation task failed.", exc_info=True)
+
+    threading.Thread(
+        target=_runner,
+        daemon=True,
+        name=f"buddy-onboarding-activation-{instance_id}",
+    ).start()
+
+
+def _maybe_activate_buddy_execution(
     request: Request,
     *,
     execution_carrier: dict[str, object] | None,
@@ -75,12 +103,12 @@ async def _maybe_activate_buddy_execution(
     ).strip()
     if not instance_id:
         return None
-    return await kickoff(
-        industry_instance_id=instance_id,
-        message_text="Buddy onboarding confirmed. Start the first concrete task now.",
-        trigger_source="buddy-onboarding",
-        trigger_reason_override="Buddy onboarding confirmed. Start the first concrete task now.",
-    )
+    _spawn_buddy_activation_job(kickoff=kickoff, instance_id=instance_id)
+    return {
+        "status": "queued",
+        "industry_instance_id": instance_id,
+        "trigger_source": "buddy-onboarding",
+    }
 
 
 @router.post("/onboarding/identity")
@@ -91,6 +119,8 @@ async def submit_buddy_identity(
     service = _get_buddy_onboarding_service(request)
     try:
         result = service.submit_identity(**payload.model_dump())
+    except TimeoutError as exc:
+        raise HTTPException(504, detail=str(exc) or "Buddy onboarding model timed out.") from exc
     except ValueError as exc:
         raise HTTPException(400, detail=str(exc)) from exc
     return result.model_dump(mode="json")
@@ -104,6 +134,8 @@ async def answer_buddy_clarification(
     service = _get_buddy_onboarding_service(request)
     try:
         result = service.answer_clarification_turn(**payload.model_dump())
+    except TimeoutError as exc:
+        raise HTTPException(504, detail=str(exc) or "Buddy onboarding model timed out.") from exc
     except ValueError as exc:
         raise HTTPException(400, detail=str(exc)) from exc
     return result.model_dump(mode="json")
@@ -130,9 +162,11 @@ async def confirm_buddy_direction(
     service = _get_buddy_onboarding_service(request)
     try:
         result = service.confirm_primary_direction(**payload.model_dump())
+    except TimeoutError as exc:
+        raise HTTPException(504, detail=str(exc) or "Buddy onboarding model timed out.") from exc
     except ValueError as exc:
         raise HTTPException(400, detail=str(exc)) from exc
-    activation = await _maybe_activate_buddy_execution(
+    activation = _maybe_activate_buddy_execution(
         request,
         execution_carrier=result.execution_carrier,
         domain_capability=result.domain_capability,

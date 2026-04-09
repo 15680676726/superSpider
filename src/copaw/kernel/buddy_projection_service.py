@@ -81,10 +81,14 @@ class BuddyProjectionService:
         self._human_assist_task_service = human_assist_task_service
         self._current_focus_resolver = current_focus_resolver
 
-    def build_chat_surface(self, *, profile_id: str | None = None) -> BuddySurfacePayload:
+    def build_optional_chat_surface(
+        self,
+        *,
+        profile_id: str | None = None,
+    ) -> BuddySurfacePayload | None:
         profile = self._resolve_profile(profile_id)
         if profile is None:
-            raise ValueError("Buddy profile is not available")
+            return None
         target = self._growth_target_repository.get_active_target(profile.profile_id)
         relationship = self._relationship_repository.get_relationship(profile.profile_id)
         session = self._onboarding_session_repository.get_latest_session_for_profile(profile.profile_id)
@@ -191,6 +195,12 @@ class BuddyProjectionService:
             presentation=presentation,
             growth=growth,
         )
+
+    def build_chat_surface(self, *, profile_id: str | None = None) -> BuddySurfacePayload:
+        surface = self.build_optional_chat_surface(profile_id=profile_id)
+        if surface is None:
+            raise ValueError("Buddy profile is not available")
+        return surface
 
     def build_cockpit_summary(self, *, profile_id: str | None = None) -> dict[str, Any]:
         surface = self.build_chat_surface(profile_id=profile_id)

@@ -9,8 +9,7 @@ from pydantic import BaseModel, Field
 
 
 MemoryBackendKind = Literal[
-    "lexical",
-    "hybrid-local",
+    "truth-first",
 ]
 
 
@@ -59,7 +58,7 @@ class MemoryRecallHit(BaseModel):
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     quality_score: float = Field(default=0.0, ge=0.0, le=1.0)
     score: float = 0.0
-    backend: str = "lexical"
+    backend: str = "truth-first"
     source_updated_at: datetime | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 

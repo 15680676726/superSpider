@@ -143,7 +143,7 @@ class _FakeBuddyProjectionService:
                 current_task_summary="写出第一篇真正能代表自己的案例文章",
                 why_now_summary="因为这是把长期方向从想象拉进现实的第一份证据。",
                 single_next_action_summary="现在先打开文档，写下这篇案例的标题和三条核心观点。",
-                companion_strategy_summary="先接住情绪，再把任务缩成一个最小动作；避免高压催促；一旦出现刷短视频逃避，就立刻拉回一个最小动作。",
+                companion_strategy_summary="先直接推进当前任务，做完后主动同步完成情况和下一步；不要只陪聊。",
             ),
             growth=SimpleNamespace(
                 intimacy=42,
@@ -1123,6 +1123,50 @@ def test_main_brain_chat_service_prompt_prefers_truth_first_profile_before_lexic
     assert recall_service.calls[0]["scope_id"] == "ctx-truth-first"
 
 
+def test_main_brain_chat_service_prefers_memory_surface_service_for_scope_snapshot():
+    class _FailingRecallService:
+        def recall(self, **kwargs):
+            raise AssertionError("legacy memory recall service should not build scope snapshot directly")
+
+    class _MemorySurfaceService:
+        def resolve_truth_first_scope_snapshot(self, **kwargs):
+            _ = kwargs
+            entry = SimpleNamespace(
+                title="Surface latest fact",
+                summary="Use the facade-backed truth-first snapshot.",
+                content_excerpt="Use the facade-backed truth-first snapshot.",
+            )
+            return {
+                "entries": [entry],
+                "latest_entries": [entry],
+                "history_entries": [],
+            }
+
+    service = MainBrainChatService(
+        session_backend=_FakeSessionBackend(),
+        memory_recall_service=_FailingRecallService(),
+        memory_surface_service=_MemorySurfaceService(),
+        model_factory=lambda: _StaticResponseModel("ok"),
+    )
+    request = SimpleNamespace(
+        session_id="sess-surface",
+        user_id="user-surface",
+        industry_instance_id=None,
+        work_context_id="ctx-surface",
+        agent_id="ops-agent",
+    )
+
+    prompt_messages = service._build_prompt_messages(  # pylint: disable=protected-access
+        request=request,
+        query="Use the current checklist",
+        prior_messages=[],
+        current_messages=[],
+    )
+
+    context_prompt = prompt_messages[1]["content"]
+    assert "Use the facade-backed truth-first snapshot." in context_prompt
+
+
 @pytest.mark.asyncio
 async def test_main_brain_chat_service_skips_lexical_recall_for_short_followup_turns_and_reuses_cached_context():
     recall_service = _TruthFirstMemoryRecallService()
@@ -1269,8 +1313,8 @@ def test_main_brain_chat_service_prompt_guides_structured_goal_and_auto_progress
     )
 
     system_prompt = prompt_messages[0]["content"]
-    assert "不要反复追问“是否开始执行”" in system_prompt
-    assert "结构化执行目标" in system_prompt
+    assert "不要反复问“要不要开始”" in system_prompt
+    assert "优先给结果、进度、下一步" in system_prompt
 
 
 def test_main_brain_chat_service_prompt_includes_exception_absorption_summary_without_low_level_case_names():
@@ -1389,9 +1433,10 @@ def test_main_brain_chat_service_prompt_includes_buddy_persona_block():
     joined_prompt = "\n".join(message["content"] for message in prompt_messages)
     assert "# Buddy 对外人格" in joined_prompt
     assert "伙伴名：小澄" in joined_prompt
-    assert "默认只给用户最终目标、当前任务、为什么现在做、以及唯一下一步" in joined_prompt
+    assert "默认只给用户最终目标、当前任务、为什么现在做、唯一下一步和已完成进展" in joined_prompt
     assert "唯一下一步：现在先打开文档，写下这篇案例的标题和三条核心观点。" in joined_prompt
-    assert "避免高压催促" in joined_prompt
+    assert "不要只陪聊" in joined_prompt
+    assert "默认会主动推进当前任务" in joined_prompt
 
 
 @pytest.mark.parametrize(
@@ -1401,7 +1446,7 @@ def test_main_brain_chat_service_prompt_includes_buddy_persona_block():
             "review",
             [
                 "Mode: REVIEW",
-                "Risk",
+                "Blockers",
                 "Evidence gaps",
                 "Do not add extra sections",
             ],
@@ -1420,7 +1465,7 @@ def test_main_brain_chat_service_prompt_includes_buddy_persona_block():
             [
                 "Mode: VERIFY",
                 "Pass/fail",
-                "Unresolved risk",
+                "Unresolved blocker",
                 "Do not add extra sections",
             ],
         ),
@@ -1469,6 +1514,71 @@ def test_main_brain_chat_service_prompt_does_not_expose_execution_only_tool_name
     assert "dispatch_goal" not in joined_prompt
     assert "dispatch_active_goals" not in joined_prompt
     assert "memory_search" not in joined_prompt
+
+
+def test_main_brain_chat_service_loads_merged_session_snapshot_when_available() -> None:
+    class _MergedBackend(_FakeSessionBackend):
+        def __init__(self) -> None:
+            super().__init__()
+            self.merged_calls: list[tuple[str, str, bool]] = []
+
+        def load_merged_session_snapshot(
+            self,
+            *,
+            session_id: str,
+            primary_user_id: str,
+            allow_not_exist: bool,
+        ) -> dict:
+            self.merged_calls.append((session_id, primary_user_id, allow_not_exist))
+            return {
+                "agent": {
+                    "memory": {
+                        "content": [
+                            {
+                                "id": "msg-user-merged",
+                                "role": "user",
+                                "content": [
+                                    {"type": "text", "text": "继续帮我推进交易系统"}
+                                ],
+                            },
+                            {
+                                "id": "msg-report-merged",
+                                "role": "assistant",
+                                "content": [
+                                    {"type": "text", "text": "我刚完成一项任务"}
+                                ],
+                            },
+                        ],
+                    },
+                },
+                "main_brain": {
+                    "phase2_commit": {
+                        "status": "committed",
+                        "action_type": "writeback_operating_truth",
+                    },
+                },
+            }
+
+    backend = _MergedBackend()
+    service = MainBrainChatService(
+        session_backend=backend,
+        model_factory=lambda: _StaticResponseModel("ok"),
+    )
+
+    snapshot = service._load_session_snapshot(  # pylint: disable=protected-access
+        session_id="industry-chat:buddy:profile-1:domain-stock:execution-core",
+        user_id="copaw-agent-runner",
+    )
+
+    assert backend.merged_calls == [
+        (
+            "industry-chat:buddy:profile-1:domain-stock:execution-core",
+            "copaw-agent-runner",
+            True,
+        )
+    ]
+    assert snapshot["agent"]["memory"]["content"][0]["id"] == "msg-user-merged"
+    assert snapshot["main_brain"]["phase2_commit"]["status"] == "committed"
 
 
 def test_main_brain_chat_service_prompt_includes_staffing_gap_and_researcher_state():

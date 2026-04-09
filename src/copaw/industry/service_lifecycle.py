@@ -2526,6 +2526,96 @@ class _IndustryLifecycleMixin:
             updated = self.reconcile_instance_status(record.instance_id) or record
             self._sync_role_runtime_surfaces_for_record(record=updated)
             self._sync_strategy_memory_for_instance(updated)
+
+    def close_task_execution_closure(
+        self,
+        *,
+        industry_instance_id: str,
+        cycle_id: str | None = None,
+        assignment_id: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        record = self._industry_instance_repository.get_instance(industry_instance_id)
+        if record is None or self._agent_report_service is None or self._assignment_service is None:
+            return None
+        target_cycle = (
+            self._operating_cycle_service.get_cycle(cycle_id)
+            if cycle_id is not None and self._operating_cycle_service is not None
+            else self._current_operating_cycle_record(record.instance_id)
+        )
+        target_cycle_id = cycle_id or (target_cycle.id if target_cycle is not None else None)
+        created_reports = self._ensure_terminal_agent_reports(
+            record=record,
+            cycle_id=target_cycle_id,
+        )
+        processed_reports = self._process_pending_agent_reports(
+            record=record,
+            cycle_id=target_cycle_id,
+        )
+        goals_by_id = {
+            goal_id: goal
+            for goal_id in self._resolve_instance_goal_ids(record)
+            if (goal := self._goal_service.get_goal(goal_id)) is not None
+        }
+        tasks_by_assignment_id: dict[str, list[TaskRecord]] = {}
+        tasks_by_goal_id: dict[str, list[TaskRecord]] = {}
+        task_repository = getattr(self._goal_service, "_task_repository", None)
+        if task_repository is not None:
+            existing_tasks = task_repository.list_tasks(
+                industry_instance_id=record.instance_id,
+                cycle_id=target_cycle_id,
+                limit=None,
+            )
+            for task in existing_tasks:
+                existing_assignment_id = _string(task.assignment_id)
+                if existing_assignment_id is not None:
+                    tasks_by_assignment_id.setdefault(existing_assignment_id, []).append(task)
+                goal_id = _string(task.goal_id)
+                if goal_id is not None:
+                    tasks_by_goal_id.setdefault(goal_id, []).append(task)
+        latest_reports_by_assignment_id = self._agent_report_service.latest_reports_by_assignment(
+            industry_instance_id=record.instance_id,
+            cycle_id=target_cycle_id,
+        )
+        assignments = self._assignment_service.reconcile_assignments(
+            industry_instance_id=record.instance_id,
+            cycle_id=target_cycle_id,
+            goals_by_id=goals_by_id,
+            tasks_by_assignment_id=tasks_by_assignment_id,
+            tasks_by_goal_id=tasks_by_goal_id,
+            latest_reports_by_assignment_id=latest_reports_by_assignment_id,
+        )
+        if target_cycle is not None and self._operating_cycle_service is not None:
+            target_cycle = self._operating_cycle_service.reconcile_cycle(
+                target_cycle,
+                assignment_statuses=[assignment.status for assignment in assignments],
+                report_ids=[
+                    report.id
+                    for report in self._list_agent_report_records(
+                        record.instance_id,
+                        cycle_id=target_cycle.id,
+                        limit=None,
+                    )
+                ],
+            )
+        record = self._retire_completed_temporary_roles(record=record)
+        updated = self.reconcile_instance_status(record.instance_id) or record
+        self._sync_role_runtime_surfaces_for_record(record=updated)
+        self._sync_strategy_memory_for_instance(updated)
+        return {
+            "industry_instance_id": updated.instance_id,
+            "cycle_id": target_cycle_id,
+            "assignment_id": assignment_id,
+            "task_id": task_id,
+            "created_report_ids": [report.id for report in created_reports],
+            "processed_report_ids": [report.id for report in processed_reports],
+            "assignment_statuses": {
+                item.id: item.status
+                for item in assignments
+                if assignment_id is None or item.id == assignment_id
+            },
+        }
+
     async def kickoff_execution_from_chat(
         self,
         *,
@@ -2542,6 +2632,14 @@ class _IndustryLifecycleMixin:
         record = self._industry_instance_repository.get_instance(industry_instance_id)
         if record is None:
             return None
+        closure_summary = self.close_task_execution_closure(
+            industry_instance_id=record.instance_id,
+            cycle_id=record.current_cycle_id,
+        )
+        if closure_summary is not None:
+            refreshed_record = self._industry_instance_repository.get_instance(record.instance_id)
+            if refreshed_record is not None:
+                record = refreshed_record
         acquisition_runner = getattr(
             self._learning_service,
             "run_industry_acquisition_cycle",
@@ -3990,9 +4088,67 @@ class _IndustryLifecycleMixin:
         created_task_ids: list[str] = []
         dispatches: list[dict[str, Any]] = []
         for assignment in assignments:
-            owner_agent_id = _string(assignment.owner_agent_id)
+            backlog_item = (
+                self._backlog_service.get_item(assignment.backlog_item_id)
+                if self._backlog_service is not None and assignment.backlog_item_id is not None
+                else None
+            )
+            if backlog_item is None or current_cycle is None:
+                continue
+            assignment_metadata = dict(assignment.metadata or {})
+            backlog_metadata = dict(backlog_item.metadata or {})
+            lane = (
+                self._operating_lane_service.get_lane(backlog_item.lane_id or assignment.lane_id)
+                if self._operating_lane_service is not None
+                and _string(backlog_item.lane_id or assignment.lane_id) is not None
+                else None
+            )
+            owner_agent_id = (
+                _string(assignment.owner_agent_id)
+                or _string(assignment_metadata.get("owner_agent_id"))
+                or _string(backlog_metadata.get("owner_agent_id"))
+                or (lane.owner_agent_id if lane is not None else None)
+            )
+            owner_role_id = normalize_industry_role_id(
+                _string(assignment.owner_role_id)
+                or _string(assignment_metadata.get("industry_role_id"))
+                or _string(backlog_metadata.get("industry_role_id"))
+                or (lane.owner_role_id if lane is not None else None),
+            )
+            if owner_agent_id is None and _string(backlog_item.source_kind) == "buddy-bootstrap":
+                owner_agent_id = EXECUTION_CORE_AGENT_ID
+            if owner_agent_id is None:
+                owner_agent_id = EXECUTION_CORE_AGENT_ID
+            if owner_role_id is None and (
+                _string(backlog_item.source_kind) == "buddy-bootstrap"
+                or owner_agent_id == EXECUTION_CORE_AGENT_ID
+            ):
+                owner_role_id = normalize_industry_role_id(
+                    (lane.owner_role_id if lane is not None else None) or EXECUTION_CORE_ROLE_ID,
+                )
             if owner_agent_id is None:
                 continue
+            if (
+                self._assignment_repository is not None
+                and (
+                    _string(assignment.owner_agent_id) != owner_agent_id
+                    or normalize_industry_role_id(assignment.owner_role_id) != owner_role_id
+                )
+            ):
+                merged_assignment_metadata = dict(assignment_metadata)
+                merged_assignment_metadata.setdefault("owner_agent_id", owner_agent_id)
+                if owner_role_id is not None:
+                    merged_assignment_metadata.setdefault("industry_role_id", owner_role_id)
+                assignment = self._assignment_repository.upsert_assignment(
+                    assignment.model_copy(
+                        update={
+                            "owner_agent_id": owner_agent_id,
+                            "owner_role_id": owner_role_id,
+                            "metadata": merged_assignment_metadata,
+                            "updated_at": _utc_now(),
+                        },
+                    ),
+                )
             if not include_execution_core and is_execution_core_agent_id(owner_agent_id):
                 continue
             assignment_tasks = list(tasks_by_assignment_id.get(assignment.id, []))
@@ -4000,13 +4156,6 @@ class _IndustryLifecycleMixin:
                 task.status in {"created", "queued", "running", "needs-confirm", "waiting", "blocked"}
                 for task in assignment_tasks
             ):
-                continue
-            backlog_item = (
-                self._backlog_service.get_item(assignment.backlog_item_id)
-                if self._backlog_service is not None and assignment.backlog_item_id is not None
-                else None
-            )
-            if backlog_item is None or current_cycle is None:
                 continue
             unit = self._build_operating_cycle_assignment_unit(
                 record=record,
@@ -4047,7 +4196,7 @@ class _IndustryLifecycleMixin:
                         },
                         metadata={
                             "industry_instance_id": record.instance_id,
-                            "industry_role_id": assignment.owner_role_id,
+                            "industry_role_id": owner_role_id,
                             "assignment_id": assignment.id,
                             "lane_id": assignment.lane_id,
                             "cycle_id": assignment.cycle_id,
@@ -4088,6 +4237,8 @@ class _IndustryLifecycleMixin:
                     assignment.model_copy(
                         update={
                             "task_id": primary_task_id,
+                            "owner_agent_id": owner_agent_id,
+                            "owner_role_id": owner_role_id,
                             "updated_at": _utc_now(),
                         },
                     ),

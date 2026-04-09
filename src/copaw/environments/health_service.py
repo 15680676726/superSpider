@@ -2152,12 +2152,8 @@ class EnvironmentHealthService:
                 desktop_app_contract.get("blocker_event_family"),
             ),
             "shared_surface_owner": owner_agent_id,
-            "requires_human_return": bool(
-                self._first_string(
-                    host_contract.get("handoff_owner_ref"),
-                    host_contract.get("handoff_state"),
-                    host_contract.get("current_gap_or_blocker"),
-                ),
+            "requires_human_return": self._host_contract_requires_human_return(
+                host_contract,
             ),
         }
         return {
@@ -4297,13 +4293,7 @@ class EnvironmentHealthService:
             "restorable",
             "same-host-other-process",
         }
-        requires_human_return = bool(
-            self._first_string(
-                host_contract.get("handoff_owner_ref"),
-                host_contract.get("handoff_state"),
-                host_contract.get("current_gap_or_blocker"),
-            ),
-        )
+        requires_human_return = self._host_contract_requires_human_return(host_contract)
         if recovered_runtime_ready:
             requires_human_return = False
         status = "blocked"
@@ -4323,6 +4313,17 @@ class EnvironmentHealthService:
             ),
             "requires_human_return": requires_human_return,
         }
+
+    def _host_contract_requires_human_return(
+        self,
+        host_contract: dict[str, object],
+    ) -> bool:
+        return bool(
+            self._first_string(
+                host_contract.get("handoff_owner_ref"),
+                host_contract.get("handoff_state"),
+            ),
+        )
 
     def _build_host_twin_trusted_anchors(
         self,

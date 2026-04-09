@@ -161,10 +161,11 @@ def _resolve_industry_instance_id_from_thread_id(thread_id: str | None) -> str |
         return None
     if not normalized.startswith("industry-chat:"):
         return None
-    parts = normalized.split(":")
-    if len(parts) < 3:
+    _, _, remainder = normalized.partition("industry-chat:")
+    instance_id, separator, role_id = remainder.rpartition(":")
+    if not instance_id or not separator or not role_id:
         return None
-    return _first_non_empty(parts[1])
+    return _first_non_empty(instance_id)
 
 
 def _canonical_host_twin_summary(
@@ -443,40 +444,14 @@ class GovernanceService:
         return all(action in _WRITEBACK_ONLY_REQUESTED_ACTIONS for action in requested_actions)
 
     def _environment_handoff_block_reason(self, task: Any) -> str | None:
-        service = self._environment_service
-        if service is None:
-            return None
         payload = _mapping_value(getattr(task, "payload", None))
-        candidate_session_refs = _resolve_candidate_environment_refs(
+        resolved = self._resolve_environment_handoff_candidate(
             payload=payload,
             task_environment_ref=getattr(task, "environment_ref", None),
         )
-        if not candidate_session_refs:
+        if resolved is None:
             return None
-        getter = getattr(service, "get_session_detail", None)
-        if not callable(getter):
-            return None
-        session_ref: str | None = None
-        detail = None
-        for candidate in candidate_session_refs:
-            try:
-                detail = getter(candidate, limit=20)
-                session_ref = candidate
-                break
-            except TypeError:
-                try:
-                    detail = getter(candidate)
-                    session_ref = candidate
-                    break
-                except Exception:
-                    continue
-            except Exception:
-                continue
-        if detail is None or session_ref is None:
-            return None
-        detail_payload = _mapping_value(detail)
-        host_twin = _mapping_value(detail_payload.get("host_twin"))
-        host_twin_summary = _canonical_host_twin_summary(detail_payload, host_twin)
+        session_ref, detail_payload, host_twin, host_twin_summary = resolved
         if not self._host_twin_requires_handoff(host_twin, host_twin_summary):
             return None
         self._ensure_environment_handoff_human_assist_task(
@@ -642,16 +617,107 @@ class GovernanceService:
             status = _first_non_empty(payload_record.get("status")) or "unknown"
             if status in {"closed", "cancelled", "expired", "resume_queued"}:
                 continue
+            if self._maybe_close_stale_host_handoff_task(
+                task_record=task_record,
+                payload_record=payload_record,
+            ):
+                continue
             if status == "need_more_evidence":
                 return (
                     f"Human assist evidence is still incomplete for chat thread '{chat_thread_id}'. "
                     "Dispatch must wait for more evidence."
                 )
             return (
-                f"Human assist handoff is still open for chat thread '{chat_thread_id}'. "
-                f"Current status: {status}."
-            )
+            f"Human assist handoff is still open for chat thread '{chat_thread_id}'. "
+            f"Current status: {status}."
+        )
         return None
+
+    def _resolve_environment_handoff_candidate(
+        self,
+        *,
+        payload: dict[str, object],
+        task_environment_ref: object | None,
+    ) -> tuple[str, dict[str, object], dict[str, object], dict[str, object]] | None:
+        service = self._environment_service
+        if service is None:
+            return None
+        candidate_session_refs = _resolve_candidate_environment_refs(
+            payload=payload,
+            task_environment_ref=task_environment_ref,
+        )
+        if not candidate_session_refs:
+            return None
+        getter = getattr(service, "get_session_detail", None)
+        if not callable(getter):
+            return None
+        session_ref: str | None = None
+        detail = None
+        for candidate in candidate_session_refs:
+            try:
+                detail = getter(candidate, limit=20)
+                if detail is None:
+                    continue
+                session_ref = candidate
+                break
+            except TypeError:
+                try:
+                    detail = getter(candidate)
+                    if detail is None:
+                        continue
+                    session_ref = candidate
+                    break
+                except Exception:
+                    continue
+            except Exception:
+                continue
+        if detail is None or session_ref is None:
+            return None
+        detail_payload = _mapping_value(detail)
+        host_twin = _mapping_value(detail_payload.get("host_twin"))
+        host_twin_summary = _canonical_host_twin_summary(detail_payload, host_twin)
+        return session_ref, detail_payload, host_twin, host_twin_summary
+
+    def _maybe_close_stale_host_handoff_task(
+        self,
+        *,
+        task_record: object,
+        payload_record: dict[str, object],
+    ) -> bool:
+        service = self._human_assist_task_service
+        if service is None:
+            return False
+        task_type = _first_non_empty(payload_record.get("task_type"))
+        reason_code = _first_non_empty(payload_record.get("reason_code"))
+        if task_type != "host-handoff-return" and reason_code != "host-handoff-active":
+            return False
+        submission_payload = _mapping_value(payload_record.get("submission_payload"))
+        resolved = self._resolve_environment_handoff_candidate(
+            payload=submission_payload,
+            task_environment_ref=None,
+        )
+        if resolved is None:
+            return False
+        _session_ref, _detail_payload, host_twin, host_twin_summary = resolved
+        if self._host_twin_requires_handoff(host_twin, host_twin_summary):
+            return False
+        task_id = _first_non_empty(payload_record.get("id"), payload_record.get("task_id"))
+        closer = getattr(service, "mark_closed", None)
+        if task_id is None or not callable(closer):
+            return False
+        try:
+            closer(
+                task_id,
+                summary="Runtime host handoff no longer blocks this control thread.",
+                resume_payload={
+                    "resumed": False,
+                    "reason": "stale-host-handoff-cleared",
+                },
+            )
+        except Exception:
+            logger.exception("Failed to close stale host handoff human assist task")
+            return False
+        return True
 
     def _staffing_block_reason(self, task: Any) -> str | None:
         service = self._industry_service

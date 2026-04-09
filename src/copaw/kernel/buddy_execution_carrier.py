@@ -23,12 +23,15 @@ def build_buddy_execution_carrier_handoff(
     team_generated: bool,
     control_thread_id: str | None = None,
 ) -> dict[str, object]:
+    normalized_instance_id = str(instance_id or "").strip()
+    normalized_control_thread_id = str(control_thread_id or "").strip()
     resolved_control_thread_id = (
-        str(control_thread_id or "").strip()
-        or build_buddy_domain_control_thread_id(instance_id=instance_id)
+        build_buddy_domain_control_thread_id(instance_id=normalized_instance_id)
+        if normalized_instance_id
+        else normalized_control_thread_id
     )
     return {
-        "instance_id": instance_id,
+        "instance_id": normalized_instance_id,
         "label": label,
         "owner_scope": profile.profile_id,
         "current_cycle_id": current_cycle_id,
@@ -43,7 +46,7 @@ def build_buddy_execution_carrier_handoff(
             "context_key": f"control-thread:{resolved_control_thread_id}",
             "binding_kind": "buddy-execution-carrier",
             "metadata": {
-                "industry_instance_id": instance_id,
+                "industry_instance_id": normalized_instance_id,
                 "industry_role_id": EXECUTION_CORE_ROLE_ID,
                 "industry_role_name": "execution-core",
                 "owner_scope": profile.profile_id,

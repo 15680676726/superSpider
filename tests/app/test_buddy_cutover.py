@@ -170,6 +170,15 @@ def test_buddy_surface_and_runtime_center_surface_share_same_projection(tmp_path
     assert summary["current_task_summary"] == "Finish today's current task"
 
 
+def test_buddy_surface_without_profile_returns_no_content(tmp_path) -> None:
+    client = _build_client(tmp_path)
+
+    response = client.get("/buddy/surface")
+
+    assert response.status_code == 204
+    assert response.text == ""
+
+
 def test_runtime_center_legacy_buddy_summary_route_is_removed(tmp_path) -> None:
     client = _build_client(tmp_path)
 

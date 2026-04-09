@@ -207,7 +207,9 @@ def build_role_execution_contract_lines(
     ]
 
 
-def build_task_mode_contract_lines(task_mode: str | None) -> list[str]:
+def build_task_mode_contract_lines(
+    task_mode: str | None,
+) -> list[str]:
     normalized = str(task_mode or "").strip().lower()
     if normalized == "team-orchestration":
         return [

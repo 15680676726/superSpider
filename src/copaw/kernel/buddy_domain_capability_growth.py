@@ -6,13 +6,23 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .buddy_domain_capability import resolve_stage_transition
-from .buddy_execution_carrier import build_buddy_domain_control_thread_id
+from .buddy_execution_carrier import (
+    EXECUTION_CORE_ROLE_ID,
+    build_buddy_domain_control_thread_id,
+)
+from ..industry.identity import normalize_industry_role_id
+from ..industry.models import IndustryRoleBlueprint, IndustryTeamBlueprint
 from ..state import BuddyDomainCapabilityRecord
 from ..state.repositories_buddy import SqliteBuddyDomainCapabilityRepository
 
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _string(value: object | None) -> str | None:
+    text = str(value or "").strip()
+    return text or None
 
 
 class BuddyDomainCapabilityGrowthService:
@@ -44,6 +54,7 @@ class BuddyDomainCapabilityGrowthService:
         if active is None:
             return None
         active = self._backfill_legacy_binding(profile_id=profile_id, active=active)
+        self._repair_legacy_execution_binding(active=active)
         facts = self._collect_growth_facts(active=active)
         if facts is None:
             return active
@@ -275,6 +286,158 @@ class BuddyDomainCapabilityGrowthService:
             },
         )
         return self._domain_capability_repository.upsert_domain_capability(updated)
+
+    def _repair_legacy_execution_binding(
+        self,
+        *,
+        active: BuddyDomainCapabilityRecord,
+    ) -> None:
+        get_instance = getattr(self._industry_instance_repository, "get_instance", None)
+        if not callable(get_instance):
+            return
+        instance_id = str(active.industry_instance_id or "").strip()
+        if not instance_id.startswith("buddy:"):
+            return
+        record = get_instance(instance_id)
+        if record is None:
+            return
+        roles = self._restore_or_build_buddy_roles(record=record)
+        if not roles:
+            return
+        role_to_agent = {role.role_id: role.agent_id for role in roles}
+        needs_team_repair = (
+            not list((record.team_payload or {}).get("agents") or [])
+            or set(record.agent_ids or []) != set(role_to_agent.values())
+        )
+        if needs_team_repair:
+            self._industry_instance_repository.upsert_instance(
+                record.model_copy(
+                    update={
+                        "team_payload": IndustryTeamBlueprint(
+                            team_id=record.instance_id,
+                            label=record.label,
+                            summary=record.summary,
+                            agents=roles,
+                        ).model_dump(mode="json"),
+                        "agent_ids": [role.agent_id for role in roles],
+                        "updated_at": _utc_now(),
+                    },
+                ),
+            )
+        if self._operating_lane_service is not None:
+            self._operating_lane_service.seed_from_roles(
+                industry_instance_id=instance_id,
+                roles=roles,
+            )
+        list_assignments = getattr(self._assignment_service, "list_assignments", None)
+        assignment_repository = getattr(self._assignment_service, "_repository", None)
+        if not callable(list_assignments) or assignment_repository is None:
+            return
+        assignments = list_assignments(industry_instance_id=instance_id, limit=None)
+        lanes = []
+        if self._operating_lane_service is not None:
+            lanes = self._operating_lane_service.list_lanes(
+                industry_instance_id=instance_id,
+                limit=None,
+            )
+        lanes_by_id = {
+            str(getattr(lane, "id", "") or "").strip(): lane
+            for lane in lanes
+            if str(getattr(lane, "id", "") or "").strip()
+        }
+        for assignment in assignments:
+            metadata = dict(getattr(assignment, "metadata", None) or {})
+            explicit_role_id = normalize_industry_role_id(
+                _string(getattr(assignment, "owner_role_id", None))
+                or _string(metadata.get("industry_role_id"))
+            )
+            if explicit_role_id not in role_to_agent:
+                if explicit_role_id is not None:
+                    continue
+                lane = lanes_by_id.get(str(getattr(assignment, "lane_id", "") or "").strip())
+                explicit_role_id = normalize_industry_role_id(
+                    _string(getattr(lane, "owner_role_id", None))
+                )
+                if explicit_role_id not in role_to_agent:
+                    continue
+            desired_agent_id = role_to_agent[explicit_role_id]
+            desired_role_id = explicit_role_id
+            if (
+                _string(getattr(assignment, "owner_agent_id", None)) == desired_agent_id
+                and _string(getattr(assignment, "owner_role_id", None)) == desired_role_id
+                and _string(metadata.get("owner_agent_id")) == desired_agent_id
+                and _string(metadata.get("industry_role_id")) == desired_role_id
+            ):
+                continue
+            metadata["owner_agent_id"] = desired_agent_id
+            metadata["industry_role_id"] = desired_role_id
+            assignment_repository.upsert_assignment(
+                assignment.model_copy(
+                    update={
+                        "owner_agent_id": desired_agent_id,
+                        "owner_role_id": desired_role_id,
+                        "metadata": metadata,
+                        "updated_at": _utc_now(),
+                    },
+                ),
+            )
+
+    @staticmethod
+    def _restore_or_build_buddy_roles(
+        *,
+        record: object,
+    ) -> list[IndustryRoleBlueprint]:
+        payload = dict(getattr(record, "team_payload", None) or {})
+        restored: list[IndustryRoleBlueprint] = []
+        for item in list(payload.get("agents") or []):
+            try:
+                restored.append(IndustryRoleBlueprint.model_validate(item))
+            except Exception:
+                continue
+        if restored:
+            return restored
+        instance_id = str(getattr(record, "instance_id", "") or "").strip()
+        label = str(getattr(record, "label", "") or "").strip() or "Buddy"
+        return [
+            IndustryRoleBlueprint(
+                role_id="growth-focus",
+                agent_id=f"{instance_id}:growth-focus",
+                actor_key=f"{instance_id}:growth-focus",
+                name=f"{label} Growth Focus",
+                role_name="成长主线",
+                role_summary=f"持续确保{label}没有偏离已经确认的长期主方向。",
+                mission=f"持续确保{label}没有偏离已经确认的长期主方向。",
+                goal_kind="growth-focus",
+                agent_class="business",
+                employment_mode="career",
+                activation_mode="persistent",
+                suspendable=False,
+                reports_to=EXECUTION_CORE_ROLE_ID,
+                risk_level="guarded",
+                allowed_capabilities=["system:dispatch_query"],
+                preferred_capability_families=["planning", "coordination"],
+                evidence_expectations=["growth-focus completion note"],
+            ),
+            IndustryRoleBlueprint(
+                role_id="proof-of-work",
+                agent_id=f"{instance_id}:proof-of-work",
+                actor_key=f"{instance_id}:proof-of-work",
+                name=f"{label} Proof Of Work",
+                role_name="成果证明",
+                role_summary=f"把{label}当前的主方向尽快变成看得见的证据、作品与推进势能。",
+                mission=f"把{label}当前的主方向尽快变成看得见的证据、作品与推进势能。",
+                goal_kind="proof-of-work",
+                agent_class="business",
+                employment_mode="career",
+                activation_mode="persistent",
+                suspendable=False,
+                reports_to=EXECUTION_CORE_ROLE_ID,
+                risk_level="guarded",
+                allowed_capabilities=["system:dispatch_query"],
+                preferred_capability_families=["execution", "evidence"],
+                evidence_expectations=["proof-of-work artifact"],
+            ),
+        ]
 
     @staticmethod
     def _list_records(service: object | None, method_name: str, **kwargs) -> list[object]:

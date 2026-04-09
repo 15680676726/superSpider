@@ -79,6 +79,12 @@ class FakeTurnExecutor:
         yield {
             "object": "message",
             "status": "completed",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "已根据当前请求完成真实执行并返回结果。",
+                },
+            ],
             "request": request,
         }
 
@@ -2206,10 +2212,7 @@ def test_system_dispatch_query_executes_through_kernel_query_execution_service()
     )
     assert payload["success"] is True
     assert payload["phase"] == "completed"
-    assert (
-        payload["summary"]
-        == "Dispatched query through the kernel-owned query execution service."
-    )
+    assert payload["summary"] == "已根据当前请求完成真实执行并返回结果。"
     assert turn_executor.requests
     request_payload, kwargs = turn_executor.requests[0]
     assert request_payload["session_id"] == "goal-1"

@@ -649,6 +649,12 @@ def build_runtime_bootstrap(
     agent_report_service = domain_services.agent_report_service
     media_service = domain_services.media_service
     industry_service = domain_services.industry_service
+    set_dispatcher_industry_service = getattr(kernel_dispatcher, "set_industry_service", None)
+    if callable(set_dispatcher_industry_service):
+        set_dispatcher_industry_service(industry_service)
+    set_actor_worker_industry_service = getattr(actor_worker, "set_industry_service", None)
+    if callable(set_actor_worker_industry_service):
+        set_actor_worker_industry_service(industry_service)
     workflow_template_service = domain_services.workflow_template_service
     fixed_sop_service = domain_services.fixed_sop_service
     routine_service = domain_services.routine_service

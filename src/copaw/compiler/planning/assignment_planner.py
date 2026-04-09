@@ -7,6 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from ...industry.identity import EXECUTION_CORE_AGENT_ID, EXECUTION_CORE_ROLE_ID
 from ...state import BacklogItemRecord, OperatingLaneRecord
 from .models import (
     AssignmentPlanEnvelope,
@@ -322,6 +323,9 @@ class AssignmentPlanningCompiler:
         owner_role_id = _string(metadata.get("industry_role_id")) or (
             lane.owner_role_id if lane is not None else None
         )
+        if owner_agent_id is None and owner_role_id is None:
+            owner_agent_id = EXECUTION_CORE_AGENT_ID
+            owner_role_id = EXECUTION_CORE_ROLE_ID
         report_back_mode = _string(metadata.get("report_back_mode")) or "summary"
         execution_ordering_hints = _string_list(
             [entry.get("summary") for entry in list(knowledge_subgraph.get("dependency_paths") or [])],

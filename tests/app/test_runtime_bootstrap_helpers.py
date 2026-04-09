@@ -1009,30 +1009,30 @@ async def test_stop_runtime_manager_stack_ignores_cancelled_teardown_errors() ->
     assert events == ["channel"]
 
 
-def test_default_memory_backend_defaults_to_hybrid_local_when_unset(
+def test_default_memory_backend_defaults_to_truth_first_when_unset(
     monkeypatch,
 ) -> None:
     monkeypatch.delenv("COPAW_MEMORY_RECALL_BACKEND", raising=False)
 
-    assert _resolve_default_memory_recall_backend() == "hybrid-local"
+    assert _resolve_default_memory_recall_backend() == "truth-first"
 
 
-def test_default_memory_backend_accepts_lexical_override(monkeypatch) -> None:
+def test_default_memory_backend_accepts_truth_first_override(monkeypatch) -> None:
+    monkeypatch.setenv("COPAW_MEMORY_RECALL_BACKEND", "truth-first")
+
+    assert _resolve_default_memory_recall_backend() == "truth-first"
+
+
+def test_default_memory_backend_rejects_legacy_lexical_override(monkeypatch) -> None:
     monkeypatch.setenv("COPAW_MEMORY_RECALL_BACKEND", "lexical")
 
-    assert _resolve_default_memory_recall_backend() == "lexical"
-
-
-def test_default_memory_backend_accepts_hybrid_local_override(monkeypatch) -> None:
-    monkeypatch.setenv("COPAW_MEMORY_RECALL_BACKEND", "hybrid-local")
-
-    assert _resolve_default_memory_recall_backend() == "hybrid-local"
+    assert _resolve_default_memory_recall_backend() == "truth-first"
 
 
 def test_default_memory_backend_rejects_unknown_override(monkeypatch) -> None:
     monkeypatch.setenv("COPAW_MEMORY_RECALL_BACKEND", "legacy-sidecar")
 
-    assert _resolve_default_memory_recall_backend() == "hybrid-local"
+    assert _resolve_default_memory_recall_backend() == "truth-first"
 
 
 def test_warm_runtime_memory_services_extracts_startup_side_effects(monkeypatch) -> None:
@@ -1046,7 +1046,7 @@ def test_warm_runtime_memory_services_extracts_startup_side_effects(monkeypatch)
         rebuild_all=lambda: calls.setdefault("rebuild_all", True),
     )
     memory_recall_service = SimpleNamespace(
-        list_backends=lambda: [SimpleNamespace(backend_id="hybrid-local", is_default=True)],
+        list_backends=lambda: [SimpleNamespace(backend_id="truth-first", is_default=True)],
     )
     memory_reflection_service = SimpleNamespace(
         reflect=lambda **kwargs: calls.setdefault("reflect_calls", []).append(kwargs),
@@ -1088,7 +1088,7 @@ def test_warm_runtime_memory_services_does_not_request_sidecar_prewarm(
         rebuild_all=lambda: calls.setdefault("rebuild_all", True),
     )
     memory_recall_service = SimpleNamespace(
-        list_backends=lambda: [SimpleNamespace(backend_id="hybrid-local", is_default=True)],
+        list_backends=lambda: [SimpleNamespace(backend_id="truth-first", is_default=True)],
     )
     memory_reflection_service = SimpleNamespace(
         reflect=lambda **kwargs: calls.setdefault("reflect_calls", []).append(kwargs),
@@ -1151,7 +1151,7 @@ def test_warm_runtime_memory_services_skips_legacy_sidecar_prewarm_call() -> Non
 def test_formal_memory_backend_kind_excludes_vector_and_legacy_sidecar_variants() -> None:
     backend_kinds = set(get_args(MemoryBackendKind))
 
-    assert backend_kinds == {"lexical", "hybrid-local"}
+    assert backend_kinds == {"truth-first"}
 
 
 def test_runtime_bootstrap_formal_contract_exposes_runtime_provider_only() -> None:

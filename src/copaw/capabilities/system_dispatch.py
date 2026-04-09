@@ -2,6 +2,40 @@
 from __future__ import annotations
 
 
+def _extract_event_text(value: object | None) -> str | None:
+    if isinstance(value, str):
+        text = value.strip()
+        return text or None
+    if isinstance(value, list):
+        parts: list[str] = []
+        for item in value:
+            if isinstance(item, dict):
+                text = str(item.get("text") or "").strip()
+            else:
+                text = str(getattr(item, "text", "") or "").strip()
+            if text:
+                parts.append(text)
+        if parts:
+            return "\n".join(parts)
+    return None
+
+
+def _resolve_dispatch_summary(event: object | None, fallback: str) -> str:
+    if isinstance(event, dict):
+        return (
+            _extract_event_text(event.get("content"))
+            or _extract_event_text(event.get("message"))
+            or fallback
+        )
+    if event is not None:
+        return (
+            _extract_event_text(getattr(event, "content", None))
+            or _extract_event_text(getattr(event, "message", None))
+            or fallback
+        )
+    return fallback
+
+
 class SystemDispatchFacade:
     def __init__(
         self,
@@ -121,12 +155,21 @@ class SystemDispatchFacade:
         )
 
         last_event = None
+        last_message_event = None
         async for event in self._turn_executor.stream_request(
             request_payload,
             kernel_task_id=task_id or None,
             skip_kernel_admission=False,
         ):
             last_event = event
+            if (
+                isinstance(event, dict)
+                and str(event.get("object") or "").strip().lower() == "message"
+            ) or (
+                event is not None
+                and str(getattr(event, "object", "") or "").strip().lower() == "message"
+            ):
+                last_message_event = event
             if mode == "final":
                 continue
             if (
@@ -186,9 +229,10 @@ class SystemDispatchFacade:
                         getattr(error_payload, "message", None) or error_payload,
                     ).strip() or None
 
+        effective_summary = _resolve_dispatch_summary(last_message_event, summary)
         return {
             "success": success,
-            "summary": summary if success else (error or summary),
+            "summary": effective_summary if success else (error or effective_summary),
             "error": error,
             "dispatch_status": normalized_status or None,
             "task_id": task_id or None,

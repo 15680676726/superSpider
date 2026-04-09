@@ -3114,6 +3114,45 @@ def test_host_twin_summary_treats_return_ready_as_non_blocking_even_if_stale_han
     assert summary["legal_recovery_mode"] == "resume-environment"
 
 
+def test_detached_session_without_explicit_handoff_does_not_require_human_return(
+    tmp_path,
+):
+    store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    env_repo = EnvironmentRepository(store)
+    session_repo = SessionMountRepository(store)
+    registry = EnvironmentRegistry(
+        repository=env_repo,
+        session_repository=session_repo,
+        host_id="windows-host",
+        process_id=4242,
+    )
+    service = EnvironmentService(registry=registry, lease_ttl_seconds=120)
+    service.set_session_repository(session_repo)
+
+    lease = service.acquire_session_lease(
+        channel="console",
+        session_id="industry-chat:buddy:profile-1:domain-stock:execution-core",
+        user_id="buddy:profile-1",
+        owner="copaw-agent-runner",
+        ttl_seconds=60,
+        handle={"browser": "tab-1"},
+        metadata={"channel": "console"},
+    )
+    released = service.release_session_lease(
+        lease.id,
+        lease_token=lease.lease_token,
+        reason="query turn completed",
+    )
+
+    detail = service.get_session_detail(released.id, limit=10)
+
+    assert detail is not None
+    assert detail["recovery"]["resume_kind"] == "fresh"
+    assert detail["host_twin"]["continuity"]["requires_human_return"] is False
+    assert detail["workspace_graph"]["collision_facts"]["requires_human_return"] is False
+    assert detail["host_twin"]["coordination"]["recommended_scheduler_action"] == "proceed"
+
+
 def test_host_twin_multi_seat_selects_alternate_ready_seat_for_same_owner(tmp_path):
     store = SQLiteStateStore(tmp_path / "state.sqlite3")
     env_repo = EnvironmentRepository(store)

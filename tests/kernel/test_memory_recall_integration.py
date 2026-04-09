@@ -39,7 +39,7 @@ class _FakeMemoryRecallService:
         _ = kwargs
         return MemoryRecallResponse(
             query="evidence review",
-            backend_used="hybrid-local",
+            backend_used="truth-first",
             hits=[
                 MemoryRecallHit(
                     entry_id="memory-index:knowledge_chunk:chunk-1",
@@ -85,7 +85,7 @@ class _CapturingMemoryRecallService:
             ]
         return MemoryRecallResponse(
             query=str(kwargs.get("query") or ""),
-            backend_used="hybrid-local",
+            backend_used="truth-first",
             hits=hits,
         )
 

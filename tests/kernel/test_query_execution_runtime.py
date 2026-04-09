@@ -473,6 +473,43 @@ def test_query_execution_runtime_projects_compaction_visibility_when_available()
     }
 
 
+def test_query_execution_runtime_prefers_memory_surface_service_for_compaction_visibility() -> None:
+    class _MemorySurfaceService:
+        def resolve_runtime_compaction_visibility_payload(self) -> dict[str, object]:
+            return {
+                "compaction_state": {
+                    "mode": "microcompact",
+                    "summary": "Facade supplied compaction visibility.",
+                    "spill_count": 2,
+                },
+                "tool_result_budget": {
+                    "message_budget": 3200,
+                    "remaining_budget": 1200,
+                },
+            }
+
+        def has_private_memory_surface(self) -> bool:
+            return True
+
+    service = KernelQueryExecutionService(
+        session_backend=object(),
+        conversation_compaction_service=None,
+        memory_surface_service=_MemorySurfaceService(),
+    )
+
+    entropy = service.get_query_runtime_entropy_contract()
+
+    assert entropy["compaction_state"] == {
+        "mode": "microcompact",
+        "summary": "Facade supplied compaction visibility.",
+        "spill_count": 2,
+    }
+    assert entropy["tool_result_budget"] == {
+        "message_budget": 3200,
+        "remaining_budget": 1200,
+    }
+
+
 def test_query_execution_runtime_exposes_bounded_donor_trial_carry_forward_contract() -> None:
     service = KernelQueryExecutionService(
         session_backend=object(),

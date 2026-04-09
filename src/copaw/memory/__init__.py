@@ -31,6 +31,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "MemoryRecallService": (".recall_service", "MemoryRecallService"),
     "MemoryReflectionService": (".reflection_service", "MemoryReflectionService"),
     "MemoryRetainService": (".retain_service", "MemoryRetainService"),
+    "MemorySurfaceService": (".surface_service", "MemorySurfaceService"),
 }
 
 __all__ = list(_EXPORTS)

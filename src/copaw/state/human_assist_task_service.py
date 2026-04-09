@@ -34,6 +34,30 @@ def _mapping(value: object | None) -> dict[str, Any]:
     return {}
 
 
+def _looks_like_stale_fresh_host_handoff(task: HumanAssistTaskRecord) -> bool:
+    if task.task_type != "host-handoff-return" or task.reason_code != "host-handoff-active":
+        return False
+    submission_payload = _mapping(task.submission_payload)
+    main_brain_runtime = _mapping(submission_payload.get("main_brain_runtime"))
+    recovery_mode = _string(
+        main_brain_runtime.get("recovery_mode"),
+    )
+    environment_binding_kind = _string(
+        main_brain_runtime.get("environment_binding_kind"),
+    )
+    hard_anchors = _string_list(_mapping(task.acceptance_spec).get("hard_anchors"))
+    handoff_owner_ref = _string(
+        submission_payload.get("handoff_owner_ref"),
+    ) or _string(main_brain_runtime.get("handoff_owner_ref"))
+    if handoff_owner_ref is not None:
+        return False
+    return (
+        recovery_mode == "fresh"
+        and environment_binding_kind == "host-handoff"
+        and hard_anchors == ["fresh"]
+    )
+
+
 def _merge_submission_payload(
     existing: object | None,
     incoming: Mapping[str, Any] | None,
@@ -343,6 +367,8 @@ class HumanAssistTaskService:
     def get_current_task(self, *, chat_thread_id: str) -> HumanAssistTaskRecord | None:
         for task in self._repository.list_tasks(chat_thread_id=chat_thread_id, limit=50):
             if task.status not in self._TERMINAL_STATUSES:
+                if _looks_like_stale_fresh_host_handoff(task):
+                    continue
                 return task
         return None
 

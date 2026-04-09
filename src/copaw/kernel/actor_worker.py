@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
@@ -24,6 +25,9 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+logger = logging.getLogger(__name__)
+
+
 class ActorWorker:
     """Single worker implementation reused across all dynamic actors."""
 
@@ -37,6 +41,7 @@ class ActorWorker:
         mcp_manager: object | None = None,
         agent_runtime_repository: object | None = None,
         experience_memory_service: object | None = None,
+        industry_service: object | None = None,
         lease_ttl_seconds: int = 180,
         lease_heartbeat_interval_seconds: float | None = None,
     ) -> None:
@@ -47,6 +52,7 @@ class ActorWorker:
         self._mcp_manager = mcp_manager
         self._agent_runtime_repository = agent_runtime_repository
         self._experience_memory_service = experience_memory_service
+        self._industry_service = industry_service
         self._lease_ttl_seconds = max(30, lease_ttl_seconds)
         self._lease_heartbeat_interval_seconds = max(
             0.01,
@@ -143,6 +149,12 @@ class ActorWorker:
                 summary=str(getattr(result, "summary", "Actor mailbox item completed")),
                 snapshot_payload={"result": _model_dump(result)},
             )
+            await self._maybe_close_industry_execution_loop(
+                agent_id=agent_id,
+                item=started,
+                task_id=task_id,
+                phase=str(getattr(result, "phase", "completed")),
+            )
             return True
         except asyncio.CancelledError:
             resolution = "cancelled by actor control"
@@ -156,6 +168,12 @@ class ActorWorker:
                 summary=resolution,
                 snapshot_payload={"error": resolution},
             )
+            await self._maybe_close_industry_execution_loop(
+                agent_id=agent_id,
+                item=started,
+                task_id=task_id,
+                phase="cancelled",
+            )
             return True
         except Exception as exc:
             self._finalize_mailbox_item(
@@ -167,9 +185,18 @@ class ActorWorker:
                 snapshot_payload={"error": str(exc)},
                 retryable=True,
             )
+            await self._maybe_close_industry_execution_loop(
+                agent_id=agent_id,
+                item=started,
+                task_id=task_id,
+                phase="failed",
+            )
             return True
         finally:
             self._release_actor_lease(lease)
+
+    def set_industry_service(self, industry_service: object | None) -> None:
+        self._industry_service = industry_service
 
     def _submit_task(self, task: KernelTask) -> Any | None:
         if self._kernel_dispatcher is None:
@@ -443,6 +470,77 @@ class ActorWorker:
         if not callable(getter):
             return None
         return getter(agent_id)
+
+    async def _maybe_close_industry_execution_loop(
+        self,
+        *,
+        agent_id: str,
+        item: object,
+        task_id: str | None,
+        phase: str,
+    ) -> None:
+        if phase not in {"completed", "failed", "cancelled"}:
+            return
+        service = self._industry_service
+        if service is None:
+            return
+        close_loop = getattr(service, "close_task_execution_closure", None)
+        if not callable(close_loop):
+            return
+        metadata = getattr(item, "metadata", None)
+        metadata_mapping = dict(metadata) if isinstance(metadata, dict) else {}
+        payload = getattr(item, "payload", None)
+        payload_mapping = dict(payload) if isinstance(payload, dict) else {}
+        task_payload = payload_mapping.get("payload")
+        if not isinstance(task_payload, dict):
+            task_payload = payload_mapping
+        task_meta = task_payload.get("meta")
+        task_meta_mapping = dict(task_meta) if isinstance(task_meta, dict) else {}
+        runtime = self._get_runtime(agent_id)
+        industry_instance_id = (
+            str(
+                metadata_mapping.get("industry_instance_id")
+                or task_payload.get("industry_instance_id")
+                or task_meta_mapping.get("industry_instance_id")
+                or getattr(runtime, "industry_instance_id", None)
+                or "",
+            ).strip()
+            or None
+        )
+        if industry_instance_id is None:
+            return
+        cycle_id = (
+            str(
+                metadata_mapping.get("cycle_id")
+                or task_payload.get("cycle_id")
+                or task_meta_mapping.get("cycle_id")
+                or "",
+            ).strip()
+            or None
+        )
+        assignment_id = (
+            str(
+                metadata_mapping.get("assignment_id")
+                or task_payload.get("assignment_id")
+                or task_meta_mapping.get("assignment_id")
+                or "",
+            ).strip()
+            or None
+        )
+        try:
+            result = close_loop(
+                industry_instance_id=industry_instance_id,
+                cycle_id=cycle_id,
+                assignment_id=assignment_id,
+                task_id=task_id,
+            )
+            if hasattr(result, "__await__"):
+                await result
+        except Exception:
+            logger.exception(
+                "Actor worker failed to close industry execution loop for instance %s",
+                industry_instance_id,
+            )
 
 
 def _model_dump(value: object) -> object:

@@ -606,16 +606,11 @@ def build_agent_report_control_thread_message(
     result_label = _string(report.result) or _string(report.status) or "reported"
     assignment_title = _string(assignment.title) if assignment is not None else None
     summary = _string(report.summary)
-    lines = [
-        f"Agent report: {_string(report.headline) or report.id}",
-        f"Source: {owner_label}",
-        f"Result: {result_label}",
-    ]
+    headline = _string(report.headline) or report.id
+    lines = [f"我刚完成一项任务：{headline}", f"负责人：{owner_label}", f"结果：{result_label}"]
     if assignment_title:
-        lines.append(f"Assignment: {assignment_title}")
+        lines.append(f"任务：{assignment_title}")
     if summary:
-        lines.append(f"Summary: {summary}")
-    lines.append(
-        f"Evidence {len(report.evidence_ids or [])} / Decisions {len(report.decision_ids or [])}",
-    )
+        lines.append(f"结论：{summary}")
+    lines.append(f"证据 {len(report.evidence_ids or [])} / 决策 {len(report.decision_ids or [])}")
     return "\n".join(lines)

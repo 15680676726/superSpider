@@ -27,7 +27,7 @@ def test_build_buddy_persona_prompt_returns_shared_lines_and_signature() -> None
             current_task_summary="写出第一篇真正代表自己的案例文章",
             why_now_summary="因为这是把长期方向从想象拉进现实的第一份证据。",
             single_next_action_summary="现在先打开文档，写下标题和三条核心观点。",
-            companion_strategy_summary="先接住情绪，再把任务缩成一个最小动作。",
+            companion_strategy_summary="先直接推进任务，做完再同步结果和下一步。",
         ),
     )
 
@@ -39,11 +39,12 @@ def test_build_buddy_persona_prompt_returns_shared_lines_and_signature() -> None
     assert any(line.endswith("建立可持续的创作事业与独立成长轨道") for line in lines)
     assert any(line.endswith("写出第一篇真正代表自己的案例文章") for line in lines)
     assert any(line.endswith("现在先打开文档，写下标题和三条核心观点。") for line in lines)
-    assert any("先接住情绪，再把任务缩成一个最小动作。" in line for line in lines)
+    assert any("默认会主动推进当前任务，不只是陪聊。" in line for line in lines)
+    assert any("先直接推进任务，做完再同步结果和下一步。" in line for line in lines)
     assert signature == (
         "buddy:profile-buddy|小澄|建立可持续的创作事业与独立成长轨道|"
         "写出第一篇真正代表自己的案例文章|因为这是把长期方向从想象拉进现实的第一份证据。|"
-        "现在先打开文档，写下标题和三条核心观点。|先接住情绪，再把任务缩成一个最小动作。"
+        "现在先打开文档，写下标题和三条核心观点。|先直接推进任务，做完再同步结果和下一步。"
     )
 
 

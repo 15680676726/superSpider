@@ -30,6 +30,7 @@ from .industry_api_parts.shared import (
     FakeIndustryDraftGenerator,
     FakeTurnExecutor,
     _build_industry_app,
+    bootstrap_schedule_by_role,
 )
 from .runtime_center_api_parts.shared import (
     FakeAgentProfileService,
@@ -1487,11 +1488,7 @@ def test_phase_next_researcher_schedule_followup_keeps_execution_core_continuity
     control_thread_id = f"industry-chat:{instance_id}:execution-core"
     environment_ref = f"session:console:industry:{instance_id}"
 
-    researcher_schedule_id = next(
-        item["schedule_id"]
-        for item in payload["schedules"]
-        if item["schedule"]["spec_payload"]["request"]["industry_role_id"] == "researcher"
-    )
+    researcher_schedule_id = bootstrap_schedule_by_role(payload, "researcher")["schedule_id"]
     schedule = app.state.schedule_repository.get_schedule(researcher_schedule_id)
     assert schedule is not None
     record = app.state.industry_instance_repository.get_instance(instance_id)

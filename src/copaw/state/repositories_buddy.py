@@ -28,6 +28,10 @@ class BuddyOnboardingSessionRecord(UpdatedRecord):
     candidate_directions: list[str] = Field(default_factory=list)
     recommended_direction: str = ""
     selected_direction: str = ""
+    draft_direction: str = ""
+    draft_final_goal: str = ""
+    draft_why_it_matters: str = ""
+    draft_backlog_items: list[dict[str, object]] = Field(default_factory=list)
 
 
 def _encode_json(value: object) -> str:
@@ -44,6 +48,18 @@ def _decode_json_list(value: object | None) -> list[str]:
     if isinstance(payload, list):
         return [str(item).strip() for item in payload if str(item).strip()]
     return []
+
+
+def _decode_json_object_list(value: object | None) -> list[dict[str, object]]:
+    if value in (None, ""):
+        return []
+    try:
+        payload = json.loads(str(value))
+    except Exception:
+        return []
+    if not isinstance(payload, list):
+        return []
+    return [dict(item) for item in payload if isinstance(item, dict)]
 
 
 def _human_profile_from_row(row) -> HumanProfile | None:
@@ -96,6 +112,9 @@ def _session_from_row(row) -> BuddyOnboardingSessionRecord | None:
     payload["transcript"] = _decode_json_list(payload.pop("transcript_json", None))
     payload["candidate_directions"] = _decode_json_list(
         payload.pop("candidate_directions_json", None),
+    )
+    payload["draft_backlog_items"] = _decode_json_object_list(
+        payload.pop("draft_backlog_items_json", None),
     )
     return BuddyOnboardingSessionRecord.model_validate(payload)
 
@@ -481,17 +500,22 @@ class SqliteBuddyOnboardingSessionRepository:
         payload["tightened"] = 1 if session.tightened else 0
         payload["transcript_json"] = _encode_json(session.transcript)
         payload["candidate_directions_json"] = _encode_json(session.candidate_directions)
+        payload["draft_backlog_items_json"] = _encode_json(session.draft_backlog_items)
         with self._store.connection() as conn:
             conn.execute(
                 """
                 INSERT INTO buddy_onboarding_sessions (
                     session_id, profile_id, status, question_count, tightened,
                     next_question, transcript_json, candidate_directions_json,
-                    recommended_direction, selected_direction, created_at, updated_at
+                    recommended_direction, selected_direction,
+                    draft_direction, draft_final_goal, draft_why_it_matters, draft_backlog_items_json,
+                    created_at, updated_at
                 ) VALUES (
                     :session_id, :profile_id, :status, :question_count, :tightened,
                     :next_question, :transcript_json, :candidate_directions_json,
-                    :recommended_direction, :selected_direction, :created_at, :updated_at
+                    :recommended_direction, :selected_direction,
+                    :draft_direction, :draft_final_goal, :draft_why_it_matters, :draft_backlog_items_json,
+                    :created_at, :updated_at
                 )
                 ON CONFLICT(session_id) DO UPDATE SET
                     profile_id = excluded.profile_id,
@@ -503,6 +527,10 @@ class SqliteBuddyOnboardingSessionRepository:
                     candidate_directions_json = excluded.candidate_directions_json,
                     recommended_direction = excluded.recommended_direction,
                     selected_direction = excluded.selected_direction,
+                    draft_direction = excluded.draft_direction,
+                    draft_final_goal = excluded.draft_final_goal,
+                    draft_why_it_matters = excluded.draft_why_it_matters,
+                    draft_backlog_items_json = excluded.draft_backlog_items_json,
                     created_at = excluded.created_at,
                     updated_at = excluded.updated_at
                 """,

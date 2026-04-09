@@ -205,9 +205,9 @@ class MainBrainIntentShell:
         }
         hint_map = {
             "plan": "Goal, constraints, affected scope/files, checklist, acceptance criteria, verification steps.",
-            "review": "Conclusion, findings, severity, risk, evidence gaps, next step.",
+            "review": "Conclusion, findings, severity, blockers, evidence gaps, next step.",
             "resume": "Current state, continuity anchors, blockers, next action.",
-            "verify": "Check target, evidence, pass/fail, unresolved risk, next step.",
+            "verify": "Check target, evidence, pass/fail, unresolved blocker, next step.",
         }
         return {
             "mode_hint": self.mode_hint,

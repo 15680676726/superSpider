@@ -157,7 +157,7 @@ def test_build_runtime_bootstrap_assembles_domain_services_via_domain_builder(
             SimpleNamespace(rebuild_all=lambda: calls.setdefault("rebuild_all", True)),
             SimpleNamespace(reflect=lambda **reflect_kwargs: calls.setdefault("reflect_calls", []).append(reflect_kwargs)),
             SimpleNamespace(
-                list_backends=lambda: [SimpleNamespace(backend_id="hybrid-local", is_default=True)],
+                list_backends=lambda: [SimpleNamespace(backend_id="truth-first", is_default=True)],
                 prepare_sidecar_backends=lambda prewarm_backend_ids: calls.setdefault("prewarm_backends", list(prewarm_backend_ids)),
             ),
             "memory-retain-service",

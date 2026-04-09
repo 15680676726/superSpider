@@ -38,7 +38,10 @@ from .query_execution_shared import (
 if TYPE_CHECKING:
     from ..industry import IndustryService
     from ..memory import MemoryRecallService
+    from ..memory.surface_service import MemorySurfaceService
     from .agent_profile_service import AgentProfileService
+else:
+    from ..memory.surface_service import MemorySurfaceService
 
 logger = logging.getLogger(__name__)
 
@@ -97,19 +100,16 @@ _PURE_CHAT_EMPTY_REPLY_FALLBACK = (
     "如果你是在补充目标、约束或执行条件，我会继续整理并自动推进。"
 )
 
-_PURE_CHAT_SYSTEM_PROMPT = """你是 Spider Mesh 主脑，当前处于主脑聊天前台。
-你的职责：理解需求、澄清歧义、判断轻重缓急、解释团队现状、先拆执行前方案，并判断是否该由主脑继续自动推进后台编排。
+_PURE_CHAT_SYSTEM_PROMPT = """你是 Spider Mesh 主脑，不是普通聊天机器人。
+默认行为是：能直接推进就直接推进，做完再回话；只有真的缺关键条件时才追问。
 硬约束：
-1. 不要声称已经派工、已经执行、已经写回、已经调用工具，除非上下文里真的出现了这些结果。
-2. 不要向用户暴露任何内部工具名、函数名或调度实现细节。
-3. 先给结论，再给必要理由，再给下一步；没有必要就不要铺背景。
-4. 默认短答，优先控制在 3 到 6 句；除非用户明确要细讲，否则不要长篇解释。
-5. 先把需求整理成执行前方案：目标、约束、已知条件、关键缺口、建议下一步。
-6. 如果需求已经足够清楚且不涉及必须的人类边界，不要反复追问“是否开始执行”；默认按主脑自动推进来回答。
-7. 如果仍缺关键参数，只追问最少的一组缺口，优先问会改变执行方向或风险边界的问题。
-8. 对“月入10万且零亏损”这类结果口号，要主动改写成结构化执行目标：周期、资源基线、风险边界、验收指标、首轮验证。
-9. 可以结合团队成员分工说明谁更适合承接，但不要编造还没发生的派工结果。
-10. 回复优先直接、清楚、少废话，禁止职业化空话和重复总结。"""
+1. 不要假装已执行；只有上下文里真的有结果才能说完成。
+2. 不要把系统本来能做的事推回给用户手动复制、手动整理、手动执行。
+3. 对明确任务，优先给结果、进度、下一步，不要先陪聊。
+4. 任务已清楚时，不要反复问“要不要开始”；默认直接推进。
+5. 如果必须追问，只问会改变执行方向的最少一问。
+6. 回复要短、直接、像真正干活的伙伴，不要客服腔。
+7. 不要用风险分析、治理术语或内部规则去劝退用户；能做就做，做完留结果。"""
 
 
 class _ApproxTokenizer:
@@ -779,6 +779,7 @@ class MainBrainChatService:
         industry_service: IndustryService | None = None,
         agent_profile_service: AgentProfileService | None = None,
         memory_recall_service: MemoryRecallService | None = None,
+        memory_surface_service: MemorySurfaceService | None = None,
         buddy_projection_service: Any | None = None,
         actor_supervisor: object | None = None,
         model_factory: Callable[[], object] | None = None,
@@ -789,6 +790,9 @@ class MainBrainChatService:
         self._industry_service = industry_service
         self._agent_profile_service = agent_profile_service
         self._memory_recall_service = memory_recall_service
+        self._memory_surface_service = memory_surface_service or MemorySurfaceService(
+            memory_recall_service=memory_recall_service,
+        )
         self._buddy_projection_service = buddy_projection_service
         self._actor_supervisor = actor_supervisor
         self._model_factory = model_factory or _missing_main_brain_chat_model
@@ -828,6 +832,14 @@ class MainBrainChatService:
 
     def set_session_backend(self, session_backend: Any) -> None:
         self._session_backend = session_backend
+
+    def set_memory_surface_service(
+        self,
+        memory_surface_service: MemorySurfaceService | None,
+    ) -> None:
+        self._memory_surface_service = memory_surface_service or MemorySurfaceService(
+            memory_recall_service=self._memory_recall_service,
+        )
 
     def set_buddy_projection_service(self, buddy_projection_service: Any | None) -> None:
         self._buddy_projection_service = buddy_projection_service
@@ -1348,6 +1360,14 @@ class MainBrainChatService:
     ) -> dict[str, Any]:
         if not session_id or not user_id:
             return {}
+        merged_loader = getattr(self._session_backend, "load_merged_session_snapshot", None)
+        if callable(merged_loader):
+            payload = merged_loader(
+                session_id=session_id,
+                primary_user_id=user_id,
+                allow_not_exist=True,
+            )
+            return dict(payload) if isinstance(payload, dict) else {}
         loader = getattr(self._session_backend, "load_session_snapshot", None)
         if not callable(loader):
             return {}
@@ -1588,7 +1608,7 @@ class MainBrainChatService:
                     "- Then use these sections only:",
                     "  - Findings",
                     "  - Severity",
-                    "  - Risk",
+                    "  - Blockers",
                     "  - Evidence gaps",
                     "  - Recommended next step",
                     "- Do not add extra sections unless the user explicitly asks.",
@@ -1620,7 +1640,7 @@ class MainBrainChatService:
                     "  - Check target",
                     "  - Evidence",
                     "  - Pass/fail",
-                    "  - Unresolved risk",
+                    "  - Unresolved blocker",
                     "  - Next step",
                     "- Do not add extra sections unless the user explicitly asks.",
                     "- Do not claim validation evidence that does not exist in context.",
@@ -1633,14 +1653,15 @@ class MainBrainChatService:
                 "- Start with a short direct reply.",
                 "- For yes/no or short factual asks, answer in one sentence.",
                 "- For clear/simple asks, answer directly in 1-2 sentences.",
-                "- Do not restate the user's request unless needed to resolve direction, risk, or acceptance.",
+                "- For actionable asks, prefer execution-oriented reply over advisory chat.",
+                "- Do not restate the user's request unless needed to resolve direction or acceptance.",
                 "- Do not use bullets or sections for simple asks.",
                 "- Do not narrate your internal process or what you are about to do.",
                 "- Do not add rapport or filler before the answer.",
                 "- Do not add background or implementation detail unless the user asks for depth.",
                 "- Do not ask for start or confirmation again when the request is already clear.",
                 "- If clarification is required, ask one decisive question.",
-                "- Ask only the minimum missing inputs that change direction, risk, or acceptance.",
+                "- Ask only the minimum missing inputs that change direction or acceptance.",
             ],
         )
 
@@ -1829,27 +1850,19 @@ class MainBrainChatService:
         if service is None:
             return "## Truth-First Memory Profile\n- No truth-first memory service available."
         scope_type, scope_id = self._resolve_truth_first_scope(request)
-        derived_service = getattr(service, "_derived_index_service", None)
-        if derived_service is not None and callable(getattr(derived_service, "list_fact_entries", None)):
-            entries = _sort_truth_first_entries(
-                list(
-                    derived_service.list_fact_entries(
-                        scope_type=scope_type,
-                        scope_id=scope_id,
-                        owner_agent_id=owner_agent_id,
-                        industry_instance_id=str(
-                            getattr(request, "industry_instance_id", "") or "",
-                        ).strip()
-                        or None,
-                        limit=8,
-                    )
-                    or []
-                ),
-            )
-        else:
-            entries = []
-        latest_entries = entries[:2]
-        history_entries = entries[2:4]
+        snapshot = self._memory_surface_service.resolve_truth_first_scope_snapshot(
+            scope_type=scope_type,
+            scope_id=scope_id,
+            owner_agent_id=owner_agent_id,
+            industry_instance_id=str(
+                getattr(request, "industry_instance_id", "") or "",
+            ).strip()
+            or None,
+            limit=8,
+        )
+        entries = list(snapshot.get("entries") or [])
+        latest_entries = list(snapshot.get("latest_entries") or [])
+        history_entries = list(snapshot.get("history_entries") or [])
         return "\n".join(
             [
                 f"## Truth-First Memory Profile\n{_format_truth_first_profile(scope_type=scope_type, scope_id=scope_id, entries=entries)}",

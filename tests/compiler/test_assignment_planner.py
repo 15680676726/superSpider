@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from copaw.compiler.planning import AssignmentPlanningCompiler, PlanningStrategyConstraints
+from copaw.industry.identity import EXECUTION_CORE_AGENT_ID, EXECUTION_CORE_ROLE_ID
 from copaw.state import BacklogItemRecord, OperatingLaneRecord
 
 
@@ -158,3 +159,25 @@ def test_assignment_planner_carries_dependency_resource_and_retry_contract() -> 
     assert envelope.sidecar_plan["capacity_requirements"] == envelope.capacity_requirements
     assert envelope.sidecar_plan["retry_policy"] == envelope.retry_policy
     assert envelope.sidecar_plan["local_replan_policy"] == envelope.local_replan_policy
+
+
+def test_assignment_planner_defaults_lane_less_backlog_to_execution_core() -> None:
+    planner = AssignmentPlanningCompiler()
+    backlog_item = BacklogItemRecord(
+        id="backlog-followup-1",
+        industry_instance_id="industry-1",
+        lane_id=None,
+        title="Review strategy follow-up",
+        summary="Materialize a main-brain follow-up without a dedicated lane owner.",
+        metadata={},
+    )
+
+    envelope = planner.plan(
+        assignment_id="assignment-followup-1",
+        cycle_id="cycle-followup-1",
+        backlog_item=backlog_item,
+        lane=None,
+    )
+
+    assert envelope.owner_agent_id == EXECUTION_CORE_AGENT_ID
+    assert envelope.owner_role_id == EXECUTION_CORE_ROLE_ID

@@ -12,6 +12,7 @@ from ..industry.models import (
     resolve_runtime_effective_capability_ids,
 )
 from ..memory.conversation_compaction_service import ConversationCompactionService
+from ..memory.surface_service import MemorySurfaceService
 from ..memory.knowledge_writeback_service import KnowledgeWritebackService
 from .main_brain_intake import (
     build_industry_chat_action_kwargs,
@@ -669,6 +670,7 @@ class _QueryExecutionRuntimeMixin(
         prediction_service: Any | None = None,
         knowledge_service: Any | None = None,
         memory_recall_service: Any | None = None,
+        memory_surface_service: Any | None = None,
         memory_activation_service: Any | None = None,
         buddy_projection_service: Any | None = None,
         actor_mailbox_service: Any | None = None,
@@ -694,6 +696,11 @@ class _QueryExecutionRuntimeMixin(
         self._prediction_service = prediction_service
         self._knowledge_service = knowledge_service
         self._memory_recall_service = memory_recall_service
+        self._memory_surface_service_is_explicit = memory_surface_service is not None
+        self._memory_surface_service = memory_surface_service or MemorySurfaceService(
+            memory_recall_service=memory_recall_service,
+            conversation_compaction_service=conversation_compaction_service,
+        )
         self._memory_activation_service = memory_activation_service
         self._buddy_projection_service = buddy_projection_service
         self._actor_mailbox_service = actor_mailbox_service
@@ -723,6 +730,7 @@ class _QueryExecutionRuntimeMixin(
         conversation_compaction_service: ConversationCompactionService | None,
     ) -> None:
         self._conversation_compaction_service = conversation_compaction_service
+        self._refresh_memory_surface_service()
 
     def set_mcp_manager(self, mcp_manager: Any | None) -> None:
         self._mcp_manager = mcp_manager
@@ -759,6 +767,14 @@ class _QueryExecutionRuntimeMixin(
 
     def set_memory_recall_service(self, memory_recall_service: Any | None) -> None:
         self._memory_recall_service = memory_recall_service
+        self._refresh_memory_surface_service()
+
+    def set_memory_surface_service(self, memory_surface_service: Any | None) -> None:
+        self._memory_surface_service_is_explicit = memory_surface_service is not None
+        self._memory_surface_service = memory_surface_service or MemorySurfaceService(
+            memory_recall_service=self._memory_recall_service,
+            conversation_compaction_service=self._conversation_compaction_service,
+        )
 
     def set_buddy_projection_service(self, buddy_projection_service: Any | None) -> None:
         self._buddy_projection_service = buddy_projection_service
@@ -787,6 +803,30 @@ class _QueryExecutionRuntimeMixin(
     def set_evidence_ledger(self, evidence_ledger: Any | None) -> None:
         self._evidence_ledger = evidence_ledger
 
+    def _refresh_memory_surface_service(self) -> None:
+        if self._memory_surface_service_is_explicit:
+            return
+        surface_service = self._memory_surface_service
+        if isinstance(surface_service, MemorySurfaceService):
+            surface_service.set_memory_recall_service(self._memory_recall_service)
+            surface_service.set_conversation_compaction_service(
+                self._conversation_compaction_service,
+            )
+            return
+        self._memory_surface_service = MemorySurfaceService(
+            memory_recall_service=self._memory_recall_service,
+            conversation_compaction_service=self._conversation_compaction_service,
+        )
+
+    def _has_private_memory_surface(self) -> bool:
+        checker = getattr(self._memory_surface_service, "has_private_memory_surface", None)
+        if callable(checker):
+            try:
+                return bool(checker())
+            except Exception:
+                logger.debug("Memory surface private availability check failed", exc_info=True)
+        return self._conversation_compaction_service is not None
+
     def get_query_runtime_entropy_contract(self) -> dict[str, Any]:
         return self._build_query_runtime_entropy_contract()
 
@@ -799,7 +839,7 @@ class _QueryExecutionRuntimeMixin(
         degradation: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return build_runtime_entropy_sidecar_memory_projection(
-            sidecar_memory_available=self._conversation_compaction_service is not None,
+            sidecar_memory_available=self._has_private_memory_surface(),
             degradation=degradation,
         )
 
@@ -810,7 +850,7 @@ class _QueryExecutionRuntimeMixin(
         budget: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return build_runtime_entropy_contract_payload(
-            sidecar_memory_available=self._conversation_compaction_service is not None,
+            sidecar_memory_available=self._has_private_memory_surface(),
             degradation=degradation,
             budget=budget,
         )
@@ -822,14 +862,30 @@ class _QueryExecutionRuntimeMixin(
         runtime_entropy: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         budget = self._resolve_query_runtime_entropy_budget()
-        compaction_visibility = _resolve_runtime_compaction_visibility_payload(
-            self._conversation_compaction_service,
+        surface_visibility_resolver = getattr(
+            self._memory_surface_service,
+            "resolve_runtime_compaction_visibility_payload",
+            None,
         )
+        if callable(surface_visibility_resolver):
+            try:
+                compaction_visibility = _normalize_runtime_compaction_visibility(
+                    surface_visibility_resolver(),
+                )
+            except Exception:
+                logger.debug("Memory surface compaction visibility resolve failed", exc_info=True)
+                compaction_visibility = _resolve_runtime_compaction_visibility_payload(
+                    self._conversation_compaction_service,
+                )
+        else:
+            compaction_visibility = _resolve_runtime_compaction_visibility_payload(
+                self._conversation_compaction_service,
+            )
         donor_trial_carry_forward = build_donor_trial_carry_forward_projection(
             _mapping_value(compaction_visibility.get("donor_trial_carry_forward")),
         )
         resolved_degradation = _normalize_runtime_entropy_degradation(
-            sidecar_memory_available=self._conversation_compaction_service is not None,
+            sidecar_memory_available=self._has_private_memory_surface(),
             degradation=degradation,
         )
         donor_trial_degradation = _build_donor_trial_carry_forward_degradation(
@@ -838,7 +894,7 @@ class _QueryExecutionRuntimeMixin(
         if donor_trial_degradation is not None:
             resolved_degradation["donor_trial_carry_forward"] = donor_trial_degradation
         rebuilt_runtime_entropy = build_runtime_entropy_contract_payload(
-            sidecar_memory_available=self._conversation_compaction_service is not None,
+            sidecar_memory_available=self._has_private_memory_surface(),
             degradation=resolved_degradation,
             budget=budget,
         )
@@ -853,7 +909,7 @@ class _QueryExecutionRuntimeMixin(
         else:
             resolved_runtime_entropy = rebuilt_runtime_entropy
         return build_query_runtime_entropy_contract_payload(
-            sidecar_memory_available=self._conversation_compaction_service is not None,
+            sidecar_memory_available=self._has_private_memory_surface(),
             degradation=resolved_degradation,
             budget=budget,
             runtime_entropy=resolved_runtime_entropy,

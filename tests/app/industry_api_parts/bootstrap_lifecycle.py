@@ -25,6 +25,8 @@ from copaw.state import (
     BacklogItemRecord,
     IndustryInstanceRecord,
     OperatingCycleRecord,
+    TaskRecord,
+    TaskRuntimeRecord,
 )
 
 
@@ -1901,6 +1903,181 @@ def test_kickoff_execution_from_chat_dispatches_bootstrap_assignments_without_go
     assert all(task.assignment_id in started_assignment_ids for task in created_tasks)
 
 
+def test_kickoff_execution_from_chat_recovers_ownerless_assignments_from_lane_binding(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Industrial Equipment",
+            "company_name": "Northwind Robotics",
+            "product": "factory monitoring copilots",
+        },
+    )
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+
+    bootstrap = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": preview_payload["profile"],
+            "draft": preview_payload["draft"],
+            "auto_activate": False,
+            "auto_dispatch": False,
+            "execute": False,
+        },
+    )
+    assert bootstrap.status_code == 200
+    instance_id = bootstrap.json()["team"]["team_id"]
+
+    original_assignments = app.state.assignment_repository.list_assignments(
+        industry_instance_id=instance_id,
+        limit=None,
+    )
+    assert original_assignments
+    for assignment in original_assignments:
+        metadata = dict(assignment.metadata or {})
+        metadata.pop("owner_agent_id", None)
+        metadata.pop("industry_role_id", None)
+        app.state.assignment_repository.upsert_assignment(
+            assignment.model_copy(
+                update={
+                    "owner_agent_id": None,
+                    "owner_role_id": None,
+                    "metadata": metadata,
+                },
+            ),
+        )
+
+    kickoff = asyncio.run(
+        app.state.industry_service.kickoff_execution_from_chat(
+            industry_instance_id=instance_id,
+            message_text="Start the first execution cycle for today.",
+            owner_agent_id="copaw-agent-runner",
+            session_id=f"industry:{instance_id}",
+            channel="console",
+        ),
+    )
+
+    assert kickoff is not None
+    assert kickoff["started_assignment_ids"]
+
+    recovered = [
+        app.state.assignment_repository.get_assignment(assignment_id)
+        for assignment_id in kickoff["started_assignment_ids"]
+    ]
+    assert all(item is not None for item in recovered)
+    assert all(item.owner_agent_id for item in recovered if item is not None)
+    assert all(item.owner_role_id for item in recovered if item is not None)
+
+
+def test_kickoff_execution_from_chat_repairs_stale_completed_assignment_closure(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Industrial Equipment",
+            "company_name": "Northwind Robotics",
+            "product": "factory monitoring copilots",
+        },
+    )
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+
+    bootstrap = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": preview_payload["profile"],
+            "draft": preview_payload["draft"],
+            "auto_activate": False,
+            "auto_dispatch": False,
+            "execute": False,
+        },
+    )
+    assert bootstrap.status_code == 200
+    instance_id = bootstrap.json()["team"]["team_id"]
+    control_thread_id = f"industry-chat:{instance_id}:execution-core"
+
+    assignment = app.state.assignment_repository.list_assignments(
+        industry_instance_id=instance_id,
+        limit=1,
+    )[0]
+    repaired_assignment = app.state.assignment_repository.upsert_assignment(
+        assignment.model_copy(
+            update={
+                "status": "queued",
+                "task_id": "task-kickoff-stale",
+                "last_report_id": None,
+                "metadata": {
+                    **dict(assignment.metadata or {}),
+                    "control_thread_id": control_thread_id,
+                    "session_id": control_thread_id,
+                },
+            },
+        ),
+    )
+
+    app.state.task_repository.upsert_task(
+        TaskRecord(
+            id="task-kickoff-stale",
+            title=repaired_assignment.title,
+            summary=repaired_assignment.summary,
+            task_type="system:dispatch_query",
+            status="completed",
+            owner_agent_id=repaired_assignment.owner_agent_id,
+            work_context_id="work-context-kickoff-stale",
+            current_risk_level="guarded",
+            industry_instance_id=instance_id,
+            assignment_id=repaired_assignment.id,
+            lane_id=repaired_assignment.lane_id,
+            cycle_id=repaired_assignment.cycle_id,
+            report_back_mode="summary",
+        ),
+    )
+    app.state.task_runtime_repository.upsert_runtime(
+        TaskRuntimeRecord(
+            task_id="task-kickoff-stale",
+            runtime_status="terminated",
+            current_phase="completed",
+            risk_level="guarded",
+            last_result_summary="Recovered stale kickoff closure.",
+            last_owner_agent_id=repaired_assignment.owner_agent_id,
+        ),
+    )
+
+    kickoff = asyncio.run(
+        app.state.industry_service.kickoff_execution_from_chat(
+            industry_instance_id=instance_id,
+            message_text="Resume the first execution cycle for today.",
+            owner_agent_id="copaw-agent-runner",
+            session_id=control_thread_id,
+            channel="console",
+        ),
+    )
+
+    assert kickoff is not None
+    reports = app.state.agent_report_repository.list_reports(
+        industry_instance_id=instance_id,
+        assignment_id=repaired_assignment.id,
+        limit=None,
+    )
+    assert reports
+    assert any(report.task_id == "task-kickoff-stale" for report in reports)
+    refreshed_assignment = app.state.assignment_repository.get_assignment(
+        repaired_assignment.id,
+    )
+    assert refreshed_assignment is not None
+    assert refreshed_assignment.status == "completed"
+    assert refreshed_assignment.last_report_id is not None
+
+
 def test_kickoff_execution_from_chat_does_not_block_on_learning_acquisition_cycle_by_default(
     tmp_path,
 ) -> None:
@@ -3043,8 +3220,8 @@ def test_processed_report_keeps_completed_career_role_in_team(tmp_path) -> None:
     )
     assert report_message["metadata"]["message_kind"] == "agent-report-writeback"
     text = report_message["content"][0]["text"]
-    assert "Agent report: Support cleanup completed" in text
-    assert "Summary: All support work is done." in text
+    assert "我刚完成一项任务：Support cleanup completed" in text
+    assert "结论：All support work is done." in text
     push_messages = asyncio.run(take_all())
     assert any(
         "Support cleanup completed" in item["text"]

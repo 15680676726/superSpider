@@ -40,12 +40,14 @@ class KernelDispatcher:
         capability_service: "CapabilityService | None" = None,
         governance_service: "GovernanceService | None" = None,
         learning_service: object | None = None,
+        industry_service: object | None = None,
     ) -> None:
         self._config = config or KernelConfig()
         self._task_store = task_store
         self._capability_service = capability_service
         self._governance_service = governance_service
         self._learning_service = learning_service
+        self._industry_service = industry_service
         self._goal_service: object | None = None
         self._lifecycle = lifecycle or TaskLifecycleManager(
             config=self._config,
@@ -54,6 +56,9 @@ class KernelDispatcher:
 
     def set_goal_service(self, goal_service: object | None) -> None:
         self._goal_service = goal_service
+
+    def set_industry_service(self, industry_service: object | None) -> None:
+        self._industry_service = industry_service
 
     def submit(self, task: KernelTask) -> KernelResult:
         """Accept a task into the kernel and apply risk gating."""
@@ -553,7 +558,53 @@ class KernelDispatcher:
         self._reconcile_parent_after_child_terminal(task)
         self._notify_goal_service(task)
         self._resume_goal_background_chain(task)
+        self._maybe_close_industry_execution_loop(task=task)
         self._record_main_brain_outcome(task=task, result=result)
+
+    def _maybe_close_industry_execution_loop(self, *, task: KernelTask) -> None:
+        service = self._industry_service
+        if service is None:
+            return
+        close_loop = getattr(service, "close_task_execution_closure", None)
+        if not callable(close_loop):
+            return
+        payload = task.payload if isinstance(task.payload, dict) else {}
+        request_context = payload.get("request_context")
+        request = payload.get("request")
+        meta = payload.get("meta")
+        request_context_mapping = dict(request_context) if isinstance(request_context, dict) else {}
+        request_mapping = dict(request) if isinstance(request, dict) else {}
+        meta_mapping = dict(meta) if isinstance(meta, dict) else {}
+        industry_instance_id = _normalize_optional_str(
+            payload.get("industry_instance_id")
+            or request_context_mapping.get("industry_instance_id")
+            or request_mapping.get("industry_instance_id")
+            or meta_mapping.get("industry_instance_id"),
+        )
+        if industry_instance_id is None:
+            return
+        try:
+            close_loop(
+                industry_instance_id=industry_instance_id,
+                cycle_id=_normalize_optional_str(
+                    payload.get("cycle_id")
+                    or request_context_mapping.get("cycle_id")
+                    or request_mapping.get("cycle_id")
+                    or meta_mapping.get("cycle_id"),
+                ),
+                assignment_id=_normalize_optional_str(
+                    payload.get("assignment_id")
+                    or request_context_mapping.get("assignment_id")
+                    or request_mapping.get("assignment_id")
+                    or meta_mapping.get("assignment_id"),
+                ),
+                task_id=task.id,
+            )
+        except Exception:
+            logger.exception(
+                "Kernel dispatcher failed to close industry execution loop for task %s",
+                task.id,
+            )
 
     def _record_main_brain_outcome(
         self,

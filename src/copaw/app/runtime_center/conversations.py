@@ -94,14 +94,22 @@ class RuntimeConversationFacade:
         thread_spec: RuntimeThreadSpec,
     ) -> dict[str, object] | None:
         backend = getattr(self._history_reader, "_session_backend", None)
-        loader = getattr(backend, "load_session_snapshot", None)
-        if not callable(loader):
-            return None
-        payload = loader(
-            session_id=thread_spec.session_id,
-            user_id=thread_spec.user_id,
-            allow_not_exist=True,
-        )
+        merged_loader = getattr(backend, "load_merged_session_snapshot", None)
+        if callable(merged_loader):
+            payload = merged_loader(
+                session_id=thread_spec.session_id,
+                primary_user_id=thread_spec.user_id,
+                allow_not_exist=True,
+            )
+        else:
+            loader = getattr(backend, "load_session_snapshot", None)
+            if not callable(loader):
+                return None
+            payload = loader(
+                session_id=thread_spec.session_id,
+                user_id=thread_spec.user_id,
+                allow_not_exist=True,
+            )
         if not isinstance(payload, dict):
             return None
         main_brain = payload.get("main_brain")
@@ -208,9 +216,9 @@ class RuntimeConversationFacade:
         # If exact match fails for industry-chat, try with normalized role_id
         # This handles case mismatches (e.g., "Marketing-Manager" vs "marketing-manager")
         if binding is None and conversation_id.startswith("industry-chat:"):
-            parts = conversation_id.split(":", 2)
-            if len(parts) == 3:
-                instance_id, role_id = parts[1], parts[2]
+            _, _, remainder = conversation_id.partition("industry-chat:")
+            instance_id, separator, role_id = remainder.rpartition(":")
+            if instance_id and separator and role_id:
                 normalized_role_id = normalize_industry_role_id(role_id)
                 if normalized_role_id and normalized_role_id != role_id:
                     normalized_id = f"industry-chat:{instance_id}:{normalized_role_id}"
@@ -269,6 +277,10 @@ class RuntimeConversationFacade:
                 "industry_role_id": binding.industry_role_id,
                 "industry_role_name": role_name,
                 "owner_scope": binding.owner_scope,
+                "buddy_profile_id": _resolve_buddy_profile_id(
+                    industry_instance_id=binding.industry_instance_id,
+                    owner_scope=binding.owner_scope,
+                ),
                 "current_focus_kind": _field_value(agent_profile, "current_focus_kind"),
                 "current_focus_id": _field_value(agent_profile, "current_focus_id"),
                 "current_focus": _field_value(agent_profile, "current_focus"),
@@ -352,6 +364,10 @@ class RuntimeConversationFacade:
                 "industry_role_id": EXECUTION_CORE_ROLE_ID,
                 "industry_role_name": resolved_role_name,
                 "owner_scope": _field_value(detail, "owner_scope"),
+                "buddy_profile_id": _resolve_buddy_profile_id(
+                    industry_instance_id=_field_value(detail, "instance_id"),
+                    owner_scope=_field_value(detail, "owner_scope"),
+                ),
                 "current_focus_kind": _field_value(agent_profile, "current_focus_kind"),
                 "current_focus_id": _field_value(agent_profile, "current_focus_id"),
                 "current_focus": _field_value(agent_profile, "current_focus"),
@@ -385,7 +401,7 @@ class RuntimeConversationFacade:
             raise RuntimeError("Industry service is unavailable")
 
         _, _, remainder = conversation_id.partition("industry-chat:")
-        instance_id, separator, role_id = remainder.partition(":")
+        instance_id, separator, role_id = remainder.rpartition(":")
         if not instance_id or not separator or not role_id:
             raise ValueError(f"Invalid industry conversation id: {conversation_id}")
 
@@ -571,6 +587,19 @@ def _industry_control_thread_id(
     if resolved_instance_id is None:
         return None
     return f"industry-chat:{resolved_instance_id}:{EXECUTION_CORE_ROLE_ID}"
+
+
+def _resolve_buddy_profile_id(
+    *,
+    industry_instance_id: object | None,
+    owner_scope: object | None,
+) -> str | None:
+    resolved_instance_id = _first_non_empty(industry_instance_id)
+    if resolved_instance_id and resolved_instance_id.startswith("buddy:"):
+        parts = resolved_instance_id.split(":")
+        if len(parts) >= 2:
+            return _first_non_empty(parts[1], owner_scope)
+    return _first_non_empty(owner_scope)
 
 
 def _industry_thread_waiting_for_kickoff(detail: object | None) -> bool:

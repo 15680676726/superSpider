@@ -155,6 +155,28 @@ def _build_mailbox_runtime(tmp_path):
     return mailbox_service, runtime_repository, checkpoint_repository, state_store
 
 
+class _RecordingIndustryClosureService:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def close_task_execution_closure(
+        self,
+        *,
+        industry_instance_id: str,
+        cycle_id: str | None = None,
+        assignment_id: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, object]:
+        payload = {
+            "industry_instance_id": industry_instance_id,
+            "cycle_id": cycle_id,
+            "assignment_id": assignment_id,
+            "task_id": task_id,
+        }
+        self.calls.append(payload)
+        return payload
+
+
 def test_actor_worker_blocks_waiting_confirm_mailbox_items(tmp_path) -> None:
     mailbox_service, runtime_repository, checkpoint_repository, _state_store = _build_mailbox_runtime(
         tmp_path,
@@ -261,6 +283,51 @@ def test_actor_worker_heartbeats_actor_lease_during_long_execution(tmp_path, mon
     lease = lease_repository.get_lease("actor:agent-1")
     assert lease is not None
     assert lease.lease_status == "released"
+
+
+def test_actor_worker_notifies_industry_closure_after_terminal_assignment_run(
+    tmp_path,
+) -> None:
+    mailbox_service, _runtime_repository, _checkpoint_repository, _state_store = _build_mailbox_runtime(
+        tmp_path,
+    )
+    mailbox_service.enqueue_item(
+        agent_id="agent-1",
+        task_id="task-closure",
+        title="Industry closure task",
+        capability_ref="system:dispatch_query",
+        payload={
+            "payload": {
+                "industry_instance_id": "industry-test",
+                "assignment_id": "assignment-test",
+                "cycle_id": "cycle-test",
+            },
+        },
+        metadata={
+            "industry_instance_id": "industry-test",
+            "assignment_id": "assignment-test",
+            "cycle_id": "cycle-test",
+        },
+    )
+    industry_service = _RecordingIndustryClosureService()
+    worker = ActorWorker(
+        worker_id="actor-worker-test",
+        mailbox_service=mailbox_service,
+        kernel_dispatcher=_SlowDispatcher(),
+        industry_service=industry_service,
+    )
+
+    handled = asyncio.run(worker.run_once("agent-1"))
+
+    assert handled is True
+    assert industry_service.calls == [
+        {
+            "industry_instance_id": "industry-test",
+            "cycle_id": "cycle-test",
+            "assignment_id": "assignment-test",
+            "task_id": "task-closure",
+        },
+    ]
 
 
 def test_actor_worker_mcp_overlay_mounts_and_clears_on_success(tmp_path) -> None:

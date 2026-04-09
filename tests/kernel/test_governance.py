@@ -178,6 +178,70 @@ class _FakeStaleTopLevelSummaryEnvironmentService:
         }
 
 
+class _FakeFreshDetachedEnvironmentService:
+    def list_sessions(self, **kwargs):
+        _ = kwargs
+        return [
+            SimpleNamespace(
+                id="session:console:industry-chat:buddy:profile-1:domain-stock:execution-core",
+            ),
+        ]
+
+    def get_session_detail(self, session_mount_id: str, *, limit: int = 20):
+        _ = limit
+        if (
+            session_mount_id
+            != "session:console:industry-chat:buddy:profile-1:domain-stock:execution-core"
+        ):
+            return None
+        return {
+            "session_mount_id": session_mount_id,
+            "host_twin": {
+                "continuity": {
+                    "status": "blocked",
+                    "valid": False,
+                    "requires_human_return": False,
+                },
+                "coordination": {
+                    "recommended_scheduler_action": "proceed",
+                },
+                "legal_recovery": {
+                    "path": "fresh",
+                    "resume_kind": "fresh",
+                },
+                "blocked_surfaces": [],
+            },
+        }
+
+
+class _FakeBuddyThreadFallbackEnvironmentService:
+    def list_sessions(self, **kwargs):
+        _ = kwargs
+        return [
+            SimpleNamespace(
+                id="session:console:industry:buddy:profile-1:domain-stock",
+            ),
+        ]
+
+    def get_session_detail(self, session_mount_id: str, *, limit: int = 20):
+        _ = limit
+        if session_mount_id != "session:console:industry:buddy:profile-1:domain-stock":
+            return None
+        return {
+            "session_mount_id": session_mount_id,
+            "host_twin": {
+                "continuity": {"requires_human_return": True},
+                "ownership": {"handoff_owner_ref": "human-operator:alice"},
+                "coordination": {"recommended_scheduler_action": "handoff"},
+                "legal_recovery": {
+                    "path": "handoff",
+                    "resume_kind": "resume-runtime",
+                    "return_condition": "checkpoint:stock",
+                },
+            },
+        }
+
+
 class _FakeHumanAssistTaskService:
     def list_tasks(self, **kwargs):
         chat_thread_id = kwargs.get("chat_thread_id")
@@ -466,6 +530,102 @@ def test_governance_admission_allows_writeback_only_query_through_handoff_gate(
     reason = service.admission_block_reason(task)
 
     assert reason is None
+
+
+def test_governance_admission_closes_stale_host_handoff_task_when_environment_no_longer_requires_return(
+    tmp_path,
+) -> None:
+    repository = SqliteGovernanceControlRepository(
+        SQLiteStateStore(tmp_path / "governance.sqlite3"),
+    )
+    human_assist_store = SQLiteStateStore(tmp_path / "human_assist.sqlite3")
+    human_assist_service = HumanAssistTaskService(
+        repository=SqliteHumanAssistTaskRepository(human_assist_store),
+    )
+    human_assist_service.ensure_host_handoff_task(
+        chat_thread_id="industry-chat:buddy:profile-1:domain-stock:execution-core",
+        title="Return host handoff",
+        summary="Runtime handoff is active for the buddy execution thread.",
+        required_action='Return after "fresh".',
+        resume_checkpoint_ref="fresh",
+        verification_anchor="fresh",
+        block_evidence_refs=[
+            "session:console:industry-chat:buddy:profile-1:domain-stock:execution-core",
+        ],
+        continuation_context={
+            "session_id": "industry-chat:buddy:profile-1:domain-stock:execution-core",
+            "control_thread_id": "industry-chat:buddy:profile-1:domain-stock:execution-core",
+            "environment_ref": (
+                "session:console:industry-chat:buddy:profile-1:domain-stock:execution-core"
+            ),
+            "recommended_scheduler_action": "handoff",
+            "main_brain_runtime": {
+                "environment_ref": (
+                    "session:console:industry-chat:buddy:profile-1:domain-stock:execution-core"
+                ),
+                "recovery_mode": "fresh",
+            },
+        },
+    )
+    service = GovernanceService(
+        control_repository=repository,
+        environment_service=_FakeFreshDetachedEnvironmentService(),
+        human_assist_task_service=human_assist_service,
+        industry_service=_FakeIndustryService(),
+    )
+
+    task = KernelTask(
+        title="Continue buddy execution chat",
+        capability_ref="system:dispatch_query",
+        environment_ref="session:console:industry-chat:buddy:profile-1:domain-stock:execution-core",
+        payload={
+            "chat_thread_id": "industry-chat:buddy:profile-1:domain-stock:execution-core",
+            "session_id": "industry-chat:buddy:profile-1:domain-stock:execution-core",
+            "control_thread_id": "industry-chat:buddy:profile-1:domain-stock:execution-core",
+        },
+    )
+
+    reason = service.admission_block_reason(task)
+
+    assert reason is None
+    assert (
+        human_assist_service.get_current_task(
+            chat_thread_id="industry-chat:buddy:profile-1:domain-stock:execution-core",
+        )
+        is None
+    )
+    tasks = human_assist_service.list_tasks(
+        chat_thread_id="industry-chat:buddy:profile-1:domain-stock:execution-core",
+    )
+    assert tasks[0].status == "closed"
+
+
+def test_governance_admission_resolves_full_buddy_instance_id_from_control_thread(
+    tmp_path,
+) -> None:
+    repository = SqliteGovernanceControlRepository(
+        SQLiteStateStore(tmp_path / "governance.sqlite3"),
+    )
+    service = GovernanceService(
+        control_repository=repository,
+        environment_service=_FakeBuddyThreadFallbackEnvironmentService(),
+        human_assist_task_service=_FakeHumanAssistTaskService(),
+        industry_service=_FakeIndustryService(),
+    )
+
+    task = KernelTask(
+        title="Dispatch buddy control thread work",
+        capability_ref="system:dispatch_query",
+        payload={
+            "chat_thread_id": "industry-chat:buddy:profile-1:domain-stock:execution-core",
+            "control_thread_id": "industry-chat:buddy:profile-1:domain-stock:execution-core",
+        },
+    )
+
+    reason = service.admission_block_reason(task)
+
+    assert reason is not None
+    assert "Runtime handoff is active" in reason
 
 
 def test_governance_status_prefers_canonical_ready_host_twin_summary(

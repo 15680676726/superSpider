@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
+import time
 
 from agentscope.message import Msg
 from fastapi.testclient import TestClient
@@ -866,6 +867,27 @@ def test_runtime_canonical_flow_harness_chat_frontdoor_closes_through_fixed_sop_
     assert task.task_type == "system:run_fixed_sop"
     assert task.work_context_id == work_context_id
 
+    deadline = time.time() + 10.0
+    report_record = None
+    while time.time() < deadline:
+        report_record = next(
+            (
+                item
+                for item in app.state.agent_report_repository.list_reports(
+                    industry_instance_id=instance_id,
+                    limit=None,
+                )
+                if item.task_id == task.id
+            ),
+            None,
+        )
+        if report_record is not None and report_record.processed:
+            break
+        time.sleep(0.25)
+
+    assert report_record is not None
+    assert report_record.processed is True
+
     second_cycle = asyncio.run(
         app.state.industry_service.run_operating_cycle(
             instance_id=instance_id,
@@ -874,7 +896,6 @@ def test_runtime_canonical_flow_harness_chat_frontdoor_closes_through_fixed_sop_
         ),
     )
     processed_report_ids = second_cycle["processed_instances"][0]["processed_report_ids"]
-    assert processed_report_ids
 
     runtime_detail = client.get(f"/runtime-center/industry/{instance_id}")
     assert runtime_detail.status_code == 200
@@ -882,7 +903,7 @@ def test_runtime_canonical_flow_harness_chat_frontdoor_closes_through_fixed_sop_
     report = next(
         item
         for item in runtime_payload["agent_reports"]
-        if item["report_id"] in processed_report_ids
+        if item["report_id"] == report_record.id
     )
     assert report["result"] == "completed"
     assert report["evidence_ids"]
@@ -1078,6 +1099,7 @@ def test_runtime_canonical_flow_harness_chat_assignment_delegated_child_closes_t
         mailbox_service=mailbox_service,
         kernel_dispatcher=app.state.kernel_dispatcher,
         agent_runtime_repository=app.state.agent_runtime_repository,
+        industry_service=app.state.industry_service,
     )
 
     class _DirectSupervisor:
@@ -1120,16 +1142,6 @@ def test_runtime_canonical_flow_harness_chat_assignment_delegated_child_closes_t
     assert child_runtime is not None
     assert child_runtime.current_phase == "completed"
 
-    second_cycle = asyncio.run(
-        app.state.industry_service.run_operating_cycle(
-            instance_id=instance_id,
-            actor="test:canonical-flow-delegated-child-reconcile",
-            force=True,
-        ),
-    )
-    processed_report_ids = second_cycle["processed_instances"][0]["processed_report_ids"]
-    assert processed_report_ids
-
     report = next(
         item
         for item in app.state.agent_report_repository.list_reports(
@@ -1137,17 +1149,18 @@ def test_runtime_canonical_flow_harness_chat_assignment_delegated_child_closes_t
             assignment_id=assignment_id,
             limit=None,
         )
-        if item.id in processed_report_ids and item.task_id == child_task_id
+        if item.task_id == child_task_id
     )
     assert report.result == "completed"
     assert report.assignment_id == assignment_id
     assert report.work_context_id == work_context_id
     assert report.evidence_ids
+    assert report.processed is True
 
     assignment = app.state.assignment_repository.get_assignment(assignment_id)
     assert assignment is not None
     assert assignment.status == "completed"
-    assert assignment.last_report_id in processed_report_ids
+    assert assignment.last_report_id is not None
 
     runtime_detail = client.get(f"/runtime-center/industry/{instance_id}")
     assert runtime_detail.status_code == 200

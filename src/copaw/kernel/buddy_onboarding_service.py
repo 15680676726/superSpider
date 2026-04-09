@@ -16,16 +16,23 @@ from .buddy_execution_carrier import (
     build_buddy_execution_carrier_handoff,
 )
 from .buddy_onboarding_reasoner import (
+    BuddyOnboardingBacklogSeed,
     BuddyOnboardingGrowthPlan,
     BuddyOnboardingReasonedTurn,
     BuddyOnboardingReasoner,
+    BuddyOnboardingReasonerTimeoutError,
 )
 from .buddy_domain_capability_growth import BuddyDomainCapabilityGrowthService
 from .buddy_domain_capability import (
     derive_buddy_domain_key,
     preview_domain_transition,
 )
-from ..industry.models import IndustryProfile
+from ..industry.identity import EXECUTION_CORE_AGENT_ID
+from ..industry.models import (
+    IndustryProfile,
+    IndustryRoleBlueprint,
+    IndustryTeamBlueprint,
+)
 from ..state import (
     BuddyDomainCapabilityRecord,
     CompanionRelationship,
@@ -619,6 +626,7 @@ class BuddyOnboardingService:
             recommended_direction=(
                 reasoned_turn.recommended_direction if reasoned_turn is not None else ""
             ),
+            **self._build_reasoned_turn_cache(reasoned_turn),
         )
         if existing_session is not None:
             session = session.model_copy(
@@ -700,6 +708,7 @@ class BuddyOnboardingService:
                     "candidate_directions": candidate_directions,
                     "recommended_direction": recommended,
                     "status": "direction-ready" if finished else "clarifying",
+                    **self._build_reasoned_turn_cache(reasoned_turn),
                 },
             ),
         )
@@ -784,11 +793,16 @@ class BuddyOnboardingService:
             session_id=session_id,
             selected_direction=normalized,
         )
-        growth_plan = self._resolve_growth_plan(
-            profile=profile,
-            transcript=session.transcript,
+        growth_plan = self._resolve_cached_growth_plan(
+            session=session,
             selected_direction=normalized,
         )
+        if growth_plan is None:
+            growth_plan = self._resolve_growth_plan(
+                profile=profile,
+                transcript=session.transcript,
+                selected_direction=normalized,
+            )
         resolved_capability_action = str(
             capability_action or preview.recommended_action or "",
         ).strip()
@@ -863,6 +877,10 @@ class BuddyOnboardingService:
                     "status": "confirmed",
                     "selected_direction": normalized,
                     "recommended_direction": session.recommended_direction or normalized,
+                    **self._build_growth_plan_cache(
+                        selected_direction=normalized,
+                        growth_plan=growth_plan,
+                    ),
                 },
             ),
         )
@@ -963,6 +981,76 @@ class BuddyOnboardingService:
             raise ValueError(f"Human profile '{profile_id}' not found")
         return profile
 
+    def _build_reasoned_turn_cache(
+        self,
+        reasoned_turn: BuddyOnboardingReasonedTurn | None,
+    ) -> dict[str, object]:
+        if reasoned_turn is None:
+            return {
+                "draft_direction": "",
+                "draft_final_goal": "",
+                "draft_why_it_matters": "",
+                "draft_backlog_items": [],
+            }
+        return {
+            "draft_direction": str(reasoned_turn.recommended_direction or "").strip(),
+            "draft_final_goal": str(reasoned_turn.final_goal or "").strip(),
+            "draft_why_it_matters": str(reasoned_turn.why_it_matters or "").strip(),
+            "draft_backlog_items": [
+                item.model_dump(mode="json")
+                for item in reasoned_turn.backlog_items
+                if item.title.strip() and item.summary.strip()
+            ][:3],
+        }
+
+    def _build_growth_plan_cache(
+        self,
+        *,
+        selected_direction: str,
+        growth_plan: BuddyOnboardingGrowthPlan | None,
+    ) -> dict[str, object]:
+        if growth_plan is None:
+            return {
+                "draft_direction": "",
+                "draft_final_goal": "",
+                "draft_why_it_matters": "",
+                "draft_backlog_items": [],
+            }
+        return {
+            "draft_direction": selected_direction.strip(),
+            "draft_final_goal": str(growth_plan.final_goal or "").strip(),
+            "draft_why_it_matters": str(growth_plan.why_it_matters or "").strip(),
+            "draft_backlog_items": [
+                item.model_dump(mode="json")
+                for item in growth_plan.backlog_items
+                if item.title.strip() and item.summary.strip()
+            ][:3],
+        }
+
+    def _resolve_cached_growth_plan(
+        self,
+        *,
+        session: BuddyOnboardingSessionRecord,
+        selected_direction: str,
+    ) -> BuddyOnboardingGrowthPlan | None:
+        if str(session.draft_direction or "").strip() != selected_direction.strip():
+            return None
+        final_goal = str(session.draft_final_goal or "").strip()
+        why_it_matters = str(session.draft_why_it_matters or "").strip()
+        backlog_items = [
+            BuddyOnboardingBacklogSeed.model_validate(item)
+            for item in list(session.draft_backlog_items or [])
+            if isinstance(item, dict)
+        ]
+        if not final_goal and not why_it_matters and not backlog_items:
+            return None
+        return BuddyOnboardingGrowthPlan(
+            primary_direction=selected_direction.strip(),
+            final_goal=final_goal,
+            why_it_matters=why_it_matters,
+            backlog_items=backlog_items[:3],
+        )
+
     def _resolve_reasoned_turn(
         self,
         *,
@@ -980,6 +1068,10 @@ class BuddyOnboardingService:
                 question_count=question_count,
                 tightened=tightened,
             )
+        except BuddyOnboardingReasonerTimeoutError:
+            raise
+        except TimeoutError:
+            raise
         except Exception:
             logger.debug("Buddy onboarding reasoned turn failed; falling back.", exc_info=True)
             return None
@@ -999,6 +1091,10 @@ class BuddyOnboardingService:
                 transcript=transcript,
                 selected_direction=selected_direction,
             )
+        except BuddyOnboardingReasonerTimeoutError:
+            raise
+        except TimeoutError:
+            raise
         except Exception:
             logger.debug("Buddy onboarding growth plan failed; falling back.", exc_info=True)
             return None
@@ -1191,6 +1287,11 @@ class BuddyOnboardingService:
                 team_generated=False,
             )
         existing_instance = self._industry_instance_repository.get_instance(instance_id)
+        team_roles = self._resolve_initial_team_roles(
+            profile=profile,
+            instance_id=instance_id,
+            existing_instance=existing_instance,
+        )
         instance = IndustryInstanceRecord(
             instance_id=instance_id,
             label=profile.display_name,
@@ -1201,12 +1302,18 @@ class BuddyOnboardingService:
                 profile=profile,
                 growth_target=growth_target,
             ).model_dump(mode="json"),
+            team_payload=IndustryTeamBlueprint(
+                team_id=instance_id,
+                label=profile.display_name,
+                summary=growth_target.final_goal,
+                agents=team_roles,
+            ).model_dump(mode="json"),
             execution_core_identity_payload={
                 "profile_id": profile.profile_id,
                 "primary_direction": growth_target.primary_direction,
                 "final_goal": growth_target.final_goal,
             },
-            agent_ids=list(existing_instance.agent_ids) if existing_instance is not None else [],
+            agent_ids=[role.agent_id for role in team_roles],
             lifecycle_status="running",
             autonomy_status="coordinating",
             current_cycle_id=existing_instance.current_cycle_id if existing_instance is not None else None,
@@ -1218,8 +1325,18 @@ class BuddyOnboardingService:
         persisted_instance = self._industry_instance_repository.upsert_instance(instance)
         lanes = self._operating_lane_service.seed_from_roles(
             industry_instance_id=instance_id,
-            roles=self._build_lane_roles(profile=profile, growth_target=growth_target),
+            roles=team_roles,
         )
+        lanes_by_id = {
+            str(getattr(lane, "id", "")).strip(): lane
+            for lane in lanes
+            if str(getattr(lane, "id", "")).strip()
+        }
+        def _lane_owner(lane_id: str | None, attr: str) -> str | None:
+            lane = lanes_by_id.get(str(lane_id or "").strip())
+            value = getattr(lane, attr, None) if lane is not None else None
+            text = str(value or "").strip()
+            return text or None
         backlog_items = [
             self._backlog_service.record_generated_item(
                 industry_instance_id=instance_id,
@@ -1255,6 +1372,14 @@ class BuddyOnboardingService:
             cycle_id=cycle.id,
             specs=[
                 {
+                    "owner_agent_id": (
+                        _lane_owner(item.lane_id, "owner_agent_id")
+                        or EXECUTION_CORE_AGENT_ID
+                    ),
+                    "owner_role_id": (
+                        _lane_owner(item.lane_id, "owner_role_id")
+                        or EXECUTION_CORE_ROLE_ID
+                    ),
                     "lane_id": item.lane_id,
                     "backlog_item_id": item.id,
                     "title": item.title,
@@ -1263,6 +1388,14 @@ class BuddyOnboardingService:
                     "metadata": {
                         "profile_id": profile.profile_id,
                         "primary_direction": growth_target.primary_direction,
+                        "owner_agent_id": (
+                            _lane_owner(item.lane_id, "owner_agent_id")
+                            or EXECUTION_CORE_AGENT_ID
+                        ),
+                        "industry_role_id": (
+                            _lane_owner(item.lane_id, "owner_role_id")
+                            or EXECUTION_CORE_ROLE_ID
+                        ),
                     },
                 }
                 for index, item in enumerate(backlog_items)
@@ -1410,26 +1543,66 @@ class BuddyOnboardingService:
             team_generated=team_generated,
         )
 
-    def _build_lane_roles(
+    def _resolve_initial_team_roles(
         self,
         *,
         profile: HumanProfile,
-        growth_target: GrowthTarget,
-    ) -> list[dict[str, str]]:
-        del growth_target
+        instance_id: str,
+        existing_instance: IndustryInstanceRecord | None,
+    ) -> list[IndustryRoleBlueprint]:
+        existing_agents = (
+            list((existing_instance.team_payload or {}).get("agents") or [])
+            if existing_instance is not None
+            else []
+        )
+        restored_roles: list[IndustryRoleBlueprint] = []
+        for item in existing_agents:
+            try:
+                restored_roles.append(IndustryRoleBlueprint.model_validate(item))
+            except Exception:
+                continue
+        if restored_roles:
+            return restored_roles
+        label = profile.display_name.strip() or "Buddy"
         return [
-            {
-                "role_id": "growth-focus",
-                "role_name": "成长主线",
-                "goal_kind": "growth-focus",
-                "mission": f"持续确保{profile.display_name}没有偏离已经确认的长期主方向。",
-            },
-            {
-                "role_id": "proof-of-work",
-                "role_name": "成果证明",
-                "goal_kind": "proof-of-work",
-                "mission": f"把{profile.display_name}当前的方向，尽快变成看得见的证据、作品与推进势能。",
-            },
+            IndustryRoleBlueprint(
+                role_id="growth-focus",
+                agent_id=f"{instance_id}:growth-focus",
+                actor_key=f"{instance_id}:growth-focus",
+                name=f"{label} Growth Focus",
+                role_name="成长主线",
+                role_summary=f"持续确保{label}没有偏离已经确认的长期主方向。",
+                mission=f"持续确保{label}没有偏离已经确认的长期主方向。",
+                goal_kind="growth-focus",
+                agent_class="business",
+                employment_mode="career",
+                activation_mode="persistent",
+                suspendable=False,
+                reports_to=EXECUTION_CORE_ROLE_ID,
+                risk_level="guarded",
+                allowed_capabilities=["system:dispatch_query"],
+                preferred_capability_families=["planning", "coordination"],
+                evidence_expectations=["growth-focus completion note"],
+            ),
+            IndustryRoleBlueprint(
+                role_id="proof-of-work",
+                agent_id=f"{instance_id}:proof-of-work",
+                actor_key=f"{instance_id}:proof-of-work",
+                name=f"{label} Proof Of Work",
+                role_name="成果证明",
+                role_summary=f"把{label}当前的主方向尽快变成看得见的证据、作品与推进势能。",
+                mission=f"把{label}当前的主方向尽快变成看得见的证据、作品与推进势能。",
+                goal_kind="proof-of-work",
+                agent_class="business",
+                employment_mode="career",
+                activation_mode="persistent",
+                suspendable=False,
+                reports_to=EXECUTION_CORE_ROLE_ID,
+                risk_level="guarded",
+                allowed_capabilities=["system:dispatch_query"],
+                preferred_capability_families=["execution", "evidence"],
+                evidence_expectations=["proof-of-work artifact"],
+            ),
         ]
 
     def _build_initial_backlog_specs(

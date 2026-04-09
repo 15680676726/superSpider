@@ -615,6 +615,9 @@ def _build_industry_app(
     fixed_sop_service._agent_report_repository = industry_service._agent_report_repository
     industry_service.set_prediction_service(prediction_service)
     goal_service.set_agent_profile_service(agent_profile_service)
+    set_dispatcher_industry_service = getattr(dispatcher, "set_industry_service", None)
+    if callable(set_dispatcher_industry_service):
+        set_dispatcher_industry_service(industry_service)
     capability_service.set_agent_profile_service(agent_profile_service)
     capability_service.set_agent_profile_override_repository(
         agent_profile_override_repository,

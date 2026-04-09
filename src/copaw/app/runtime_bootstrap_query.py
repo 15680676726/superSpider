@@ -50,9 +50,9 @@ def _resolve_memory_activation_service_cls() -> type[Any] | None:
 
 def resolve_default_memory_recall_backend() -> str:
     explicit_backend = str(os.environ.get("COPAW_MEMORY_RECALL_BACKEND", "") or "").strip().lower()
-    if explicit_backend in {"lexical", "hybrid-local"}:
+    if explicit_backend == "truth-first":
         return explicit_backend
-    return "hybrid-local"
+    return "truth-first"
 
 
 def build_runtime_query_services(
