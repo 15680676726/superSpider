@@ -17,7 +17,7 @@ from ..providers.runtime_provider_facade import (
 from ..state import HumanProfile
 
 logger = logging.getLogger(__name__)
-_DEFAULT_REASONING_TIMEOUT_SECONDS = 15.0
+_DEFAULT_REASONING_TIMEOUT_SECONDS = 45.0
 
 _BUDDY_ONBOARDING_REASONER_PROMPT = """
 你负责 CoPaw Buddy onboarding。
@@ -25,6 +25,37 @@ _BUDDY_ONBOARDING_REASONER_PROMPT = """
 1. 下一句最值得问的问题
 2. 真实主方向
 3. 一组可执行的首批任务
+
+你必须只返回一个 JSON 对象，字段名必须严格使用下面这些名字，不能自创别名：
+{
+  "finished": boolean,
+  "next_question": string,
+  "candidate_directions": string[],
+  "recommended_direction": string,
+  "final_goal": string,
+  "why_it_matters": string,
+  "backlog_items": [
+    {
+      "lane_hint": string,
+      "title": string,
+      "summary": string,
+      "priority": 1|2|3,
+      "source_key": string
+    }
+  ]
+}
+
+如果信息还不够：
+- finished=false
+- next_question 必须非空
+- candidate_directions / recommended_direction / final_goal / why_it_matters / backlog_items 可以为空
+
+如果信息已经足够：
+- finished=true
+- candidate_directions 至少给 1 个
+- recommended_direction 必须非空
+- final_goal 必须非空
+- backlog_items 至少给 1 个
 
 硬规则：
 - 不能因为用户提到“赚钱 / 收入 / 财富自由”就强行改写成内容创作。
@@ -131,6 +162,44 @@ def _response_to_payload(response: object) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("Buddy onboarding reasoner returned a non-object payload.")
     return payload
+
+
+def _normalize_reasoner_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(payload)
+    next_question = str(
+        normalized.get("next_question")
+        or normalized.get("clarifying_question")
+        or normalized.get("question")
+        or ""
+    ).strip()
+    if next_question:
+        normalized["next_question"] = next_question
+    recommended_direction = str(
+        normalized.get("recommended_direction")
+        or normalized.get("real_main_direction")
+        or normalized.get("primary_direction")
+        or normalized.get("direction")
+        or ""
+    ).strip()
+    if recommended_direction:
+        normalized["recommended_direction"] = recommended_direction
+    candidate_directions = normalized.get("candidate_directions")
+    if not isinstance(candidate_directions, list):
+        candidate_directions = normalized.get("direction_candidates")
+    if not isinstance(candidate_directions, list):
+        candidate_directions = []
+    if not candidate_directions and recommended_direction:
+        candidate_directions = [recommended_direction]
+    normalized["candidate_directions"] = candidate_directions
+    why_it_matters = str(
+        normalized.get("why_it_matters")
+        or normalized.get("why")
+        or normalized.get("reason")
+        or ""
+    ).strip()
+    if why_it_matters:
+        normalized["why_it_matters"] = why_it_matters
+    return normalized
 
 
 async def _materialize_response(response: object) -> object:
@@ -315,7 +384,9 @@ class ModelDrivenBuddyOnboardingReasoner:
                 _materialize_response(response),
                 timeout_seconds=self._reasoning_timeout_seconds,
             )
-            payload = _ReasonerResponse.model_validate(_response_to_payload(response))
+            payload = _ReasonerResponse.model_validate(
+                _normalize_reasoner_payload(_response_to_payload(response)),
+            )
         except BuddyOnboardingReasonerTimeoutError:
             logger.warning("Buddy onboarding reasoner timed out.", exc_info=True)
             raise
