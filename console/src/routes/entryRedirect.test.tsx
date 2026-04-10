@@ -36,6 +36,10 @@ vi.mock("../utils/runtimeChat", () => runtimeChatMock);
 
 import EntryRedirect from "./entryRedirect";
 
+type RuntimeWindow = Window & {
+  currentThreadMeta?: Record<string, unknown>;
+};
+
 function buildSurface(
   overrides: Partial<Record<string, unknown>> = {},
 ): Record<string, unknown> {
@@ -109,6 +113,7 @@ function buildSurface(
 describe("EntryRedirect", () => {
   beforeEach(() => {
     resetBuddyProfileBindingForTests();
+    (window as RuntimeWindow).currentThreadMeta = undefined;
     navigateMock.mockReset();
     apiMock.getBuddySurface.mockReset();
     runtimeChatMock.buildBuddyExecutionCarrierChatBinding.mockReset();
@@ -167,6 +172,70 @@ describe("EntryRedirect", () => {
       expect(navigateMock).toHaveBeenCalledWith("/buddy-onboarding", {
         replace: true,
       });
+    });
+  });
+
+  it("falls back to the active thread buddy profile when storage is empty", async () => {
+    (window as RuntimeWindow).currentThreadMeta = {
+      buddy_profile_id: "profile-1",
+    };
+    apiMock.getBuddySurface.mockResolvedValue(
+      buildSurface({
+        growth_target: {
+          target_id: "target-1",
+          profile_id: "profile-1",
+          primary_direction: "Build a durable writing lane.",
+          final_goal: "Publish the first real novel.",
+          why_it_matters: "Turn writing into proof of work.",
+          current_cycle_label: "Cycle 1",
+        },
+        relationship: {
+          relationship_id: "relationship-1",
+          profile_id: "profile-1",
+          buddy_name: "Nova",
+          encouragement_style: "old-friend",
+        },
+        execution_carrier: {
+          instance_id: "buddy:profile-1:domain-writing",
+          label: "Writing carrier",
+          owner_scope: "profile-1",
+          current_cycle_id: "cycle-1",
+          team_generated: true,
+          thread_id:
+            "industry-chat:buddy:profile-1:domain-writing:execution-core",
+          control_thread_id:
+            "industry-chat:buddy:profile-1:domain-writing:execution-core",
+        },
+        onboarding: {
+          session_id: "session-1",
+          status: "named",
+          operation_id: "",
+          operation_kind: "",
+          operation_status: "idle",
+          operation_error: "",
+          question_count: 9,
+          tightened: true,
+          next_question: "",
+          candidate_directions: ["Build a durable writing lane."],
+          recommended_direction: "Build a durable writing lane.",
+          selected_direction: "Build a durable writing lane.",
+          requires_direction_confirmation: false,
+          requires_naming: false,
+          completed: true,
+        },
+      }),
+    );
+    runtimeChatMock.buildBuddyExecutionCarrierChatBinding.mockReturnValue({
+      name: "Nova",
+      threadId: "industry-chat:buddy:profile-1:domain-writing:execution-core",
+      userId: "buddy:profile-1",
+    });
+    runtimeChatMock.openRuntimeChat.mockResolvedValue(undefined);
+
+    render(<EntryRedirect />);
+
+    await waitFor(() => {
+      expect(apiMock.getBuddySurface).toHaveBeenCalledWith("profile-1");
     });
   });
 
@@ -244,7 +313,7 @@ describe("EntryRedirect", () => {
           threadId: "industry-chat:buddy:profile-1:domain-writing:execution-core",
         }),
         navigateMock,
-        { shouldNavigate: expect.any(Function) },
+        { shouldNavigate: expect.any(Function), replace: true },
       );
     });
   });

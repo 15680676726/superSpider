@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   normalizeBuddyProfileId,
+  readActiveBuddyProfileId,
   readBuddyProfileId,
   resetBuddyProfileBindingForTests,
   resolveCanonicalBuddyProfileId,
@@ -34,6 +35,16 @@ describe("buddyProfileBinding", () => {
 
     writeBuddyProfileId("   ");
     expect(readBuddyProfileId()).toBeNull();
+  });
+
+  it("prefers the active thread buddy profile over storage when resolving the current buddy", () => {
+    writeBuddyProfileId("profile-storage");
+
+    expect(
+      readActiveBuddyProfileId({
+        buddy_profile_id: "profile-thread",
+      }),
+    ).toBe("profile-thread");
   });
 
   it("resets the stored buddy profile id for tests", () => {

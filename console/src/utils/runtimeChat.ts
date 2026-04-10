@@ -333,6 +333,7 @@ export async function openRuntimeChat(
   binding: RuntimeChatBinding,
   navigate: NavigateFunction,
   options?: {
+    replace?: boolean;
     shouldNavigate?: () => boolean;
   },
 ): Promise<void> {
@@ -340,5 +341,7 @@ export async function openRuntimeChat(
   if (options?.shouldNavigate && !options.shouldNavigate()) {
     return;
   }
-  navigate(`/chat?threadId=${encodeURIComponent(thread.id)}`);
+  navigate(`/chat?threadId=${encodeURIComponent(thread.id)}`, {
+    replace: options?.replace === true,
+  });
 }

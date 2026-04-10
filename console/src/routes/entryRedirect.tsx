@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 
 import api from "../api";
 import {
-  readBuddyProfileId,
+  readActiveBuddyProfileId,
   writeBuddyProfileId,
 } from "../runtime/buddyProfileBinding";
 import { resolveBuddyEntryDecision } from "../runtime/buddyFlow";
@@ -12,6 +12,12 @@ import {
   buildBuddyExecutionCarrierChatBinding,
   openRuntimeChat,
 } from "../utils/runtimeChat";
+
+interface CustomWindow extends Window {
+  currentThreadMeta?: Record<string, unknown>;
+}
+
+declare const window: CustomWindow;
 
 export default function EntryRedirect() {
   const navigate = useNavigate();
@@ -24,7 +30,7 @@ export default function EntryRedirect() {
     };
 
     void (async () => {
-      const profileId = readBuddyProfileId();
+      const profileId = readActiveBuddyProfileId(window.currentThreadMeta);
       if (!profileId) {
         redirectToOnboarding();
         return;
@@ -57,6 +63,7 @@ export default function EntryRedirect() {
           entrySource: "entry-redirect",
         });
         await openRuntimeChat(binding, navigate, {
+          replace: true,
           shouldNavigate: () => !cancelled,
         });
       } catch {

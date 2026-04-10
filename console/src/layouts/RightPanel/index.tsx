@@ -12,11 +12,20 @@ import {
 } from "../../pages/Chat/buddyAvatar";
 import { resolveBuddyEvolutionView } from "../../pages/Chat/buddyEvolution";
 import { resolveBuddyDisplaySnapshot } from "../../pages/Chat/buddyPresentation";
-import { readBuddyProfileId } from "../../runtime/buddyProfileBinding";
+import {
+  BUDDY_PROFILE_CHANGED_EVENT,
+  readActiveBuddyProfileId,
+} from "../../runtime/buddyProfileBinding";
 import styles from "./index.module.less";
 
 const { Text } = Typography;
 const BUDDY_PANEL_REFRESH_MS = 5 * 60 * 1000;
+
+interface CustomWindow extends Window {
+  currentThreadMeta?: Record<string, unknown>;
+}
+
+declare const window: CustomWindow;
 
 // ── 空态（未绑定伙伴） ──────────────────────────────────────────────────
 function EmptyState() {
@@ -36,10 +45,12 @@ export default function RightPanel() {
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
   const [boundProfileId, setBoundProfileId] = useState<string | null>(() =>
-    readBuddyProfileId(),
+    readActiveBuddyProfileId(window.currentThreadMeta),
   );
   const [surface, setSurface] = useState<BuddySurfaceResponse | null>(null);
-  const [loading, setLoading] = useState(() => Boolean(readBuddyProfileId()));
+  const [loading, setLoading] = useState(() =>
+    Boolean(readActiveBuddyProfileId(window.currentThreadMeta)),
+  );
   const [tick, setTick] = useState(0);
   const [documentVisible, setDocumentVisible] = useState(
     () => typeof document === "undefined" || document.visibilityState !== "hidden",
@@ -52,8 +63,35 @@ export default function RightPanel() {
     surface !== null;
 
   useEffect(() => {
-    setBoundProfileId(readBuddyProfileId());
+    setBoundProfileId(readActiveBuddyProfileId(window.currentThreadMeta));
   }, [location.key, location.pathname]);
+
+  useEffect(() => {
+    const syncBoundProfile = (event: Event) => {
+      const detail =
+        event instanceof CustomEvent && event.detail && typeof event.detail === "object"
+          ? event.detail
+          : null;
+      const threadMeta =
+        detail && "meta" in detail ? (detail.meta as Record<string, unknown> | undefined) : null;
+      setBoundProfileId(readActiveBuddyProfileId(threadMeta ?? window.currentThreadMeta));
+    };
+    const syncStoredProfile = (event: Event) => {
+      const detail =
+        event instanceof CustomEvent && event.detail && typeof event.detail === "object"
+          ? event.detail
+          : null;
+      const profileId =
+        detail && "profileId" in detail ? (detail.profileId as string | null | undefined) : null;
+      setBoundProfileId(readActiveBuddyProfileId({ buddy_profile_id: profileId ?? null }));
+    };
+    window.addEventListener("copaw:thread-context", syncBoundProfile);
+    window.addEventListener(BUDDY_PROFILE_CHANGED_EVENT, syncStoredProfile);
+    return () => {
+      window.removeEventListener("copaw:thread-context", syncBoundProfile);
+      window.removeEventListener(BUDDY_PROFILE_CHANGED_EVENT, syncStoredProfile);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
