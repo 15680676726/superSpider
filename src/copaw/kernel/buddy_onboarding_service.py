@@ -408,7 +408,7 @@ class BuddyOnboardingService:
             profile.profile_id,
         )
         if existing_session is not None and existing_session.operation_status == "running":
-            raise ValueError("Buddy onboarding is already processing.")
+            raise ValueError("伙伴建档正在处理中，请稍后再试。")
         operation_id = _new_buddy_operation_id()
         session = self._build_contract_draft_session(
             profile=profile,
@@ -510,7 +510,7 @@ class BuddyOnboardingService:
     ) -> BuddyOnboardingOperationHandle:
         session = self._require_session(session_id)
         if session.operation_status == "running":
-            raise ValueError("Buddy onboarding is already processing.")
+            raise ValueError("伙伴建档正在处理中，请稍后再试。")
         operation_id = _new_buddy_operation_id()
         updated = self._onboarding_session_repository.upsert_session(
             session.model_copy(
@@ -623,7 +623,7 @@ class BuddyOnboardingService:
             "restore-archived",
             "start-new",
         }:
-            raise ValueError("capability_action is required")
+            raise ValueError("请选择方向切换后的能力处理方式。")
         growth_target = self._growth_target_repository.upsert_target(
             GrowthTarget(
                 profile_id=profile.profile_id,
@@ -712,7 +712,7 @@ class BuddyOnboardingService:
     ) -> BuddyOnboardingOperationHandle:
         session = self._require_session(session_id)
         if session.operation_status == "running":
-            raise ValueError("Buddy onboarding is already processing.")
+            raise ValueError("伙伴建档正在处理中，请稍后再试。")
         operation_id = _new_buddy_operation_id()
         updated = self._onboarding_session_repository.upsert_session(
             session.model_copy(
@@ -839,7 +839,7 @@ class BuddyOnboardingService:
         session = self._require_session(session_id)
         relationship = self._relationship_repository.get_relationship(session.profile_id)
         if relationship is None:
-            raise ValueError("primary direction must be confirmed before naming Buddy")
+            raise ValueError("请先确认长期主方向，再给伙伴命名。")
         updated = self._relationship_repository.upsert_relationship(
             relationship.model_copy(update={"buddy_name": buddy_name.strip() or "伙伴"}),
         )
@@ -885,19 +885,19 @@ class BuddyOnboardingService:
     def _require_session(self, session_id: str) -> BuddyOnboardingSessionRecord:
         session = self._onboarding_session_repository.get_session(session_id)
         if session is None:
-            raise ValueError(f"Buddy onboarding session '{session_id}' not found")
+            raise ValueError(f"未找到伙伴建档会话：{session_id}")
         return session
 
     def _require_profile(self, profile_id: str) -> HumanProfile:
         profile = self._profile_repository.get_profile(profile_id)
         if profile is None:
-            raise ValueError(f"Human profile '{profile_id}' not found")
+            raise ValueError(f"未找到用户档案：{profile_id}")
         return profile
 
     def _require_session_by_profile(self, profile_id: str) -> BuddyOnboardingSessionRecord:
         session = self._onboarding_session_repository.get_latest_session_for_profile(profile_id)
         if session is None:
-            raise ValueError(f"Buddy onboarding session for profile '{profile_id}' not found")
+            raise ValueError(f"未找到该档案对应的伙伴建档会话：{profile_id}")
         return session
 
     def _derive_operating_mode(
@@ -1072,7 +1072,7 @@ class BuddyOnboardingService:
         normalized_direction = selected_direction.strip()
         candidate_directions = _unique(list(session.candidate_directions or []))
         if normalized_direction and candidate_directions and normalized_direction not in candidate_directions:
-            raise ValueError("selected_direction must come from the current contract candidates")
+            raise ValueError("所选主方向必须来自当前这轮协作合同编译结果。")
         cached = self._resolve_cached_contract_compile(
             session=session,
             selected_direction=normalized_direction,
@@ -1081,9 +1081,9 @@ class BuddyOnboardingService:
             return self._validate_contract_compile_result(cached)
         if str(session.draft_direction or "").strip():
             raise ValueError(
-                "selected_direction requires a fresh contract compile before confirmation",
+                "当前所选主方向需要重新编译协作合同后才能确认。",
             )
-        raise ValueError("contract compile must be completed before confirming a direction")
+        raise ValueError("请先完成协作合同编译，再确认主方向。")
 
     def _resolve_contract_compile(
         self,
@@ -1093,7 +1093,7 @@ class BuddyOnboardingService:
     ) -> BuddyOnboardingContractCompileResult:
         if self._onboarding_reasoner is None:
             raise BuddyOnboardingReasonerUnavailableError(
-                "Buddy onboarding model is not available.",
+                "伙伴建档模型暂不可用。",
             )
         try:
             growth_plan = self._onboarding_reasoner.compile_contract(
@@ -1107,9 +1107,9 @@ class BuddyOnboardingService:
         except BuddyOnboardingReasonerUnavailableError:
             raise
         except Exception:
-            logger.warning("Buddy onboarding contract compile failed.", exc_info=True)
+            logger.warning("伙伴建档协作合同编译失败。", exc_info=True)
             raise BuddyOnboardingReasonerUnavailableError(
-                "Buddy onboarding model failed to return a valid result.",
+                "伙伴建档模型未返回有效结果。",
             ) from None
         return self._validate_contract_compile_result(growth_plan)
 
@@ -1119,7 +1119,7 @@ class BuddyOnboardingService:
     ) -> BuddyOnboardingContractCompileResult:
         if growth_plan is None:
             raise BuddyOnboardingReasonerUnavailableError(
-                "Buddy onboarding model failed to return a valid result.",
+                "伙伴建档模型未返回有效结果。",
             )
         recommended_direction = str(growth_plan.recommended_direction or "").strip()
         final_goal = str(growth_plan.final_goal or "").strip()
@@ -1133,7 +1133,7 @@ class BuddyOnboardingService:
             lane_hint = _normalize_buddy_lane_hint(item.lane_hint)
             if not lane_hint:
                 raise BuddyOnboardingReasonerUnavailableError(
-                    "Buddy onboarding model failed to return a valid lane hint.",
+                    "伙伴建档模型未返回有效的职责车道。",
                 )
             backlog_items.append(
                 item.model_copy(
@@ -1151,7 +1151,7 @@ class BuddyOnboardingService:
         )
         if not recommended_direction or not final_goal or not why_it_matters or not backlog_items:
             raise BuddyOnboardingReasonerUnavailableError(
-                "Buddy onboarding model failed to return a valid result.",
+                "伙伴建档模型未返回有效结果。",
             )
         return growth_plan.model_copy(
             update={
@@ -1171,7 +1171,7 @@ class BuddyOnboardingService:
     ) -> str:
         normalized = selected_direction.strip()
         if not normalized:
-            raise ValueError("selected_direction is required")
+            raise ValueError("请选择一个长期主方向。")
         return normalized
 
     def _activate_domain_capability(
@@ -1200,7 +1200,7 @@ class BuddyOnboardingService:
                 profile.profile_id,
             )
             if active is None:
-                raise ValueError("cannot keep-active without an active domain capability")
+                raise ValueError("当前没有可沿用的活跃领域能力。")
             updated = active.model_copy(
                 update={
                     "domain_label": self._present_domain_label(
@@ -1218,12 +1218,12 @@ class BuddyOnboardingService:
             if not resolved_target_domain_id and len(preview.archived_matches) == 1:
                 resolved_target_domain_id = str(preview.archived_matches[0]["domain_id"])
             if not resolved_target_domain_id:
-                raise ValueError("target_domain_id is required for restore-archived")
+                raise ValueError("请选择要恢复的历史领域能力。")
             archived = self._domain_capability_repository.get_domain_capability(
                 resolved_target_domain_id,
             )
             if archived is None or archived.profile_id != profile.profile_id:
-                raise ValueError("target_domain_id does not belong to the current profile")
+                raise ValueError("所选历史领域能力不属于当前档案。")
             self._domain_capability_repository.archive_active_domain_capabilities(
                 profile.profile_id,
                 except_domain_id=archived.domain_id,
@@ -1262,7 +1262,7 @@ class BuddyOnboardingService:
         if normalized_direction:
             return normalized_direction
         normalized_domain = str(domain_key or "").strip().replace("-", " ")
-        return normalized_domain or "unscoped domain"
+        return normalized_domain or "未分配领域"
 
     def _ensure_growth_scaffold(
         self,
@@ -1385,7 +1385,7 @@ class BuddyOnboardingService:
             focus_lane_ids=focus_lane_ids,
             backlog_item_ids=[item.id for item in backlog_items],
             source_ref=f"buddy-onboarding:{profile.profile_id}",
-            summary=f"Buddy onboarding cycle for {profile.display_name}",
+            summary=f"{profile.display_name} 的伙伴建档启动周期",
             metadata={"profile_id": profile.profile_id, "primary_direction": growth_target.primary_direction},
         )
         self._assignment_service.ensure_assignments(
@@ -1477,8 +1477,8 @@ class BuddyOnboardingService:
             actor_key=EXECUTION_CORE_AGENT_ID,
             name=f"{profile.display_name} Execution Core",
             role_name="Execution Core",
-            role_summary="Runs durable main-brain reviews and routes the next governed move.",
-            mission="Review progress, backlog, assignments, and evidence, then route the next governed move.",
+            role_summary="负责主脑长程复盘，并把下一步正式动作路由到正确执行位。",
+            mission="审阅进度、积压、派工与证据，然后把下一步正式动作路由到正确执行位。",
             goal_kind=EXECUTION_CORE_ROLE_ID,
             agent_class="system",
             employment_mode="career",
@@ -1502,8 +1502,8 @@ class BuddyOnboardingService:
                 IndustryDraftSchedule(
                     schedule_id=f"{instance_id}-main-brain-morning-review",
                     owner_agent_id=EXECUTION_CORE_AGENT_ID,
-                    title=f"{profile.display_name} Spider Mesh Morning Review",
-                    summary="Morning main-brain review over reports, backlog, assignments, blockers, and next moves.",
+                    title=f"{profile.display_name} 超级伙伴晨间复盘",
+                    summary="晨间检查报告、积压、派工、阻塞与下一步动作。",
                     cron="0 9 * * *",
                     timezone="Asia/Shanghai",
                     dispatch_mode="final",
@@ -1511,8 +1511,8 @@ class BuddyOnboardingService:
                 IndustryDraftSchedule(
                     schedule_id=f"{instance_id}-main-brain-evening-review",
                     owner_agent_id=EXECUTION_CORE_AGENT_ID,
-                    title=f"{profile.display_name} Spider Mesh Evening Review",
-                    summary="Evening main-brain review over execution results, unresolved blockers, and tomorrow routing.",
+                    title=f"{profile.display_name} 超级伙伴晚间复盘",
+                    summary="晚间检查执行结果、未解决阻塞与明日路由安排。",
                     cron="0 19 * * *",
                     timezone="Asia/Shanghai",
                     dispatch_mode="final",
@@ -1814,7 +1814,7 @@ class BuddyOnboardingService:
             if dynamic_roles:
                 return dynamic_roles
         raise BuddyOnboardingReasonerUnavailableError(
-            "Buddy onboarding model failed to return dynamic specialist lanes.",
+            "伙伴建档模型未返回有效的动态执行位车道。",
         )
 
     def _build_initial_backlog_specs(
@@ -1840,7 +1840,7 @@ class BuddyOnboardingService:
                 lane_id = lane_id_by_role.get(normalized_lane_hint)
                 if lane_id is None:
                     raise BuddyOnboardingReasonerUnavailableError(
-                        "Buddy onboarding model returned a backlog lane without a matching specialist role.",
+                        "伙伴建档模型返回的积压项没有匹配到对应执行位车道。",
                     )
                 title = item.title.strip()
                 summary = item.summary.strip()
@@ -1859,7 +1859,7 @@ class BuddyOnboardingService:
             if generated_specs:
                 return generated_specs
         raise BuddyOnboardingReasonerUnavailableError(
-            "Buddy onboarding model failed to return valid backlog seeds.",
+            "伙伴建档模型未返回有效的初始积压项。",
         )
 
     def _seed_avoidance_patterns(

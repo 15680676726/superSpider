@@ -227,7 +227,7 @@ class BuddyProjectionService:
     def build_chat_surface(self, *, profile_id: str | None = None) -> BuddySurfacePayload:
         surface = self.build_optional_chat_surface(profile_id=profile_id)
         if surface is None:
-            raise ValueError("Buddy profile is not available")
+            raise ValueError("伙伴档案暂不可用。")
         return surface
 
     def build_cockpit_summary(self, *, profile_id: str | None = None) -> dict[str, Any]:
@@ -262,7 +262,7 @@ class BuddyProjectionService:
         if profile_id:
             return self._profile_repository.get_profile(profile_id)
         if self._profile_repository.count_profiles() > 1:
-            raise ValueError("Buddy surface requires explicit profile_id when multiple profiles exist")
+            raise ValueError("当前存在多个伙伴档案，请明确指定 profile_id。")
         return self._profile_repository.get_latest_profile()
 
     def _resolve_active_domain_capability(

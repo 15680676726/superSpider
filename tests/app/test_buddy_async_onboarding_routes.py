@@ -240,7 +240,7 @@ def test_sync_contract_submit_clears_stale_async_failure_on_surface(tmp_path) ->
         handle["profile_id"],
         operation_status="failed",
     )
-    assert "timed out" in failed_surface["onboarding"]["operation_error"].lower()
+    assert failed_surface["onboarding"]["operation_error"] == "伙伴建档模型响应超时。"
 
     retry = client.post(
         "/buddy/onboarding/contract",

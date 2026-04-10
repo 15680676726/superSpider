@@ -133,7 +133,7 @@ def test_contract_returns_gateway_timeout_when_compiler_times_out(tmp_path) -> N
     )
 
     assert response.status_code == 504
-    assert "timed out" in response.json()["detail"].lower()
+    assert response.json()["detail"] == "伙伴建档模型响应超时。"
     session = service._onboarding_session_repository.get_session(identity["session_id"])  # pylint: disable=protected-access
     assert session is not None
     assert session.status == "contract-draft"
@@ -152,7 +152,7 @@ def test_contract_returns_service_unavailable_when_compiler_fails(tmp_path) -> N
     )
 
     assert response.status_code == 503
-    assert "model" in response.json()["detail"].lower()
+    assert "伙伴建档模型" in response.json()["detail"]
 
 
 def test_confirm_direction_rejects_missing_contract_compile(tmp_path) -> None:
@@ -170,7 +170,7 @@ def test_confirm_direction_rejects_missing_contract_compile(tmp_path) -> None:
     )
 
     assert response.status_code == 400
-    assert "contract" in response.json()["detail"].lower()
+    assert "协作合同编译" in response.json()["detail"]
 
 
 def test_confirm_direction_rejects_alternate_candidate_without_matching_compile(
@@ -196,7 +196,7 @@ def test_confirm_direction_rejects_alternate_candidate_without_matching_compile(
     )
 
     assert response.status_code == 400
-    assert "fresh contract compile" in response.json()["detail"].lower()
+    assert "重新编译协作合同" in response.json()["detail"]
 
 
 def test_confirm_direction_queues_activation_instead_of_waiting_for_kickoff(tmp_path) -> None:

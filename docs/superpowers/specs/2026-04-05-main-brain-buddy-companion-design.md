@@ -620,7 +620,7 @@ The current first-entry flow must not remain the old industry bootstrap mindset.
 
 The new first-entry flow should become:
 
-> human identity formation -> Buddy clarification -> direction confirmation -> Buddy birth -> first chat naming
+> human identity formation -> collaboration contract compile -> direction confirmation -> Buddy birth -> first chat naming
 
 ### 8.1 Core Judgment
 
@@ -634,7 +634,7 @@ It should instead be:
 
 - establish who the human is
 - understand where the human is in life/work
-- clarify what kind of larger direction is actually desired
+- capture what the human wants Buddy to do and how collaboration should work
 - let Buddy emerge as the companion shell of the main brain
 
 Execution-team/industry structure may still be generated afterward, but that should not be the first emotional entry point.
@@ -653,20 +653,20 @@ The first screen should collect a compact human profile, such as:
 
 This screen should feel like "the system is getting to know me," not like "I am configuring a work platform."
 
-### 8.3 Step Two: Buddy Clarification Dialogue
+### 8.3 Step Two: Collaboration Contract Compile
 
 After the basic form, the system should not immediately produce a plan.
 
-It should enter a Buddy-led clarification dialogue.
+It should collect a structured Buddy collaboration contract and compile it into candidate directions.
 
 Hard rules:
 
-- maximum of `9` questions
-- if direction is still unclear after `5`, switch to tighter follow-up mode
-- the system must not stay suspended forever waiting for perfect clarity
-- the system must still converge to a usable first result
+- no clarification dialogue remains as canonical onboarding truth
+- the source of truth must be explicit contract fields rather than transcript turns
+- the system must still converge to a usable first result even if some fields are vague
+- async UI is allowed, but the async path must still compile the same contract object rather than create a second interview flow
 
-This clarification may borrow from psychology-informed growth coaching or motivation clarification, but must not become:
+This contract compile may borrow from psychology-informed growth coaching or motivation clarification, but must not become:
 
 - therapy
 - diagnosis
@@ -674,15 +674,15 @@ This clarification may borrow from psychology-informed growth coaching or motiva
 
 Its role is:
 
-- direction clarification
-- motive clarification
-- blocker discovery
-- value prioritization
-- realistic first-step discovery
+- service-intent capture
+- collaboration-role capture
+- autonomy-boundary capture
+- report-style capture
+- realistic direction synthesis
 
 ### 8.4 Step Three: Candidate Directions And One Primary Direction
 
-After clarification, Buddy may present:
+After contract compile, Buddy may present:
 
 - `2-3` candidate long-horizon directions
 
@@ -707,7 +707,7 @@ The onboarding flow must always produce at least:
 - a first phase focus
 - a first current task
 
-This prevents the system from degrading into endless clarification.
+This prevents the system from degrading into endless onboarding loops.
 
 ### 8.6 Step Five: Buddy Birth And First Chat Naming
 
@@ -1015,7 +1015,8 @@ Recommended API shape:
 
 - onboarding endpoints for:
   - basic identity submit
-  - clarification dialogue turns
+  - collaboration contract submit/start
+  - direction transition preview
   - candidate-direction resolution
   - primary-direction confirmation
 - Buddy read surface:
@@ -1050,7 +1051,7 @@ This should no longer be the first emotional or product entry for humans.
 The cutover should become:
 
 - human onboarding first
-- Buddy clarification second
+- collaboration contract compile second
 - main direction confirmation third
 - industry/team/execution scaffolding afterward
 
@@ -1089,10 +1090,11 @@ Migration should allow a short compatibility window, but with strict boundaries:
 The implementation plan should include explicit tests for:
 
 - first entry now landing on human/Buddy onboarding rather than industry bootstrap
-- clarification flow capping at 9 questions
+- collaboration contract compile replacing clarification turns
 - candidate directions returning 2-3 options
 - exactly one primary direction being confirmed
 - Buddy naming happening inside first real chat
+- old clarify routes returning `404`
 - old industry bootstrap not silently reclaiming primary-entry status
 
 ---
@@ -1114,9 +1116,9 @@ This Buddy round should not:
 
 ### Phase 1: Buddy Onboarding Replacement
 
-- replace the old first-entry mentality with human identity + clarification onboarding
+- replace the old first-entry mentality with human identity + collaboration-contract onboarding
 - collect the basic human profile
-- add Buddy clarification dialogue with the 9-question cap
+- add the fixed collaboration contract form plus contract compile
 - converge to candidate directions and one confirmed primary direction
 - land first-chat Buddy naming
 
@@ -1158,7 +1160,7 @@ This design is only considered properly landed if the following are true:
 
 - Buddy is the main brain's only front-stage personality shell
 - the first-entry flow forms the human identity before team/execution bootstrap takes over
-- Buddy clarification converges within the capped question flow
+- Buddy onboarding converges through the collaboration contract compile flow
 - the human confirms exactly one primary direction
 - Buddy is named inside the first real chat relationship flow
 - Buddy does not create a second truth source

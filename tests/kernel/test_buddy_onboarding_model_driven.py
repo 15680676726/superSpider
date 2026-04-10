@@ -195,7 +195,7 @@ def test_model_driven_confirm_requires_completed_contract_compile(tmp_path) -> N
         goal_intention="Build a real stock trading path.",
     )
 
-    with pytest.raises(ValueError, match="contract"):
+    with pytest.raises(ValueError, match="协作合同编译"):
         service.confirm_primary_direction(
             session_id=identity.session_id,
             selected_direction=_STOCKS_DIRECTION,
@@ -224,7 +224,7 @@ def test_model_driven_confirm_rejects_alternate_candidate_without_direction_spec
 
     assert compiled.candidate_directions == [_STOCKS_DIRECTION, _CREATOR_DIRECTION]
 
-    with pytest.raises(ValueError, match="fresh contract compile"):
+    with pytest.raises(ValueError, match="重新编译协作合同"):
         service.confirm_primary_direction(
             session_id=identity.session_id,
             selected_direction=_CREATOR_DIRECTION,

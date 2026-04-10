@@ -504,13 +504,7 @@ export default function BuddyOnboardingPage() {
     }
   };
 
-  const stepIndex = confirmPayload
-    ? 2
-    : contractDraft
-      ? 2
-      : identity
-        ? 1
-        : 0;
+  const stepIndex = confirmPayload ? 2 : contractDraft ? 2 : identity ? 1 : 0;
 
   if (loading) {
     return (
@@ -525,7 +519,7 @@ export default function BuddyOnboardingPage() {
       <Card>
         <Space direction="vertical" size={8} style={{ width: "100%" }}>
           <Title level={2} style={{ margin: 0 }}>
-            超级伙伴初次建档
+            超级伙伴首次建档
           </Title>
           <Paragraph style={{ margin: 0 }}>
             先确认你是谁、你希望我怎么和你协作，再把长期主方向落成正式执行主链。
@@ -602,7 +596,7 @@ export default function BuddyOnboardingPage() {
             data-testid="buddy-contract-form"
           >
             <Form.Item
-              label="你希望我为你做什么"
+              label="你希望我为你做什么？"
               name="service_intent"
               rules={[{ required: true, message: "请先告诉我你希望我为你做什么。" }]}
             >

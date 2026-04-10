@@ -242,7 +242,7 @@ describe("EntryRedirect", () => {
 
     render(<EntryRedirect />);
 
-    expect(screen.getByText("正在为你打开页面…")).toBeInTheDocument();
+    expect(screen.getByText("正在为你打开伙伴主场…")).toBeInTheDocument();
 
     await waitFor(() => {
       expect(runtimeChatMock.buildBuddyExecutionCarrierChatBinding).toHaveBeenCalledWith({

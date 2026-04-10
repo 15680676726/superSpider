@@ -137,10 +137,10 @@ def _response_to_payload(response: object) -> dict[str, Any]:
         return dict(metadata)
     text = _response_to_text(response)
     if not text:
-        raise ValueError("Buddy onboarding reasoner returned an empty response.")
+        raise ValueError("伙伴建档编译器返回了空响应。")
     payload = json.loads(text)
     if not isinstance(payload, dict):
-        raise ValueError("Buddy onboarding reasoner returned a non-object payload.")
+        raise ValueError("伙伴建档编译器返回了非法结构。")
     return payload
 
 
@@ -216,7 +216,7 @@ def _run_async_blocking(
     thread.join(timeout_seconds)
     if thread.is_alive():
         raise BuddyOnboardingReasonerTimeoutError(
-            f"Buddy onboarding model timed out after {timeout_seconds:g} seconds.",
+            f"伙伴建档模型在 {timeout_seconds:g} 秒内未返回结果。",
         )
     if "value" in error:
         raise error["value"]
@@ -266,9 +266,9 @@ class ModelDrivenBuddyOnboardingReasoner:
         try:
             model = self._model_factory()
         except Exception:
-            logger.debug("Buddy onboarding compiler could not resolve an active chat model.", exc_info=True)
+            logger.debug("伙伴建档编译器无法获取可用聊天模型。", exc_info=True)
             raise BuddyOnboardingReasonerUnavailableError(
-                "Buddy onboarding model is not available.",
+                "伙伴建档模型暂不可用。",
             ) from None
         request_payload = {
             "profile": profile.model_dump(mode="json"),
@@ -297,12 +297,12 @@ class ModelDrivenBuddyOnboardingReasoner:
                 _normalize_reasoner_payload(_response_to_payload(response)),
             )
         except BuddyOnboardingReasonerTimeoutError:
-            logger.warning("Buddy onboarding contract compiler timed out.", exc_info=True)
+            logger.warning("伙伴建档协作合同编译超时。", exc_info=True)
             raise
         except Exception:
-            logger.warning("Buddy onboarding contract compiler failed.", exc_info=True)
+            logger.warning("伙伴建档协作合同编译失败。", exc_info=True)
             raise BuddyOnboardingReasonerUnavailableError(
-                "Buddy onboarding model failed to return a valid result.",
+                "伙伴建档模型未返回有效结果。",
             ) from None
         directions = _unique(payload.candidate_directions)
         recommended = str(payload.recommended_direction or "").strip()
@@ -317,7 +317,7 @@ class ModelDrivenBuddyOnboardingReasoner:
         ][:3]
         if not recommended or not final_goal or not why_it_matters or not backlog_items:
             raise BuddyOnboardingReasonerUnavailableError(
-                "Buddy onboarding model failed to return a valid result.",
+                "伙伴建档模型未返回有效结果。",
             )
         return BuddyOnboardingContractCompileResult(
             candidate_directions=directions[:3],

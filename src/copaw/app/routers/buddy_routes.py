@@ -15,6 +15,13 @@ from ...kernel.buddy_projection_service import BuddyProjectionService
 router = APIRouter(prefix="/buddy", tags=["buddy"])
 logger = logging.getLogger(__name__)
 
+_BUDDY_ONBOARDING_SERVICE_UNAVAILABLE = "伙伴建档服务暂不可用。"
+_BUDDY_PROJECTION_SERVICE_UNAVAILABLE = "伙伴投影服务暂不可用。"
+_BUDDY_ONBOARDING_TIMEOUT_MESSAGE = "伙伴建档模型响应超时。"
+_BUDDY_ONBOARDING_MODEL_UNAVAILABLE = "伙伴建档模型暂不可用。"
+_BUDDY_ONBOARDING_FAILED_MESSAGE = "伙伴建档失败。"
+_BUDDY_ONBOARDING_ACTIVATION_MESSAGE = "伙伴建档已确认，请立即启动第一项具体任务。"
+
 
 class BuddyIdentityRequest(BaseModel):
     display_name: str = Field(..., min_length=1)
@@ -65,23 +72,23 @@ def _get_buddy_onboarding_service(request: Request) -> BuddyOnboardingService:
     service = getattr(request.app.state, "buddy_onboarding_service", None)
     if isinstance(service, BuddyOnboardingService):
         return service
-    raise HTTPException(503, detail="Buddy onboarding service is not available")
+    raise HTTPException(503, detail=_BUDDY_ONBOARDING_SERVICE_UNAVAILABLE)
 
 
 def _get_buddy_projection_service(request: Request) -> BuddyProjectionService:
     service = getattr(request.app.state, "buddy_projection_service", None)
     if isinstance(service, BuddyProjectionService):
         return service
-    raise HTTPException(503, detail="Buddy projection service is not available")
+    raise HTTPException(503, detail=_BUDDY_PROJECTION_SERVICE_UNAVAILABLE)
 
 
 def _spawn_buddy_activation_job(*, kickoff, instance_id: str) -> None:
     async def _run() -> None:
         await kickoff(
             industry_instance_id=instance_id,
-            message_text="Buddy onboarding confirmed. Start the first concrete task now.",
+            message_text=_BUDDY_ONBOARDING_ACTIVATION_MESSAGE,
             trigger_source="buddy-onboarding",
-            trigger_reason_override="Buddy onboarding confirmed. Start the first concrete task now.",
+            trigger_reason_override=_BUDDY_ONBOARDING_ACTIVATION_MESSAGE,
         )
 
     def _runner() -> None:
@@ -90,7 +97,7 @@ def _spawn_buddy_activation_job(*, kickoff, instance_id: str) -> None:
 
             asyncio.run(_run())
         except Exception:
-            logger.warning("Buddy onboarding activation task failed.", exc_info=True)
+            logger.warning("伙伴建档激活任务执行失败。", exc_info=True)
 
     threading.Thread(
         target=_runner,
@@ -186,7 +193,7 @@ def _spawn_buddy_onboarding_operation(
         try:
             work()
         except Exception:
-            logger.warning("Buddy onboarding async operation failed.", exc_info=True)
+            logger.warning("伙伴建档异步任务执行失败。", exc_info=True)
 
     threading.Thread(
         target=_runner,
@@ -204,9 +211,9 @@ async def submit_buddy_identity(
     try:
         result = service.submit_identity(**payload.model_dump())
     except TimeoutError as exc:
-        raise HTTPException(504, detail=str(exc) or "Buddy onboarding model timed out.") from exc
+        raise HTTPException(504, detail=_BUDDY_ONBOARDING_TIMEOUT_MESSAGE) from exc
     except BuddyOnboardingReasonerUnavailableError as exc:
-        raise HTTPException(503, detail=str(exc) or "Buddy onboarding model is unavailable.") from exc
+        raise HTTPException(503, detail=str(exc) or _BUDDY_ONBOARDING_MODEL_UNAVAILABLE) from exc
     except ValueError as exc:
         raise HTTPException(400, detail=str(exc)) from exc
     return result.model_dump(mode="json")
@@ -233,21 +240,21 @@ async def start_buddy_identity(
                 session_id=handle.session_id,
                 operation_id=handle.operation_id,
                 operation_kind=handle.operation_kind,
-                error_message=str(exc) or "Buddy onboarding model timed out.",
+                error_message=_BUDDY_ONBOARDING_TIMEOUT_MESSAGE,
             )
         except BuddyOnboardingReasonerUnavailableError as exc:
             service.mark_operation_failed(
                 session_id=handle.session_id,
                 operation_id=handle.operation_id,
                 operation_kind=handle.operation_kind,
-                error_message=str(exc) or "Buddy onboarding model is unavailable.",
+                error_message=str(exc) or _BUDDY_ONBOARDING_MODEL_UNAVAILABLE,
             )
         except Exception as exc:
             service.mark_operation_failed(
                 session_id=handle.session_id,
                 operation_id=handle.operation_id,
                 operation_kind=handle.operation_kind,
-                error_message=str(exc) or "Buddy onboarding failed.",
+                error_message=_BUDDY_ONBOARDING_FAILED_MESSAGE,
             )
         else:
             service.mark_operation_succeeded(
@@ -272,9 +279,9 @@ async def submit_buddy_contract(
     try:
         result = service.submit_contract(**payload.model_dump())
     except TimeoutError as exc:
-        raise HTTPException(504, detail=str(exc) or "Buddy onboarding model timed out.") from exc
+        raise HTTPException(504, detail=_BUDDY_ONBOARDING_TIMEOUT_MESSAGE) from exc
     except BuddyOnboardingReasonerUnavailableError as exc:
-        raise HTTPException(503, detail=str(exc) or "Buddy onboarding model is unavailable.") from exc
+        raise HTTPException(503, detail=str(exc) or _BUDDY_ONBOARDING_MODEL_UNAVAILABLE) from exc
     except ValueError as exc:
         raise HTTPException(400, detail=str(exc)) from exc
     return result.model_dump(mode="json")
@@ -301,21 +308,21 @@ async def start_buddy_contract_compile(
                 session_id=handle.session_id,
                 operation_id=handle.operation_id,
                 operation_kind=handle.operation_kind,
-                error_message=str(exc) or "Buddy onboarding model timed out.",
+                error_message=_BUDDY_ONBOARDING_TIMEOUT_MESSAGE,
             )
         except BuddyOnboardingReasonerUnavailableError as exc:
             service.mark_operation_failed(
                 session_id=handle.session_id,
                 operation_id=handle.operation_id,
                 operation_kind=handle.operation_kind,
-                error_message=str(exc) or "Buddy onboarding model is unavailable.",
+                error_message=str(exc) or _BUDDY_ONBOARDING_MODEL_UNAVAILABLE,
             )
         except Exception as exc:
             service.mark_operation_failed(
                 session_id=handle.session_id,
                 operation_id=handle.operation_id,
                 operation_kind=handle.operation_kind,
-                error_message=str(exc) or "Buddy onboarding failed.",
+                error_message=_BUDDY_ONBOARDING_FAILED_MESSAGE,
             )
         else:
             service.mark_operation_succeeded(
@@ -353,9 +360,9 @@ async def confirm_buddy_direction(
     try:
         result = service.confirm_primary_direction(**payload.model_dump())
     except TimeoutError as exc:
-        raise HTTPException(504, detail=str(exc) or "Buddy onboarding model timed out.") from exc
+        raise HTTPException(504, detail=_BUDDY_ONBOARDING_TIMEOUT_MESSAGE) from exc
     except BuddyOnboardingReasonerUnavailableError as exc:
-        raise HTTPException(503, detail=str(exc) or "Buddy onboarding model is unavailable.") from exc
+        raise HTTPException(503, detail=str(exc) or _BUDDY_ONBOARDING_MODEL_UNAVAILABLE) from exc
     except ValueError as exc:
         raise HTTPException(400, detail=str(exc)) from exc
     await _maybe_register_buddy_schedules(
@@ -399,7 +406,7 @@ async def start_buddy_direction_confirmation(
                 session_id=handle.session_id,
                 operation_id=handle.operation_id,
                 operation_kind=handle.operation_kind,
-                error_message=str(exc) or "Buddy onboarding model timed out.",
+                error_message=_BUDDY_ONBOARDING_TIMEOUT_MESSAGE,
             )
             return
         except BuddyOnboardingReasonerUnavailableError as exc:
@@ -407,7 +414,7 @@ async def start_buddy_direction_confirmation(
                 session_id=handle.session_id,
                 operation_id=handle.operation_id,
                 operation_kind=handle.operation_kind,
-                error_message=str(exc) or "Buddy onboarding model is unavailable.",
+                error_message=str(exc) or _BUDDY_ONBOARDING_MODEL_UNAVAILABLE,
             )
             return
         except Exception as exc:
@@ -415,7 +422,7 @@ async def start_buddy_direction_confirmation(
                 session_id=handle.session_id,
                 operation_id=handle.operation_id,
                 operation_kind=handle.operation_kind,
-                error_message=str(exc) or "Buddy onboarding failed.",
+                error_message=_BUDDY_ONBOARDING_FAILED_MESSAGE,
             )
             return
         service.mark_operation_succeeded(
@@ -433,7 +440,7 @@ async def start_buddy_direction_confirmation(
                 )
             )
         except Exception:
-            logger.warning("Buddy onboarding async schedule registration failed.", exc_info=True)
+            logger.warning("伙伴建档异步日程注册失败。", exc_info=True)
         try:
             _maybe_activate_buddy_execution_for_app(
                 app,
@@ -441,7 +448,7 @@ async def start_buddy_direction_confirmation(
                 domain_capability=result.domain_capability,
             )
         except Exception:
-            logger.warning("Buddy onboarding async activation failed.", exc_info=True)
+            logger.warning("伙伴建档异步激活失败。", exc_info=True)
 
     _spawn_buddy_onboarding_operation(
         name=f"buddy-onboarding-confirm-{handle.session_id}",
@@ -489,7 +496,7 @@ async def get_buddy_surface(
         try:
             onboarding_service.repair_active_domain_schedules(profile_id=profile_id)
         except Exception:
-            logger.debug("Buddy surface schedule repair failed.", exc_info=True)
+            logger.debug("伙伴读面日程修复失败。", exc_info=True)
     service = _get_buddy_projection_service(request)
     try:
         surface = service.build_optional_chat_surface(profile_id=profile_id)

@@ -135,7 +135,7 @@ def test_model_driven_reasoner_rejects_incomplete_contract_compile_payload() -> 
         ),
     )
 
-    with pytest.raises(BuddyOnboardingReasonerUnavailableError, match="valid result"):
+    with pytest.raises(BuddyOnboardingReasonerUnavailableError, match="有效结果"):
         reasoner.compile_contract(
             profile=_profile(),
             collaboration_contract=_contract(),

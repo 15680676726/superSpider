@@ -481,7 +481,7 @@ def test_confirm_primary_direction_requires_completed_contract_compile(tmp_path)
         goal_intention="I want a real creator direction that can change my life.",
     )
 
-    with pytest.raises(ValueError, match="contract"):
+    with pytest.raises(ValueError, match="协作合同编译"):
         service.confirm_primary_direction(
             session_id=identity.session_id,
             selected_direction=_CREATOR_DIRECTION,
@@ -515,7 +515,7 @@ def test_confirm_primary_direction_rejects_selected_direction_without_matching_c
 
     assert compiled.candidate_directions == [_STOCKS_DIRECTION, _CREATOR_DIRECTION]
 
-    with pytest.raises(ValueError, match="fresh contract compile"):
+    with pytest.raises(ValueError, match="重新编译协作合同"):
         service.confirm_primary_direction(
             session_id=identity.session_id,
             selected_direction=_CREATOR_DIRECTION,

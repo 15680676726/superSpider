@@ -81,7 +81,7 @@ export default function EntryRedirect() {
     >
       <div style={{ display: "grid", gap: 12, justifyItems: "center" }}>
         <Spin size="large" />
-        <div>正在为你打开页面…</div>
+        <div>正在为你打开伙伴主场…</div>
       </div>
     </div>
   );
