@@ -570,6 +570,16 @@ class _ObjectScheduleStateQueryService(FakeStateQueryService):
         return [SimpleNamespace(**item) for item in schedules]
 
 
+class _PausedScheduleStateQueryService(FakeStateQueryService):
+    async def list_schedules(self, limit: int | None = 5):
+        schedules = await super().list_schedules(limit=limit)
+        payload = [dict(item) for item in schedules]
+        for item in payload:
+            item["status"] = "paused"
+            item["enabled"] = False
+        return payload[:limit] if isinstance(limit, int) else payload
+
+
 def test_runtime_center_overview_uses_state_and_evidence_services():
     app = build_runtime_center_app()
     app.state.state_query_service = FakeStateQueryService()
@@ -1821,6 +1831,34 @@ def test_runtime_center_main_brain_route_handles_object_schedule_summaries():
     assert payload["automation"]["schedule_count"] == 1
     assert payload["automation"]["active_schedule_count"] == 1
     assert payload["automation"]["paused_schedule_count"] == 0
+
+
+def test_runtime_center_main_brain_route_does_not_mark_paused_schedules_as_active():
+    app = build_runtime_center_app()
+    app.state.state_query_service = _PausedScheduleStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = FakeIndustryService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+
+    client = TestClient(app)
+    with patch(
+        "copaw.app.runtime_center.overview_cards.get_heartbeat_config",
+        return_value=HeartbeatConfig(enabled=True, every="6h", target="main"),
+        create=True,
+    ):
+        response = client.get("/runtime-center/surface?sections=main_brain")
+
+    assert response.status_code == 200
+    payload = response.json()["main_brain"]
+    assert payload["automation"]["schedule_count"] == 1
+    assert payload["automation"]["active_schedule_count"] == 0
+    assert payload["automation"]["paused_schedule_count"] == 1
+    assert payload["automation"]["status"] == "idle"
 
 
 def test_runtime_center_overview_governance_uses_canonical_host_twin_summary_for_ready_runtime():

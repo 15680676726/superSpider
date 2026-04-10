@@ -897,9 +897,11 @@ async def get_patch_detail(
     goal = goal_service.get_goal(patch.goal_id) if patch.goal_id else None
     agent = agent_profile_service.get_agent(patch.agent_id) if patch.agent_id else None
     evidence_records = []
+    seen_evidence_ids: set[str] = set()
     for evidence_id in [patch.source_evidence_id, *patch.evidence_refs]:
-        if not evidence_id:
+        if not evidence_id or evidence_id in seen_evidence_ids:
             continue
+        seen_evidence_ids.add(evidence_id)
         record = evidence_query_service.get_record(evidence_id)
         if record is not None:
             evidence_records.append(evidence_query_service.serialize_record(record))

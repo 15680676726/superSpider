@@ -164,7 +164,7 @@ describe("ChatHumanAssistPanel", () => {
   });
 
   it.each([
-    ["resume_queued", "已验收"],
+    ["resume_queued", "\u6062\u590d\u4e2d"],
     ["need_more_evidence", "待补证"],
     ["closed", "已关闭"],
   ])("renders a readable status label for %s", async (status, label) => {

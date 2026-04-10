@@ -83,7 +83,7 @@ const COMMIT_STATUS_TITLES: Record<RuntimeCommitStatusKind, string> = {
   governance_denied: "\u6cbb\u7406\u62d2\u7edd",
   environment_unavailable: "\u73af\u5883\u4e0d\u53ef\u7528",
   failed: "\u63d0\u4ea4\u5931\u8d25",
-  deferred: "\u5df2\u6279\u51c6\uff0c\u7b49\u5f85\u63d0\u4ea4",
+  deferred: "\u5f85\u8c03\u5ea6",
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -244,6 +244,77 @@ function resolveCommitStatusTitle(kind: RuntimeCommitStatusKind): string {
   return COMMIT_STATUS_TITLES[kind];
 }
 
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item) => asNonEmptyString(item))
+    .filter((item): item is string => typeof item === "string");
+}
+
+export function resolveDeferredCommitPresentation(payload: Record<string, unknown>): {
+  title: string;
+  summary: string | null;
+} {
+  const summary =
+    asNonEmptyString(payload.summary) ?? asNonEmptyString(payload.message);
+  const delegationState = asNonEmptyString(payload.delegation_state);
+  const reason = asNonEmptyString(payload.reason) ?? asNonEmptyString(payload.outcome);
+  const seatResolutionKind = asNonEmptyString(payload.seat_resolution_kind);
+  const proposalStatus = asNonEmptyString(payload.proposal_status);
+  const materializedAssignmentIds = asStringArray(payload.materialized_assignment_ids);
+  const createdBacklogIds = asStringArray(payload.created_backlog_ids);
+
+  if (
+    delegationState === "waiting_confirm" ||
+    delegationState === "waiting-confirm" ||
+    reason === "waiting_confirm" ||
+    reason === "confirm_required" ||
+    proposalStatus === "waiting_confirm" ||
+    proposalStatus === "waiting-confirm"
+  ) {
+    return {
+      title: "\u5f85\u786e\u8ba4",
+      summary,
+    };
+  }
+
+  if (
+    delegationState === "pending_staffing" ||
+    delegationState === "routing-pending" ||
+    reason === "pending_staffing" ||
+    seatResolutionKind === "routing-pending"
+  ) {
+    return {
+      title: "\u5f85\u8865\u4f4d",
+      summary,
+    };
+  }
+
+  if (
+    delegationState === "materialized" ||
+    materializedAssignmentIds.length > 0
+  ) {
+    return {
+      title: "\u5df2\u751f\u6210\u4efb\u52a1",
+      summary,
+    };
+  }
+
+  if (delegationState === "recorded" || createdBacklogIds.length > 0) {
+    return {
+      title: "\u5df2\u8bb0\u5f55",
+      summary,
+    };
+  }
+
+  return {
+    title: resolveCommitStatusTitle("deferred"),
+    summary,
+  };
+}
+
 function trimHistory(history: RuntimeCommitStatus[]): RuntimeCommitStatus[] {
   return history.slice(-6);
 }
@@ -271,6 +342,12 @@ function buildRuntimeSidecarPayload(
     commit_key: record.commit_key,
     recovery_options: record.recovery_options,
     idempotent_replay: record.idempotent_replay,
+    delegation_state: record.delegation_state,
+    created_backlog_ids: record.created_backlog_ids,
+    materialized_assignment_ids: record.materialized_assignment_ids,
+    materialized_cycle_id: record.materialized_cycle_id,
+    seat_resolution_kind: record.seat_resolution_kind,
+    proposal_status: record.proposal_status,
   };
   for (const [key, value] of Object.entries(extras)) {
     if (value !== undefined) {
@@ -396,12 +473,17 @@ export function reduceRuntimeSidecarEvent(
   if (!kind) {
     return state;
   }
+  const deferredPresentation =
+    kind === "deferred"
+      ? resolveDeferredCommitPresentation(sidecarEvent.payload)
+      : null;
 
   const status: RuntimeCommitStatus = {
     kind,
     event: sidecarEvent.event,
-    title: resolveCommitStatusTitle(kind),
+    title: deferredPresentation?.title ?? resolveCommitStatusTitle(kind),
     summary:
+      deferredPresentation?.summary ??
       asNonEmptyString(sidecarEvent.payload.summary) ??
       asNonEmptyString(sidecarEvent.payload.message),
     reason:

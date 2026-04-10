@@ -219,6 +219,7 @@ interface Proposal {
   title: string;
   description: string;
   source_agent_id: string;
+  agent_id?: string | null;
   status: string;
   created_at: string;
 }
@@ -226,6 +227,7 @@ interface Proposal {
 interface PatchItem {
   id: string;
   kind: string;
+  agent_id?: string | null;
   title: string;
   description: string;
   status: string;
@@ -367,7 +369,25 @@ const REPORT_PROPOSAL_LIMIT = 50;
 const REPORT_PATCH_LIMIT = 50;
 const REPORT_EVIDENCE_LIMIT = 50;
 
-function useReportData() {
+function scopeReportData(
+  dataset: ReportData,
+  agentId: string | null,
+): ReportData {
+  if (!agentId) {
+    return dataset;
+  }
+  return {
+    events: dataset.events.filter((item) => item.agent_id === agentId),
+    proposals: dataset.proposals.filter(
+      (item) =>
+        item.agent_id === agentId || item.source_agent_id === agentId,
+    ),
+    patches: dataset.patches.filter((item) => item.agent_id === agentId),
+    evidence: dataset.evidence,
+  };
+}
+
+function useReportData(agentId: string | null) {
   const [data, setData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -376,26 +396,36 @@ function useReportData() {
     setLoading(true);
     try {
       setError(null);
+      const normalizedAgentId = agentId?.trim() || null;
       const [events, proposals, patches, evidence] = await Promise.all([
         request<GrowthEvent[]>(
-          `/runtime-center/learning/growth?limit=${REPORT_GROWTH_LIMIT}`,
+          normalizedAgentId
+            ? `/runtime-center/learning/growth?agent_id=${encodeURIComponent(normalizedAgentId)}&limit=${REPORT_GROWTH_LIMIT}`
+            : `/runtime-center/learning/growth?limit=${REPORT_GROWTH_LIMIT}`,
         ),
         request<Proposal[]>(
           `/runtime-center/learning/proposals?limit=${REPORT_PROPOSAL_LIMIT}`,
         ),
         request<PatchItem[]>(
-          `/runtime-center/learning/patches?limit=${REPORT_PATCH_LIMIT}`,
+          normalizedAgentId
+            ? `/runtime-center/learning/patches?agent_id=${encodeURIComponent(normalizedAgentId)}&limit=${REPORT_PATCH_LIMIT}`
+            : `/runtime-center/learning/patches?limit=${REPORT_PATCH_LIMIT}`,
         ),
         request<EvidenceItem[]>(
           `/runtime-center/evidence?limit=${REPORT_EVIDENCE_LIMIT}`,
         ),
       ]);
-      setData({
-        events: Array.isArray(events) ? events : [],
-        proposals: Array.isArray(proposals) ? proposals : [],
-        patches: Array.isArray(patches) ? patches : [],
-        evidence: Array.isArray(evidence) ? evidence : [],
-      });
+      setData(
+        scopeReportData(
+          {
+            events: Array.isArray(events) ? events : [],
+            proposals: Array.isArray(proposals) ? proposals : [],
+            patches: Array.isArray(patches) ? patches : [],
+            evidence: Array.isArray(evidence) ? evidence : [],
+          },
+          normalizedAgentId,
+        ),
+      );
     } catch (fetchError) {
       console.error("Failed to load agent report data", fetchError);
       setError(
@@ -404,7 +434,7 @@ function useReportData() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [agentId]);
 
   useEffect(() => {
     void fetchData();
@@ -791,8 +821,14 @@ export function AgentWeeklyReport({
   return <AgentFormalReport window="weekly" agentId={agentId} agentName={agentName} />;
 }
 
-export function AgentGrowthTrajectory() {
-  const { data, loading, error, refresh } = useReportData();
+export function AgentGrowthTrajectory({
+  agentId,
+  agentName,
+}: {
+  agentId: string | null;
+  agentName: string | null;
+}) {
+  const { data, loading, error, refresh } = useReportData(agentId);
 
   if (loading) {
     return <Spin />;
@@ -813,7 +849,11 @@ export function AgentGrowthTrajectory() {
         showIcon
         type="info"
         message={agentReportsText.learningFeedTitle}
-        description={agentReportsText.learningFeedDescription}
+        description={
+          agentId && agentName
+            ? `${agentName} 的学习流、补丁流和成长轨迹。`
+            : agentReportsText.learningFeedDescription
+        }
         style={{ marginBottom: 32 }}
       />
 

@@ -26,9 +26,12 @@ def build_buddy_execution_carrier_handoff(
     normalized_instance_id = str(instance_id or "").strip()
     normalized_control_thread_id = str(control_thread_id or "").strip()
     resolved_control_thread_id = (
-        build_buddy_domain_control_thread_id(instance_id=normalized_instance_id)
-        if normalized_instance_id
-        else normalized_control_thread_id
+        normalized_control_thread_id
+        or (
+            build_buddy_domain_control_thread_id(instance_id=normalized_instance_id)
+            if normalized_instance_id
+            else ""
+        )
     )
     return {
         "instance_id": normalized_instance_id,

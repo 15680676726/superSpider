@@ -165,6 +165,13 @@ describe("ChatRuntimeSidebar", () => {
       tone: "error",
       updatedAt: 102,
     };
+    const deferredState: RuntimeLifecycleState = {
+      phase: "commit_deferred",
+      title: "待补位",
+      description: "Execution was recorded and is waiting for staffing or routing resolution.",
+      tone: "warning",
+      updatedAt: 103,
+    };
 
     const { rerender } = render(
       <ChatRuntimeSidebar
@@ -194,6 +201,16 @@ describe("ChatRuntimeSidebar", () => {
     );
 
     expect(screen.getByText("\u63d0\u4ea4\u5931\u8d25")).toBeTruthy();
+    expect(screen.queryByText("\u5c31\u7eea")).toBeNull();
+
+    rerender(
+      <ChatRuntimeSidebar
+        {...baseProps}
+        runtimeLifecycleState={deferredState}
+      />,
+    );
+
+    expect(screen.getByText("待补位")).toBeTruthy();
     expect(screen.queryByText("\u5c31\u7eea")).toBeNull();
   });
 });

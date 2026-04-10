@@ -853,7 +853,15 @@ class _FakeMemoryActivationService:
         )
 
 
-def _build_runtime_center_activation_client(tmp_path):
+_RUNTIME_CENTER_DEFAULT = object()
+
+
+def _build_runtime_center_activation_client(
+    tmp_path,
+    *,
+    memory_activation_service: object = _RUNTIME_CENTER_DEFAULT,
+    knowledge_graph_service: object = _RUNTIME_CENTER_DEFAULT,
+):
     app = build_runtime_center_app()
     state_store = SQLiteStateStore(tmp_path / "runtime-center-activation.sqlite3")
     task_repository = SqliteTaskRepository(state_store)
@@ -962,8 +970,14 @@ def _build_runtime_center_activation_client(tmp_path):
         schedule_repository=schedule_repository,
         decision_request_repository=decision_request_repository,
     )
-    activation_service = _FakeMemoryActivationService()
+    activation_service = (
+        _FakeMemoryActivationService()
+        if memory_activation_service is _RUNTIME_CENTER_DEFAULT
+        else memory_activation_service
+    )
     state_query._memory_activation_service = activation_service
+    if knowledge_graph_service is not _RUNTIME_CENTER_DEFAULT:
+        state_query._knowledge_graph_service = knowledge_graph_service
     app.state.state_query_service = state_query
     return TestClient(app), activation_service
 
@@ -1092,6 +1106,25 @@ def test_runtime_center_tasks_overview_includes_activation_hint_for_current_focu
     assert payload[0]["task_subgraph"]["dependency_paths"] == [
         "Resolve finance sign-off before resuming outbound approval.",
     ]
+
+
+def test_runtime_center_task_detail_marks_unwired_activation_and_subgraph_services_explicitly(
+    tmp_path,
+) -> None:
+    client, _ = _build_runtime_center_activation_client(
+        tmp_path,
+        memory_activation_service=None,
+        knowledge_graph_service=None,
+    )
+
+    response = client.get("/runtime-center/tasks/task-activation-1")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["activation"]["status"] == "unavailable"
+    assert payload["activation"]["reason"] == "memory-activation-service-unwired"
+    assert payload["task_subgraph"]["status"] == "unavailable"
+    assert payload["task_subgraph"]["reason"] == "knowledge-graph-service-unwired"
 
 
 def test_runtime_center_work_contexts_list_reads_projector_backed_state(tmp_path) -> None:

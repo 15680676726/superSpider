@@ -360,13 +360,13 @@ def _resolve_interaction_mode(request: AgentRequest) -> str:
 
 def _request_has_active_confirmation_or_continuity(*, request: Any) -> bool:
     if _first_non_empty(
+        getattr(request, "continuity_token", None),
         getattr(request, "decision_request_id", None),
         getattr(request, "pending_decision_request_id", None),
         getattr(request, "human_assist_task_id", None),
         getattr(request, "resume_checkpoint_id", None),
         getattr(request, "resume_mailbox_id", None),
         getattr(request, "resume_kernel_task_id", None),
-        getattr(request, "environment_continuity_token", None),
     ):
         return True
     runtime_context = normalize_main_brain_runtime_context(
@@ -385,11 +385,17 @@ def _request_has_active_confirmation_or_continuity(*, request: Any) -> bool:
     environment = runtime_context.get("environment")
     if not isinstance(environment, dict):
         return False
-    return bool(environment.get("resume_ready")) or bool(
-        _first_non_empty(
-            environment.get("continuity_token"),
-        ),
-    )
+    if bool(environment.get("resume_ready")):
+        return True
+    continuity_token = _first_non_empty(environment.get("continuity_token"))
+    continuity_source = _first_non_empty(environment.get("continuity_source"))
+    if continuity_token is None:
+        return False
+    return continuity_source in {
+        "continuity-token",
+        "session-lease",
+        "session-live-handle",
+    }
 
 
 def _initial_turn_title(msgs: list[Any]) -> str:

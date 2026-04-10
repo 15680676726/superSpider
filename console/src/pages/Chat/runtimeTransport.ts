@@ -18,6 +18,7 @@ import {
   type RuntimeLifecycleState,
   type RuntimeWaitState,
 } from "./runtimeDiagnostics";
+import { resolveDeferredCommitPresentation } from "./runtimeSidecarEvents";
 import {
   buildRuntimeChatRequest as buildRuntimeChatRequestBody,
   firstNonEmptyString as firstNonEmptyStringHelper,
@@ -478,6 +479,20 @@ function resolveRuntimeLifecycleState(
         tone: "success",
         updatedAt: Date.now(),
       };
+    case "commit_deferred": {
+      const deferred = resolveDeferredCommitPresentation(payload);
+      const tone =
+        deferred.title === "待补位" || deferred.title === "待确认"
+          ? "warning"
+          : "busy";
+      return {
+        phase: "commit_deferred",
+        title: deferred.title,
+        description: deferred.summary || "主脑已记录请求，正在等待后续分派或调度收口。",
+        tone,
+        updatedAt: Date.now(),
+      };
+    }
     case "commit_failed": {
       const localized = localizeRuntimeError(
         details.raw_code ||
@@ -600,7 +615,8 @@ function consumeRuntimeSidecarEvent(
     eventName === "commit_started" ||
     eventName === "committed" ||
     eventName === "confirm_required" ||
-    eventName === "commit_failed"
+    eventName === "commit_failed" ||
+    eventName === "commit_deferred"
   ) {
     setRuntimeWaitState(null);
     setRuntimeLifecycleState?.(lifecycleState);

@@ -1172,6 +1172,96 @@ describe("runtimeTransport", () => {
     );
   });
 
+  it("surfaces deferred delegation states with explicit lifecycle labels", () => {
+    const setRuntimeLifecycleState = vi.fn();
+    const setRuntimeWaitState = vi.fn();
+
+    parseRuntimeResponseChunk(
+      JSON.stringify({
+        object: "runtime.sidecar",
+        event: "commit_deferred",
+        payload: {
+          reason: "pending_staffing",
+          delegation_state: "pending_staffing",
+          message: "Execution was recorded and is waiting for staffing or routing resolution.",
+        },
+      }),
+      {
+        setRuntimeHealthNotice: vi.fn(),
+        setRuntimeLifecycleState,
+        setRuntimeWaitState,
+        dispatchGovernanceDirty: vi.fn(),
+        dispatchHumanAssistDirty: vi.fn(),
+      },
+    );
+
+    parseRuntimeResponseChunk(
+      JSON.stringify({
+        object: "runtime.sidecar",
+        event: "commit_deferred",
+        payload: {
+          reason: "materialization_deferred",
+          delegation_state: "recorded",
+          message: "Execution was recorded, but the assignment has not materialized yet.",
+        },
+      }),
+      {
+        setRuntimeHealthNotice: vi.fn(),
+        setRuntimeLifecycleState,
+        setRuntimeWaitState,
+        dispatchGovernanceDirty: vi.fn(),
+        dispatchHumanAssistDirty: vi.fn(),
+      },
+    );
+
+    parseRuntimeResponseChunk(
+      JSON.stringify({
+        object: "runtime.sidecar",
+        event: "commit_deferred",
+        payload: {
+          delegation_state: "materialized",
+          materialized_assignment_ids: ["assignment-1"],
+          message: "Execution assignment materialized and is waiting for dispatch.",
+        },
+      }),
+      {
+        setRuntimeHealthNotice: vi.fn(),
+        setRuntimeLifecycleState,
+        setRuntimeWaitState,
+        dispatchGovernanceDirty: vi.fn(),
+        dispatchHumanAssistDirty: vi.fn(),
+      },
+    );
+
+    expect(setRuntimeLifecycleState).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        phase: "commit_deferred",
+        title: "待补位",
+        tone: "warning",
+      }),
+    );
+    expect(setRuntimeLifecycleState).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        phase: "commit_deferred",
+        title: "已记录",
+        tone: "busy",
+      }),
+    );
+    expect(setRuntimeLifecycleState).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        phase: "commit_deferred",
+        title: "已生成任务",
+        tone: "busy",
+      }),
+    );
+    expect(setRuntimeWaitState).toHaveBeenNthCalledWith(1, null);
+    expect(setRuntimeWaitState).toHaveBeenNthCalledWith(2, null);
+    expect(setRuntimeWaitState).toHaveBeenNthCalledWith(3, null);
+  });
+
   it("forwards hidden sidecar tail events to the runtime sidecar callback", async () => {
     vi.stubGlobal("BASE_URL", "http://testserver");
     vi.spyOn(providerApi, "getActiveModels").mockResolvedValue({

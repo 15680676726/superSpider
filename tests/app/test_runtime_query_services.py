@@ -22,6 +22,7 @@ from copaw.app.runtime_center.work_context_projection import (
     RuntimeCenterWorkContextProjector,
 )
 from copaw.evidence import EvidenceLedger, EvidenceRecord
+from copaw.industry.models import IndustrySeatCapabilityLayers
 from copaw.kernel.models import KernelTask
 from copaw.kernel.persistence import KernelTaskStore
 from copaw.state import (
@@ -88,6 +89,15 @@ def _make_human_assist_task(*, task_id: str = "task-1") -> HumanAssistTaskRecord
         created_at=timestamp,
         updated_at=timestamp,
     )
+
+
+class _DummyCapabilityCandidate:
+    def __init__(self, payload: dict[str, object]) -> None:
+        self._payload = payload
+
+    def model_dump(self, mode: str = "json") -> dict[str, object]:
+        _ = mode
+        return dict(self._payload)
 
 
 def test_runtime_query_services_read_state_backed_surfaces(tmp_path) -> None:
@@ -1759,7 +1769,7 @@ def test_runtime_query_services_expose_human_assist_task_surfaces(tmp_path) -> N
     assert detail["routes"]["self"] == f"/api/runtime-center/human-assist-tasks/{issued.id}"
 
 
-def test_runtime_query_services_hide_resume_queued_human_assist_from_current_but_keep_detail(
+def test_runtime_query_services_keep_resume_queued_human_assist_visible_in_current_task(
     tmp_path,
 ) -> None:
     state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
@@ -1784,7 +1794,8 @@ def test_runtime_query_services_hide_resume_queued_human_assist_from_current_but
     current = state_query.get_current_human_assist_task(
         chat_thread_id="industry-chat:industry-1:execution-core",
     )
-    assert current is None
+    assert current is not None
+    assert current["status"] == "resume_queued"
 
     items = state_query.list_human_assist_tasks(
         chat_thread_id="industry-chat:industry-1:execution-core",
@@ -1805,3 +1816,63 @@ def test_runtime_query_services_hide_resume_queued_human_assist_from_current_but
     assert detail["routes"]["current"].endswith(
         "chat_thread_id=industry-chat%3Aindustry-1%3Aexecution-core",
     )
+
+
+def test_runtime_query_services_capability_candidates_read_active_pack_from_target_agent(
+    tmp_path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    layers = IndustrySeatCapabilityLayers(
+        seat_instance_capability_ids=["skill:seat-skill"],
+    ).to_metadata_payload()
+
+    class _CandidateService:
+        def list_candidates(self, *, limit: int | None = 20):
+            _ = limit
+            return [
+                _DummyCapabilityCandidate(
+                    {
+                        "candidate_id": "candidate-1",
+                        "status": "trial",
+                        "candidate_kind": "skill-bundle",
+                        "candidate_source_kind": "skillhub",
+                        "candidate_source_ref": "skillhub://seat-skill",
+                        "proposed_skill_name": "seat-skill",
+                        "target_scope": "seat",
+                        "target_role_id": "role-execution-core",
+                        "target_agent_id": "agent-execution-seat-1",
+                        "target_seat_ref": "seat:execution:1",
+                    },
+                ),
+            ]
+
+    class _AgentProfileService:
+        def get_agent_detail(self, agent_id: str):
+            if agent_id != "agent-execution-seat-1":
+                return {"runtime": {"metadata": {}}}
+            return {
+                "runtime": {
+                    "metadata": {
+                        "capability_layers": layers,
+                    },
+                },
+            }
+
+    state_query = RuntimeCenterStateQueryService(
+        task_repository=SqliteTaskRepository(state_store),
+        task_runtime_repository=SqliteTaskRuntimeRepository(state_store),
+        schedule_repository=SqliteScheduleRepository(state_store),
+        decision_request_repository=SqliteDecisionRequestRepository(state_store),
+        capability_candidate_service=_CandidateService(),
+        agent_profile_service=_AgentProfileService(),
+    )
+
+    payload = state_query.list_capability_candidates(limit=10)
+
+    assert len(payload) == 1
+    assert payload[0]["target_scope_projection"]["target_agent_id"] == "agent-execution-seat-1"
+    assert payload[0]["active_pack_composition"]["target_agent_id"] == "agent-execution-seat-1"
+    assert payload[0]["active_pack_composition"]["active_candidate_member"] is True
+    assert payload[0]["active_pack_composition"]["effective_capability_ids"] == [
+        "skill:seat-skill",
+    ]

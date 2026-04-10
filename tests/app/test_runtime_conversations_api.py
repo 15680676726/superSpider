@@ -634,8 +634,10 @@ def test_runtime_conversation_detail_kickoff_prompt_mentions_staffing_gap_and_re
     payload = response.json()
     text = payload["messages"][0]["content"][0]["text"]
     assert "Platform Trader" in text
+    assert "待补位" in text
+    assert "待确认补位" in text
     assert "decision-seat-1" in text
-    assert "Researcher" in text
+    assert "研究位" in text
     assert history_reader.calls[0].session_id == thread_id
 
 
@@ -673,8 +675,9 @@ def test_runtime_conversation_detail_kickoff_prompt_mentions_pending_proposals_a
 
     assert response.status_code == 200
     text = response.json()["messages"][0]["content"][0]["text"]
-    assert "待确认 proposals" in text
+    assert "待确认补位" in text
     assert "Browser QA Seat" in text
+    assert "临时席位" in text
     assert "Temporary Browser Runner" in text
 
 
@@ -807,6 +810,47 @@ def test_runtime_conversation_detail_surfaces_persisted_main_brain_commit_state_
     assert reloaded_payload["id"] == control_thread_id
     assert reloaded_payload["meta"]["main_brain_commit"]["status"] == "committed"
     assert reloaded_payload["meta"]["main_brain_commit"]["record_id"] == "strategy-memory-1"
+
+
+def test_runtime_conversation_detail_commit_path_reload_surfaces_query_runtime_commit_outcome_without_phase2_commit() -> None:
+    control_thread_id = "industry-chat:industry-v1-acme:execution-core"
+    session_backend = _FakeSessionBackend()
+    session_backend.save_session_snapshot(
+        session_id=control_thread_id,
+        user_id="copaw-agent-runner",
+        payload={
+            "agent": {"memory": []},
+            "query_runtime_state": {
+                "accepted_persistence": {
+                    "status": "accepted",
+                    "source": "query_execution_runtime",
+                    "boundary": "execution_runtime_intake",
+                    "control_thread_id": control_thread_id,
+                    "session_id": control_thread_id,
+                },
+                "commit_outcome": {
+                    "status": "committed",
+                    "action_type": "writeback_and_kickoff",
+                    "record_id": "assignment-query-runtime-1",
+                    "control_thread_id": control_thread_id,
+                    "session_id": control_thread_id,
+                },
+            },
+        },
+        source_ref="test:/query-runtime-only-commit-path",
+    )
+    app, _history_reader = _build_app(
+        history_reader=SessionRuntimeThreadHistoryReader(session_backend=session_backend),
+        session_backend=session_backend,
+    )
+    client = TestClient(app)
+
+    response = client.get(f"/runtime-center/conversations/{control_thread_id}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["meta"]["main_brain_commit"]["status"] == "committed"
+    assert payload["meta"]["main_brain_commit"]["record_id"] == "assignment-query-runtime-1"
 
 
 def test_runtime_conversation_detail_accepts_legacy_snapshot_messages_missing_name(

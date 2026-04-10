@@ -325,6 +325,7 @@ class HumanAssistTaskService:
     """Manage issue, submit, verify, and resume-ready state for host tasks."""
 
     _TERMINAL_STATUSES = frozenset({"resume_queued", "closed", "expired", "cancelled"})
+    _VISIBLE_TERMINAL_STATUSES = frozenset({"closed", "expired", "cancelled"})
 
     def __init__(
         self,
@@ -371,6 +372,28 @@ class HumanAssistTaskService:
                     continue
                 return task
         return None
+
+    def get_visible_current_task(
+        self,
+        *,
+        chat_thread_id: str,
+    ) -> HumanAssistTaskRecord | None:
+        recent_resume_terminal: HumanAssistTaskRecord | None = None
+        for task in self._repository.list_tasks(chat_thread_id=chat_thread_id, limit=50):
+            if _looks_like_stale_fresh_host_handoff(task):
+                continue
+            if task.status in self._VISIBLE_TERMINAL_STATUSES:
+                if (
+                    task.status == "closed"
+                    and _string(
+                        _mapping(task.verification_payload).get("resume", {}).get("status"),
+                    )
+                    in {"resume_queued", "closed", "handoff_blocked"}
+                ):
+                    recent_resume_terminal = recent_resume_terminal or task
+                continue
+            return task
+        return recent_resume_terminal
 
     def issue_task(self, task: HumanAssistTaskRecord) -> HumanAssistTaskRecord:
         spec = _mapping(task.acceptance_spec)

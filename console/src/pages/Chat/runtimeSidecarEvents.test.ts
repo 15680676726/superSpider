@@ -156,6 +156,50 @@ describe("runtimeSidecarEvents", () => {
     expect(state.history).toHaveLength(1);
   });
 
+  it("keeps deferred delegation states visible after same-thread reload", () => {
+    const state = hydrateRuntimeSidecarState(
+      {
+        status: "commit_deferred",
+        control_thread_id: "industry-chat:industry-1:execution-core",
+        session_id: "industry-chat:industry-1:execution-core",
+        reason: "pending_staffing",
+        delegation_state: "pending_staffing",
+        summary: "Execution was recorded and is waiting for staffing or routing resolution.",
+      },
+      "industry-chat:industry-1:execution-core",
+      450,
+    );
+
+    expect(state.currentCommitStatus?.kind).toBe("deferred");
+    expect(state.currentCommitStatus?.title).toBe("待补位");
+    expect(state.currentCommitStatus?.summary).toContain("waiting for staffing");
+    expect(state.history).toHaveLength(1);
+  });
+
+  it("surfaces materialized deferred state with a distinct title", () => {
+    const initialState = createInitialRuntimeSidecarState(
+      "industry-chat:industry-1:execution-core",
+    );
+
+    const nextState = reduceRuntimeSidecarEvent(
+      initialState,
+      {
+        event: "commit_deferred",
+        payload: {
+          control_thread_id: "industry-chat:industry-1:execution-core",
+          delegation_state: "materialized",
+          materialized_assignment_ids: ["assignment-1"],
+          summary: "Execution assignment materialized and is waiting for dispatch.",
+        },
+      },
+      510,
+    );
+
+    expect(nextState.currentCommitStatus?.kind).toBe("deferred");
+    expect(nextState.currentCommitStatus?.title).toBe("已生成任务");
+    expect(nextState.currentCommitStatus?.summary).toContain("waiting for dispatch");
+  });
+
   it("parses compatible sidecar envelopes without the canonical wrapper", () => {
     const parsed = parseRuntimeSidecarEvent(
       {

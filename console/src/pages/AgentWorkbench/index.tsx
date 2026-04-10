@@ -490,7 +490,12 @@ export default function AgentWorkbenchPage() {
           {
             key: "performance",
             label: renderTabLabel(<RiseOutlined />, agentWorkbenchText.tabPerformance),
-            children: <AgentGrowthTrajectory />,
+            children: (
+              <AgentGrowthTrajectory
+                agentId={displayedAgent?.agent_id ?? null}
+                agentName={displayedAgent?.name ?? null}
+              />
+            ),
           },
           {
             key: "evidence",

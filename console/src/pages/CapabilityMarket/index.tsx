@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import {
   Alert,
   Button,
@@ -21,6 +21,12 @@ import { ReloadOutlined } from "@ant-design/icons";
 import { Sparkles } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import api, { type CuratedSkillCatalogEntry } from "../../api";
+import type {
+  CapabilityMarketAttachmentTruth,
+  CapabilityMarketProjectInstallAcceptedResponse,
+  CapabilityMarketProjectInstallJobStatusResponse,
+  CapabilityMarketProjectInstallResponse,
+} from "../../api/modules/capabilityMarket";
 import {
   localizeRemoteSkillText,
   presentRecommendationInstallKind,
@@ -48,10 +54,74 @@ import { useCapabilityMarketState } from "./useCapabilityMarketState";
 const { Paragraph, Text } = Typography;
 const { TextArea, Password } = Input;
 
+type ProjectInstallNotice = {
+  type: "info" | "success" | "error";
+  message: string;
+  description?: string;
+};
+
+function resolveAttachmentSummary(
+  attachment: CapabilityMarketAttachmentTruth | null | undefined,
+  fallback: string,
+): string {
+  const summary = String(attachment?.summary || "").trim();
+  return summary || fallback;
+}
+
+function buildProjectInstallNoticeFromAccepted(
+  accepted: CapabilityMarketProjectInstallAcceptedResponse,
+): ProjectInstallNotice {
+  return {
+    type: "info",
+    message: String(accepted.progress_summary || "外扩项目安装任务已受理。"),
+    description: "安装还在后台继续，等任务完成后才代表能力真的可用。",
+  };
+}
+
+function buildProjectInstallNoticeFromJob(
+  job: CapabilityMarketProjectInstallJobStatusResponse,
+): ProjectInstallNotice {
+  if (job.status === "failed") {
+    return {
+      type: "error",
+      message: String(job.error || job.progress_summary || "外扩项目安装失败。"),
+      description: "请查看任务详情或日志，再决定是否重试。",
+    };
+  }
+  return {
+    type: job.status === "completed" ? "success" : "info",
+    message: String(job.progress_summary || "外扩项目安装正在继续。"),
+    description:
+      job.status === "completed"
+        ? "后台任务已完成，下面显示的是正式安装结果。"
+        : "任务仍在后台执行，当前不是最终安装结果。",
+  };
+}
+
+function buildProjectInstallNoticeFromResult(
+  result: CapabilityMarketProjectInstallResponse,
+): ProjectInstallNotice {
+  const attachmentSummary = resolveAttachmentSummary(
+    result.attachment,
+    "外扩项目已完成安装。",
+  );
+  const attachedCount = result.attachment?.attached_agent_ids?.length || 0;
+  return {
+    type: result.attachment?.status === "attached" ? "success" : "info",
+    message: attachmentSummary,
+    description:
+      attachedCount > 0
+        ? `已挂到 ${attachedCount} 个执行位。`
+        : "当前只进入能力库存，尚未挂到执行位。",
+  };
+}
+
 export default function CapabilityMarketPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [templateForm] = Form.useForm<Record<string, unknown>>();
   const [mcpForm] = Form.useForm<Record<string, unknown>>();
+  const [projectInstallNotice, setProjectInstallNotice] =
+    useState<ProjectInstallNotice | null>(null);
   const {
     activeTab,
     categoryCounts,
@@ -125,13 +195,15 @@ export default function CapabilityMarketPage() {
       }
       setInstallingCuratedId(installKey);
       try {
-        await api.installCapabilityMarketCuratedCatalogEntry({
+        const result = await api.installCapabilityMarketCuratedCatalogEntry({
           source_id: item.source_id,
           candidate_id: item.candidate_id,
           review_acknowledged: Boolean(curatedReviewAcknowledgements[installKey]),
           enable: true,
         });
-        message.success("安装成功");
+        message.success(
+          resolveAttachmentSummary(result.attachment, "安装成功"),
+        );
       } catch (error) {
         message.error(error instanceof Error ? error.message : String(error));
       } finally {
@@ -158,7 +230,9 @@ export default function CapabilityMarketPage() {
     try {
       const config = await buildTemplateConfigPayload();
       const result = await api.installCapabilityMarketInstallTemplate(requestedTemplateId, { config, enabled: true });
-      setTemplateInstallSummary(result.summary || "安装成功");
+      setTemplateInstallSummary(
+        resolveAttachmentSummary(result.attachment, result.summary || "安装成功"),
+      );
     } catch (error) {
       message.error(error instanceof Error ? error.message : String(error));
     } finally {
@@ -175,8 +249,9 @@ export default function CapabilityMarketPage() {
     }) => {
       const installKey = item.source_url || item.display_name || "project";
       setProjectInstallKey(installKey);
+      setProjectInstallNotice(null);
       try {
-        await api.installCapabilityMarketProject({
+        const accepted = await api.installCapabilityMarketProject({
           source_url: item.source_url,
           version: item.version,
           capability_kind:
@@ -188,10 +263,35 @@ export default function CapabilityMarketPage() {
           overwrite: true,
           enable: true,
         });
-        message.success("安装成功");
-        await handleRefreshAll();
+        const acceptedNotice = buildProjectInstallNoticeFromAccepted(accepted);
+        setProjectInstallNotice(acceptedNotice);
+
+        const job = await api.getCapabilityMarketProjectInstallJob(accepted.task_id);
+        if (job.status === "completed") {
+          const result =
+            job.result ||
+            (await api.getCapabilityMarketProjectInstallJobResult(accepted.task_id));
+          const resultNotice = buildProjectInstallNoticeFromResult(result);
+          setProjectInstallNotice(resultNotice);
+          message.success(resultNotice.message);
+          await handleRefreshAll();
+        } else if (job.status === "failed") {
+          const failedNotice = buildProjectInstallNoticeFromJob(job);
+          setProjectInstallNotice(failedNotice);
+          message.error(failedNotice.message);
+        } else {
+          const runningNotice = buildProjectInstallNoticeFromJob(job);
+          setProjectInstallNotice(runningNotice);
+          message.info(runningNotice.message);
+        }
       } catch (error) {
-        message.error(error instanceof Error ? error.message : String(error));
+        const detail = error instanceof Error ? error.message : String(error);
+        setProjectInstallNotice({
+          type: "error",
+          message: detail,
+          description: "外扩项目安装没有完成，请检查 donor 任务状态。",
+        });
+        message.error(detail);
       } finally {
         setProjectInstallKey(null);
       }
@@ -275,6 +375,14 @@ export default function CapabilityMarketPage() {
             children: (
               <Card>
                 <Space direction="vertical" style={{ width: "100%" }}>
+                  {projectInstallNotice ? (
+                    <Alert
+                      type={projectInstallNotice.type}
+                      showIcon
+                      message={projectInstallNotice.message}
+                      description={projectInstallNotice.description}
+                    />
+                  ) : null}
                   <Space.Compact style={{ width: "100%" }}>
                     <Input
                       value={projectQuery}

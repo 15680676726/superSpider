@@ -55,6 +55,10 @@ function makeSurface(
     onboarding: {
       session_id: "session-1",
       status: "clarifying",
+      operation_id: "",
+      operation_kind: "",
+      operation_status: "idle",
+      operation_error: "",
       question_count: 2,
       tightened: false,
       next_question: "下一问",
@@ -94,6 +98,10 @@ describe("buddyFlow", () => {
       onboarding: {
         session_id: "session-1",
         status: "confirmed",
+        operation_id: "",
+        operation_kind: "",
+        operation_status: "idle",
+        operation_error: "",
         question_count: 9,
         tightened: true,
         next_question: "",
@@ -119,6 +127,10 @@ describe("buddyFlow", () => {
       onboarding: {
         session_id: null,
         status: "confirmed",
+        operation_id: "",
+        operation_kind: "",
+        operation_status: "idle",
+        operation_error: "",
         question_count: 9,
         tightened: true,
         next_question: "",
@@ -170,6 +182,10 @@ describe("buddyFlow", () => {
       onboarding: {
         session_id: "session-1",
         status: "named",
+        operation_id: "",
+        operation_kind: "",
+        operation_status: "idle",
+        operation_error: "",
         question_count: 9,
         tightened: true,
         next_question: "",

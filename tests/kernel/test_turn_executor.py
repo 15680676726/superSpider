@@ -10,6 +10,7 @@ from agentscope_runtime.engine.schemas.agent_schemas import AgentRequest, RunSta
 
 import copaw.kernel.main_brain_chat_service as main_brain_chat_service_module
 import copaw.kernel.query_execution_shared as query_execution_shared_module
+import copaw.kernel.turn_executor as turn_executor_module
 from copaw.app.runtime_host import RuntimeHost
 from copaw.environments.models import SessionMount
 from copaw.kernel import KernelResult, KernelTurnExecutor
@@ -2429,3 +2430,32 @@ async def test_kernel_turn_executor_skips_usage_persistence_for_chat_mode(monkey
         "total_tokens": 8,
     }
     assert query_execution_service.recorded_usage == []
+
+
+@pytest.mark.asyncio
+async def test_turn_executor_environment_ref_resume_shell_requires_live_continuity_proof():
+    request = AgentRequest(
+        id="req-symbolic-environment-ref",
+        session_id="sess-symbolic-environment-ref",
+        user_id="user-symbolic-environment-ref",
+        channel="console",
+        input=[],
+    )
+    request._copaw_main_brain_runtime_context = {
+        "environment": {
+            "ref": "desktop:session-1",
+            "kind": "desktop",
+            "resume_ready": False,
+            "continuity_token": "desktop:session-1",
+            "continuity_source": "environment-ref",
+        }
+    }
+
+    mode = await turn_executor_module._resolve_auto_chat_mode(  # pylint: disable=protected-access
+        query="resume this flow",
+        request=request,
+        msgs=[Msg(name="user", role="user", content="resume this flow")],
+        intent_shell=MainBrainIntentShell(mode_hint="resume"),
+    )
+
+    assert mode == "chat"

@@ -6,6 +6,7 @@ from pathlib import Path
 from .shared import *  # noqa: F401,F403
 
 from copaw.capabilities import CapabilityService
+from copaw.app.runtime_center.evidence_query import RuntimeCenterEvidenceQueryService
 from copaw.evidence import EvidenceLedger
 from copaw.kernel import KernelDispatcher, KernelTaskStore
 from copaw.state import SQLiteStateStore
@@ -38,6 +39,12 @@ def _wire_governed_patch_runtime(app: FastAPI, tmp_path: Path) -> None:
     app.state.capability_service = capability_service
     app.state.kernel_dispatcher = kernel_dispatcher
     app.state.decision_request_repository = decision_request_repository
+    app.state.task_repository = task_repository
+    app.state.evidence_query_service = RuntimeCenterEvidenceQueryService(
+        evidence_ledger=evidence_ledger,
+    )
+    app.state.goal_service = SimpleNamespace(get_goal=lambda goal_id: None)
+    app.state.agent_profile_service = SimpleNamespace(get_agent=lambda agent_id: None)
 
 
 def test_runtime_center_detail_endpoints() -> None:
@@ -1542,6 +1549,12 @@ def test_runtime_center_patch_actions_are_first_class_routes(tmp_path) -> None:
     assert approve_rollback.status_code == 200
     assert approve_rollback.json()["phase"] == "completed"
     assert approve_rollback.json()["decision_request_id"] == rollback_decision_id
+
+    patch_detail = client.get("/runtime-center/learning/patches/patch-1")
+    assert patch_detail.status_code == 200
+    detail_payload = patch_detail.json()
+    assert "evidence" in detail_payload
+    assert "decisions" in detail_payload
 
 
 def test_routines_api_detail_diagnosis_and_runs() -> None:

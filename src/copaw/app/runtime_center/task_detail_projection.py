@@ -270,7 +270,10 @@ class RuntimeCenterTaskDetailProjector:
         service = self._memory_activation_service
         activate_for_query = getattr(service, "activate_for_query", None)
         if not callable(activate_for_query):
-            return None
+            return {
+                "status": "unavailable",
+                "reason": "memory-activation-service-unwired",
+            }
         task_id = first_non_empty(getattr(task, "id", None))
         if task_id is None:
             return None
@@ -360,7 +363,10 @@ class RuntimeCenterTaskDetailProjector:
         service = self._knowledge_graph_service
         summarize = getattr(service, "summarize_kernel_task_subgraph", None)
         if not callable(summarize):
-            return None
+            return {
+                "status": "unavailable",
+                "reason": "knowledge-graph-service-unwired",
+            }
         summary = summarize(kernel_metadata)
         if not isinstance(summary, dict) or not summary:
             return None

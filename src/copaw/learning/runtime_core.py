@@ -733,6 +733,20 @@ class LearningRuntimeCore:
                 metadata=payload,
             ),
         )
+        source_evidence_id = patch.source_evidence_id or record.id
+        evidence_refs = list(patch.evidence_refs or [])
+        if record.id != source_evidence_id and record.id not in evidence_refs:
+            evidence_refs.append(record.id)
+        if (
+            source_evidence_id != patch.source_evidence_id
+            or evidence_refs != list(patch.evidence_refs or [])
+        ):
+            patch.source_evidence_id = source_evidence_id
+            patch.evidence_refs = evidence_refs
+            self._engine._store.save_patch(
+                patch,
+                action=f"{action}-evidence-linked",
+            )
         return record.id
 
     def _resolve_learning_context(

@@ -217,7 +217,9 @@ class RuntimeCenterStateQueryService:
         chat_thread_id: str,
     ) -> dict[str, object] | None:
         service = self._human_assist_task_service
-        getter = getattr(service, "get_current_task", None)
+        getter = getattr(service, "get_visible_current_task", None)
+        if not callable(getter):
+            getter = getattr(service, "get_current_task", None)
         if not callable(getter):
             return None
         task = getter(chat_thread_id=chat_thread_id)
@@ -506,6 +508,7 @@ class RuntimeCenterStateQueryService:
         target_scope_projection = {
             "target_scope": first_non_empty(serialized.get("target_scope")) or "seat",
             "target_role_id": first_non_empty(serialized.get("target_role_id")),
+            "target_agent_id": first_non_empty(serialized.get("target_agent_id")),
             "target_seat_ref": first_non_empty(serialized.get("target_seat_ref")),
         }
         baseline_projection = {
@@ -756,6 +759,10 @@ class RuntimeCenterStateQueryService:
         candidate_payload: Mapping[str, object],
     ) -> dict[str, object]:
         target_role_id = first_non_empty(candidate_payload.get("target_role_id"))
+        target_agent_id = first_non_empty(
+            candidate_payload.get("target_agent_id"),
+            target_role_id,
+        )
         target_seat_ref = first_non_empty(candidate_payload.get("target_seat_ref"))
         target_scope = first_non_empty(candidate_payload.get("target_scope")) or "seat"
         role_prototype_capability_ids: list[str] = []
@@ -765,9 +772,9 @@ class RuntimeCenterStateQueryService:
         effective_capability_ids: list[str] = []
         service = getattr(self, "_agent_profile_service", None)
         detail_getter = getattr(service, "get_agent_detail", None)
-        if callable(detail_getter) and target_role_id is not None:
+        if callable(detail_getter) and target_agent_id is not None:
             try:
-                detail = detail_getter(target_role_id)
+                detail = detail_getter(target_agent_id)
             except Exception:
                 detail = None
             detail_payload = self._mapping_payload(detail)
@@ -795,6 +802,7 @@ class RuntimeCenterStateQueryService:
         return {
             "target_scope": target_scope,
             "target_role_id": target_role_id,
+            "target_agent_id": target_agent_id,
             "target_seat_ref": target_seat_ref,
             "role_prototype_capability_ids": role_prototype_capability_ids,
             "seat_instance_capability_ids": seat_instance_capability_ids,

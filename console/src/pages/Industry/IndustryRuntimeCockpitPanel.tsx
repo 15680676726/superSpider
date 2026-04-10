@@ -121,7 +121,7 @@ export default function IndustryRuntimeCockpitPanel({
       label: "待办",
       value: `${detail.backlog.length} 项`,
       note: focusedBacklog?.title || detail.backlog[0]?.title || null,
-      status: focusedBacklog?.status || detail.backlog[0]?.status || detail.status,
+      status: focusedBacklog?.status || detail.backlog[0]?.status || "idle",
       actionLabel:
         focusedBacklog?.backlog_item_id || detail.backlog[0]?.backlog_item_id
           ? "聚焦待办"
@@ -147,7 +147,7 @@ export default function IndustryRuntimeCockpitPanel({
       label: "派工",
       value: `${runtimeSignalCounts.assignment} 项`,
       note: focusedAssignment?.title || detail.assignments[0]?.title || null,
-      status: focusedAssignment?.status || detail.assignments[0]?.status || detail.status,
+      status: focusedAssignment?.status || detail.assignments[0]?.status || "idle",
       actionLabel:
         focusedAssignment?.assignment_id || detail.assignments[0]?.assignment_id
           ? "聚焦派工"
@@ -168,7 +168,7 @@ export default function IndustryRuntimeCockpitPanel({
         detail.agent_reports[0]?.headline ||
         detail.agent_reports[0]?.report_id ||
         null,
-      status: followupReports[0]?.status || detail.agent_reports[0]?.status || detail.status,
+      status: followupReports[0]?.status || detail.agent_reports[0]?.status || "idle",
       actionLabel: detail.agent_reports[0] ? "打开汇报对话" : null,
       onAction: detail.agent_reports[0] ? () => onOpenAgentReportChat(detail.agent_reports[0]) : null,
     },

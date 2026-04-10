@@ -518,4 +518,55 @@ describe("runtimeCenter viewHelpers", () => {
       "工作区已绑定",
     );
   });
+
+  it("marks the environment as unavailable when no backing truth is exposed", () => {
+    const payload = {
+      generated_at: "2026-03-29T09:00:00Z",
+      surface: {
+        version: "runtime-center-v1",
+        mode: "operator-surface",
+        status: "state-service",
+        read_only: true,
+        source: "state_query_service",
+        note: "Shared runtime surface",
+        services: ["state_query_service"],
+      },
+      cards: [
+        {
+          key: "main-brain",
+          title: "Main-Brain",
+          source: "state_query_service",
+          status: "state-service",
+          count: 1,
+          summary: "Main brain cockpit",
+          entries: [],
+          meta: {
+            carrier: {
+              status: "state-service",
+              summary: "Carrier ready",
+              route: "/api/runtime-center/governance/status",
+            },
+          },
+        },
+        {
+          key: "governance",
+          title: "Governance",
+          source: "governance_service",
+          status: "idle",
+          count: 0,
+          summary: null,
+          entries: [],
+          meta: {},
+        },
+      ],
+    } as RuntimeCenterOverviewPayload;
+
+    const environmentSignal = buildRuntimeEnvironmentCockpitSignals(payload).find(
+      (signal) => signal.key === "environment",
+    );
+
+    expect(environmentSignal?.value).toBe("环境待接线");
+    expect(environmentSignal?.detail).toBe("还没有可验证的环境连续性或宿主绑定信息。");
+    expect(environmentSignal?.tone).toBe("warning");
+  });
 });

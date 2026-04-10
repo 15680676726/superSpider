@@ -1961,8 +1961,63 @@ class LearningAcquisitionRuntimeService(LearningRuntimeDelegate):
                 "message": "能力执行器不可用，无法完成真实试运行。",
                 "detail": "executor-unavailable",
             }
+        from ..capabilities.execution_support import (
+            _tool_response_payload,
+            _tool_response_success,
+            _tool_response_summary,
+        )
+
         try:
-            response = await _maybe_await(executor(action="describe"))
+            describe_response = await _maybe_await(executor(action="describe"))
+        except Exception as exc:
+            return {
+                "key": f"trial-run:{capability_id}",
+                "label": capability_id,
+                "status": "fail",
+                "message": f"试运行说明读取失败：{exc}",
+                "detail": exc.__class__.__name__,
+            }
+
+        describe_payload = _tool_response_payload(describe_response)
+        if not _tool_response_success(describe_response):
+            return {
+                "key": f"trial-run:{capability_id}",
+                "label": capability_id,
+                "status": "fail",
+                "message": _tool_response_summary(describe_response),
+                "detail": "describe-failed",
+                "metadata": describe_payload if isinstance(describe_payload, dict) else {},
+            }
+
+        skill_payload = (
+            describe_payload.get("skill")
+            if isinstance(describe_payload, dict)
+            and isinstance(describe_payload.get("skill"), dict)
+            else {}
+        )
+        trial_script_path = self._select_skill_trial_script(
+            skill_payload.get("scripts")
+            if isinstance(skill_payload, dict)
+            else None,
+        )
+        if trial_script_path is None:
+            return {
+                "key": f"trial-run:{capability_id}",
+                "label": capability_id,
+                "status": "fail",
+                "message": "当前 skill 没有声明安全试运行脚本，不能只靠说明信息判定通过。",
+                "detail": "missing-skill-trial-script",
+                "metadata": describe_payload if isinstance(describe_payload, dict) else {},
+            }
+
+        try:
+            response = await _maybe_await(
+                executor(
+                    action="run_script",
+                    script_path=trial_script_path,
+                    timeout=120,
+                ),
+            )
         except Exception as exc:
             return {
                 "key": f"trial-run:{capability_id}",
@@ -1971,21 +2026,52 @@ class LearningAcquisitionRuntimeService(LearningRuntimeDelegate):
                 "message": f"试运行执行失败：{exc}",
                 "detail": exc.__class__.__name__,
             }
-        from ..capabilities.execution_support import (
-            _tool_response_payload,
-            _tool_response_success,
-            _tool_response_summary,
-        )
 
         payload = _tool_response_payload(response)
+        metadata = payload if isinstance(payload, dict) else {}
+        metadata = {
+            **metadata,
+            "trial_script_path": trial_script_path,
+            "trial_mode": "run_script",
+        }
         return {
             "key": f"trial-run:{capability_id}",
             "label": capability_id,
             "status": "pass" if _tool_response_success(response) else "fail",
             "message": _tool_response_summary(response),
-            "detail": capability_id,
-            "metadata": payload if isinstance(payload, dict) else {},
+            "detail": trial_script_path,
+            "metadata": metadata,
         }
+
+    def _select_skill_trial_script(self, scripts_payload: object) -> str | None:
+        if not isinstance(scripts_payload, dict):
+            return None
+        preferred_stems = (
+            "trial",
+            "smoke",
+            "verify",
+            "check",
+            "doctor",
+            "selftest",
+        )
+        supported_suffixes = {"", "py", "ps1", "sh", "js", "ts", "mjs", "cjs", "cmd", "bat"}
+        candidates: list[tuple[int, str]] = []
+        for raw_path in scripts_payload.keys():
+            candidate = _normalize_optional_str(raw_path)
+            if candidate is None:
+                continue
+            normalized = candidate.replace("\\", "/")
+            basename = normalized.rsplit("/", 1)[-1].lower()
+            stem, dot, suffix = basename.partition(".")
+            if stem not in preferred_stems:
+                continue
+            if suffix.lower() not in supported_suffixes:
+                continue
+            candidates.append((preferred_stems.index(stem), candidate))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: (item[0], item[1]))
+        return candidates[0][1]
 
     async def _resolve_mcp_trial_client(
         self,

@@ -6,11 +6,29 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const stateMock = vi.fn();
 
+vi.mock("../../api", async () => {
+  const actual = await vi.importActual<typeof import("../../api")>("../../api");
+  return {
+    ...actual,
+    default: {
+      ...actual.default,
+      installCapabilityMarketProject: vi.fn(),
+      getCapabilityMarketProjectInstallJob: vi.fn(),
+      getCapabilityMarketProjectInstallJobResult: vi.fn(),
+    },
+  };
+});
+
 vi.mock("./useCapabilityMarketState", () => ({
   useCapabilityMarketState: (...args: unknown[]) => stateMock(...args),
 }));
 
+import api from "../../api";
 import CapabilityMarketPage from "./index";
+
+const mockedInstallProject = vi.mocked(api.installCapabilityMarketProject);
+const mockedGetProjectInstallJob = vi.mocked(api.getCapabilityMarketProjectInstallJob);
+const mockedGetProjectInstallJobResult = vi.mocked(api.getCapabilityMarketProjectInstallJobResult);
 
 describe("CapabilityMarketPage", () => {
   const baseState = {
@@ -54,6 +72,7 @@ describe("CapabilityMarketPage", () => {
     setCuratedReviewAcknowledgements: vi.fn(),
     setInstallingCuratedId: vi.fn(),
     setMcpQuery: vi.fn(),
+    setProjectInstallKey: vi.fn(),
     setProjectQuery: vi.fn(),
     setTemplateActionKey: vi.fn(),
     setTemplateInstallSummary: vi.fn(),
@@ -76,6 +95,9 @@ describe("CapabilityMarketPage", () => {
   beforeEach(() => {
     stateMock.mockReset();
     stateMock.mockReturnValue(baseState);
+    mockedInstallProject.mockReset();
+    mockedGetProjectInstallJob.mockReset();
+    mockedGetProjectInstallJobResult.mockReset();
   });
 
   it("renders the new projects tab alongside the existing market tabs", () => {
@@ -209,5 +231,77 @@ describe("CapabilityMarketPage", () => {
 
     expect(loadMcpCatalog).toHaveBeenCalled();
     expect(loadCurated).not.toHaveBeenCalled();
+  });
+
+  it("shows donor install job acceptance instead of pretending the project is already ready", async () => {
+    mockedInstallProject.mockResolvedValue({
+      accepted: true,
+      task_id: "ktask:project-install-1",
+      status: "queued",
+      phase: "executing",
+      title: "Install project donor https://github.com/psf/black",
+      source_url: "https://github.com/psf/black",
+      capability_kind: "project-package",
+      candidate_id: "candidate-black",
+      progress_summary: "Project donor install job accepted.",
+      routes: {
+        status: "/api/capability-market/projects/install-jobs/ktask:project-install-1",
+        result:
+          "/api/capability-market/projects/install-jobs/ktask:project-install-1/result",
+      },
+    } as never);
+    mockedGetProjectInstallJob.mockResolvedValue({
+      task_id: "ktask:project-install-1",
+      status: "running",
+      phase: "executing",
+      stage: "installing",
+      title: "Install project donor https://github.com/psf/black",
+      source_url: "https://github.com/psf/black",
+      capability_kind: "project-package",
+      candidate_id: "candidate-black",
+      target_agent_id: null,
+      progress_summary: "Starting external project donor install job.",
+      error: null,
+      installed_capability_ids: [],
+      result: null,
+      created_at: null,
+      updated_at: null,
+      routes: {
+        status: "/api/capability-market/projects/install-jobs/ktask:project-install-1",
+        result:
+          "/api/capability-market/projects/install-jobs/ktask:project-install-1/result",
+      },
+    } as never);
+    stateMock.mockReturnValue({
+      ...baseState,
+      activeTab: "projects",
+      projectResults: [
+        {
+          display_name: "psf/black",
+          summary: "Python formatter",
+          source_kind: "github-repo",
+          candidate_kind: "project",
+          source_url: "https://github.com/psf/black",
+          version: "main",
+          capability_keys: ["formatting"],
+          install_supported: true,
+          metadata: {},
+          routes: {},
+        },
+      ],
+    });
+
+    render(
+      <MemoryRouter>
+        <CapabilityMarketPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /安\s*装/ }));
+
+    expect(
+      await screen.findByText("Project donor install job accepted."),
+    ).toBeInTheDocument();
+    expect(mockedGetProjectInstallJobResult).not.toHaveBeenCalled();
   });
 });

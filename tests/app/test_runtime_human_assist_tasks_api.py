@@ -275,7 +275,8 @@ def test_runtime_center_chat_run_intercepts_human_assist_submission_when_explici
         "/runtime-center/human-assist-tasks/current",
         params={"chat_thread_id": issued.chat_thread_id},
     )
-    assert current_response.status_code == 404
+    assert current_response.status_code == 200
+    assert current_response.json()["status"] in {"resume_queued", "closed"}
 
 
 def test_runtime_center_chat_run_preserves_requested_actions_in_submission_payload(
@@ -719,7 +720,12 @@ def test_runtime_center_chat_run_marks_resume_queued_before_async_resume_closes(
         "/runtime-center/human-assist-tasks/current",
         params={"chat_thread_id": issued.chat_thread_id},
     )
-    assert current_response.status_code == 404
+    assert current_response.status_code == 200
+    assert current_response.json()["status"] in {"resume_queued", "closed"}
+    assert current_response.json()["verification_payload"]["resume"]["status"] in {
+        "resume_queued",
+        "closed",
+    }
 
     deadline = time.time() + 2.0
     while time.time() < deadline:

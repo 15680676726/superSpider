@@ -198,7 +198,7 @@ def _detect_requested_surfaces(
     capability_ids, capability_layers_declared, capability_layers_valid = (
         _resolve_runtime_capability_projection(resolved_metadata)
     )
-    if capability_layers_declared and not capability_layers_valid:
+    if not capability_layers_valid:
         return []
     return infer_requested_execution_surfaces(
         texts=[
@@ -247,7 +247,7 @@ def _resolve_runtime_capability_projection(
         except Exception:
             return [], True, False
         return merged, True, True
-    return _unique_strings(metadata.get("allowed_capabilities")), False, True
+    return [], False, False
 
 
 def _runtime_has_terminal_signal(runtime: object | None) -> bool:

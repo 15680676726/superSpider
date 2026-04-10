@@ -1342,7 +1342,11 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             or heartbeat_status == "error"
         ):
             automation_status = "degraded"
-        elif schedule_count > 0 or active_loop_count > 0 or bool(supervisor.get("running")):
+        elif (
+            active_schedule_count > 0
+            or active_loop_count > 0
+            or bool(supervisor.get("running"))
+        ):
             automation_status = "active"
         return {
             "status": automation_status,

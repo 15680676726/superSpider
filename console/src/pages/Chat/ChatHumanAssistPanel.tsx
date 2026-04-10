@@ -31,7 +31,7 @@ export function resolveHumanAssistStatusPresentation(
   if (normalized === "need_more_evidence") {
     return { label: "待补证", color: "warning" };
   }
-  if (normalized === "resume_queued") return { label: "已验收", color: "success" };
+  if (normalized === "resume_queued") return { label: "\u6062\u590d\u4e2d", color: "processing" };
   if (normalized === "handoff_blocked") {
     return { label: "恢复受阻", color: "warning" };
   }

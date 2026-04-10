@@ -42,6 +42,9 @@ describe("industry page helpers", () => {
     expect(presentIndustryRuntimeStatus("waiting-resource")).toBe(
       presentRuntimeStatusLabel("waiting-resource"),
     );
+    expect(presentIndustryRuntimeStatus("materialized")).toBe("已生成任务");
+    expect(presentIndustryRuntimeStatus("pending_staffing")).toBe("待补位");
+    expect(presentIndustryRuntimeStatus("waiting-confirm")).toBe("待确认");
   });
 
   it("normalizes display tokens and falls back for empty values", () => {

@@ -153,6 +153,24 @@ def test_startup_recovery_surface_detection_fails_closed_when_layers_are_malform
     assert surfaces == []
 
 
+def test_startup_recovery_surface_detection_does_not_treat_legacy_allowed_capabilities_as_live_projection() -> None:
+    surfaces = _detect_requested_surfaces(
+        "鎵撳紑鏂囨湯澶╂満澶勭悊杩欐壒璧勬枡",
+        metadata={
+            "allowed_capabilities": [
+                "mcp:desktop_windows",
+                "tool:read_file",
+                "tool:write_file",
+                "tool:edit_file",
+            ],
+            "environment_constraints": ["desktop", "workspace", "file-view"],
+            "role_summary": "Handles local desktop work and governed file organization.",
+        },
+    )
+
+    assert surfaces == []
+
+
 def test_startup_recovery_recovers_local_orphans_and_expires_decisions(tmp_path) -> None:
     state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
     task_repository = SqliteTaskRepository(state_store)
@@ -518,7 +536,7 @@ def test_startup_recovery_records_exception_absorption_replan_action_into_summar
     assert summary.absorption_action_materialized is False
 
 
-def test_startup_recovery_requeues_legacy_execution_core_chat_writeback_gap(
+def test_startup_recovery_does_not_requeue_legacy_execution_core_chat_writeback_gap_without_layers(
     tmp_path,
 ) -> None:
     state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
@@ -666,46 +684,41 @@ def test_startup_recovery_requeues_legacy_execution_core_chat_writeback_gap(
         reason="startup",
     )
 
-    assert summary.recovered_legacy_chat_writebacks == 1
+    assert summary.recovered_legacy_chat_writebacks == 0
 
     refreshed_backlog = backlog_repository.get_item(backlog_item.id)
     assert refreshed_backlog is not None
-    assert refreshed_backlog.status == "open"
-    assert refreshed_backlog.cycle_id is None
-    assert refreshed_backlog.goal_id is None
-    assert refreshed_backlog.assignment_id is None
-    assert refreshed_backlog.metadata["chat_writeback_requested_surfaces"] == [
-        "file",
-        "desktop",
-    ]
-    assert refreshed_backlog.metadata["chat_writeback_gap_kind"] == "capability-gap"
-    assert "routing-pending" in refreshed_backlog.metadata["chat_writeback_classes"]
-    assert "capability-gap" in refreshed_backlog.metadata["chat_writeback_classes"]
+    assert refreshed_backlog.status == "materialized"
+    assert refreshed_backlog.cycle_id == "cycle-legacy-gap"
+    assert refreshed_backlog.goal_id == "goal-legacy-gap"
+    assert refreshed_backlog.assignment_id == "assignment-legacy-gap"
+    assert "chat_writeback_requested_surfaces" not in refreshed_backlog.metadata
+    assert "chat_writeback_gap_kind" not in refreshed_backlog.metadata
 
     refreshed_assignment = assignment_repository.get_assignment("assignment-legacy-gap")
     assert refreshed_assignment is not None
-    assert refreshed_assignment.status == "cancelled"
+    assert refreshed_assignment.status == "running"
 
     refreshed_goal = goal_repository.get_goal("goal-legacy-gap")
     assert refreshed_goal is not None
-    assert refreshed_goal.status == "archived"
+    assert refreshed_goal.status == "active"
 
     refreshed_override = goal_override_repository.get_override("goal-legacy-gap")
     assert refreshed_override is not None
-    assert refreshed_override.status == "archived"
+    assert refreshed_override.status == "active"
 
     refreshed_task = task_repository.get_task("task-legacy-gap")
     assert refreshed_task is not None
-    assert refreshed_task.status == "cancelled"
+    assert refreshed_task.status == "running"
 
     refreshed_runtime = task_runtime_repository.get_runtime("task-legacy-gap")
     assert refreshed_runtime is not None
-    assert refreshed_runtime.runtime_status == "terminated"
-    assert refreshed_runtime.current_phase == "cancelled"
-    assert "legacy execution-core" in (refreshed_runtime.last_error_summary or "")
+    assert refreshed_runtime.runtime_status == "active"
+    assert refreshed_runtime.current_phase == "executing"
+    assert refreshed_runtime.last_error_summary is None
 
 
-def test_startup_recovery_requeues_legacy_gap_from_capability_environment_metadata(
+def test_startup_recovery_does_not_requeue_legacy_gap_from_capability_environment_metadata_without_layers(
     tmp_path,
 ) -> None:
     state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
@@ -860,10 +873,7 @@ def test_startup_recovery_requeues_legacy_gap_from_capability_environment_metada
         reason="startup",
     )
 
-    assert summary.recovered_legacy_chat_writebacks == 1
+    assert summary.recovered_legacy_chat_writebacks == 0
     refreshed_backlog = backlog_repository.get_item(backlog_item.id)
     assert refreshed_backlog is not None
-    assert refreshed_backlog.metadata["chat_writeback_requested_surfaces"] == [
-        "file",
-        "desktop",
-    ]
+    assert "chat_writeback_requested_surfaces" not in refreshed_backlog.metadata

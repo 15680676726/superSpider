@@ -113,9 +113,17 @@ class RuntimeConversationFacade:
         if not isinstance(payload, dict):
             return None
         main_brain = payload.get("main_brain")
-        if not isinstance(main_brain, dict):
-            return None
-        commit_payload = _compact_mapping(main_brain.get("phase2_commit"))
+        commit_payload = (
+            _compact_mapping(main_brain.get("phase2_commit"))
+            if isinstance(main_brain, dict)
+            else {}
+        )
+        if not commit_payload:
+            query_runtime_state = payload.get("query_runtime_state")
+            if isinstance(query_runtime_state, dict):
+                commit_payload = _compact_mapping(query_runtime_state.get("commit_outcome"))
+                if commit_payload:
+                    commit_payload.setdefault("state_channel", "query_runtime_state")
         if not commit_payload:
             return None
         control_thread_id = _first_non_empty(
@@ -131,7 +139,9 @@ class RuntimeConversationFacade:
         chat_thread_id: str,
     ) -> dict[str, object] | None:
         service = self._human_assist_task_service
-        getter = getattr(service, "get_current_task", None)
+        getter = getattr(service, "get_visible_current_task", None)
+        if not callable(getter):
+            getter = getattr(service, "get_current_task", None)
         if not callable(getter):
             return None
         task = getter(chat_thread_id=chat_thread_id)
@@ -656,7 +666,7 @@ def _build_industry_kickoff_prompt(
         summary_line = f"{summary_line} 当前 lane：{'、'.join(lane_titles)}。"
     return (
         f"“{label}” 已创建完成，当前停在主脑启动确认。\n"
-        "系统不会直接把执行位推入干活，而是会先进入行业学习阶段：由 researcher 补齐行业、客户、竞争和平台信号，再自动转入后续协调与执行。\n"
+        "系统不会直接把执行位推入干活，而是会先进入行业学习阶段：由研究位补齐行业、客户、竞争和平台信号，再自动转入后续协调与执行。\n"
         "如果当前仍停在这里，说明这条链路需要一次显式启动；你可以直接回复“开始学习”或“继续执行”。\n"
         "如果你想先调整优先级、lane、backlog 或节奏，也可以直接在这里补充要求。\n"
         f"{summary_line}{_build_kickoff_staffing_suffix(detail)}"
@@ -667,17 +677,41 @@ def _build_kickoff_staffing_suffix(detail: object | None) -> str:
     if not isinstance(staffing, dict):
         return ""
     lines: list[str] = []
+
+    def _present_staffing_kind(value: object) -> str:
+        normalized = _first_non_empty(value)
+        if not normalized:
+            return "待补位"
+        mapping = {
+            "routing-pending": "待补位",
+            "career-seat-proposal": "长期岗位提案",
+            "temporary-seat-proposal": "临时席位提案",
+        }
+        return mapping.get(normalized, normalized)
+
+    def _present_staffing_status(value: object) -> str:
+        normalized = _first_non_empty(value)
+        if not normalized:
+            return "就绪"
+        mapping = {
+            "waiting-review": "待审核",
+            "ready": "就绪",
+            "active": "运行中",
+            "paused": "已暂停",
+        }
+        return mapping.get(normalized, normalized)
+
     active_gap = staffing.get("active_gap")
     if isinstance(active_gap, dict):
         gap_role = _first_non_empty(
             active_gap.get("target_role_name"),
             active_gap.get("target_role_id"),
-        ) or "unassigned seat"
-        gap_kind = _first_non_empty(active_gap.get("kind")) or "routing-pending"
+        ) or "未指派席位"
+        gap_kind = _present_staffing_kind(active_gap.get("kind"))
         gap_decision_id = _first_non_empty(active_gap.get("decision_request_id"))
-        gap_line = f"当前 staffing gap：{gap_role}（{gap_kind}）"
+        gap_line = f"当前待补位：{gap_role}（{gap_kind}）"
         if gap_decision_id:
-            gap_line = f"{gap_line}，decision {gap_decision_id}"
+            gap_line = f"{gap_line}，决策 {gap_decision_id}"
         lines.append(f"{gap_line}。")
     pending_proposals = staffing.get("pending_proposals")
     if isinstance(pending_proposals, list) and pending_proposals:
@@ -689,14 +723,14 @@ def _build_kickoff_staffing_suffix(detail: object | None) -> str:
             proposal_role = _first_non_empty(
                 item.get("target_role_name"),
                 item.get("target_role_id"),
-            ) or "pending proposal"
-            proposal_kind = _first_non_empty(item.get("kind"))
+            ) or "待确认补位"
+            proposal_kind = _present_staffing_kind(item.get("kind"))
             proposal_decision_id = _first_non_empty(item.get("decision_request_id"))
             details = [
                 value
                 for value in (
                     proposal_kind,
-                    f"decision {proposal_decision_id}" if proposal_decision_id else None,
+                    f"决策 {proposal_decision_id}" if proposal_decision_id else None,
                 )
                 if value
             ]
@@ -707,27 +741,29 @@ def _build_kickoff_staffing_suffix(detail: object | None) -> str:
             preview = ", ".join(preview_items)
             if len(valid_pending_proposals) > 3:
                 preview = f"{preview} 等 {len(valid_pending_proposals)} 项"
-            lines.append(f"待确认 proposals：{preview}。")
+            lines.append(f"待确认补位：{preview}。")
     temporary_seats = staffing.get("temporary_seats")
     if isinstance(temporary_seats, list) and temporary_seats:
         preview = ", ".join(
-            _first_non_empty(item.get("role_name"), item.get("role_id")) or "temporary seat"
+            _first_non_empty(item.get("role_name"), item.get("role_id")) or "临时席位"
             for item in temporary_seats[:3]
             if isinstance(item, dict)
         )
         if preview:
-            lines.append(f"当前 temporary seats：{preview}。")
+            lines.append(f"当前临时席位：{preview}。")
     researcher = staffing.get("researcher")
     if isinstance(researcher, dict):
         researcher_name = _first_non_empty(
             researcher.get("role_name"),
             researcher.get("agent_id"),
-        ) or "Researcher"
-        researcher_status = _first_non_empty(researcher.get("status")) or "ready"
+        ) or "研究位"
+        if researcher_name == "Researcher":
+            researcher_name = "研究位"
+        researcher_status = _present_staffing_status(researcher.get("status"))
         pending_signal_count = researcher.get("pending_signal_count")
         researcher_line = f"{researcher_name} 当前状态：{researcher_status}"
         if isinstance(pending_signal_count, int):
-            researcher_line = f"{researcher_line}，pending signals {pending_signal_count}"
+            researcher_line = f"{researcher_line}，待处理信号 {pending_signal_count}"
         lines.append(f"{researcher_line}。")
     return f"\n{'\n'.join(lines)}" if lines else ""
 

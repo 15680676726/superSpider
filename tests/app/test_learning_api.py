@@ -10,6 +10,7 @@ import pytest
 
 from copaw.app.routers.learning import router as learning_router
 from copaw.app.routers.runtime_center import router as runtime_center_router
+from copaw.app.runtime_center.evidence_query import RuntimeCenterEvidenceQueryService
 from copaw.capabilities import CapabilityService
 from copaw.capabilities.install_templates import InstallTemplateExampleRunRecord
 from copaw.config.config import MCPClientConfig
@@ -80,6 +81,11 @@ def _build_learning_app(tmp_path) -> FastAPI:
     app.state.task_repository = task_repository
     app.state.task_runtime_repository = task_runtime_repository
     app.state.evidence_ledger = evidence_ledger
+    app.state.evidence_query_service = RuntimeCenterEvidenceQueryService(
+        evidence_ledger=evidence_ledger,
+    )
+    app.state.goal_service = SimpleNamespace(get_goal=lambda goal_id: None)
+    app.state.agent_profile_service = SimpleNamespace(get_agent=lambda agent_id: None)
     return app
 
 
@@ -270,6 +276,98 @@ def test_learning_service_mcp_onboarding_runs_live_trial(monkeypatch, tmp_path) 
     assert temp_manager.closed is True
 
 
+def test_learning_service_skill_trial_does_not_pass_on_describe_only(tmp_path) -> None:
+    calls: list[tuple[str | None, str | None]] = []
+
+    async def _executor(
+        action: str | None = None,
+        script_path: str | None = None,
+        **_: object,
+    ) -> dict[str, object]:
+        calls.append((action, script_path))
+        if action == "describe":
+            return {
+                "success": True,
+                "summary": "Skill description loaded.",
+                "skill": {
+                    "name": "design-helper",
+                    "scripts": {},
+                },
+            }
+        raise AssertionError("describe-only skill trial should not execute scripts")
+
+    app = _build_learning_app(tmp_path)
+    learning_service = app.state.learning_service
+    learning_service.set_capability_service(
+        SimpleNamespace(resolve_executor=lambda capability_id: _executor),
+    )
+
+    result = asyncio.run(
+        learning_service._run_capability_trial_check(
+            capability_id="skill:design-helper",
+            plan=SimpleNamespace(id="plan-skill"),
+            proposal=SimpleNamespace(id="proposal-skill"),
+        ),
+    )
+
+    assert result["status"] == "fail"
+    assert result["detail"] == "missing-skill-trial-script"
+    assert "不能只靠说明信息" in result["message"]
+    assert calls == [("describe", None)]
+
+
+def test_learning_service_skill_trial_runs_declared_trial_script(tmp_path) -> None:
+    calls: list[tuple[str | None, str | None]] = []
+
+    async def _executor(
+        action: str | None = None,
+        script_path: str | None = None,
+        **_: object,
+    ) -> dict[str, object]:
+        calls.append((action, script_path))
+        if action == "describe":
+            return {
+                "success": True,
+                "summary": "Skill description loaded.",
+                "skill": {
+                    "name": "design-helper",
+                    "scripts": {
+                        "trial.py": "print('trial ok')",
+                        "notes.txt": "not executable",
+                    },
+                },
+            }
+        if action == "run_script":
+            assert script_path == "trial.py"
+            return {
+                "success": True,
+                "summary": "Trial script ok",
+                "payload": {"ran": True},
+            }
+        raise AssertionError(f"Unexpected skill trial action: {action}")
+
+    app = _build_learning_app(tmp_path)
+    learning_service = app.state.learning_service
+    learning_service.set_capability_service(
+        SimpleNamespace(resolve_executor=lambda capability_id: _executor),
+    )
+
+    result = asyncio.run(
+        learning_service._run_capability_trial_check(
+            capability_id="skill:design-helper",
+            plan=SimpleNamespace(id="plan-skill"),
+            proposal=SimpleNamespace(id="proposal-skill"),
+        ),
+    )
+
+    assert result["status"] == "pass"
+    assert result["detail"] == "trial.py"
+    assert result["message"] == "Trial script ok"
+    assert result["metadata"]["trial_script_path"] == "trial.py"
+    assert result["metadata"]["trial_mode"] == "run_script"
+    assert calls == [("describe", None), ("run_script", "trial.py")]
+
+
 def test_learning_service_configure_bindings_sets_runtime_collaborators(tmp_path) -> None:
     app = _build_learning_app(tmp_path)
     service = app.state.learning_service
@@ -398,6 +496,17 @@ def test_learning_api_patch_lifecycle_and_runtime_center_reads(tmp_path) -> None
     assert approved_rollback.json()["phase"] == "completed"
     assert approved_rollback.json()["decision_request_id"] == rollback_decision_id
     assert app.state.goal_override_repository.get_override("goal-detail") is None
+
+    patch_detail = client.get(f"/runtime-center/learning/patches/{patch_id}")
+    assert patch_detail.status_code == 200
+    patch_detail_payload = patch_detail.json()
+    patch_evidence = patch_detail_payload["evidence"]
+    assert patch_detail_payload["patch"]["source_evidence_id"] is not None
+    assert len(patch_detail_payload["patch"]["evidence_refs"]) >= 1
+    capability_refs = {item["capability_ref"] for item in patch_evidence}
+    assert "learning:patch-approved" in capability_refs
+    assert "learning:patch-applied" in capability_refs
+    assert "learning:patch-rolled-back" in capability_refs
 
 
 def test_runtime_center_patch_action_routes_enter_governed_mutation_flow(tmp_path) -> None:

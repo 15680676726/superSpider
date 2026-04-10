@@ -1613,6 +1613,75 @@ def test_capability_market_curated_install_assigns_capabilities_to_target_agents
     assert payload["installed"] is True
     assert payload["assigned_capability_ids"] == ["skill:salesforce"]
     assert payload["assignment_results"][0]["agent_id"] == "agent-sales"
+    assert payload["attachment"]["status"] == "attached"
+    assert payload["attachment"]["attached_agent_ids"] == ["agent-sales"]
+
+
+def test_capability_market_curated_install_without_targets_stays_inventory_only(
+    tmp_path,
+) -> None:
+    client = TestClient(build_runtime_app(tmp_path))
+
+    candidate = CuratedSkillCatalogEntry(
+        candidate_id="research-pack",
+        source_id="skillhub-featured-research",
+        source_label="SkillHub curated",
+        source_kind="skillhub-curated",
+        source_repo_url="https://lightmake.site",
+        discovery_kind="skillhub-preset",
+        manifest_status="skillhub-curated",
+        title="研究分析工具",
+        description="Curated research workflow skill",
+        bundle_url="https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/skills/research-pack.zip",
+        version="1.0.0",
+        install_name="research_pack",
+        tags=["research"],
+        capability_tags=["skill", "skillhub-curated"],
+        review_required=True,
+        review_summary="Review before install",
+        review_notes=["Curated review gate"],
+        routes={},
+    )
+
+    with (
+        patch(
+            "copaw.app.routers.capability_market.get_curated_skill_catalog_entry",
+            return_value=candidate,
+        ),
+        patch(
+            "copaw.app.routers.capability_market._resolve_remote_skill_capability_ids",
+            return_value=["skill:salesforce"],
+        ),
+        patch(
+            "copaw.app.routers.capability_market._dispatch_market_mutation",
+            return_value={
+                "success": True,
+                "installed": True,
+                "name": "research_pack",
+                "enabled": True,
+                "source_url": "https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/skills/research-pack.zip",
+                "summary": "Installed skill 'research_pack' from hub.",
+            },
+        ),
+        patch(
+            "copaw.app.routers.capability_market._assign_capabilities_to_agents",
+            return_value=[],
+        ),
+    ):
+        response = client.post(
+            "/capability-market/curated-catalog/install",
+            json={
+                "source_id": "skillhub-featured-research",
+                "candidate_id": "research-pack",
+                "review_acknowledged": True,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["installed"] is True
+    assert payload["attachment"]["status"] == "inventory-only"
+    assert payload["attachment"]["attached_agent_ids"] == []
 
 
 def test_capability_market_project_install_trials_github_candidate_and_records_trial_truth(
@@ -1812,6 +1881,8 @@ def test_capability_market_project_install_unwraps_kernel_output_payload(
     assert payload["source_url"] == "https://github.com/psf/black"
     assert payload["installed_capability_ids"] == ["project:black"]
     assert payload["trial_attachment"]["scope_ref"] == "seat-1"
+    assert payload["attachment"]["status"] == "attached"
+    assert payload["attachment"]["attached_agent_ids"] == ["copaw-agent-runner"]
     assert payload["runtime_contract"]["runtime_kind"] == "cli"
     assert payload["runtime_contract"]["supported_actions"] == ["describe", "run"]
     assert "port" not in payload["runtime_contract"]

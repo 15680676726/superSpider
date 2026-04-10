@@ -15,7 +15,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from typing import Any, Literal
+from typing import Any, Literal, Mapping
 from urllib.parse import urlparse
 from urllib.request import Request as URLRequest, urlopen
 
@@ -135,6 +135,12 @@ class CapabilityMarketCuratedInstallRequest(BaseModel):
     capability_assignment_mode: Literal["replace", "merge"] = "merge"
 
 
+class CapabilityMarketAttachmentTruth(BaseModel):
+    status: Literal["inventory-only", "attached"] = "inventory-only"
+    summary: str = ""
+    attached_agent_ids: list[str] = Field(default_factory=list)
+
+
 class CapabilityMarketCuratedInstallResponse(BaseModel):
     installed: bool
     name: str
@@ -147,6 +153,9 @@ class CapabilityMarketCuratedInstallResponse(BaseModel):
     assigned_capability_ids: list[str] = Field(default_factory=list)
     assignment_results: list["CapabilityMarketCapabilityAssignmentResult"] = Field(
         default_factory=list,
+    )
+    attachment: CapabilityMarketAttachmentTruth = Field(
+        default_factory=CapabilityMarketAttachmentTruth,
     )
 
 
@@ -170,6 +179,9 @@ class CapabilityMarketHubInstallResponse(BaseModel):
     assigned_capability_ids: list[str] = Field(default_factory=list)
     assignment_results: list["CapabilityMarketCapabilityAssignmentResult"] = Field(
         default_factory=list,
+    )
+    attachment: CapabilityMarketAttachmentTruth = Field(
+        default_factory=CapabilityMarketAttachmentTruth,
     )
 
 
@@ -212,6 +224,9 @@ class CapabilityMarketProjectInstallResponse(BaseModel):
     target_agent_id: str | None = None
     trial_attachment: dict[str, Any] | None = None
     probe_result: dict[str, Any] | None = None
+    attachment: CapabilityMarketAttachmentTruth = Field(
+        default_factory=CapabilityMarketAttachmentTruth,
+    )
 
 
 class CapabilityMarketProjectInstallAcceptedResponse(BaseModel):
@@ -296,6 +311,9 @@ class CapabilityMarketMCPRegistryInstallResponse(MCPClientInfo):
         default_factory=list,
     )
     summary: str = ""
+    attachment: CapabilityMarketAttachmentTruth = Field(
+        default_factory=CapabilityMarketAttachmentTruth,
+    )
 
 
 class CapabilityMarketMCPRegistryUpgradeRequest(BaseModel):
@@ -393,6 +411,9 @@ class CapabilityMarketMCPTemplateInstallResponse(MCPClientInfo):
         default_factory=list,
     )
     workflow_resume: CapabilityMarketWorkflowResumeSpec | None = None
+    attachment: CapabilityMarketAttachmentTruth = Field(
+        default_factory=CapabilityMarketAttachmentTruth,
+    )
 
 
 class CapabilityMarketInstallTemplateInstallRequest(BaseModel):
@@ -452,6 +473,9 @@ class CapabilityMarketInstallTemplateInstallResponse(BaseModel):
     assigned_capability_ids: list[str] = Field(default_factory=list)
     assignment_results: list[CapabilityMarketCapabilityAssignmentResult] = Field(
         default_factory=list,
+    )
+    attachment: CapabilityMarketAttachmentTruth = Field(
+        default_factory=CapabilityMarketAttachmentTruth,
     )
     workflow_resume: CapabilityMarketWorkflowResumeSpec | None = None
     summary: str = ""
@@ -2052,6 +2076,14 @@ def _project_install_response_payload(
     enable: bool,
     target_agent_id: str | None,
 ) -> dict[str, object]:
+    attachment_truth = _build_attachment_truth(
+        target_agent_id=target_agent_id,
+        trial_attachment=(
+            result.get("trial_attachment")
+            if isinstance(result.get("trial_attachment"), Mapping)
+            else None
+        ),
+    )
     return {
         "installed": bool(result.get("installed", True)),
         "candidate_id": candidate_id,
@@ -2090,6 +2122,7 @@ def _project_install_response_payload(
             if isinstance(result.get("probe_result"), dict)
             else None
         ),
+        "attachment": attachment_truth.model_dump(mode="json"),
     }
 
 
@@ -2632,6 +2665,55 @@ async def _assign_capabilities_to_agents(
     return assignment_results
 
 
+def _build_attachment_truth(
+    *,
+    target_agent_ids: Sequence[str] | None = None,
+    assignment_results: Sequence[CapabilityMarketCapabilityAssignmentResult] | None = None,
+    target_agent_id: str | None = None,
+    trial_attachment: Mapping[str, Any] | None = None,
+) -> CapabilityMarketAttachmentTruth:
+    normalized_target_agent_ids = [
+        str(agent_id).strip()
+        for agent_id in list(target_agent_ids or [])
+        if str(agent_id).strip()
+    ]
+    attached_agent_ids = [
+        str(result.agent_id).strip()
+        for result in list(assignment_results or [])
+        if str(getattr(result, "agent_id", "") or "").strip()
+        and bool(getattr(result, "success", False))
+    ]
+    normalized_target_agent_id = str(target_agent_id or "").strip() or None
+    if (
+        normalized_target_agent_id is not None
+        and isinstance(trial_attachment, Mapping)
+        and bool(trial_attachment.get("success"))
+        and normalized_target_agent_id not in attached_agent_ids
+    ):
+        attached_agent_ids.append(normalized_target_agent_id)
+    if attached_agent_ids:
+        return CapabilityMarketAttachmentTruth(
+            status="attached",
+            summary=(
+                "已挂到执行位"
+                if len(attached_agent_ids) == 1
+                else f"已挂到 {len(attached_agent_ids)} 个执行位"
+            ),
+            attached_agent_ids=attached_agent_ids,
+        )
+    if normalized_target_agent_ids or normalized_target_agent_id is not None:
+        return CapabilityMarketAttachmentTruth(
+            status="inventory-only",
+            summary="已加入库存，尚未完成执行位挂载",
+            attached_agent_ids=[],
+        )
+    return CapabilityMarketAttachmentTruth(
+        status="inventory-only",
+        summary="已加入库存，尚未挂到执行位",
+        attached_agent_ids=[],
+    )
+
+
 def _resolve_remote_skill_capability_ids(
     request: Request,
     *,
@@ -2802,6 +2884,10 @@ async def _materialize_registry_mcp_install(
         assigned_capability_ids=assigned_capability_ids,
         assignment_results=assignment_results,
         summary=plan.summary,
+        attachment=_build_attachment_truth(
+            target_agent_ids=target_agent_ids,
+            assignment_results=assignment_results,
+        ),
     )
 
 
@@ -3234,6 +3320,7 @@ async def install_market_install_template(
             ready=bool(refreshed_template.ready) if refreshed_template is not None else bool(mcp_response.enabled),
             assigned_capability_ids=list(mcp_response.assigned_capability_ids),
             assignment_results=list(mcp_response.assignment_results),
+            attachment=mcp_response.attachment,
             workflow_resume=mcp_response.workflow_resume,
             summary=str(mcp_response.description or template.description or "").strip(),
             routes=template.routes,
@@ -3348,6 +3435,10 @@ async def install_market_install_template(
         ready=ready,
         assigned_capability_ids=assigned_capability_ids,
         assignment_results=assignment_results,
+        attachment=_build_attachment_truth(
+            target_agent_ids=_normalize_agent_ids(request_payload.target_agent_ids),
+            assignment_results=assignment_results,
+        ),
         workflow_resume=_response_workflow_resume(request_payload.workflow_resume),
         summary=summary,
         routes=template.routes,
@@ -3590,6 +3681,10 @@ async def install_market_hub_skill(
         source_url=str(result.get("source_url") or payload.bundle_url),
         assigned_capability_ids=assigned_capability_ids,
         assignment_results=assignment_results,
+        attachment=_build_attachment_truth(
+            target_agent_ids=target_agent_ids,
+            assignment_results=assignment_results,
+        ),
     )
 
 
@@ -3671,6 +3766,10 @@ async def install_market_curated_skill(
         review_notes=list(candidate.review_notes or []),
         assigned_capability_ids=assigned_capability_ids,
         assignment_results=assignment_results,
+        attachment=_build_attachment_truth(
+            target_agent_ids=target_agent_ids,
+            assignment_results=assignment_results,
+        ),
     )
 
 

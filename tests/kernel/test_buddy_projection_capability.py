@@ -4,7 +4,16 @@ from __future__ import annotations
 from copaw.kernel.buddy_domain_capability_growth import BuddyDomainCapabilityGrowthService
 from copaw.kernel.buddy_onboarding_service import BuddyOnboardingService
 from copaw.kernel.buddy_projection_service import BuddyProjectionService
-from copaw.state import AgentReportRecord, AssignmentRecord, SQLiteStateStore
+from copaw.kernel.buddy_domain_capability import derive_buddy_domain_key
+from copaw.state import (
+    AgentReportRecord,
+    AssignmentRecord,
+    BuddyDomainCapabilityRecord,
+    GrowthTarget,
+    HumanProfile,
+    IndustryInstanceRecord,
+    SQLiteStateStore,
+)
 from copaw.state.main_brain_service import (
     AgentReportService,
     AssignmentService,
@@ -230,3 +239,70 @@ def test_invalid_closure_without_report_or_evidence_does_not_add_points(tmp_path
     assert payload.growth.capability_points == 0
     assert payload.growth.settled_closure_count == 0
     assert payload.growth.evolution_stage == "seed"
+
+
+def test_buddy_projection_preserves_explicit_legacy_control_thread_after_binding_backfill(
+    tmp_path,
+) -> None:
+    _onboarding, projection, store = _build_services(tmp_path)
+    profile_repository = SqliteHumanProfileRepository(store)
+    growth_target_repository = SqliteGrowthTargetRepository(store)
+    domain_repository = SqliteBuddyDomainCapabilityRepository(store)
+    industry_repository = SqliteIndustryInstanceRepository(store)
+
+    profile = HumanProfile(
+        profile_id="profile-1",
+        display_name="Nora",
+        profession="Writer",
+        current_stage="restart",
+        interests=["writing"],
+        strengths=["storytelling"],
+        constraints=["time"],
+        goal_intention="Return to creator work.",
+    )
+    profile_repository.upsert_profile(profile)
+    growth_target_repository.upsert_target(
+        GrowthTarget(
+            profile_id=profile.profile_id,
+            primary_direction="creator",
+            final_goal="Return to creator work.",
+            why_it_matters="This is still the real path.",
+        ),
+    )
+    legacy_instance_id = f"buddy:{profile.profile_id}"
+    industry_repository.upsert_instance(
+        IndustryInstanceRecord(
+            instance_id=legacy_instance_id,
+            label=profile.display_name,
+            summary="Legacy buddy carrier",
+            owner_scope=profile.profile_id,
+            status="active",
+            profile_payload={},
+            team_payload={},
+            execution_core_identity_payload={},
+            agent_ids=[],
+            lifecycle_status="running",
+            autonomy_status="coordinating",
+        ),
+    )
+    historical_thread_id = "industry-chat:historical-thread:execution-core"
+    domain_repository.upsert_domain_capability(
+        BuddyDomainCapabilityRecord(
+            profile_id=profile.profile_id,
+            domain_key=derive_buddy_domain_key("creator"),
+            domain_label="Creator",
+            status="active",
+            industry_instance_id="",
+            control_thread_id=historical_thread_id,
+        ),
+    )
+
+    payload = projection.build_chat_surface(profile_id=profile.profile_id)
+    active = domain_repository.get_active_domain_capability(profile.profile_id)
+
+    assert active is not None
+    assert active.industry_instance_id == legacy_instance_id
+    assert active.control_thread_id == historical_thread_id
+    assert payload.execution_carrier is not None
+    assert payload.execution_carrier["instance_id"] == legacy_instance_id
+    assert payload.execution_carrier["control_thread_id"] == historical_thread_id

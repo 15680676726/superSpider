@@ -349,6 +349,26 @@ def test_human_assist_task_service_excludes_resume_queued_from_current_task(tmp_
     assert current is None
 
 
+def test_human_assist_task_service_exposes_resume_queued_for_visible_current_task(tmp_path) -> None:
+    service = _build_service(tmp_path)
+    issued = service.issue_task(_make_record(task_id="task-visible-resume"))
+
+    service.submit_and_verify(
+        issued.id,
+        submission_text="uploaded receipt proof",
+        submission_evidence_refs=["media-analysis-1"],
+    )
+    service.mark_resume_queued(issued.id)
+
+    visible = service.get_visible_current_task(
+        chat_thread_id="industry-chat:industry-1:execution-core",
+    )
+
+    assert visible is not None
+    assert visible.id == issued.id
+    assert visible.status == "resume_queued"
+
+
 def test_human_assist_task_service_closes_task_after_resume_finishes(tmp_path) -> None:
     service = _build_service(tmp_path)
     issued = service.issue_task(_make_record())
@@ -370,6 +390,32 @@ def test_human_assist_task_service_closes_task_after_resume_finishes(tmp_path) -
     assert closed.closed_at is not None
     assert closed.verification_payload["resume"]["status"] == "closed"
     assert closed.verification_payload["resume"]["summary"] == "系统已从断点继续。"
+
+
+def test_human_assist_task_service_keeps_recent_resume_terminal_task_visible(tmp_path) -> None:
+    service = _build_service(tmp_path)
+    issued = service.issue_task(_make_record(task_id="task-visible-terminal"))
+
+    service.submit_and_verify(
+        issued.id,
+        submission_text="uploaded receipt proof",
+        submission_evidence_refs=["media-analysis-1"],
+    )
+    service.mark_resume_queued(issued.id)
+    service.mark_closed(
+        issued.id,
+        summary="resume finished",
+        resume_payload={"resumed": True, "summary": "resume finished"},
+    )
+
+    visible = service.get_visible_current_task(
+        chat_thread_id="industry-chat:industry-1:execution-core",
+    )
+
+    assert visible is not None
+    assert visible.id == issued.id
+    assert visible.status == "closed"
+    assert visible.verification_payload["resume"]["status"] == "closed"
 
 
 def test_human_assist_task_service_marks_handoff_blocked_when_resume_fails(tmp_path) -> None:

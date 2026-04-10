@@ -193,6 +193,12 @@ export interface CapabilityMarketCapabilityAssignmentResult {
   routes: Record<string, string>;
 }
 
+export interface CapabilityMarketAttachmentTruth {
+  status: "inventory-only" | "attached";
+  summary: string;
+  attached_agent_ids: string[];
+}
+
 export interface CapabilityMarketInstallTemplateInstallResponse {
   template_id: string;
   install_status: "installed" | "already-installed" | "enabled-existing";
@@ -202,6 +208,7 @@ export interface CapabilityMarketInstallTemplateInstallResponse {
   ready: boolean;
   assigned_capability_ids: string[];
   assignment_results: CapabilityMarketCapabilityAssignmentResult[];
+  attachment: CapabilityMarketAttachmentTruth;
   workflow_resume?: CapabilityMarketWorkflowResumePayload | null;
   summary: string;
   routes: Record<string, string>;
@@ -214,6 +221,7 @@ export interface CapabilityMarketRemoteSkillInstallResponse {
   source_url: string;
   assigned_capability_ids: string[];
   assignment_results: CapabilityMarketCapabilityAssignmentResult[];
+  attachment: CapabilityMarketAttachmentTruth;
 }
 
 export interface CapabilityMarketCuratedInstallResponse
@@ -249,6 +257,39 @@ export interface CapabilityMarketProjectInstallResponse {
   installed_capability_ids: string[];
   target_agent_id?: string | null;
   trial_attachment?: Record<string, unknown> | null;
+  attachment: CapabilityMarketAttachmentTruth;
+}
+
+export interface CapabilityMarketProjectInstallAcceptedResponse {
+  accepted: true;
+  task_id: string;
+  status: string;
+  phase: string;
+  title: string;
+  source_url: string;
+  capability_kind: string;
+  candidate_id?: string | null;
+  progress_summary: string;
+  routes: Record<string, string>;
+}
+
+export interface CapabilityMarketProjectInstallJobStatusResponse {
+  task_id: string;
+  status: string;
+  phase: string;
+  stage: string;
+  title: string;
+  source_url: string;
+  capability_kind: string;
+  candidate_id?: string | null;
+  target_agent_id?: string | null;
+  progress_summary: string;
+  error?: string | null;
+  installed_capability_ids: string[];
+  result?: CapabilityMarketProjectInstallResponse | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  routes: Record<string, string>;
 }
 
 export interface McpRegistryCategory {
@@ -428,10 +469,20 @@ export const capabilityMarketApi = {
     capability_assignment_mode?: "replace" | "merge";
     trial_scope?: "single-agent" | "single-seat" | "wider-rollout";
   }) =>
-    request<CapabilityMarketProjectInstallResponse>("/capability-market/projects/install", {
+    request<CapabilityMarketProjectInstallAcceptedResponse>("/capability-market/projects/install", {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+
+  getCapabilityMarketProjectInstallJob: (taskId: string) =>
+    request<CapabilityMarketProjectInstallJobStatusResponse>(
+      `/capability-market/projects/install-jobs/${encodeURIComponent(taskId)}`,
+    ),
+
+  getCapabilityMarketProjectInstallJobResult: (taskId: string) =>
+    request<CapabilityMarketProjectInstallResponse>(
+      `/capability-market/projects/install-jobs/${encodeURIComponent(taskId)}/result`,
+    ),
 
   listCapabilityMarketCuratedSources: () =>
     request<CuratedSkillCatalogSource[]>("/capability-market/curated-sources"),

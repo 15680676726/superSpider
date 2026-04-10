@@ -131,7 +131,18 @@ export function buildRuntimeEnvironmentCockpitSignals(
 
   const carrierSource = mainBrainMeta.carrier ?? surface?.status ?? "unavailable";
   const environmentSource =
-    mainBrainMeta.environment ?? governanceMeta.host_twin_summary ?? governanceCard?.summary;
+    mainBrainMeta.environment ??
+    governanceMeta.host_twin_summary ??
+    governanceCard?.summary ?? {
+      summary: "环境待接线",
+      detail: "还没有可验证的环境连续性或宿主绑定信息。",
+    };
+  const environmentStatus =
+    mainBrainMeta.environment == null &&
+    governanceMeta.host_twin_summary == null &&
+    governanceCard?.summary == null
+      ? "degraded"
+      : governanceCard?.status;
 
   const carrierRoute = routeText(carrierSource) || textValue(governanceEntry?.route);
   const environmentRoute = routeText(environmentSource) || textValue(governanceEntry?.route);
@@ -162,9 +173,9 @@ export function buildRuntimeEnvironmentCockpitSignals(
         summarizeHostTwin(governanceMeta.host_twin_summary) ||
         firstTextValue(surface?.note),
       environmentRoute || governanceEntry?.route || null,
-      governanceCard?.status === "state-service"
+      environmentStatus === "state-service"
         ? "success"
-        : governanceCard?.status === "degraded"
+        : environmentStatus === "degraded"
           ? "warning"
           : "default",
       "环境详情",
