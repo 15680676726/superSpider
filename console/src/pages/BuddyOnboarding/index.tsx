@@ -19,7 +19,6 @@ import type {
   BuddyConfirmDirectionResponse,
   BuddyDirectionTransitionPreviewResponse,
   BuddyIdentityResponse,
-  BuddyOnboardingOperationResponse,
   BuddySurfaceResponse,
 } from "../../api/modules/buddy";
 import { resolveBuddyEntryDecision } from "../../runtime/buddyFlow";
@@ -31,6 +30,11 @@ import {
   buildBuddyExecutionCarrierChatBinding,
   openRuntimeChat,
 } from "../../utils/runtimeChat";
+import {
+  clearBuddyOnboardingDraft,
+  loadBuddyOnboardingDraft,
+  saveBuddyOnboardingDraft,
+} from "./draftState";
 
 const { Paragraph, Title } = Typography;
 const { TextArea } = Input;
@@ -45,13 +49,50 @@ type IdentityFormValues = {
   goal_intention: string;
 };
 
-type PendingBuddyOperation = BuddyOnboardingOperationResponse;
+type BuddyOnboardingDraft = {
+  identity?: Partial<IdentityFormValues>;
+  clarification?: {
+    answer?: string;
+    selected_direction?: string;
+    capability_action?: "keep-active" | "restore-archived" | "start-new" | null;
+    target_domain_id?: string;
+  };
+  naming?: {
+    buddy_name?: string;
+  };
+  step?: number;
+};
 
 function parseLines(value?: string | null): string[] {
   return (value || "")
     .split(/[\n,，、]/)
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function joinLines(value?: string[] | null): string {
+  return Array.isArray(value) ? value.join("\n") : "";
+}
+
+function sanitizeDraft(value: unknown): BuddyOnboardingDraft | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  return value as BuddyOnboardingDraft;
+}
+
+function buildIdentityFormValues(
+  profile: BuddyIdentityResponse["profile"],
+): IdentityFormValues {
+  return {
+    display_name: profile.display_name,
+    profession: profile.profession,
+    current_stage: profile.current_stage,
+    interests: joinLines(profile.interests),
+    strengths: joinLines(profile.strengths),
+    constraints: joinLines(profile.constraints),
+    goal_intention: profile.goal_intention,
+  };
 }
 
 function buildIdentityFromSurface(
@@ -81,6 +122,7 @@ function buildClarificationFromSurface(
     tightened: Boolean(surface.onboarding.tightened),
     finished: Boolean(
       surface.onboarding.requires_direction_confirmation ||
+        surface.onboarding.requires_naming ||
         surface.onboarding.completed,
     ),
     next_question: surface.onboarding.next_question || "",
@@ -96,7 +138,8 @@ function buildConfirmPayloadFromSurface(
     !surface.profile?.profile_id ||
     !surface.onboarding?.session_id ||
     !surface.growth_target ||
-    !surface.execution_carrier
+    !surface.execution_carrier ||
+    (!surface.onboarding.requires_naming && !surface.onboarding.completed)
   ) {
     return null;
   }
@@ -129,24 +172,39 @@ function buildConfirmPayloadFromSurface(
 export default function BuddyOnboardingPage() {
   const navigate = useNavigate();
   const [form] = Form.useForm<IdentityFormValues>();
+  const watchedIdentityValues = Form.useWatch([], form);
+  const [initialDraft] = useState<BuddyOnboardingDraft | null>(() =>
+    sanitizeDraft(loadBuddyOnboardingDraft()),
+  );
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [identity, setIdentity] = useState<BuddyIdentityResponse | null>(null);
   const [clarification, setClarification] =
     useState<BuddyClarificationResponse | null>(null);
-  const [questionAnswer, setQuestionAnswer] = useState("");
+  const [questionAnswer, setQuestionAnswer] = useState(
+    () => initialDraft?.clarification?.answer || "",
+  );
   const [confirmPayload, setConfirmPayload] =
     useState<BuddyConfirmDirectionResponse | null>(null);
-  const [pendingOperation, setPendingOperation] =
-    useState<PendingBuddyOperation | null>(null);
-  const [selectedDirection, setSelectedDirection] = useState("");
+  const [currentStep, setCurrentStep] = useState<number>(
+    () => initialDraft?.step ?? 0,
+  );
+  const [selectedDirection, setSelectedDirection] = useState(
+    () => initialDraft?.clarification?.selected_direction || "",
+  );
   const [transitionPreview, setTransitionPreview] =
     useState<BuddyDirectionTransitionPreviewResponse | null>(null);
   const [selectedCapabilityAction, setSelectedCapabilityAction] = useState<
     "keep-active" | "restore-archived" | "start-new" | null
-  >(null);
-  const [selectedTargetDomainId, setSelectedTargetDomainId] = useState<string | undefined>();
+  >(() => initialDraft?.clarification?.capability_action ?? null);
+  const [selectedTargetDomainId, setSelectedTargetDomainId] = useState<string | undefined>(
+    () => initialDraft?.clarification?.target_domain_id,
+  );
+  const [buddyNameDraft, setBuddyNameDraft] = useState(
+    () => initialDraft?.naming?.buddy_name || "",
+  );
+  const [draftEnabled, setDraftEnabled] = useState(true);
 
   const applyBuddySurface = (surface: BuddySurfaceResponse) => {
     const nextIdentity = buildIdentityFromSurface(surface);
@@ -157,6 +215,9 @@ export default function BuddyOnboardingPage() {
     }
     setIdentity(nextIdentity);
     setClarification(nextClarification);
+    if (nextIdentity?.profile) {
+      form.setFieldsValue(buildIdentityFormValues(nextIdentity.profile));
+    }
     if (surface.onboarding?.recommended_direction) {
       setSelectedDirection(
         surface.onboarding.selected_direction ||
@@ -164,10 +225,57 @@ export default function BuddyOnboardingPage() {
           "",
       );
     }
+    if (surface.relationship?.buddy_name?.trim()) {
+      setBuddyNameDraft(surface.relationship.buddy_name.trim());
+    }
     if (nextConfirmPayload) {
       setConfirmPayload(nextConfirmPayload);
+      setCurrentStep(2);
+      return;
     }
+    if (nextIdentity) {
+      setCurrentStep(1);
+      return;
+    }
+    setCurrentStep(0);
   };
+
+  useEffect(() => {
+    if (initialDraft?.identity) {
+      form.setFieldsValue(initialDraft.identity);
+    }
+  }, [form, initialDraft]);
+
+  useEffect(() => {
+    if (!draftEnabled) {
+      return;
+    }
+    saveBuddyOnboardingDraft({
+      identity:
+        watchedIdentityValues && typeof watchedIdentityValues === "object"
+          ? watchedIdentityValues
+          : undefined,
+      clarification: {
+        answer: questionAnswer,
+        selected_direction: selectedDirection,
+        capability_action: selectedCapabilityAction,
+        target_domain_id: selectedTargetDomainId,
+      },
+      naming: {
+        buddy_name: buddyNameDraft,
+      },
+      step: currentStep,
+    } satisfies BuddyOnboardingDraft);
+  }, [
+    buddyNameDraft,
+    currentStep,
+    draftEnabled,
+    questionAnswer,
+    selectedCapabilityAction,
+    selectedDirection,
+    selectedTargetDomainId,
+    watchedIdentityValues,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -181,31 +289,11 @@ export default function BuddyOnboardingPage() {
         const decision = resolveBuddyEntryDecision(surface);
         if (decision.mode === "chat-ready" && surface?.profile?.profile_id) {
           if (!surface.execution_carrier) {
-            setError("伙伴主场尚未准备完成，请刷新后重试。");
+            setError("伙伴聊天页还没准备好，请刷新后重试。");
             return;
           }
           const binding = buildBuddyExecutionCarrierChatBinding({
             sessionId: null,
-            profileId: surface.profile.profile_id,
-            profileDisplayName: surface.profile.display_name,
-            executionCarrier: surface.execution_carrier,
-            entrySource: "buddy-onboarding-resume",
-          });
-          await openRuntimeChat(binding, navigate, {
-            shouldNavigate: () => !cancelled,
-          });
-          return;
-        }
-        if (
-          decision.mode === "chat-needs-naming" &&
-          surface?.profile?.profile_id
-        ) {
-          if (!surface.execution_carrier) {
-            setError("伙伴主场尚未准备完成，请刷新后重试。");
-            return;
-          }
-          const binding = buildBuddyExecutionCarrierChatBinding({
-            sessionId: decision.sessionId,
             profileId: surface.profile.profile_id,
             profileDisplayName: surface.profile.display_name,
             executionCarrier: surface.execution_carrier,
@@ -222,23 +310,11 @@ export default function BuddyOnboardingPage() {
           surface.onboarding
         ) {
           applyBuddySurface(surface);
-          if (
-            surface.onboarding.operation_status === "running" &&
-            surface.onboarding.operation_id
-          ) {
-            setPendingOperation({
-              session_id: surface.onboarding.session_id ?? "",
-              profile_id: surface.profile.profile_id,
-              operation_id: surface.onboarding.operation_id,
-              operation_kind: surface.onboarding.operation_kind,
-              operation_status: surface.onboarding.operation_status,
-            });
-          }
         }
       } catch (rawError) {
         if (cancelled) return;
         if (!isApiError(rawError) || rawError.status !== 404) {
-          setError(rawError instanceof Error ? rawError.message : "伙伴建档加载失败");
+          setError("伙伴档案加载失败，请稍后重试。");
         }
       } finally {
         if (!cancelled) {
@@ -250,58 +326,6 @@ export default function BuddyOnboardingPage() {
       cancelled = true;
     };
   }, [navigate]);
-
-  useEffect(() => {
-    if (!pendingOperation) {
-      return;
-    }
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-
-    const poll = async () => {
-      try {
-        const surface = await api.getBuddySurface(pendingOperation.profile_id);
-        if (cancelled || !surface) {
-          return;
-        }
-        const onboarding = surface.onboarding;
-        if (
-          onboarding.session_id !== pendingOperation.session_id ||
-          onboarding.operation_id !== pendingOperation.operation_id
-        ) {
-          timer = setTimeout(() => {
-            void poll();
-          }, 1500);
-          return;
-        }
-        if (onboarding.operation_status === "running") {
-          timer = setTimeout(() => {
-            void poll();
-          }, 1500);
-          return;
-        }
-        applyBuddySurface(surface);
-        if (onboarding.operation_status === "failed") {
-          setError(onboarding.operation_error || "Buddy 建档失败");
-        }
-        setPendingOperation(null);
-      } catch (rawError) {
-        if (!cancelled) {
-          setError(rawError instanceof Error ? rawError.message : "Buddy 建档失败");
-          setPendingOperation(null);
-        }
-      }
-    };
-
-    void poll();
-
-    return () => {
-      cancelled = true;
-      if (timer) {
-        clearTimeout(timer);
-      }
-    };
-  }, [pendingOperation]);
 
   const handleSubmitIdentity = async (values: IdentityFormValues) => {
     setSubmitting(true);
@@ -316,33 +340,28 @@ export default function BuddyOnboardingPage() {
         constraints: parseLines(values.constraints),
         goal_intention: values.goal_intention,
       };
-      const operation = await api.startBuddyIdentity(payload);
-      writeBuddyProfileId(operation.profile_id);
-      setIdentity({
-        session_id: operation.session_id,
-        profile: {
-          profile_id: operation.profile_id,
-          display_name: payload.display_name,
-          profession: payload.profession,
-          current_stage: payload.current_stage,
-          interests: payload.interests,
-          strengths: payload.strengths,
-          constraints: payload.constraints,
-          goal_intention: payload.goal_intention,
-        },
-        question_count: 1,
-        next_question: "",
+      const result = await api.submitBuddyIdentity(payload);
+      writeBuddyProfileId(result.profile.profile_id);
+      setIdentity(result);
+      setClarification({
+        session_id: result.session_id,
+        question_count: result.question_count,
+        tightened: false,
         finished: false,
+        next_question: result.next_question,
+        candidate_directions: [],
+        recommended_direction: "",
       });
-      setClarification(null);
       setConfirmPayload(null);
       setSelectedDirection("");
       setTransitionPreview(null);
       setSelectedCapabilityAction(null);
       setSelectedTargetDomainId(undefined);
-      setPendingOperation(operation);
+      setBuddyNameDraft("");
+      setCurrentStep(1);
     } catch (rawError) {
-      setError(rawError instanceof Error ? rawError.message : "身份建档失败");
+      void rawError;
+      setError("身份信息提交失败，请稍后重试。");
     } finally {
       setSubmitting(false);
     }
@@ -353,18 +372,22 @@ export default function BuddyOnboardingPage() {
     setSubmitting(true);
     setError(null);
     try {
-      const operation = await api.startBuddyClarification({
+      const result = await api.answerBuddyClarification({
         session_id: identity.session_id,
         answer: questionAnswer.trim(),
         existing_question_count: clarification?.question_count,
       });
+      setClarification(result);
       setQuestionAnswer("");
       setTransitionPreview(null);
       setSelectedCapabilityAction(null);
       setSelectedTargetDomainId(undefined);
-      setPendingOperation(operation);
+      if (result.finished && result.recommended_direction) {
+        setSelectedDirection(result.recommended_direction);
+      }
     } catch (rawError) {
-      setError(rawError instanceof Error ? rawError.message : "方向澄清失败");
+      void rawError;
+      setError("方向澄清失败，请稍后重试。");
     } finally {
       setSubmitting(false);
     }
@@ -387,7 +410,8 @@ export default function BuddyOnboardingPage() {
           : undefined,
       );
     } catch (rawError) {
-      setError(rawError instanceof Error ? rawError.message : "主方向确认失败");
+      void rawError;
+      setError("方向确认失败，请稍后重试。");
     } finally {
       setSubmitting(false);
     }
@@ -404,7 +428,7 @@ export default function BuddyOnboardingPage() {
     setSubmitting(true);
     setError(null);
     try {
-      const operation = await api.startBuddyConfirmDirection({
+      const result = await api.confirmBuddyDirection({
         session_id: identity.session_id,
         selected_direction: selectedDirection,
         capability_action: selectedCapabilityAction,
@@ -413,22 +437,40 @@ export default function BuddyOnboardingPage() {
             ? selectedTargetDomainId
             : undefined,
       });
-      setPendingOperation(operation);
+      writeBuddyProfileId(result.session.profile_id);
+      setConfirmPayload(result);
+      setCurrentStep(2);
     } catch (rawError) {
-      setError(rawError instanceof Error ? rawError.message : "主方向确认失败");
+      void rawError;
+      setError("方向确认失败，请稍后重试。");
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleEnterChat = async () => {
-    if (!identity || !confirmPayload?.session?.session_id) return;
+  const handleStartChat = async () => {
+    if (
+      !identity ||
+      !confirmPayload?.session?.session_id ||
+      !buddyNameDraft.trim()
+    ) {
+      return;
+    }
     const executionCarrier = confirmPayload.execution_carrier;
     if (!executionCarrier) {
-      setError("伙伴主场尚未准备完成，请刷新后重试。");
+      setError("伙伴聊天页还没准备好，请刷新后重试。");
       return;
     }
     try {
+      setSubmitting(true);
+      setError(null);
+      const named = await api.nameBuddy({
+        session_id: confirmPayload.session.session_id,
+        buddy_name: buddyNameDraft.trim(),
+      });
+      writeBuddyProfileId(named.profile_id);
+      setDraftEnabled(false);
+      clearBuddyOnboardingDraft();
       const binding = buildBuddyExecutionCarrierChatBinding({
         sessionId: confirmPayload.session.session_id,
         profileId: identity.profile.profile_id,
@@ -436,14 +478,15 @@ export default function BuddyOnboardingPage() {
         executionCarrier,
       });
       await openRuntimeChat(binding, navigate);
-      return;
     } catch (rawError) {
-      setError(rawError instanceof Error ? rawError.message : "进入聊天失败");
-      return;
+      void rawError;
+      setError("进入聊天失败，请稍后重试。");
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  const stepIndex = confirmPayload ? 2 : clarification?.finished ? 2 : identity ? 1 : 0;
+  const stepIndex = currentStep;
 
   if (loading) {
     return (
@@ -458,7 +501,7 @@ export default function BuddyOnboardingPage() {
       <Card>
         <Space direction="vertical" size={8} style={{ width: "100%" }}>
           <Title level={2} style={{ margin: 0 }}>
-            超级伙伴初次建档
+            首次创建伙伴档案
           </Title>
           <Paragraph style={{ margin: 0 }}>
             先让我认真了解你，再一起把长期方向收口成一个足够大的主方向。
@@ -467,24 +510,16 @@ export default function BuddyOnboardingPage() {
           <Steps
             current={stepIndex}
             items={[
-              { title: "身份建档" },
-              { title: "方向澄清" },
-              { title: "确认主方向" },
+              { title: "身份资料" },
+              { title: "方向确认" },
+              { title: "伙伴名称" },
             ]}
           />
         </Space>
       </Card>
 
       {error ? <Alert type="error" showIcon message={error} /> : null}
-      {pendingOperation ? (
-        <Alert
-          type="info"
-          showIcon
-          message="我在后台认真分析你的情况，模型慢时会继续处理中，不用重复点击。"
-        />
-      ) : null}
-
-      {!identity ? (
+      {(!identity || currentStep === 0) ? (
         <Card title="先告诉我你是谁">
           <Form
             form={form}
@@ -526,14 +561,14 @@ export default function BuddyOnboardingPage() {
                 data-testid="buddy-identity-goal-intention"
               />
             </Form.Item>
-            <Button type="primary" htmlType="submit" loading={submitting || Boolean(pendingOperation)}>
-              开始建立伙伴关系
+            <Button type="primary" htmlType="submit" loading={submitting}>
+              开始创建伙伴档案
             </Button>
           </Form>
         </Card>
       ) : null}
 
-      {identity && !clarification?.finished ? (
+      {currentStep === 1 && identity && !clarification?.finished ? (
         <Card title="再回答我几句，我帮你把方向收得更准">
           <Space direction="vertical" size={16} style={{ width: "100%" }}>
             <Alert
@@ -557,10 +592,13 @@ export default function BuddyOnboardingPage() {
               data-testid="buddy-clarification-answer"
             />
             <Space>
+              <Button onClick={() => setCurrentStep(0)} data-testid="buddy-step-back">
+                返回上一步
+              </Button>
               <Button
                 type="primary"
                 onClick={() => void handleClarify()}
-                loading={submitting || Boolean(pendingOperation)}
+                loading={submitting}
                 data-testid="buddy-clarification-submit"
               >
                 继续
@@ -570,7 +608,7 @@ export default function BuddyOnboardingPage() {
         </Card>
       ) : null}
 
-      {identity && clarification?.finished && !confirmPayload ? (
+      {currentStep === 1 && identity && clarification?.finished && !confirmPayload ? (
         <Card title="我先给你 2-3 个候选大方向，但你只确认 1 个主方向">
           <Space direction="vertical" size={16} style={{ width: "100%" }}>
             <Paragraph style={{ marginBottom: 0 }}>
@@ -605,7 +643,7 @@ export default function BuddyOnboardingPage() {
               <Button
                 type="primary"
                 disabled={!selectedDirection}
-                loading={submitting || Boolean(pendingOperation)}
+                loading={submitting}
                 onClick={() => void handlePreviewDirectionTransition()}
                 data-testid="buddy-direction-confirm"
               >
@@ -696,7 +734,7 @@ export default function BuddyOnboardingPage() {
                     </Button>
                     <Button
                       type="primary"
-                      loading={submitting || Boolean(pendingOperation)}
+                      loading={submitting}
                       disabled={
                         !selectedCapabilityAction ||
                         (selectedCapabilityAction === "restore-archived" &&
@@ -705,7 +743,7 @@ export default function BuddyOnboardingPage() {
                       onClick={() => void handleConfirmDirection()}
                       data-testid="buddy-transition-confirm"
                     >
-                      确认切换方式，进入聊天主场
+                      确认切换方式，填写伙伴名称
                     </Button>
                   </Space>
                 </Space>
@@ -715,9 +753,9 @@ export default function BuddyOnboardingPage() {
         </Card>
       ) : null}
 
-      {identity && confirmPayload ? (
+      {currentStep === 2 && identity && confirmPayload ? (
         <Card
-          title="已完成方向确认，准备进入伙伴主场"
+          title="已确认方向，填写伙伴名称"
           data-testid="buddy-direction-confirmed"
         >
           <Space direction="vertical" size={16} style={{ width: "100%" }}>
@@ -725,7 +763,7 @@ export default function BuddyOnboardingPage() {
               type="success"
               showIcon
               message="你的长期方向已经生成好了"
-              description="下一步进入聊天主场，给伙伴起名，然后只看最终目标和当前这一步。"
+              description="下一步先给伙伴取名，确认后再进入聊天页。"
             />
             <Paragraph style={{ marginBottom: 0 }}>
               <strong>已确认方向：</strong>{" "}
@@ -736,12 +774,29 @@ export default function BuddyOnboardingPage() {
                 <strong>已生成载体：</strong> {confirmPayload.execution_carrier.label}
               </Paragraph>
             ) : null}
+            <Input
+              value={buddyNameDraft}
+              onChange={(event) => setBuddyNameDraft(event.target.value)}
+              placeholder="给伙伴起个名字"
+              data-testid="buddy-name-input"
+            />
+            <Button
+              onClick={() => {
+                setConfirmPayload(null);
+                setCurrentStep(1);
+              }}
+              data-testid="buddy-step-back"
+            >
+              返回上一步
+            </Button>
             <Button
               type="primary"
-              onClick={() => void handleEnterChat()}
-              data-testid="buddy-direction-enter-chat"
+              loading={submitting}
+              disabled={!buddyNameDraft.trim()}
+              onClick={() => void handleStartChat()}
+              data-testid="buddy-start-chat"
             >
-              进入聊天，给伙伴起名
+              开始聊天
             </Button>
           </Space>
         </Card>

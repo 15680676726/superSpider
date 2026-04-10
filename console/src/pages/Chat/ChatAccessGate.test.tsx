@@ -11,39 +11,36 @@ describe("ChatAccessGate", () => {
     cleanup();
   });
 
-  it("renders the binding notice with buddy-first wording and only exposes identity-first shortcuts", async () => {
+  it("renders a single identity path for binding notice", () => {
     const onOpenIdentityCenter = vi.fn();
-    const onReload = vi.fn();
 
     render(
       <ChatAccessGate
         chatNoticeVariant="binding"
         threadBootstrapError={null}
-        autoBindingPending={true}
+        autoBindingPending={false}
         requestedThreadId={null}
         industryTeamsError={null}
-        hasSuggestedTeams={true}
+        hasSuggestedTeams={false}
         effectiveThreadPending={false}
-        showModelPrompt={true}
+        showModelPrompt={false}
         onCloseModelPrompt={vi.fn()}
         onOpenModelSettings={vi.fn()}
         onOpenIdentityCenter={onOpenIdentityCenter}
-        onReload={onReload}
+        onReload={vi.fn()}
       />,
     );
 
-    expect(screen.getByText("正在接入伙伴主场")).toBeInTheDocument();
-    expect(screen.getByText("打开身份中心")).toBeTruthy();
-    expect(screen.queryByText(/线程/)).toBeNull();
-    expect(screen.queryByRole("button", { name: "智能体工作台" })).toBeNull();
+    expect(screen.getByText("正在准备聊天通道")).toBeInTheDocument();
+    expect(screen.getByText("完成身份确认后即可继续使用，系统已在后台接续。")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "打开身份中心" }));
-
+    const identityButton = screen.getByRole("button", { name: "前往身份中心" });
+    fireEvent.click(identityButton);
     expect(onOpenIdentityCenter).toHaveBeenCalledTimes(1);
-    expect(onReload).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("renders the loading notice without showing the gate modal when closed", () => {
+  it("shows a loading spinner before chat is ready", () => {
     const { container } = render(
       <ChatAccessGate
         chatNoticeVariant="loading"
@@ -62,7 +59,38 @@ describe("ChatAccessGate", () => {
     );
 
     expect(container.querySelector(".ant-spin")).not.toBeNull();
-    expect(screen.getByText("正在进入伙伴对话...")).toBeInTheDocument();
+    expect(screen.getByText("正在进入聊天，请稍候")).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("shows the model prompt using Chinese copy", () => {
+    const onCloseModelPrompt = vi.fn();
+    const onOpenModelSettings = vi.fn();
+
+    render(
+      <ChatAccessGate
+        chatNoticeVariant={null}
+        threadBootstrapError={null}
+        autoBindingPending={false}
+        requestedThreadId={null}
+        industryTeamsError={null}
+        hasSuggestedTeams={false}
+        effectiveThreadPending={false}
+        showModelPrompt={true}
+        onCloseModelPrompt={onCloseModelPrompt}
+        onOpenModelSettings={onOpenModelSettings}
+        onOpenIdentityCenter={vi.fn()}
+        onReload={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("请先完成模型配置")).toBeInTheDocument();
+    expect(screen.getByText("确认模型设置后才能继续使用聊天。")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "稍后再说" }));
+    expect(onCloseModelPrompt).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: /去模型设置/ }));
+    expect(onOpenModelSettings).toHaveBeenCalledTimes(1);
   });
 });

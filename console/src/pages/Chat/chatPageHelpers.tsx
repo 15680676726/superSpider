@@ -5,25 +5,6 @@ const CHAT_RUNTIME_TEXT = {
   unknownAgent: "未知智能体",
 } as const;
 
-function countPendingChatApprovals(
-  governanceStatus:
-    | {
-        pending_decisions?: number | null;
-        proposed_patches?: number | null;
-        pending_patches?: number | null;
-      }
-    | null
-    | undefined,
-): number {
-  if (!governanceStatus) {
-    return 0;
-  }
-  return (
-    (governanceStatus.pending_decisions ?? 0) +
-    (governanceStatus.proposed_patches ?? 0)
-  );
-}
-
 function normalizeThreadId(threadId: string | null | undefined): string | null {
   if (!threadId) {
     return null;
@@ -67,16 +48,12 @@ function parseIndustryThreadId(
 
 function resolveChatRouteRecoveryTarget({
   requestedThreadId,
-  buddySessionId,
-  requestedBuddyProfileId,
   activeThreadId,
 }: {
   requestedThreadId: string | null;
-  buddySessionId: string | null;
-  requestedBuddyProfileId: string | null;
   activeThreadId: string | null | undefined;
 }): string | null {
-  if (requestedThreadId || buddySessionId || requestedBuddyProfileId) {
+  if (requestedThreadId) {
     return null;
   }
   const recoveryTarget = resolveRuntimeChatEntryPath(activeThreadId);
@@ -85,14 +62,10 @@ function resolveChatRouteRecoveryTarget({
 
 function resolveChatThreadBootstrapState({
   requestedThreadId,
-  buddySessionId,
-  requestedBuddyProfileId,
   activeThreadId,
   activeThreadMeta,
 }: {
   requestedThreadId: string | null;
-  buddySessionId: string | null;
-  requestedBuddyProfileId: string | null;
   activeThreadId: string | null | undefined;
   activeThreadMeta: unknown;
 }): {
@@ -106,8 +79,6 @@ function resolveChatThreadBootstrapState({
   const normalizedActiveThreadId = normalizeThreadId(activeThreadId);
   const recoveryTarget = resolveChatRouteRecoveryTarget({
     requestedThreadId: normalizedRequestedThreadId,
-    buddySessionId,
-    requestedBuddyProfileId,
     activeThreadId: normalizedActiveThreadId,
   });
 
@@ -138,39 +109,17 @@ function resolveChatThreadBootstrapState({
     effectiveThreadId: null,
     initialThreadMeta: {},
     initialThreadBootstrapPending: false,
-    initialAutoBindingPending: true,
+    initialAutoBindingPending: false,
     recoveryTarget: null,
   };
 }
 
-function shouldAutoRefreshRuntimeThread({
-  threadId,
-  threadMeta,
-  threadBootstrapError,
-}: {
-  threadId: string | null;
-  threadMeta: Record<string, unknown>;
-  threadBootstrapError?: string | null;
-}): boolean {
-  if (typeof threadBootstrapError === "string" && threadBootstrapError.trim()) {
-    return false;
-  }
-  if (!isFormalRuntimeThreadId(threadId)) {
-    return false;
-  }
-  const sessionKind =
-    typeof threadMeta.session_kind === "string" ? threadMeta.session_kind.trim() : "";
-  return !sessionKind || sessionKind === "industry-control-thread";
-}
-
 export {
   CHAT_RUNTIME_TEXT,
-  countPendingChatApprovals,
   normalizeThreadId,
   normalizeThreadMeta,
   isFormalRuntimeThreadId,
   parseIndustryThreadId,
   resolveChatThreadBootstrapState,
   resolveChatRouteRecoveryTarget,
-  shouldAutoRefreshRuntimeThread,
 };

@@ -5,34 +5,20 @@ export const BUDDY_IDENTITY_CENTER_ROUTE = "/buddy-onboarding";
 export type BuddyEntryDecision =
   | { mode: "start-onboarding"; sessionId: null }
   | { mode: "resume-onboarding"; sessionId: string | null }
-  | { mode: "chat-needs-naming"; sessionId: string | null }
   | { mode: "chat-ready"; sessionId: null };
-
-export type BuddyNamingState = {
-  needsNaming: boolean;
-  sessionId: string | null;
-};
-
-function normalizeSessionId(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
-}
-
-function resolveCanonicalSessionId(...values: unknown[]): string | null {
-  for (const value of values) {
-    const normalized = normalizeSessionId(value);
-    if (normalized) {
-      return normalized;
-    }
-  }
-  return null;
-}
 
 function hasProfile(surface: BuddySurfaceResponse | null | undefined): boolean {
   return Boolean(surface?.profile?.profile_id);
+}
+
+function hasExecutionCarrier(
+  surface: BuddySurfaceResponse | null | undefined,
+): boolean {
+  if (!surface?.execution_carrier) {
+    return false;
+  }
+  const instanceId = surface.execution_carrier.instance_id;
+  return typeof instanceId === "string" && instanceId.trim().length > 0;
 }
 
 export function resolveBuddyEntryDecision(
@@ -46,25 +32,8 @@ export function resolveBuddyEntryDecision(
   if (!onboarding) {
     return { mode: "resume-onboarding", sessionId };
   }
-  if (onboarding.completed) {
+  if (onboarding.completed && hasExecutionCarrier(surface)) {
     return { mode: "chat-ready", sessionId: null };
   }
-  if (onboarding.requires_naming) {
-    return { mode: "chat-needs-naming", sessionId };
-  }
   return { mode: "resume-onboarding", sessionId };
-}
-
-export function resolveBuddyNamingState(
-  surface: BuddySurfaceResponse | null | undefined,
-  ...fallbackSessionIds: Array<string | null | undefined>
-): BuddyNamingState {
-  const onboarding = surface?.onboarding;
-  return {
-    needsNaming: Boolean(onboarding?.requires_naming),
-    sessionId: resolveCanonicalSessionId(
-      onboarding?.session_id,
-      ...fallbackSessionIds,
-    ),
-  };
 }

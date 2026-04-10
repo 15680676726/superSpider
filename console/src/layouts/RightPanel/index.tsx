@@ -16,6 +16,7 @@ import { readBuddyProfileId } from "../../runtime/buddyProfileBinding";
 import styles from "./index.module.less";
 
 const { Text } = Typography;
+const BUDDY_PANEL_REFRESH_MS = 5 * 60 * 1000;
 
 // ── 空态（未绑定伙伴） ──────────────────────────────────────────────────
 function EmptyState() {
@@ -34,37 +35,59 @@ function EmptyState() {
 export default function RightPanel() {
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
+  const [boundProfileId, setBoundProfileId] = useState<string | null>(() =>
+    readBuddyProfileId(),
+  );
   const [surface, setSurface] = useState<BuddySurfaceResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => Boolean(readBuddyProfileId()));
   const [tick, setTick] = useState(0);
   const [documentVisible, setDocumentVisible] = useState(
     () => typeof document === "undefined" || document.visibilityState !== "hidden",
   );
-  const isBuddyOnboardingRoute = location.pathname.startsWith("/buddy-onboarding");
+  const shouldShowPanel = Boolean(boundProfileId);
   const shouldAnimateAvatar =
+    shouldShowPanel &&
     !collapsed &&
     documentVisible &&
     surface !== null;
 
-  // 拉取伙伴数据
+  useEffect(() => {
+    setBoundProfileId(readBuddyProfileId());
+  }, [location.key, location.pathname]);
+
   useEffect(() => {
     let cancelled = false;
-    const boundProfileId = readBuddyProfileId();
-
-    if (isBuddyOnboardingRoute && !boundProfileId) {
+    if (!boundProfileId) {
       setSurface(null);
       setLoading(false);
       return () => { cancelled = true; };
     }
 
     setLoading(true);
-    void api.getBuddySurface(isBuddyOnboardingRoute ? boundProfileId : undefined).then((s) => {
+    void api.getBuddySurface(boundProfileId).then((s) => {
       if (!cancelled) { setSurface(s); setLoading(false); }
     }).catch(() => {
       if (!cancelled) setLoading(false);
     });
     return () => { cancelled = true; };
-  }, [isBuddyOnboardingRoute]);
+  }, [boundProfileId]);
+
+  useEffect(() => {
+    if (!boundProfileId) {
+      return undefined;
+    }
+    const timer = window.setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        return;
+      }
+      void api.getBuddySurface(boundProfileId).then((s) => {
+        setSurface(s);
+      }).catch(() => {
+        /* keep current sidebar snapshot when refresh fails */
+      });
+    }, BUDDY_PANEL_REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, [boundProfileId]);
 
   useEffect(() => {
     if (typeof document === "undefined") {
@@ -87,6 +110,10 @@ export default function RightPanel() {
     const timer = window.setInterval(() => setTick((t) => t + 1), BUDDY_ANIMATION_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [shouldAnimateAvatar]);
+
+  if (!shouldShowPanel) {
+    return null;
+  }
 
   const snapshot = surface ? resolveBuddyDisplaySnapshot(surface) : null;
   const evolution = surface
@@ -225,9 +252,9 @@ export default function RightPanel() {
                 </Row>
               </div>
 
-              {/* ── 当前关系上下文 ── */}
+              {/* ── 当前推进背景 ── */}
               <div className={styles.sectionCard}>
-                <div className={styles.sectionLabel}>关系上下文</div>
+                <div className={styles.sectionLabel}>当前推进背景</div>
                 <div className={styles.contextItem}><span className={styles.contextLabel}>最终目标</span><span className={styles.contextValue}>{snapshot.finalGoalSummary}</span></div>
                 <div className={styles.contextItem}><span className={styles.contextLabel}>当前任务</span><span className={styles.contextValue}>{snapshot.currentTaskSummary}</span></div>
                 <div className={styles.contextItem}><span className={styles.contextLabel}>为什么现在做</span><span className={styles.contextValue}>{snapshot.whyNowSummary}</span></div>

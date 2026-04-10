@@ -4,7 +4,6 @@ import type { BuddySurfaceResponse } from "../api/modules/buddy";
 import {
   BUDDY_IDENTITY_CENTER_ROUTE,
   resolveBuddyEntryDecision,
-  resolveBuddyNamingState,
 } from "./buddyFlow";
 
 function makeSurface(
@@ -14,18 +13,19 @@ function makeSurface(
     profile: {
       profile_id: "profile-1",
       display_name: "Mina",
-      profession: "运营",
-      current_stage: "探索期",
+      profession: "Operator",
+      current_stage: "exploring",
       interests: [],
       strengths: [],
       constraints: [],
-      goal_intention: "找到长期方向",
+      goal_intention: "Find a durable direction",
     },
     growth_target: null,
     relationship: null,
+    execution_carrier: null,
     presentation: {
       profile_id: "profile-1",
-      buddy_name: "你的伙伴",
+      buddy_name: "Your buddy",
       lifecycle_state: "born-unnamed",
       presence_state: "attentive",
       mood_state: "warm",
@@ -61,7 +61,7 @@ function makeSurface(
       operation_error: "",
       question_count: 2,
       tightened: false,
-      next_question: "下一问",
+      next_question: "What matters most right now?",
       candidate_directions: [],
       recommended_direction: "",
       selected_direction: "",
@@ -70,6 +70,19 @@ function makeSurface(
       completed: false,
     },
     ...overrides,
+  };
+}
+
+function makeCarrier() {
+  return {
+    instance_id: "buddy:profile-1:domain-writing",
+    label: "Mina writing carrier",
+    owner_scope: "profile-1",
+    current_cycle_id: "cycle-1",
+    team_generated: true,
+    thread_id: "industry-chat:buddy:profile-1:domain-writing:execution-core",
+    control_thread_id:
+      "industry-chat:buddy:profile-1:domain-writing:execution-core",
   };
 }
 
@@ -85,16 +98,17 @@ describe("buddyFlow", () => {
     expect(decision.sessionId).toBe("session-1");
   });
 
-  it("routes confirmed-but-unnamed buddies into chat naming", () => {
+  it("keeps confirmed-but-unnamed buddies inside onboarding", () => {
     const surface = makeSurface({
       growth_target: {
         target_id: "target-1",
         profile_id: "profile-1",
-        primary_direction: "建立稳定、自主、长期向上的人生成长主方向",
-        final_goal: "建立长期成长主方向",
-        why_it_matters: "因为这会改变接下来几年。",
+        primary_direction: "Build a durable writing lane.",
+        final_goal: "Publish the first real novel.",
+        why_it_matters: "Turn writing into proof of work.",
         current_cycle_label: "Cycle 1",
       },
+      execution_carrier: makeCarrier(),
       onboarding: {
         session_id: "session-1",
         status: "confirmed",
@@ -105,9 +119,9 @@ describe("buddyFlow", () => {
         question_count: 9,
         tightened: true,
         next_question: "",
-        candidate_directions: ["建立稳定、自主、长期向上的人生成长主方向"],
-        recommended_direction: "建立稳定、自主、长期向上的人生成长主方向",
-        selected_direction: "建立稳定、自主、长期向上的人生成长主方向",
+        candidate_directions: ["Build a durable writing lane."],
+        recommended_direction: "Build a durable writing lane.",
+        selected_direction: "Build a durable writing lane.",
         requires_direction_confirmation: false,
         requires_naming: true,
         completed: false,
@@ -115,38 +129,45 @@ describe("buddyFlow", () => {
     });
 
     const decision = resolveBuddyEntryDecision(surface);
-    const naming = resolveBuddyNamingState(surface, null);
 
-    expect(decision.mode).toBe("chat-needs-naming");
-    expect(naming.needsNaming).toBe(true);
-    expect(naming.sessionId).toBe("session-1");
+    expect(decision.mode).toBe("resume-onboarding");
+    expect(decision.sessionId).toBe("session-1");
   });
 
-  it("falls back to the bound thread session id when naming still needs to continue", () => {
+  it("keeps confirmed buddies inside onboarding until the carrier is bound", () => {
     const surface = makeSurface({
+      growth_target: {
+        target_id: "target-1",
+        profile_id: "profile-1",
+        primary_direction: "Build a durable writing lane.",
+        final_goal: "Publish the first real novel.",
+        why_it_matters: "Turn writing into proof of work.",
+        current_cycle_label: "Cycle 1",
+      },
+      execution_carrier: null,
       onboarding: {
-        session_id: null,
+        session_id: "session-1",
         status: "confirmed",
         operation_id: "",
         operation_kind: "",
-        operation_status: "idle",
-        operation_error: "",
+        operation_status: "failed",
+        operation_error: "boom after target",
         question_count: 9,
         tightened: true,
         next_question: "",
-        candidate_directions: ["建立稳定、自主、长期向上的人生成长主方向"],
-        recommended_direction: "建立稳定、自主、长期向上的人生成长主方向",
-        selected_direction: "建立稳定、自主、长期向上的人生成长主方向",
+        candidate_directions: ["Build a durable writing lane."],
+        recommended_direction: "Build a durable writing lane.",
+        selected_direction: "Build a durable writing lane.",
         requires_direction_confirmation: false,
         requires_naming: true,
         completed: false,
       },
     });
 
-    const naming = resolveBuddyNamingState(surface, null, "session-from-thread");
+    const decision = resolveBuddyEntryDecision(surface);
 
-    expect(naming.needsNaming).toBe(true);
-    expect(naming.sessionId).toBe("session-from-thread");
+    expect(decision.mode).toBe("resume-onboarding");
+    expect(decision.sessionId).toBe("session-1");
   });
 
   it("lets completed buddies enter chat without naming gate", () => {
@@ -154,20 +175,21 @@ describe("buddyFlow", () => {
       growth_target: {
         target_id: "target-1",
         profile_id: "profile-1",
-        primary_direction: "建立稳定、自主、长期向上的人生成长主方向",
-        final_goal: "建立长期成长主方向",
-        why_it_matters: "因为这会改变接下来几年。",
+        primary_direction: "Build a durable writing lane.",
+        final_goal: "Publish the first real novel.",
+        why_it_matters: "Turn writing into proof of work.",
         current_cycle_label: "Cycle 1",
       },
       relationship: {
         relationship_id: "relationship-1",
         profile_id: "profile-1",
-        buddy_name: "小澜",
+        buddy_name: "Nova",
         encouragement_style: "old-friend",
       },
+      execution_carrier: makeCarrier(),
       presentation: {
         profile_id: "profile-1",
-        buddy_name: "小澜",
+        buddy_name: "Nova",
         lifecycle_state: "bonded",
         presence_state: "attentive",
         mood_state: "warm",
@@ -189,9 +211,9 @@ describe("buddyFlow", () => {
         question_count: 9,
         tightened: true,
         next_question: "",
-        candidate_directions: ["建立稳定、自主、长期向上的人生成长主方向"],
-        recommended_direction: "建立稳定、自主、长期向上的人生成长主方向",
-        selected_direction: "建立稳定、自主、长期向上的人生成长主方向",
+        candidate_directions: ["Build a durable writing lane."],
+        recommended_direction: "Build a durable writing lane.",
+        selected_direction: "Build a durable writing lane.",
         requires_direction_confirmation: false,
         requires_naming: false,
         completed: true,
@@ -199,9 +221,8 @@ describe("buddyFlow", () => {
     });
 
     const decision = resolveBuddyEntryDecision(surface);
-    const naming = resolveBuddyNamingState(surface, null);
 
     expect(decision.mode).toBe("chat-ready");
-    expect(naming.needsNaming).toBe(false);
+    expect(decision.sessionId).toBeNull();
   });
 });

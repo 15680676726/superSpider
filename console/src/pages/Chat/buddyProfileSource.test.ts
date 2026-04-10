@@ -4,6 +4,7 @@ import {
   mergeBuddyProfileIntoThreadMeta,
   resolveBuddyProfileIdFromBuddySurface,
   resolveRequestedBuddyProfileId,
+  shouldLoadBuddySurface,
   resolveBuddySurfaceProfileRequest,
   resolveThreadBuddyProfileId,
 } from "./buddyProfileSource";
@@ -49,6 +50,12 @@ describe("buddyProfileSource", () => {
         requestedProfileId: "profile-query",
       }),
     ).toBe("profile-query");
+  });
+
+  it("only loads buddy surface when a canonical buddy profile id exists", () => {
+    expect(shouldLoadBuddySurface("profile-1")).toBe(true);
+    expect(shouldLoadBuddySurface("   ")).toBe(false);
+    expect(shouldLoadBuddySurface(null)).toBe(false);
   });
 
   it("does not overwrite a canonical thread buddy profile id with a query fallback", () => {

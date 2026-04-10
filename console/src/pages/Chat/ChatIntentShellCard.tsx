@@ -1,10 +1,14 @@
+import { Button } from "antd";
+
 import styles from "./index.module.less";
 import type { RuntimeIntentShellSurface } from "./runtimeSidecarEvents";
 
 export function ChatIntentShellCard({
   shell,
+  onViewDetails,
 }: {
   shell: RuntimeIntentShellSurface | null;
+  onViewDetails?: (() => void) | null;
 }) {
   if (!shell) {
     return null;
@@ -38,6 +42,17 @@ export function ChatIntentShellCard({
           >
             {shell.metaSummary}
           </span>
+          {onViewDetails ? (
+            <Button size="small" type="link" onClick={onViewDetails}>
+              查看详情
+            </Button>
+          ) : null}
+        </div>
+      ) : onViewDetails ? (
+        <div className={styles.humanAssistStripActions}>
+          <Button size="small" type="link" onClick={onViewDetails}>
+            查看详情
+          </Button>
         </div>
       ) : null}
     </div>

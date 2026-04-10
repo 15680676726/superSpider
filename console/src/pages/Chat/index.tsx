@@ -1,5 +1,4 @@
 ﻿import {
-  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -24,24 +23,18 @@ import {
 } from "@ant-design/icons";
 import { useLocation, useNavigate } from "react-router-dom";
 
-import api from "../../api";
-import type { GovernanceStatus } from "../../api";
-import type { BuddySurfaceResponse } from "../../api/modules/buddy";
 import type { IndustryInstanceSummary } from "../../api/modules/industry";
 import type {
   MediaAnalysisSummary,
   MediaSourceSpec,
 } from "../../api/modules/media";
-import { useModelStore } from "../../stores/useModelStore";
 import { resolveMediaTitle } from "../../utils/mediaPresentation";
 import type { ChatMediaDraftItem } from "./useChatMedia";
 import { ChatAccessGate } from "./ChatAccessGate";
 import {
-  countPendingChatApprovals,
   normalizeThreadId,
   normalizeThreadMeta,
   resolveChatThreadBootstrapState,
-  shouldAutoRefreshRuntimeThread,
 } from "./chatPageHelpers";
 import {
   resolveChatComposerKey,
@@ -50,34 +43,19 @@ import {
 } from "./chatRuntimePresentation";
 import defaultConfig, { type DefaultConfig } from "./OptionsPanel/defaultConfig";
 import { resolveChatNoticeVariant } from "./noticeState";
-import { resolveThreadRuntimePresentation } from "./pagePresentation";
-import {
-  formatRuntimeWaitDescription,
-  type RuntimeHealthNotice,
-  type RuntimeLifecycleState,
-  type RuntimeWaitState,
-} from "./runtimeDiagnostics";
+import { type RuntimeWaitState } from "./runtimeDiagnostics";
 import sessionApi from "./sessionApi";
 import { ChatComposerAdapter } from "./ChatComposerAdapter";
-import { ChatCommitConfirmationCard } from "./ChatCommitConfirmationCard";
-import { ChatHumanAssistPanel } from "./ChatHumanAssistPanel";
 import { ChatIntentShellCard } from "./ChatIntentShellCard";
-import { ChatRuntimeSidebar } from "./ChatRuntimeSidebar";
 import { useChatMedia } from "./useChatMedia";
 import { useChatRuntimeState } from "./useChatRuntimeState";
 import styles from "./index.module.less";
 import { useRuntimeBinding } from "./useRuntimeBinding";
-import { resolveCanonicalBuddyProfileId } from "../../runtime/buddyProfileBinding";
-import {
-  BUDDY_IDENTITY_CENTER_ROUTE,
-  resolveBuddyNamingState,
-} from "../../runtime/buddyFlow";
+import { readBuddyProfileId } from "../../runtime/buddyProfileBinding";
+import { BUDDY_IDENTITY_CENTER_ROUTE } from "../../runtime/buddyFlow";
 import {
   mergeBuddyProfileIntoThreadMeta,
-  resolveBuddyProfileIdFromBuddySurface,
-  resolveBuddySurfaceProfileRequest,
   resolveRequestedBuddyProfileId,
-  resolveThreadBuddyProfileId,
 } from "./buddyProfileSource";
 
 interface CustomWindow extends Window {
@@ -90,61 +68,7 @@ interface CustomWindow extends Window {
 declare const window: CustomWindow;
 
 type OptionsConfig = DefaultConfig;
-
-type RuntimeModelsSnapshot = {
-  resolved_llm?: { provider_id: string; model: string } | null;
-  active_llm?: { provider_id: string; model: string } | null;
-  fallback_enabled?: boolean;
-  fallback_chain?: unknown[];
-  resolution_reason?: string | null;
-} | null;
-
-function resolveRuntimeModelPresentation(
-  activeModels: RuntimeModelsSnapshot,
-): {
-  runtimeModelLabel: string;
-  runtimeFallbackLabel: string | null;
-  runtimeModelHint: string;
-} {
-  const resolvedRuntimeModel =
-    activeModels?.resolved_llm || activeModels?.active_llm || null;
-  const runtimeModelLabel = resolvedRuntimeModel
-    ? `${resolvedRuntimeModel.provider_id}/${resolvedRuntimeModel.model}`
-    : "模型未配置";
-  const runtimeFallbackLabel =
-    activeModels?.fallback_enabled === false
-      ? null
-      : activeModels?.fallback_chain?.length
-      ? `备用 ${activeModels.fallback_chain.length}`
-      : null;
-  const runtimeModelHint =
-    activeModels?.resolution_reason?.trim() ||
-    (runtimeFallbackLabel ? "已启用备用模型" : "当前对话模型");
-  return {
-    runtimeModelLabel,
-    runtimeFallbackLabel,
-    runtimeModelHint,
-  };
-}
-
-function resolveRuntimeWaitPresentation(
-  runtimeWaitState: RuntimeWaitState | null,
-  runtimeWaitClock: number,
-): { runtimeWaitDescription: string | null; runtimeWaitSeconds: number } {
-  if (!runtimeWaitState) {
-    return {
-      runtimeWaitDescription: null,
-      runtimeWaitSeconds: 0,
-    };
-  }
-  return {
-    runtimeWaitDescription: formatRuntimeWaitDescription(runtimeWaitState),
-    runtimeWaitSeconds: Math.max(
-      0,
-      Math.floor((runtimeWaitClock - runtimeWaitState.startedAt) / 1000),
-    ),
-  };
-}
+const EMPTY_SUGGESTED_TEAMS: IndustryInstanceSummary[] = [];
 
 // ============================================================
 // 媒体附件面板
@@ -186,7 +110,7 @@ function MediaPanel({
         <Alert
           type="warning"
           showIcon
-          message={mediaError}
+          message="材料处理失败，请稍后重试。"
           closable
           onClose={clearMediaError}
           style={{ marginBottom: 6, borderRadius: 10 }}
@@ -296,10 +220,6 @@ export default function ChatPage() {
     () => normalizeThreadId(new URLSearchParams(location.search).get("threadId")),
     [location.search],
   );
-  const buddySessionId = useMemo(
-    () => new URLSearchParams(location.search).get("buddy_session"),
-    [location.search],
-  );
   const buddyProfileIdFromQuery = useMemo(
     () => new URLSearchParams(location.search).get("buddy_profile"),
     [location.search],
@@ -310,29 +230,18 @@ export default function ChatPage() {
   );
   const threadBootstrapState = resolveChatThreadBootstrapState({
     requestedThreadId: requestedThreadIdFromQuery,
-    buddySessionId,
-    requestedBuddyProfileId,
     activeThreadId: sessionApi.getActiveThreadId(),
     activeThreadMeta: window.currentThreadMeta,
   });
   const requestedThreadId = threadBootstrapState.effectiveThreadId;
-  const [resolvedBuddyProfileId, setResolvedBuddyProfileId] = useState<string | null>(
-    () => requestedBuddyProfileId,
-  );
 
   const [showModelPrompt, setShowModelPrompt] = useState(false);
-  const [suggestedTeams, setSuggestedTeams] = useState<IndustryInstanceSummary[]>([]);
-  const [industryTeamsError, setIndustryTeamsError] = useState<string | null>(null);
   const [threadBootstrapPending, setThreadBootstrapPending] = useState(
     threadBootstrapState.initialThreadBootstrapPending,
   );
   const [threadBootstrapError, setThreadBootstrapError] = useState<string | null>(null);
   const [threadMeta, setThreadMeta] = useState<Record<string, unknown>>(
     threadBootstrapState.initialThreadMeta,
-  );
-  const canonicalThreadBuddyProfileId = useMemo(
-    () => resolveThreadBuddyProfileId(threadMeta),
-    [threadMeta],
   );
   const effectiveThreadMeta = useMemo<Record<string, unknown>>(
     () =>
@@ -341,15 +250,6 @@ export default function ChatPage() {
         requestedProfileId: requestedBuddyProfileId,
       }),
     [requestedBuddyProfileId, threadMeta],
-  );
-  const buddyProfileId = useMemo(
-    () =>
-      resolveCanonicalBuddyProfileId(
-        canonicalThreadBuddyProfileId,
-        resolvedBuddyProfileId,
-        requestedBuddyProfileId,
-      ),
-    [canonicalThreadBuddyProfileId, requestedBuddyProfileId, resolvedBuddyProfileId],
   );
 
   const {
@@ -368,21 +268,11 @@ export default function ChatPage() {
   const [autoBindingPending, setAutoBindingPending] = useState(
     threadBootstrapState.initialAutoBindingPending,
   );
-  const [runtimeWaitState, setRuntimeWaitState] = useState<RuntimeWaitState | null>(null);
-  const [runtimeHealthNotice, setRuntimeHealthNotice] = useState<RuntimeHealthNotice | null>(null);
-  const [runtimeLifecycleState, setRuntimeLifecycleState] =
-    useState<RuntimeLifecycleState | null>(null);
-  const [runtimeWaitClock, setRuntimeWaitClock] = useState(() => Date.now());
-  const [governanceStatus, setGovernanceStatus] = useState<GovernanceStatus | null>(null);
-  const [buddySurface, setBuddySurface] = useState<BuddySurfaceResponse | null>(null);
-  const [buddyLoading, setBuddyLoading] = useState(false);
-  const [buddyError, setBuddyError] = useState<string | null>(null);
-  const [buddyNameDraft, setBuddyNameDraft] = useState("");
-  const [buddyNamingBusy, setBuddyNamingBusy] = useState(false);
+  const [, setRuntimeWaitState] = useState<RuntimeWaitState | null>(null);
+  const [, setRuntimeHealthNotice] = useState<unknown>(null);
+  const [, setRuntimeLifecycleState] = useState<unknown>(null);
   const recoveryAttemptsRef = useRef<Set<string>>(new Set());
   const optionsConfig: OptionsConfig = defaultConfig;
-  const activeModels = useModelStore((s) => s.activeModels);
-  const refreshActiveModels = useModelStore((s) => s.refreshActiveModels);
 
   const activeWorkContextId =
     typeof effectiveThreadMeta.work_context_id === "string" && effectiveThreadMeta.work_context_id.trim()
@@ -408,110 +298,10 @@ export default function ChatPage() {
     uploadMediaInputRef,
   } = useChatMedia({ activeChatThreadId, activeWorkContextId });
 
-  const loadGovernanceStatus = useCallback(async () => {
-    try { setGovernanceStatus(await api.getGovernanceStatus()); }
-    catch { setGovernanceStatus(null); }
-  }, []);
-
-  const openGovernanceApprovals = useCallback(() => {
-    navigate("/runtime-center?tab=governance");
-  }, [navigate]);
-
   // ---- effects ----
   useEffect(() => {
-    if (!runtimeWaitState) return;
-    setRuntimeWaitClock(Date.now());
-    const t = window.setInterval(() => setRuntimeWaitClock(Date.now()), 1000);
-    return () => window.clearInterval(t);
-  }, [runtimeWaitState]);
-
-  useEffect(() => {
     setRuntimeWaitState(null);
-    setRuntimeHealthNotice(null);
-    setRuntimeLifecycleState(null);
   }, [requestedThreadId]);
-
-  useEffect(() => { void refreshActiveModels(); }, [refreshActiveModels]);
-
-  const loadBuddySurface = useCallback(async () => {
-    setBuddyLoading(true);
-    setBuddyError(null);
-    try {
-      const explicitProfileId =
-        resolveBuddySurfaceProfileRequest({
-          threadMeta,
-          requestedProfileId: requestedBuddyProfileId,
-        }) || undefined;
-      const surface = await api.getBuddySurface(explicitProfileId);
-      setBuddySurface(surface);
-      const surfaceProfileId = resolveRequestedBuddyProfileId(
-        surface?.profile?.profile_id,
-      );
-      const nextProfileId = resolveBuddyProfileIdFromBuddySurface({
-        requestedProfileId: explicitProfileId,
-        surfaceProfileId,
-      });
-      setResolvedBuddyProfileId(nextProfileId || null);
-      setBuddyNameDraft("");
-    } catch (error) {
-      setBuddySurface(null);
-      setResolvedBuddyProfileId(
-        resolveCanonicalBuddyProfileId(
-          canonicalThreadBuddyProfileId,
-          requestedBuddyProfileId,
-        ),
-      );
-      if (error instanceof Error) {
-        setBuddyError(error.message);
-      }
-    } finally {
-      setBuddyLoading(false);
-    }
-  }, [canonicalThreadBuddyProfileId, requestedBuddyProfileId, threadMeta]);
-
-  useEffect(() => {
-    void loadBuddySurface();
-  }, [loadBuddySurface]);
-
-  const buddyNamingState = useMemo(
-    () =>
-      resolveBuddyNamingState(
-        buddySurface,
-        buddySessionId,
-        typeof effectiveThreadMeta.buddy_session_id === "string"
-          ? effectiveThreadMeta.buddy_session_id
-          : null,
-      ),
-    [buddySessionId, buddySurface, effectiveThreadMeta.buddy_session_id],
-  );
-
-  useEffect(() => {
-    setResolvedBuddyProfileId(
-      resolveCanonicalBuddyProfileId(
-        canonicalThreadBuddyProfileId,
-        requestedBuddyProfileId,
-      ),
-    );
-  }, [canonicalThreadBuddyProfileId, requestedBuddyProfileId]);
-
-  useEffect(() => {
-    if (location.pathname !== "/chat") return;
-    void loadGovernanceStatus();
-  }, [loadGovernanceStatus, location.key, location.pathname, requestedThreadId]);
-
-  useEffect(() => {
-    const onFocus = () => { if (document.visibilityState !== "hidden") void loadGovernanceStatus(); };
-    const onVisible = () => { if (document.visibilityState === "visible") void loadGovernanceStatus(); };
-    const onDirty = () => void loadGovernanceStatus();
-    window.addEventListener("focus", onFocus);
-    window.addEventListener("copaw:governance-status-dirty", onDirty);
-    document.addEventListener("visibilitychange", onVisible);
-    return () => {
-      window.removeEventListener("focus", onFocus);
-      window.removeEventListener("copaw:governance-status-dirty", onDirty);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, [loadGovernanceStatus]);
 
   useEffect(() => {
     if (!requestedThreadIdFromQuery) {
@@ -521,12 +311,18 @@ export default function ChatPage() {
         navigate(recoveryTarget, { replace: true });
         return;
       }
+      const storedBuddyProfileId = readBuddyProfileId();
+      if (storedBuddyProfileId) {
+        navigate("/", { replace: true });
+        return;
+      }
       sessionApi.setPreferredThreadId(null);
       sessionApi.clearBoundThreadContext();
       setThreadBootstrapPending(false);
       setThreadBootstrapError(null);
       setThreadMeta({});
-      setAutoBindingPending(threadBootstrapState.initialAutoBindingPending);
+      setAutoBindingPending(false);
+      navigate(BUDDY_IDENTITY_CENTER_ROUTE, { replace: true });
       return;
     }
     if (!requestedThreadLooksBound || !requestedThreadId) {
@@ -559,13 +355,10 @@ export default function ChatPage() {
       .finally(() => { if (!cancelled) setThreadBootstrapPending(false); });
     return () => { cancelled = true; };
   }, [
-    buddySessionId,
     navigate,
-    requestedBuddyProfileId,
     requestedThreadIdFromQuery,
     requestedThreadId,
     requestedThreadLooksBound,
-    threadBootstrapState.initialAutoBindingPending,
     threadBootstrapState.recoveryTarget,
   ]);
 
@@ -577,59 +370,6 @@ export default function ChatPage() {
     window.addEventListener("copaw:thread-context", sync);
     return () => window.removeEventListener("copaw:thread-context", sync);
   }, []);
-
-  useEffect(() => {
-    if (
-      !requestedThreadId ||
-      threadBootstrapPending ||
-      autoBindingPending ||
-      !shouldAutoRefreshRuntimeThread({
-        threadId: requestedThreadId,
-        threadMeta: effectiveThreadMeta,
-        threadBootstrapError,
-      })
-    ) {
-      return;
-    }
-    let cancelled = false;
-    const timer = window.setInterval(() => {
-      if (document.visibilityState !== "visible") {
-        return;
-      }
-      void sessionApi
-        .getSession(requestedThreadId)
-        .then((thread) => {
-          if (!cancelled) {
-            setThreadMeta(
-              normalizeThreadMeta((thread as { meta?: Record<string, unknown> }).meta),
-            );
-          }
-        })
-        .catch(() => {
-          /* keep current bound thread state on background refresh failure */
-        });
-    }, 6500);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [
-    autoBindingPending,
-    effectiveThreadMeta,
-    requestedThreadId,
-    threadBootstrapError,
-    threadBootstrapPending,
-  ]);
-
-  useEffect(() => {
-    if (activeIndustryId) { setSuggestedTeams([]); setIndustryTeamsError(null); return; }
-    let cancelled = false;
-    setIndustryTeamsError(null);
-    void api.listIndustryInstances(3)
-      .then((ins) => { if (!cancelled) setSuggestedTeams(Array.isArray(ins) ? ins : []); })
-      .catch((err) => { if (!cancelled) { setSuggestedTeams([]); setIndustryTeamsError(err instanceof Error ? err.message : String(err)); } });
-    return () => { cancelled = true; };
-  }, [activeIndustryId]);
 
   const runtimeState = useChatRuntimeState({
     activeAgentId,
@@ -649,46 +389,22 @@ export default function ChatPage() {
     setRuntimeHealthNotice,
     setRuntimeLifecycleState,
     setRuntimeWaitState,
-    suggestedTeams,
+    suggestedTeams: EMPTY_SUGGESTED_TEAMS,
     threadBootstrapError,
     threadBootstrapPending,
     threadMeta: effectiveThreadMeta,
   });
 
   const {
-    bindingLabel,
-    currentFocus,
     hasBoundAgentContext,
     hasSuggestedTeams,
     options,
-    approveCommitBusy,
-    approveCommitDecisions,
-    rejectCommitBusy,
-    rejectCommitDecisions,
-    sessionKind,
     runtimeCommitState,
     runtimeIntentShell,
   } = runtimeState;
 
-  const {
-    focusLabel,
-    focusHint,
-    threadKindLabel,
-    threadKindHint,
-    writebackLabel,
-    writebackHint,
-  } = resolveThreadRuntimePresentation({
-    currentFocus,
-    sessionKind: sessionKind || "",
-    threadMeta: effectiveThreadMeta,
-  });
-
   const effectiveThreadPending = threadBootstrapPending || autoBindingPending;
   const activeWindowThreadId = normalizeThreadId(window.currentThreadId);
-  const allowUnboundBuddyShell = Boolean(
-    buddyNamingState.needsNaming && buddyNamingState.sessionId,
-  );
-  const hasBuddyNamingGate = allowUnboundBuddyShell;
   const { shouldRenderChatComposer, shouldRenderChatUi } = resolveChatUiVisibility({
     requestedThreadId,
     activeWindowThreadId,
@@ -696,8 +412,8 @@ export default function ChatPage() {
     threadBootstrapError,
     hasBoundAgentContext,
     effectiveThreadPending,
-    allowUnboundBuddyShell,
-    disableComposer: hasBuddyNamingGate,
+    allowUnboundBuddyShell: false,
+    disableComposer: false,
   });
 
   const chatNoticeVariant = resolveChatNoticeVariant({
@@ -706,14 +422,6 @@ export default function ChatPage() {
     autoBindingPending,
     shouldRenderChatUi,
   });
-
-  const { runtimeWaitDescription, runtimeWaitSeconds } =
-    resolveRuntimeWaitPresentation(runtimeWaitState, runtimeWaitClock);
-  const { runtimeModelLabel, runtimeFallbackLabel, runtimeModelHint } =
-    resolveRuntimeModelPresentation(activeModels);
-
-  const pendingApprovalCount = countPendingChatApprovals(governanceStatus);
-  const approvalButtonLabel = pendingApprovalCount > 0 ? `审批(${pendingApprovalCount})` : "审批";
 
   const chatUiKey = useMemo(
     () =>
@@ -739,29 +447,6 @@ export default function ChatPage() {
     ],
   );
 
-  const submitBuddyNaming = useCallback(async () => {
-    if (!buddyNamingState.sessionId || !buddyNameDraft.trim()) return;
-    setBuddyNamingBusy(true);
-    try {
-      await api.nameBuddy({
-        session_id: buddyNamingState.sessionId,
-        buddy_name: buddyNameDraft.trim(),
-      });
-      await loadBuddySurface();
-      const params = new URLSearchParams(location.search);
-      params.delete("buddy_session");
-      if (buddyProfileId) {
-        params.set("buddy_profile", buddyProfileId);
-      }
-      const nextSearch = params.toString();
-      navigate(nextSearch ? `/chat?${nextSearch}` : "/chat", { replace: true });
-    } catch (error) {
-      setBuddyError(error instanceof Error ? error.message : "伙伴命名失败");
-    } finally {
-      setBuddyNamingBusy(false);
-    }
-  }, [buddyNameDraft, buddyNamingState.sessionId, buddyProfileId, loadBuddySurface, location.search, navigate]);
-
   // ============================================================
   return (
     <div className={styles.page}>
@@ -770,7 +455,7 @@ export default function ChatPage() {
         threadBootstrapError={threadBootstrapError}
         autoBindingPending={autoBindingPending}
         requestedThreadId={requestedThreadId}
-        industryTeamsError={industryTeamsError}
+        industryTeamsError={null}
         hasSuggestedTeams={hasSuggestedTeams}
         effectiveThreadPending={effectiveThreadPending}
         showModelPrompt={showModelPrompt}
@@ -786,68 +471,9 @@ export default function ChatPage() {
       {/* 主聊天区 */}
       {shouldRenderChatUi ? (
         <div className={styles.chatWrap}>
-          {/* 顶部状态条 */}
-          <ChatRuntimeSidebar
-            bindingLabel={bindingLabel}
-            runtimeIntentShell={runtimeIntentShell}
-            threadKindLabel={threadKindLabel}
-            threadKindHint={threadKindHint}
-            focusLabel={focusLabel}
-            focusHint={focusHint}
-            writebackLabel={writebackLabel}
-            writebackHint={writebackHint}
-            runtimeModelLabel={runtimeModelLabel}
-            runtimeModelHint={runtimeModelHint}
-            runtimeFallbackLabel={runtimeFallbackLabel}
-            runtimeWaitState={runtimeWaitState}
-            runtimeWaitSeconds={runtimeWaitSeconds}
-            runtimeWaitDescription={runtimeWaitDescription}
-            runtimeHealthNotice={runtimeHealthNotice}
-            runtimeLifecycleState={runtimeLifecycleState}
-            approvalButtonLabel={approvalButtonLabel}
-            onOpenGovernanceApprovals={openGovernanceApprovals}
-          />
-          {shouldRenderChatComposer ? (
-            <ChatHumanAssistPanel
-              activeChatThreadId={activeChatThreadId}
-              threadMeta={effectiveThreadMeta}
-            />
-          ) : null}
-          {buddyNamingState.needsNaming && buddyNamingState.sessionId ? (
-            <Alert
-              type="info"
-              showIcon
-              className={styles.inlineAlert}
-              message="请给你的伙伴起个名字"
-              description={(
-                <Space direction="vertical" size={8} style={{ width: "100%" }}>
-                  <Input
-                    value={buddyNameDraft}
-                    onChange={(event) => setBuddyNameDraft(event.target.value)}
-                    placeholder="它以后会一直以这个名字陪着你"
-                    maxLength={40}
-                  />
-                  <Space>
-                    <Button
-                      type="primary"
-                      onClick={() => void submitBuddyNaming()}
-                      loading={buddyNamingBusy}
-                      disabled={!buddyNameDraft.trim()}
-                    >
-                      确认名字
-                    </Button>
-                  </Space>
-                </Space>
-              )}
-            />
-          ) : null}
-          <ChatIntentShellCard shell={runtimeIntentShell} />
-          <ChatCommitConfirmationCard
-            state={runtimeCommitState}
-            approveBusy={approveCommitBusy}
-            rejectBusy={rejectCommitBusy}
-            onApprove={approveCommitDecisions}
-            onReject={rejectCommitDecisions}
+          <ChatIntentShellCard
+            shell={runtimeIntentShell}
+            onViewDetails={() => navigate("/runtime-center")}
           />
 
           {/* 错误提示 */}
@@ -855,18 +481,14 @@ export default function ChatPage() {
             <Alert
               type="warning"
               showIcon
-              message="线程绑定出现问题"
-              description={threadBootstrapError}
+              message="聊天连接出现问题"
+              description="暂时无法恢复这段聊天，请稍后重试。"
               className={styles.inlineAlert}
             />
           ) : null}
 
           {/* 聊天画布 */}
           <div className={styles.canvas}>
-            {/* 伙伴加载提示 */}
-            {buddyLoading ? (
-              <div className={styles.buddyLoading}>伙伴正在靠近你…</div>
-            ) : null}
             {shouldRenderChatComposer ? (
               <ChatComposerAdapter chatUiKey={chatComposerKey} options={options} />
             ) : null}
@@ -890,14 +512,6 @@ export default function ChatPage() {
               />
             ) : null}
           </div>
-          {buddyError ? (
-            <Alert
-              type="warning"
-              showIcon
-              message={buddyError}
-              className={styles.inlineAlert}
-            />
-          ) : null}
         </div>
       ) : null}
 

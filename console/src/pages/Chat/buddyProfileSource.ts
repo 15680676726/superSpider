@@ -27,6 +27,10 @@ export function resolveBuddySurfaceProfileRequest({
   );
 }
 
+export function shouldLoadBuddySurface(profileId: unknown): boolean {
+  return Boolean(resolveCanonicalBuddyProfileId(profileId));
+}
+
 export function mergeBuddyProfileIntoThreadMeta({
   threadMeta,
   requestedProfileId,

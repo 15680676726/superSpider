@@ -2,12 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   preloadRoutesByPath,
+  resolveLikelyNextRoutePaths,
   resolveRoutePreloadPaths,
   type PreloadableRouteConfig,
 } from "./preload";
 
 describe("route preload helpers", () => {
-  it("excludes the active route and routes without preload handlers", () => {
+  it("only keeps explicit likely-next routes with preload handlers", () => {
     const routes: PreloadableRouteConfig[] = [
       { path: "/chat", preload: vi.fn() },
       { path: "/runtime-center", preload: vi.fn() },
@@ -15,9 +16,15 @@ describe("route preload helpers", () => {
       { path: "/runtime-center" as string, preload: vi.fn() },
     ];
 
-    expect(resolveRoutePreloadPaths(routes, "/chat")).toEqual([
+    expect(resolveRoutePreloadPaths(routes, ["/runtime-center", "/settings/system"])).toEqual([
       "/runtime-center",
     ]);
+  });
+
+  it("only suggests chat after onboarding and nothing for regular page switches", () => {
+    expect(resolveLikelyNextRoutePaths("/buddy-onboarding")).toEqual(["/chat"]);
+    expect(resolveLikelyNextRoutePaths("/chat")).toEqual([]);
+    expect(resolveLikelyNextRoutePaths("/runtime-center")).toEqual([]);
   });
 
   it("invokes each preload target at most once", async () => {

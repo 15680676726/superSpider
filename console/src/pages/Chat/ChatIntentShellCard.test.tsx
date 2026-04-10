@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 
 import { ChatIntentShellCard } from "./ChatIntentShellCard";
 
@@ -46,5 +46,35 @@ describe("ChatIntentShellCard", () => {
     expect(screen.queryByText(/trigger=keyword/)).toBeNull();
     expect(screen.queryByText(/match=\u8ba1\u5212/)).toBeNull();
     expect(screen.queryByText(/confidence=0.95/)).toBeNull();
+  });
+
+  it("shows a single details entry when the chat page provides one", () => {
+    const onViewDetails = vi.fn();
+
+    render(
+      <ChatIntentShellCard
+        shell={{
+          mode: "plan",
+          label: "PLAN",
+          summary: "当前正在整理本轮回复的方向。",
+          hint: "只保留简短进度，不再堆很多状态块。",
+          triggerSource: "keyword",
+          matchedText: "计划",
+          confidence: 0.95,
+          triggerSourceLabel: "来源：关键词命中",
+          matchedTextLabel: "命中：计划",
+          confidenceLabel: "置信度 95%",
+          metaSummary: "来源：关键词命中",
+          updatedAt: 500,
+          payload: {
+            mode_hint: "plan",
+          },
+        }}
+        onViewDetails={onViewDetails}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "查看详情" }));
+    expect(onViewDetails).toHaveBeenCalledTimes(1);
   });
 });

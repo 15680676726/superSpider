@@ -298,7 +298,8 @@ describe("CapabilityMarketPage", () => {
       </MemoryRouter>,
     );
 
-    fireEvent.click(screen.getAllByRole("button").at(-1)!);
+    const buttons = screen.getAllByRole("button");
+    fireEvent.click(buttons[buttons.length - 1]!);
 
     expect(
       await screen.findByText("Project donor install job accepted."),
@@ -405,7 +406,8 @@ describe("CapabilityMarketPage", () => {
       </MemoryRouter>,
     );
 
-    fireEvent.click(screen.getAllByRole("button").at(-1)!);
+    const buttons = screen.getAllByRole("button");
+    fireEvent.click(buttons[buttons.length - 1]!);
 
     await screen.findByText("Project donor install job accepted.");
     await waitFor(

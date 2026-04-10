@@ -2,7 +2,10 @@ import { Suspense, lazy, useEffect } from "react";
 import { Layout, Spin } from "antd";
 import { Route, Routes, useLocation } from "react-router-dom";
 import { routes, resolveSelectedKey } from "../../routes";
-import { scheduleRoutePreload } from "../../routes/preload";
+import {
+  resolveLikelyNextRoutePaths,
+  scheduleRoutePreload,
+} from "../../routes/preload";
 import styles from "../index.module.less";
 
 const Sidebar = lazy(() => import("../Sidebar"));
@@ -48,7 +51,7 @@ export default function MainLayout() {
   const selectedKey = resolveSelectedKey(location.pathname, location.search);
 
   useEffect(() => {
-    return scheduleRoutePreload(routes, location.pathname);
+    return scheduleRoutePreload(routes, resolveLikelyNextRoutePaths(location.pathname));
   }, [location.pathname]);
 
   return (

@@ -118,7 +118,7 @@ describe("RightPanel", () => {
     cleanup();
   });
 
-  it("stays empty on buddy onboarding before a buddy is bound", async () => {
+  it("does not render on buddy onboarding before a buddy is bound", async () => {
     render(
       <MemoryRouter initialEntries={["/buddy-onboarding"]}>
         <RightPanel />
@@ -129,7 +129,21 @@ describe("RightPanel", () => {
       expect(apiMock.getBuddySurface).not.toHaveBeenCalled();
     });
 
-    expect(screen.queryByText("测试伙伴")).not.toBeInTheDocument();
+    expect(screen.queryByText("伙伴详情")).not.toBeInTheDocument();
+  });
+
+  it("does not render on chat before a buddy is bound", async () => {
+    render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <RightPanel />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(apiMock.getBuddySurface).not.toHaveBeenCalled();
+    });
+
+    expect(screen.queryByText("伙伴详情")).not.toBeInTheDocument();
   });
 
   it("loads the bound buddy on buddy onboarding when a profile is already stored", async () => {
@@ -149,6 +163,8 @@ describe("RightPanel", () => {
   });
 
   it("renders sprites with a larger left-aligned monospace block", async () => {
+    writeBuddyProfileId("profile-1");
+
     render(
       <MemoryRouter initialEntries={["/chat"]}>
         <RightPanel />
@@ -165,6 +181,7 @@ describe("RightPanel", () => {
 
   it("starts the buddy tick timer only on active chat routes", async () => {
     const setIntervalSpy = vi.spyOn(window, "setInterval");
+    writeBuddyProfileId("profile-1");
 
     render(
       <MemoryRouter initialEntries={["/chat"]}>
@@ -181,6 +198,7 @@ describe("RightPanel", () => {
 
   it("starts the buddy tick timer on non-chat routes when the panel is visible", async () => {
     const setIntervalSpy = vi.spyOn(window, "setInterval");
+    writeBuddyProfileId("profile-1");
 
     render(
       <MemoryRouter initialEntries={["/settings/system"]}>
@@ -195,11 +213,31 @@ describe("RightPanel", () => {
     });
   });
 
+  it("refreshes buddy data every five minutes after a buddy is bound", async () => {
+    writeBuddyProfileId("profile-1");
+    const setIntervalSpy = vi.spyOn(window, "setInterval");
+
+    render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <RightPanel />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(apiMock.getBuddySurface).toHaveBeenCalledWith("profile-1");
+    });
+
+    expect(
+      setIntervalSpy.mock.calls.some((call) => call[1] === 300000),
+    ).toBe(true);
+  });
+
   it("does not start the buddy tick timer when the document is hidden", async () => {
     const setIntervalSpy = vi
       .spyOn(window, "setInterval")
       .mockReturnValue(4242 as unknown as ReturnType<typeof setInterval>);
     setVisibilityState("hidden");
+    writeBuddyProfileId("profile-1");
 
     render(
       <MemoryRouter initialEntries={["/chat"]}>
@@ -217,6 +255,7 @@ describe("RightPanel", () => {
     const buddyTimerId = 4242 as unknown as ReturnType<typeof setInterval>;
     vi.spyOn(window, "setInterval").mockReturnValue(buddyTimerId);
     const clearIntervalSpy = vi.spyOn(window, "clearInterval");
+    writeBuddyProfileId("profile-1");
 
     render(
       <MemoryRouter initialEntries={["/chat"]}>

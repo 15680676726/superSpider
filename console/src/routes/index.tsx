@@ -1,5 +1,6 @@
 import { Navigate } from "react-router-dom";
 import { lazyWithPreload } from "./preload";
+import EntryRedirect from "./entryRedirect";
 
 const Chat = lazyWithPreload(() => import("../pages/Chat"));
 const BuddyOnboardingPage = lazyWithPreload(() => import("../pages/BuddyOnboarding"));
@@ -25,7 +26,7 @@ export interface RouteConfig {
 }
 
 export const routes: RouteConfig[] = [
-  { path: "/", element: <Navigate to="/buddy-onboarding" replace /> },
+  { path: "/", element: <EntryRedirect /> },
   {
     path: "/buddy-onboarding",
     element: <BuddyOnboardingPage />,
