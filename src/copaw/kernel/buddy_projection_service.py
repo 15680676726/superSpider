@@ -52,6 +52,9 @@ class BuddyOnboardingProjection(BaseModel):
     operation_kind: str = ""
     operation_status: str = "idle"
     operation_error: str = ""
+    activation_status: str = "idle"
+    activation_error: str = ""
+    activation_attempt_count: int = 0
     question_count: int = 0
     tightened: bool = False
     next_question: str = ""
@@ -106,6 +109,7 @@ class BuddyProjectionService:
             session=session,
             target=target,
             relationship=relationship,
+            active_domain=active_domain,
         )
         current_focus = (
             self._current_focus_resolver(profile.profile_id)
@@ -354,6 +358,7 @@ class BuddyProjectionService:
         session: Any | None,
         target: GrowthTarget | None,
         relationship: CompanionRelationship | None,
+        active_domain: BuddyDomainCapabilityRecord | None,
     ) -> BuddyOnboardingProjection:
         buddy_name = (
             str(getattr(relationship, "buddy_name", "") or "").strip()
@@ -365,25 +370,32 @@ class BuddyProjectionService:
         operation_kind = str(getattr(session, "operation_kind", "") or "").strip()
         operation_status = str(getattr(session, "operation_status", "") or "").strip() or "idle"
         operation_error = str(getattr(session, "operation_error", "") or "").strip()
+        activation_status = str(getattr(session, "activation_status", "") or "").strip() or "idle"
+        activation_error = str(getattr(session, "activation_error", "") or "").strip()
+        activation_attempt_count = int(getattr(session, "activation_attempt_count", 0) or 0)
         question_count = int(getattr(session, "question_count", 0) or 0)
         tightened = bool(getattr(session, "tightened", False))
         next_question = str(getattr(session, "next_question", "") or "").strip()
         candidate_directions = list(getattr(session, "candidate_directions", []) or [])
         recommended_direction = str(getattr(session, "recommended_direction", "") or "").strip()
         selected_direction = str(getattr(session, "selected_direction", "") or "").strip()
+        carrier_ready = bool(
+            active_domain is not None
+            and str(getattr(active_domain, "industry_instance_id", "") or "").strip()
+        )
         if target is not None and not selected_direction:
             selected_direction = target.primary_direction
         if target is not None and not recommended_direction:
             recommended_direction = selected_direction
-        if target is not None and status in {"unborn", "clarifying", "direction-ready"}:
+        if target is not None and carrier_ready and status in {"unborn", "clarifying", "direction-ready"}:
             status = "confirmed"
-        if buddy_name and status in {"confirmed", "direction-ready", "clarifying", "unborn"}:
+        if buddy_name and carrier_ready and status in {"confirmed", "direction-ready", "clarifying", "unborn"}:
             status = "named"
-        requires_direction_confirmation = target is None and (
-            status == "direction-ready" or bool(candidate_directions)
+        requires_direction_confirmation = not carrier_ready and (
+            target is not None or status == "direction-ready" or bool(candidate_directions)
         )
-        requires_naming = target is not None and not buddy_name
-        completed = target is not None and bool(buddy_name)
+        requires_naming = carrier_ready and target is not None and not buddy_name
+        completed = carrier_ready and target is not None and bool(buddy_name)
         return BuddyOnboardingProjection(
             session_id=str(getattr(session, "session_id", "") or "").strip() or None,
             status=status,
@@ -391,6 +403,9 @@ class BuddyProjectionService:
             operation_kind=operation_kind,
             operation_status=operation_status,
             operation_error=operation_error,
+            activation_status=activation_status,
+            activation_error=activation_error,
+            activation_attempt_count=activation_attempt_count,
             question_count=question_count,
             tightened=tightened,
             next_question=next_question,
@@ -409,13 +424,15 @@ class BuddyProjectionService:
         growth_target: GrowthTarget | None,
         active_domain: BuddyDomainCapabilityRecord | None,
     ) -> dict[str, object] | None:
-        if growth_target is None:
+        if growth_target is None or active_domain is None:
             return None
         instance_id = str(getattr(active_domain, "industry_instance_id", "") or "").strip()
+        if not instance_id:
+            return None
         control_thread_id = str(getattr(active_domain, "control_thread_id", "") or "").strip()
         return build_buddy_execution_carrier_handoff(
             profile=profile,
-            instance_id=instance_id or f"buddy:{profile.profile_id}",
+            instance_id=instance_id,
             control_thread_id=control_thread_id or None,
             label=profile.display_name,
             current_cycle_id=growth_target.current_cycle_label or "Cycle 1",

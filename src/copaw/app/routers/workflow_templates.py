@@ -7,9 +7,11 @@ from pydantic import BaseModel, Field
 from ...state import WorkflowPresetRecord, WorkflowRunRecord, WorkflowTemplateRecord
 from ...workflows import (
     WorkflowPresetCreateRequest,
+    WorkflowLaunchRequest,
     WorkflowPreviewRequest,
     WorkflowRunCancelRequest,
     WorkflowRunDetail,
+    WorkflowRunResumeRequest,
     WorkflowStepExecutionDetail,
     WorkflowTemplatePreview,
     WorkflowTemplateService,
@@ -127,6 +129,21 @@ async def preview_workflow_template(
         raise HTTPException(400, detail=str(exc)) from exc
 
 
+@router.post("/{template_id}/launch", response_model=WorkflowRunDetail)
+async def launch_workflow_template(
+    request: Request,
+    template_id: str,
+    payload: WorkflowLaunchRequest,
+) -> WorkflowRunDetail:
+    service = _get_workflow_service(request)
+    try:
+        return await service.launch_template(template_id, payload)
+    except KeyError as exc:
+        raise HTTPException(404, detail=str(exc).strip("'")) from exc
+    except ValueError as exc:
+        raise HTTPException(400, detail=str(exc)) from exc
+
+
 @run_router.get("", response_model=list[WorkflowRunRecord])
 async def list_workflow_runs(
     request: Request,
@@ -166,6 +183,23 @@ async def cancel_workflow_run(
             run_id,
             actor=payload.actor,
             reason=payload.reason,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, detail=str(exc).strip("'")) from exc
+
+
+@run_router.post("/{run_id}/resume", response_model=WorkflowRunDetail)
+async def resume_workflow_run(
+    request: Request,
+    run_id: str,
+    payload: WorkflowRunResumeRequest,
+) -> WorkflowRunDetail:
+    service = _get_workflow_service(request)
+    try:
+        return await service.resume_run(
+            run_id,
+            actor=payload.actor,
+            execute=payload.execute,
         )
     except KeyError as exc:
         raise HTTPException(404, detail=str(exc).strip("'")) from exc

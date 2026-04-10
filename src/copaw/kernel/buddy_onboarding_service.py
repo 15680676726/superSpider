@@ -119,6 +119,12 @@ class BuddyDirectionConfirmationResult:
     schedule_specs: list[dict[str, object]] | None = None
 
 
+class BuddyActivationRepairTarget(BaseModel):
+    session_id: str
+    profile_id: str
+    industry_instance_id: str
+
+
 _DEFAULT_DIRECTION = "建立稳定、自主、长期向上的人生主方向"
 _STOCKS_DIRECTION = "建立稳定、可验证的股票交易与投资成长路径"
 _CREATOR_DIRECTION = "建立独立创作与内容事业的长期成长路径"
@@ -790,6 +796,162 @@ class BuddyOnboardingService:
             },
         )
         return self._onboarding_session_repository.upsert_session(updated)
+
+    def queue_activation(
+        self,
+        *,
+        session_id: str,
+    ) -> BuddyOnboardingSessionRecord:
+        session = self._require_session(session_id)
+        activation_id = _new_buddy_operation_id()
+        updated = session.model_copy(
+            update={
+                "activation_id": activation_id,
+                "activation_status": "queued",
+                "activation_error": "",
+                "activation_attempt_count": int(session.activation_attempt_count or 0) + 1,
+                "updated_at": _utc_now(),
+            },
+        )
+        return self._onboarding_session_repository.upsert_session(updated)
+
+    def mark_activation_started(
+        self,
+        *,
+        session_id: str,
+        activation_id: str,
+    ) -> BuddyOnboardingSessionRecord:
+        session = self._require_session(session_id)
+        if str(session.activation_id or "").strip() != str(activation_id or "").strip():
+            return session
+        updated = session.model_copy(
+            update={
+                "activation_status": "running",
+                "activation_error": "",
+                "updated_at": _utc_now(),
+            },
+        )
+        return self._onboarding_session_repository.upsert_session(updated)
+
+    def mark_activation_succeeded(
+        self,
+        *,
+        session_id: str,
+        activation_id: str,
+    ) -> BuddyOnboardingSessionRecord:
+        session = self._require_session(session_id)
+        if str(session.activation_id or "").strip() != str(activation_id or "").strip():
+            return session
+        updated = session.model_copy(
+            update={
+                "activation_status": "succeeded",
+                "activation_error": "",
+                "updated_at": _utc_now(),
+            },
+        )
+        return self._onboarding_session_repository.upsert_session(updated)
+
+    def mark_activation_deferred(
+        self,
+        *,
+        session_id: str,
+        activation_id: str,
+        error_message: str,
+    ) -> BuddyOnboardingSessionRecord:
+        session = self._require_session(session_id)
+        if str(session.activation_id or "").strip() != str(activation_id or "").strip():
+            return session
+        updated = session.model_copy(
+            update={
+                "activation_status": "deferred",
+                "activation_error": str(error_message or "").strip(),
+                "updated_at": _utc_now(),
+            },
+        )
+        return self._onboarding_session_repository.upsert_session(updated)
+
+    def mark_activation_failed(
+        self,
+        *,
+        session_id: str,
+        activation_id: str,
+        error_message: str,
+    ) -> BuddyOnboardingSessionRecord:
+        session = self._require_session(session_id)
+        if str(session.activation_id or "").strip() != str(activation_id or "").strip():
+            return session
+        updated = session.model_copy(
+            update={
+                "activation_status": "failed",
+                "activation_error": str(error_message or "").strip(),
+                "updated_at": _utc_now(),
+            },
+        )
+        return self._onboarding_session_repository.upsert_session(updated)
+
+    def complete_activation_from_result(
+        self,
+        *,
+        session_id: str,
+        activation_id: str,
+        result: Any,
+    ) -> BuddyOnboardingSessionRecord:
+        summary = dict(result) if isinstance(result, dict) else {}
+        activated = bool(summary.get("activated"))
+        started_assignment_ids = [
+            str(item).strip()
+            for item in list(summary.get("started_assignment_ids") or [])
+            if str(item).strip()
+        ]
+        assignment_dispatches = [
+            item
+            for item in list(summary.get("assignment_dispatches") or [])
+            if isinstance(item, dict)
+        ]
+        blocked_reason = str(summary.get("blocked_reason") or "").strip()
+        if activated or started_assignment_ids or assignment_dispatches:
+            return self.mark_activation_succeeded(
+                session_id=session_id,
+                activation_id=activation_id,
+            )
+        if blocked_reason:
+            return self.mark_activation_deferred(
+                session_id=session_id,
+                activation_id=activation_id,
+                error_message=blocked_reason,
+            )
+        return self.mark_activation_failed(
+            session_id=session_id,
+            activation_id=activation_id,
+            error_message="Buddy kickoff did not confirm durable assignment startup.",
+        )
+
+    def repair_failed_activation(
+        self,
+        *,
+        profile_id: str,
+    ) -> BuddyActivationRepairTarget | None:
+        if self._domain_capability_repository is None:
+            return None
+        session = self._onboarding_session_repository.get_latest_session_for_profile(profile_id)
+        if session is None:
+            return None
+        if str(session.activation_status or "").strip().lower() != "failed":
+            return None
+        if int(session.activation_attempt_count or 0) >= 3:
+            return None
+        growth_target = self._growth_target_repository.get_active_target(profile_id)
+        if growth_target is None:
+            return None
+        active_domain = self._domain_capability_repository.get_active_domain_capability(profile_id)
+        instance_id = str(getattr(active_domain, "industry_instance_id", "") or "").strip()
+        if not instance_id:
+            return None
+        return BuddyActivationRepairTarget(
+            session_id=session.session_id,
+            profile_id=profile_id,
+            industry_instance_id=instance_id,
+        )
 
     def record_chat_interaction(
         self,

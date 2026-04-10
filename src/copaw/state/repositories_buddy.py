@@ -25,6 +25,10 @@ class BuddyOnboardingSessionRecord(UpdatedRecord):
     operation_kind: str = ""
     operation_status: str = "idle"
     operation_error: str = ""
+    activation_id: str = ""
+    activation_status: str = "idle"
+    activation_error: str = ""
+    activation_attempt_count: int = 0
     question_count: int = Field(default=1, ge=1)
     tightened: bool = False
     next_question: str = ""
@@ -511,6 +515,7 @@ class SqliteBuddyOnboardingSessionRepository:
                 INSERT INTO buddy_onboarding_sessions (
                     session_id, profile_id, status,
                     operation_id, operation_kind, operation_status, operation_error,
+                    activation_id, activation_status, activation_error, activation_attempt_count,
                     question_count, tightened,
                     next_question, transcript_json, candidate_directions_json,
                     recommended_direction, selected_direction,
@@ -519,6 +524,7 @@ class SqliteBuddyOnboardingSessionRepository:
                 ) VALUES (
                     :session_id, :profile_id, :status,
                     :operation_id, :operation_kind, :operation_status, :operation_error,
+                    :activation_id, :activation_status, :activation_error, :activation_attempt_count,
                     :question_count, :tightened,
                     :next_question, :transcript_json, :candidate_directions_json,
                     :recommended_direction, :selected_direction,
@@ -532,6 +538,10 @@ class SqliteBuddyOnboardingSessionRepository:
                     operation_kind = excluded.operation_kind,
                     operation_status = excluded.operation_status,
                     operation_error = excluded.operation_error,
+                    activation_id = excluded.activation_id,
+                    activation_status = excluded.activation_status,
+                    activation_error = excluded.activation_error,
+                    activation_attempt_count = excluded.activation_attempt_count,
                     question_count = excluded.question_count,
                     tightened = excluded.tightened,
                     next_question = excluded.next_question,

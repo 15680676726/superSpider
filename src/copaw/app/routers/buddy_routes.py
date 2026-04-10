@@ -71,9 +71,16 @@ def _get_buddy_projection_service(request: Request) -> BuddyProjectionService:
     raise HTTPException(503, detail="Buddy projection service is not available")
 
 
-def _spawn_buddy_activation_job(*, kickoff, instance_id: str) -> None:
-    async def _run() -> None:
-        await kickoff(
+def _spawn_buddy_activation_job(
+    *,
+    kickoff,
+    onboarding_service: BuddyOnboardingService | None,
+    session_id: str | None,
+    activation_id: str | None,
+    instance_id: str,
+) -> None:
+    async def _run():
+        return await kickoff(
             industry_instance_id=instance_id,
             message_text="Buddy onboarding confirmed. Start the first concrete task now.",
             trigger_source="buddy-onboarding",
@@ -84,8 +91,37 @@ def _spawn_buddy_activation_job(*, kickoff, instance_id: str) -> None:
         try:
             import asyncio
 
-            asyncio.run(_run())
-        except Exception:
+            if (
+                onboarding_service is not None
+                and session_id is not None
+                and activation_id is not None
+            ):
+                onboarding_service.mark_activation_started(
+                    session_id=session_id,
+                    activation_id=activation_id,
+                )
+            result = asyncio.run(_run())
+            if (
+                onboarding_service is not None
+                and session_id is not None
+                and activation_id is not None
+            ):
+                onboarding_service.complete_activation_from_result(
+                    session_id=session_id,
+                    activation_id=activation_id,
+                    result=result,
+                )
+        except Exception as exc:
+            if (
+                onboarding_service is not None
+                and session_id is not None
+                and activation_id is not None
+            ):
+                onboarding_service.mark_activation_failed(
+                    session_id=session_id,
+                    activation_id=activation_id,
+                    error_message=str(exc).strip() or "Buddy kickoff failed.",
+                )
             logger.warning("Buddy onboarding activation task failed.", exc_info=True)
 
     threading.Thread(
@@ -98,6 +134,7 @@ def _spawn_buddy_activation_job(*, kickoff, instance_id: str) -> None:
 def _maybe_activate_buddy_execution(
     request: Request,
     *,
+    session_id: str | None = None,
     execution_carrier: dict[str, object] | None,
     domain_capability: object,
 ) -> dict[str, object] | None:
@@ -113,17 +150,30 @@ def _maybe_activate_buddy_execution(
     ).strip()
     if not instance_id:
         return None
-    _spawn_buddy_activation_job(kickoff=kickoff, instance_id=instance_id)
+    onboarding_service = getattr(request.app.state, "buddy_onboarding_service", None)
+    activation_id: str | None = None
+    if isinstance(onboarding_service, BuddyOnboardingService) and session_id is not None:
+        updated_session = onboarding_service.queue_activation(session_id=session_id)
+        activation_id = str(updated_session.activation_id or "").strip() or None
+    _spawn_buddy_activation_job(
+        kickoff=kickoff,
+        onboarding_service=onboarding_service if isinstance(onboarding_service, BuddyOnboardingService) else None,
+        session_id=session_id,
+        activation_id=activation_id,
+        instance_id=instance_id,
+    )
     return {
         "status": "queued",
         "industry_instance_id": instance_id,
         "trigger_source": "buddy-onboarding",
+        "activation_id": activation_id or "",
     }
 
 
 def _maybe_activate_buddy_execution_for_app(
     app,
     *,
+    session_id: str | None = None,
     execution_carrier: dict[str, object] | None,
     domain_capability: object,
 ) -> dict[str, object] | None:
@@ -139,11 +189,23 @@ def _maybe_activate_buddy_execution_for_app(
     ).strip()
     if not instance_id:
         return None
-    _spawn_buddy_activation_job(kickoff=kickoff, instance_id=instance_id)
+    onboarding_service = getattr(app.state, "buddy_onboarding_service", None)
+    activation_id: str | None = None
+    if isinstance(onboarding_service, BuddyOnboardingService) and session_id is not None:
+        updated_session = onboarding_service.queue_activation(session_id=session_id)
+        activation_id = str(updated_session.activation_id or "").strip() or None
+    _spawn_buddy_activation_job(
+        kickoff=kickoff,
+        onboarding_service=onboarding_service if isinstance(onboarding_service, BuddyOnboardingService) else None,
+        session_id=session_id,
+        activation_id=activation_id,
+        instance_id=instance_id,
+    )
     return {
         "status": "queued",
         "industry_instance_id": instance_id,
         "trigger_source": "buddy-onboarding",
+        "activation_id": activation_id or "",
     }
 
 
@@ -360,6 +422,7 @@ async def confirm_buddy_direction(
     )
     activation = _maybe_activate_buddy_execution(
         request,
+        session_id=result.session.session_id,
         execution_carrier=result.execution_carrier,
         domain_capability=result.domain_capability,
     )
@@ -433,6 +496,7 @@ async def start_buddy_direction_confirmation(
         try:
             _maybe_activate_buddy_execution_for_app(
                 app,
+                session_id=handle.session_id,
                 execution_carrier=result.execution_carrier,
                 domain_capability=result.domain_capability,
             )
@@ -486,6 +550,21 @@ async def get_buddy_surface(
             onboarding_service.repair_active_domain_schedules(profile_id=profile_id)
         except Exception:
             logger.debug("Buddy surface schedule repair failed.", exc_info=True)
+        try:
+            retry_target = onboarding_service.repair_failed_activation(profile_id=profile_id)
+            if retry_target is not None:
+                _maybe_activate_buddy_execution(
+                    request,
+                    session_id=retry_target.session_id,
+                    execution_carrier={"instance_id": retry_target.industry_instance_id},
+                    domain_capability=type(
+                        "_BuddyActivationCarrier",
+                        (),
+                        {"industry_instance_id": retry_target.industry_instance_id},
+                    )(),
+                )
+        except Exception:
+            logger.debug("Buddy surface activation repair failed.", exc_info=True)
     service = _get_buddy_projection_service(request)
     try:
         surface = service.build_optional_chat_surface(profile_id=profile_id)
