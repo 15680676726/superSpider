@@ -32,6 +32,33 @@ def test_shell_replay_pointer_sanitizes_windows_unsafe_task_id(
     assert ":" not in replay_files[0].name
 
 
+def test_shell_replay_pointer_truncates_overlong_task_id_for_windows_paths(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("copaw.kernel.tool_bridge.WORKING_DIR", tmp_path)
+    bridge = KernelToolBridge(task_store=object())
+    long_task_id = "query:" + ("industry-chat:buddy:demo:" * 18) + "tool:execute_shell_command:abcdef"
+
+    pointer = bridge._build_shell_replay_pointer(
+        task=KernelTask(
+            id=long_task_id,
+            title="Replay shell command",
+            capability_ref="tool:execute_shell_command",
+            owner_agent_id="ops-agent",
+            risk_level="guarded",
+        ),
+        payload={"cwd": "D:/word/copaw", "timeout": 30},
+        environment_ref="D:/word/copaw",
+        command="echo hello",
+    )
+
+    assert pointer is not None
+    replay_files = list((tmp_path / "evidence" / "replays").glob("*.json"))
+    assert len(replay_files) == 1
+    assert len(replay_files[0].name) < 180
+
+
 def test_tool_bridge_preserves_blocked_status_and_contract_metadata() -> None:
     class _FakeTaskStore:
         def __init__(self) -> None:

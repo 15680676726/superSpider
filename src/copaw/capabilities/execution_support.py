@@ -79,8 +79,38 @@ def _string_value(value: object | None) -> str | None:
     return text or None
 
 
-def _filter_executor_kwargs(executor, payload: dict[str, object]) -> dict[str, Any]:
+def _normalize_optional_empty_executor_args(
+    signature_or_executor: inspect.Signature | object,
+    payload: dict[str, object],
+) -> dict[str, object]:
+    signature = (
+        signature_or_executor
+        if isinstance(signature_or_executor, inspect.Signature)
+        else inspect.signature(signature_or_executor)
+    )
+    normalized = dict(payload)
+    for name, parameter in signature.parameters.items():
+        if name not in normalized:
+            continue
+        if normalized[name] != "":
+            continue
+        if parameter.default is not None:
+            continue
+        normalized[name] = None
+    return normalized
+
+
+def _filter_executor_kwargs(
+    executor,
+    payload: dict[str, object],
+    *,
+    normalization_signature_source: object | None = None,
+) -> dict[str, Any]:
     signature = inspect.signature(executor)
+    normalized_payload = _normalize_optional_empty_executor_args(
+        normalization_signature_source or signature,
+        payload,
+    )
     filtered: dict[str, Any] = {}
     wants_payload = "payload" in signature.parameters
     accepts_var_kwargs = any(
@@ -95,16 +125,16 @@ def _filter_executor_kwargs(executor, payload: dict[str, object]) -> dict[str, A
             continue
         if name == "payload":
             continue
-        if name not in payload:
+        if name not in normalized_payload:
             continue
-        filtered[name] = payload[name]
+        filtered[name] = normalized_payload[name]
     if accepts_var_kwargs:
-        for name, value in payload.items():
+        for name, value in normalized_payload.items():
             if name == "payload" or name in filtered:
                 continue
             filtered[name] = value
     if wants_payload and "payload" not in filtered:
-        filtered["payload"] = payload
+        filtered["payload"] = normalized_payload
     return filtered
 
 

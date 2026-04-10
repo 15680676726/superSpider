@@ -340,7 +340,11 @@ class CapabilityExecutionFacade:
                 error_kind="failed",
             )
 
-        kwargs = _filter_executor_kwargs(executor, execution_context.payload)
+        kwargs = _filter_executor_kwargs(
+            executor,
+            execution_context.payload,
+            normalization_signature_source=tool_contract.executor if tool_contract is not None else executor,
+        )
         json_safe_kwargs = _json_safe(kwargs)
         evidence_emitted = False
         concurrency_class = execution_context.concurrency_class

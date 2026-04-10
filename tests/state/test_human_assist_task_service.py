@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from datetime import timedelta
 
 import pytest
 
@@ -416,6 +417,39 @@ def test_human_assist_task_service_keeps_recent_resume_terminal_task_visible(tmp
     assert visible.id == issued.id
     assert visible.status == "closed"
     assert visible.verification_payload["resume"]["status"] == "closed"
+
+
+def test_human_assist_task_service_hides_stale_closed_resume_terminal_task(tmp_path) -> None:
+    service = _build_service(tmp_path)
+    issued = service.issue_task(_make_record(task_id="task-stale-visible-terminal"))
+
+    service.submit_and_verify(
+        issued.id,
+        submission_text="uploaded receipt proof",
+        submission_evidence_refs=["media-analysis-1"],
+    )
+    service.mark_resume_queued(issued.id)
+    closed = service.mark_closed(
+        issued.id,
+        summary="resume finished",
+        resume_payload={"resumed": True, "summary": "resume finished"},
+    )
+    stale_at = closed.updated_at - timedelta(minutes=10)
+    service.upsert_task(
+        closed.model_copy(
+            update={
+                "updated_at": stale_at,
+                "closed_at": stale_at,
+                "verified_at": stale_at,
+            },
+        ),
+    )
+
+    visible = service.get_visible_current_task(
+        chat_thread_id="industry-chat:industry-1:execution-core",
+    )
+
+    assert visible is None
 
 
 def test_human_assist_task_service_marks_handoff_blocked_when_resume_fails(tmp_path) -> None:

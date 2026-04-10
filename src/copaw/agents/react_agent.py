@@ -45,6 +45,7 @@ from .tools import (
     create_memory_search_tool,
 )
 from ..capabilities.tool_execution_contracts import get_tool_execution_contract
+from ..capabilities.execution_support import _normalize_optional_empty_executor_args
 from .utils import process_file_and_media_blocks_in_message
 from ..constant import (
     MEMORY_COMPACT_RATIO,
@@ -167,10 +168,11 @@ def _build_tool_payload_from_call(
     kwargs: dict[str, Any],
 ) -> dict[str, Any] | None:
     try:
-        bound = inspect.signature(tool_fn).bind_partial(*args, **kwargs)
+        signature = inspect.signature(tool_fn)
+        bound = signature.bind_partial(*args, **kwargs)
     except TypeError:
         return None
-    return dict(bound.arguments)
+    return _normalize_optional_empty_executor_args(signature, dict(bound.arguments))
 
 
 def _run_tool_contract_validation(

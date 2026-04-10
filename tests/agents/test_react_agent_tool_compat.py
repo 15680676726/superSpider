@@ -83,6 +83,37 @@ def test_wrap_tool_function_for_toolkit_delegates_builtin_tools_to_bound_frontdo
     assert response.content[0]["text"] == "delegated-via-capability-frontdoor"
 
 
+def test_wrap_tool_function_for_toolkit_normalizes_empty_optional_builtin_args_before_delegate() -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def _delegate(capability_id: str, payload: dict[str, object]) -> dict[str, object]:
+        calls.append((capability_id, dict(payload)))
+        return {"success": True, "summary": "delegated-via-capability-frontdoor"}
+
+    wrapped = _wrap_tool_function_for_toolkit(read_file)
+
+    with bind_tool_execution_delegate(_delegate):
+        response = asyncio.run(
+            wrapped(
+                file_path="notes.txt",
+                start_line="",
+                end_line="",
+            ),
+        )
+
+    assert calls == [
+        (
+            "tool:read_file",
+            {
+                "file_path": "notes.txt",
+                "start_line": None,
+                "end_line": None,
+            },
+        ),
+    ]
+    assert response.content[0]["text"] == "delegated-via-capability-frontdoor"
+
+
 def test_wrap_tool_function_for_toolkit_surfaces_delegate_failure_without_builtin_fallback() -> None:
     calls: list[tuple[str, dict[str, object]]] = []
 

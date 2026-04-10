@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -487,6 +487,66 @@ def test_runtime_center_chat_run_falls_back_to_normal_chat_when_no_current_human
     assert '"status": "completed"' in response.text
 
 
+def test_runtime_center_chat_run_does_not_treat_new_execution_instruction_as_human_assist_submission(
+    tmp_path,
+) -> None:
+    app, service, turn_executor, query_execution_service = _build_human_assist_app(
+        tmp_path,
+    )
+    issued = service.issue_task(
+        _make_human_assist_task(task_id="task-open-handoff").model_copy(
+            update={
+                "task_type": "host-handoff-return",
+                "reason_code": "host-handoff-active",
+                "reason_summary": "Runtime handoff is active.",
+                "required_action": "Return with rebind-environment after the host handoff is complete.",
+                "acceptance_mode": "anchor_verified",
+                "acceptance_spec": {
+                    "version": "v1",
+                    "hard_anchors": ["rebind-environment"],
+                    "failure_hint": "Return only after the host handoff is complete.",
+                },
+                "status": "issued",
+            },
+        ),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/runtime-center/chat/run",
+        json={
+            "id": "req-human-assist-new-execution-instruction",
+            "session_id": issued.chat_thread_id,
+            "thread_id": issued.chat_thread_id,
+            "user_id": "host-user",
+            "channel": "console",
+            "input": [
+                {
+                    "role": "user",
+                    "type": "message",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                "Please assign your execution seat to create a markdown file "
+                                "named stock-research-note.md in D:\\word\\copaw, and report "
+                                "back when it is done."
+                            ),
+                        },
+                    ],
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert len(turn_executor.stream_calls) == 1
+    assert query_execution_service.calls == []
+    assert service.get_task(issued.id).status == "issued"
+    assert '"status": "completed"' in response.text
+
+
 def test_runtime_center_chat_run_reports_missing_human_assist_evidence(tmp_path) -> None:
     app, service, turn_executor, query_execution_service = _build_human_assist_app(
         tmp_path,
@@ -762,6 +822,44 @@ def test_runtime_center_chat_run_marks_resume_queued_before_async_resume_closes(
     assert service.get_task(issued.id).status == "closed"
 
 
+def test_human_assist_verify_does_not_match_runtime_metadata_as_user_anchor(tmp_path) -> None:
+    state_store = SQLiteStateStore(tmp_path / "verify-anchor.state.sqlite3")
+    evidence_ledger = EvidenceLedger(database_path=tmp_path / "verify-anchor.evidence.sqlite3")
+    service = HumanAssistTaskService(
+        repository=SqliteHumanAssistTaskRepository(state_store),
+        evidence_ledger=evidence_ledger,
+    )
+    issued = service.issue_task(
+        _make_human_assist_task(task_id="task-runtime-anchor").model_copy(
+            update={
+                "task_type": "host-handoff-return",
+                "reason_code": "host-handoff-active",
+                "acceptance_mode": "anchor_verified",
+                "acceptance_spec": {
+                    "version": "v1",
+                    "hard_anchors": ["rebind-environment"],
+                    "failure_hint": "Return only after the host handoff is complete.",
+                },
+                "status": "issued",
+            },
+        ),
+    )
+
+    result = service.submit_and_verify(
+        issued.id,
+        submission_text="Please assign your execution seat to create a markdown file and report back when it is done.",
+        submission_payload={
+            "main_brain_runtime": {
+                "recovery_mode": "rebind-environment",
+                "resume_checkpoint_id": "rebind-environment",
+            }
+        },
+    )
+
+    assert result.outcome == "need_more_evidence"
+    assert service.get_task(issued.id).status == "need_more_evidence"
+
+
 def test_runtime_center_chat_run_accepts_media_only_human_assist_submission(
     tmp_path,
 ) -> None:
@@ -1001,3 +1099,41 @@ def test_runtime_center_chat_run_closed_human_assist_keeps_hidden_continuity_con
         submission_payload["main_brain_runtime"]["review_note"]
         == "host confirmed the final receipt upload"
     )
+
+
+def test_runtime_center_human_assist_current_omits_stale_closed_resume_terminal_task(
+    tmp_path,
+) -> None:
+    app, service, _turn_executor, _query_execution_service = _build_human_assist_app(
+        tmp_path,
+    )
+    issued = service.issue_task(_make_human_assist_task(task_id="task-stale-current"))
+    service.submit_and_verify(
+        issued.id,
+        submission_text="Receipt uploaded.",
+        submission_evidence_refs=["analysis-stale-current"],
+    )
+    service.mark_resume_queued(issued.id)
+    closed = service.mark_closed(
+        issued.id,
+        summary="resume finished",
+        resume_payload={"resumed": True, "summary": "resume finished"},
+    )
+    stale_at = closed.updated_at - timedelta(minutes=10)
+    service.upsert_task(
+        closed.model_copy(
+            update={
+                "updated_at": stale_at,
+                "closed_at": stale_at,
+                "verified_at": stale_at,
+            },
+        ),
+    )
+    client = TestClient(app)
+
+    response = client.get(
+        "/runtime-center/human-assist-tasks/current",
+        params={"chat_thread_id": issued.chat_thread_id},
+    )
+
+    assert response.status_code == 404

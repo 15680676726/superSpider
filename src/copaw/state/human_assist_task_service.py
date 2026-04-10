@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping, Sequence
 
 from ..evidence import EvidenceLedger, EvidenceRecord
@@ -142,9 +142,6 @@ def _flatten_sources(*values: object) -> str:
         if isinstance(value, (list, tuple, set)):
             parts.extend(_string_list(value))
             continue
-        payload = _mapping(value)
-        if payload:
-            parts.append(json.dumps(payload, ensure_ascii=False, sort_keys=True))
     return "\n".join(parts).lower()
 
 
@@ -308,6 +305,26 @@ def _resolve_verification_evidence_refs(
     return _string_list(refs)
 
 
+def _resume_state_status(task: HumanAssistTaskRecord) -> str | None:
+    return _string(_mapping(task.verification_payload).get("resume", {}).get("status"))
+
+
+def _is_recent_visible_resume_terminal(
+    task: HumanAssistTaskRecord,
+    *,
+    now: datetime,
+    ttl: timedelta,
+) -> bool:
+    if task.status != "closed":
+        return False
+    if _resume_state_status(task) not in {"resume_queued", "closed", "handoff_blocked"}:
+        return False
+    anchor_time = task.closed_at or task.updated_at
+    if anchor_time is None:
+        return False
+    return now - anchor_time <= ttl
+
+
 @dataclass(slots=True)
 class HumanAssistVerificationResult:
     outcome: str
@@ -326,6 +343,7 @@ class HumanAssistTaskService:
 
     _TERMINAL_STATUSES = frozenset({"resume_queued", "closed", "expired", "cancelled"})
     _VISIBLE_TERMINAL_STATUSES = frozenset({"closed", "expired", "cancelled"})
+    _VISIBLE_RESUME_TERMINAL_TTL = timedelta(minutes=5)
 
     def __init__(
         self,
@@ -378,17 +396,16 @@ class HumanAssistTaskService:
         *,
         chat_thread_id: str,
     ) -> HumanAssistTaskRecord | None:
+        now = _utc_now()
         recent_resume_terminal: HumanAssistTaskRecord | None = None
         for task in self._repository.list_tasks(chat_thread_id=chat_thread_id, limit=50):
             if _looks_like_stale_fresh_host_handoff(task):
                 continue
             if task.status in self._VISIBLE_TERMINAL_STATUSES:
-                if (
-                    task.status == "closed"
-                    and _string(
-                        _mapping(task.verification_payload).get("resume", {}).get("status"),
-                    )
-                    in {"resume_queued", "closed", "handoff_blocked"}
+                if _is_recent_visible_resume_terminal(
+                    task,
+                    now=now,
+                    ttl=self._VISIBLE_RESUME_TERMINAL_TTL,
                 ):
                     recent_resume_terminal = recent_resume_terminal or task
                 continue

@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+from datetime import timedelta
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -16,8 +18,11 @@ from copaw.kernel.persistence import encode_kernel_task_metadata
 from copaw.state import (
     AgentThreadBindingRecord,
     HumanAssistTaskRecord,
+    SQLiteStateStore,
     WorkContextRecord,
 )
+from copaw.state.human_assist_task_service import HumanAssistTaskService
+from copaw.state.repositories import SqliteHumanAssistTaskRepository
 
 
 class _FakeHistoryReader:
@@ -584,6 +589,69 @@ def test_runtime_conversation_detail_omits_human_assist_meta_when_current_task_i
     app, _history_reader = _build_app(
         human_assist_task_service=_ResumeQueuedHumanAssistTaskService(),
     )
+    client = TestClient(app)
+
+    response = client.get(
+        "/runtime-center/conversations/industry-chat:industry-v1-acme:execution-core",
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "human_assist_task" not in payload["meta"]
+    assert "human_assist_tasks_route" not in payload["meta"]
+
+
+def test_runtime_conversation_detail_omits_stale_closed_human_assist_task_meta(
+    tmp_path,
+) -> None:
+    service = HumanAssistTaskService(
+        repository=SqliteHumanAssistTaskRepository(SQLiteStateStore(tmp_path / "state.sqlite3")),
+    )
+    issued = service.issue_task(
+        HumanAssistTaskRecord(
+            id="human-assist:stale-task",
+            industry_instance_id="industry-v1-acme",
+            assignment_id="assignment-1",
+            task_id="task-1",
+            chat_thread_id="industry-chat:industry-v1-acme:execution-core",
+            title="Upload receipt proof",
+            summary="Host proof is required before resume.",
+            task_type="evidence-submit",
+            reason_code="blocked-by-proof",
+            reason_summary="Payment receipt still needs host confirmation.",
+            required_action="Upload the receipt in chat and say it is finished.",
+            submission_mode="chat-message",
+            acceptance_mode="evidence_verified",
+            acceptance_spec={
+                "version": "v1",
+                "hard_anchors": ["receipt"],
+                "result_anchors": ["uploaded"],
+            },
+            status="issued",
+        ),
+    )
+    service.submit_and_verify(
+        issued.id,
+        submission_text="uploaded receipt proof",
+        submission_evidence_refs=["media-analysis-1"],
+    )
+    service.mark_resume_queued(issued.id)
+    closed = service.mark_closed(
+        issued.id,
+        summary="resume finished",
+        resume_payload={"resumed": True, "summary": "resume finished"},
+    )
+    stale_at = closed.updated_at - timedelta(minutes=10)
+    service.upsert_task(
+        closed.model_copy(
+            update={
+                "updated_at": stale_at,
+                "closed_at": stale_at,
+                "verified_at": stale_at,
+            },
+        ),
+    )
+    app, _history_reader = _build_app(human_assist_task_service=service)
     client = TestClient(app)
 
     response = client.get(

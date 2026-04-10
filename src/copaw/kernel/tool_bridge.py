@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -404,7 +405,11 @@ class KernelToolBridge:
     @staticmethod
     def _safe_filename_segment(value: str) -> str:
         cleaned = _INVALID_FILENAME_CHARS.sub("-", str(value or "")).strip(" .-")
-        return cleaned or "replay"
+        cleaned = cleaned or "replay"
+        if len(cleaned) <= 96:
+            return cleaned
+        digest = hashlib.sha1(cleaned.encode("utf-8")).hexdigest()[:12]
+        return f"{cleaned[:80].rstrip('-')}-{digest}"
 
 
 __all__ = ["KernelToolBridge"]

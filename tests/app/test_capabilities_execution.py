@@ -1130,6 +1130,50 @@ def test_file_execution_builds_internal_execution_context(tmp_path) -> None:
     assert result["action_mode"] == "read"
 
 
+def test_file_execution_normalizes_empty_optional_line_bounds_before_executor(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    target = tmp_path / "notes.txt"
+    target.write_text("hello world", encoding="utf-8")
+    calls: list[dict[str, object]] = []
+
+    async def _read_file(**kwargs):
+        calls.append(dict(kwargs))
+        return {"success": True, "summary": "ok"}
+
+    monkeypatch.setitem(capability_execution_module._TOOL_EXECUTORS, "tool:read_file", _read_file)
+
+    capability_service = CapabilityService(
+        evidence_ledger=EvidenceLedger(),
+    )
+
+    result = asyncio.run(
+        capability_service.execute_task(
+            KernelTask(
+                title="Read file with empty optional bounds",
+                capability_ref="tool:read_file",
+                owner_agent_id="copaw-operator",
+                environment_ref="session:console:test",
+                payload={
+                    "file_path": str(target),
+                    "start_line": "",
+                    "end_line": "",
+                },
+            ),
+        ),
+    )
+
+    assert result["success"] is True
+    assert calls == [
+        {
+            "file_path": str(target),
+            "start_line": None,
+            "end_line": None,
+        },
+    ]
+
+
 def test_mount_declared_action_mode_overrides_capability_id_fallback(
     tmp_path,
 ) -> None:
