@@ -19,6 +19,51 @@ This ledger should be read together with:
 
 - [2026-04-09-execution-chat-front-door-dispatch-gap-spec.md](/D:/word/copaw/docs/superpowers/specs/2026-04-09-execution-chat-front-door-dispatch-gap-spec.md)
 
+### 0.1 Validation Note (`2026-04-10`)
+
+This ledger remains useful, but it is no longer an accurate "all-open issues"
+list.
+
+It should now be read as:
+
+- a `2026-04-09` audit snapshot
+- plus the current validation summary below
+
+The detailed issue sections are intentionally preserved as original audit
+records.
+
+Use the status bands below for current truth.
+
+#### Still Open
+
+- `P0-001`
+- `P0-002`
+- `P0-003`
+- `P0-004`
+- `P0-009`
+- `P0-019`
+
+#### Partially Tightened But Not Fully Closed
+
+- `P0-010`
+- `P0-012`
+- `P0-015`
+- `P0-017`
+
+#### Fixed / Safe To Treat As Archived Audit Items
+
+- `P0-005`
+- `P0-006`
+- `P0-007`
+- `P0-008`
+- `P0-011`
+- `P0-013`
+- `P0-014`
+- `P0-016`
+- `P0-018`
+- `P0-020`
+- `P0-021`
+
 ---
 
 ## 1. Confirmed Issues
@@ -615,20 +660,29 @@ This ledger should be read together with:
 
 ## 3. Current Count
 
-### Confirmed
+### Original Audit Count (`2026-04-09`)
 
 - `21` issues
 
-### Probable
+### Current Validation (`2026-04-10`)
 
-- `0` issues
+- `6` still open
+- `4` partially tightened
+- `11` fixed / archived
 
 ### Total currently recorded
 
 - `21` issues
 
-This count is provisional and should grow only when new issues are tied to
-concrete files and chains.
+This total is still useful as an audit ledger count.
+
+It should not be read as:
+
+- `21 unresolved issues`
+
+It should be read as:
+
+- `21 audited issues total, with mixed current status`
 
 ---
 

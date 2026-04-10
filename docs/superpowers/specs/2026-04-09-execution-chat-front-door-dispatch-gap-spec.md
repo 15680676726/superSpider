@@ -28,6 +28,22 @@ The concrete issue is narrower and more important:
 That gap is enough to make the product feel closer to governed chat plus
 recording than true execution-first delegation.
 
+### 0.1 Validation Note (`2026-04-10`)
+
+This spec still records a real open problem.
+
+What changed after the original audit is not the core judgment itself, but the
+surrounding chain:
+
+- several adjacent runtime/chat continuity seams were fixed
+- several UI read-model seams were tightened
+- but the same-turn dispatch gap itself still remains
+
+So this document should now be read as:
+
+- `still-open core issue`
+- not `proof that the whole front door is still broadly broken`
+
 ---
 
 ## 1. Confirmed Judgment
@@ -306,6 +322,15 @@ As of `2026-04-09`, this issue should be treated as:
 - `product-critical`
 - `not yet fixed`
 
-Any claim that the execution-chat front door is already fully closed should be
-considered inaccurate until this same-turn dispatch gap is explicitly removed or
-made intentionally visible.
+As of `2026-04-10`, that judgment still stands.
+
+The narrower accurate statement is:
+
+- front-door routing and continuity have been tightened in several adjacent
+  places
+- but same-turn `writeback -> assignment materialization -> dispatch start`
+  is still not a fully closed contract
+
+Any claim that the execution-chat front door is already fully closed should
+still be considered inaccurate until this same-turn dispatch gap is explicitly
+removed or made intentionally visible.
