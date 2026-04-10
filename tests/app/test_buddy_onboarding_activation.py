@@ -1,12 +1,21 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import asyncio
+from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import time
 
 from copaw.app.routers.buddy_routes import router as buddy_router
+from copaw.industry import IndustryCapabilityRecommendation
+from copaw.industry.chat_writeback import build_chat_writeback_plan
 from copaw.kernel.buddy_domain_capability_growth import BuddyDomainCapabilityGrowthService
+from copaw.kernel.buddy_onboarding_reasoner import (
+    BuddyOnboardingBacklogSeed,
+    BuddyOnboardingGrowthPlan,
+    BuddyOnboardingReasonedTurn,
+)
 from copaw.kernel.buddy_onboarding_service import BuddyOnboardingService
 from copaw.kernel.buddy_projection_service import BuddyProjectionService
 from copaw.state import SQLiteStateStore
@@ -31,6 +40,7 @@ from copaw.state.repositories_buddy import (
     SqliteHumanProfileRepository,
 )
 from tests.app.industry_api_parts.shared import _build_industry_app
+from tests.shared.buddy_reasoners import DeterministicBuddyReasoner
 
 
 class _FakeIndustryService:
@@ -44,6 +54,55 @@ class _FakeIndustryService:
             "industry_instance_id": kwargs["industry_instance_id"],
             "started_assignment_ids": ["assignment-1"],
         }
+
+
+class _FakeWritingBuddyReasoner:
+    def plan_turn(
+        self,
+        *,
+        profile,
+        transcript,
+        question_count: int,
+        tightened: bool,
+    ) -> BuddyOnboardingReasonedTurn:
+        _ = (profile, transcript, tightened)
+        finished = question_count >= 2
+        return BuddyOnboardingReasonedTurn(
+            finished=finished,
+            next_question="" if finished else "你是先写长篇连载，还是先做第一章验证？",
+            candidate_directions=["建立稳定、可持续的写作与内容发布成长路径"],
+            recommended_direction="建立稳定、可持续的写作与内容发布成长路径",
+        )
+
+    def build_growth_plan(
+        self,
+        *,
+        profile,
+        transcript,
+        selected_direction: str,
+    ) -> BuddyOnboardingGrowthPlan:
+        _ = (profile, transcript)
+        return BuddyOnboardingGrowthPlan(
+            primary_direction=selected_direction,
+            final_goal="先建立稳定的番茄写作与发布节奏，并产出第一轮作品证据。",
+            why_it_matters="把写作从口头计划收成能持续发布、能形成作品资产的长期主线。",
+            backlog_items=[
+                BuddyOnboardingBacklogSeed(
+                    lane_hint="growth-focus",
+                    title="明确连载方向与更新节奏",
+                    summary="先确定题材、更新频率和最小可持续字数目标。",
+                    priority=3,
+                    source_key="writing-direction",
+                ),
+                BuddyOnboardingBacklogSeed(
+                    lane_hint="proof-of-work",
+                    title="完成第一章并进入平台草稿",
+                    summary="完成第一章初稿，准备进入番茄平台草稿箱。",
+                    priority=2,
+                    source_key="writing-first-chapter",
+                ),
+            ],
+        )
 
 
 def test_buddy_confirm_direction_auto_activates_execution_when_industry_service_exists(tmp_path) -> None:
@@ -72,6 +131,7 @@ def test_buddy_confirm_direction_auto_activates_execution_when_industry_service_
         relationship_repository=relationship_repository,
         domain_capability_repository=domain_capability_repository,
         onboarding_session_repository=session_repository,
+        onboarding_reasoner=DeterministicBuddyReasoner(),
         industry_instance_repository=industry_repository,
         operating_lane_service=lane_service,
         backlog_service=backlog_service,
@@ -164,6 +224,312 @@ def test_buddy_confirm_direction_auto_activates_execution_when_industry_service_
     }
 
 
+def test_buddy_writing_instance_auto_closes_browser_specialist_gap_before_temp_seat(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    store = app.state.state_store
+    profile_repository = SqliteHumanProfileRepository(store)
+    growth_target_repository = SqliteGrowthTargetRepository(store)
+    relationship_repository = SqliteCompanionRelationshipRepository(store)
+    domain_capability_repository = SqliteBuddyDomainCapabilityRepository(store)
+    session_repository = SqliteBuddyOnboardingSessionRepository(store)
+    growth_service = BuddyDomainCapabilityGrowthService(
+        domain_capability_repository=domain_capability_repository,
+        industry_instance_repository=app.state.industry_instance_repository,
+        operating_lane_service=app.state.operating_lane_service,
+        backlog_service=app.state.backlog_service,
+        operating_cycle_service=app.state.operating_cycle_service,
+        assignment_service=app.state.assignment_service,
+        agent_report_service=app.state.agent_report_service,
+    )
+    onboarding_service = BuddyOnboardingService(
+        profile_repository=profile_repository,
+        growth_target_repository=growth_target_repository,
+        relationship_repository=relationship_repository,
+        domain_capability_repository=domain_capability_repository,
+        onboarding_session_repository=session_repository,
+        industry_instance_repository=app.state.industry_instance_repository,
+        operating_lane_service=app.state.operating_lane_service,
+        backlog_service=app.state.backlog_service,
+        operating_cycle_service=app.state.operating_cycle_service,
+        assignment_service=app.state.assignment_service,
+        schedule_repository=app.state.schedule_repository,
+        domain_capability_growth_service=growth_service,
+        onboarding_reasoner=_FakeWritingBuddyReasoner(),
+    )
+    projection_service = BuddyProjectionService(
+        profile_repository=profile_repository,
+        growth_target_repository=growth_target_repository,
+        relationship_repository=relationship_repository,
+        domain_capability_repository=domain_capability_repository,
+        onboarding_session_repository=session_repository,
+        domain_capability_growth_service=growth_service,
+        current_focus_resolver=lambda _profile_id: {},
+    )
+    app.include_router(buddy_router)
+    app.state.buddy_onboarding_service = onboarding_service
+    app.state.buddy_projection_service = projection_service
+    client = TestClient(app)
+
+    identity = client.post(
+        "/buddy/onboarding/identity",
+        json={
+            "display_name": "小满",
+            "profession": "写作者",
+            "current_stage": "重启",
+            "interests": ["写作", "番茄"],
+            "strengths": ["持续创作"],
+            "constraints": ["需要先形成稳定节奏"],
+            "goal_intention": "我想长期写小说，并真的在番茄持续发布。",
+        },
+    ).json()
+    clarification = client.post(
+        "/buddy/onboarding/clarify",
+        json={
+            "session_id": identity["session_id"],
+            "answer": "我想先把长篇连载写起来，再逐步稳定更新。",
+        },
+    ).json()
+    confirmation = client.post(
+        "/buddy/onboarding/confirm-direction",
+        json={
+            "session_id": identity["session_id"],
+            "selected_direction": clarification["recommended_direction"],
+            "capability_action": "start-new",
+        },
+    ).json()
+
+    instance_id = confirmation["execution_carrier"]["instance_id"]
+    message_text = "请在浏览器里打开番茄创作平台草稿箱，继续写今天的小说章节，并从 Windows 桌面目录选择封面图片上传"
+    result = asyncio.run(
+        app.state.industry_service.apply_execution_chat_writeback(
+            industry_instance_id=instance_id,
+            message_text=message_text,
+            owner_agent_id="copaw-agent-runner",
+            session_id=f"industry-chat:{instance_id}:execution-core",
+            channel="console",
+            writeback_plan=build_chat_writeback_plan(
+                message_text,
+                approved_classifications=["backlog"],
+                goal_title="番茄章节草稿推进",
+                goal_summary=message_text,
+                goal_plan_steps=[
+                    "打开番茄创作平台并进入当前作品草稿。",
+                    "完成今天章节的草稿更新，并从 Windows 桌面目录选择封面图片上传。",
+                    "把草稿推进结果和下一步写回。",
+                ],
+            ),
+        ),
+    )
+
+    assert result is not None
+    assert result["dispatch_deferred"] is True
+    assert result["target_owner_agent_id"] != "copaw-agent-runner"
+    assert "capability-gap-closed" in result["classification"]
+    assert "temporary-seat-proposal" not in result["classification"]
+    assert "temporary-seat-auto" not in result["classification"]
+
+    runtime = app.state.agent_runtime_repository.get_runtime(result["target_owner_agent_id"])
+    assert runtime is not None
+    capability_layers = runtime.metadata["capability_layers"]
+    assert "tool:browser_use" in capability_layers["role_prototype_capability_ids"]
+
+
+def test_buddy_writing_instance_auto_closes_curated_browser_skill_gap_when_templates_miss(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    app = _build_industry_app(
+        tmp_path,
+        enable_curated_catalog=True,
+    )
+    store = app.state.state_store
+    profile_repository = SqliteHumanProfileRepository(store)
+    growth_target_repository = SqliteGrowthTargetRepository(store)
+    relationship_repository = SqliteCompanionRelationshipRepository(store)
+    domain_capability_repository = SqliteBuddyDomainCapabilityRepository(store)
+    session_repository = SqliteBuddyOnboardingSessionRepository(store)
+    growth_service = BuddyDomainCapabilityGrowthService(
+        domain_capability_repository=domain_capability_repository,
+        industry_instance_repository=app.state.industry_instance_repository,
+        operating_lane_service=app.state.operating_lane_service,
+        backlog_service=app.state.backlog_service,
+        operating_cycle_service=app.state.operating_cycle_service,
+        assignment_service=app.state.assignment_service,
+        agent_report_service=app.state.agent_report_service,
+    )
+    onboarding_service = BuddyOnboardingService(
+        profile_repository=profile_repository,
+        growth_target_repository=growth_target_repository,
+        relationship_repository=relationship_repository,
+        domain_capability_repository=domain_capability_repository,
+        onboarding_session_repository=session_repository,
+        industry_instance_repository=app.state.industry_instance_repository,
+        operating_lane_service=app.state.operating_lane_service,
+        backlog_service=app.state.backlog_service,
+        operating_cycle_service=app.state.operating_cycle_service,
+        assignment_service=app.state.assignment_service,
+        schedule_repository=app.state.schedule_repository,
+        domain_capability_growth_service=growth_service,
+        onboarding_reasoner=_FakeWritingBuddyReasoner(),
+    )
+    projection_service = BuddyProjectionService(
+        profile_repository=profile_repository,
+        growth_target_repository=growth_target_repository,
+        relationship_repository=relationship_repository,
+        domain_capability_repository=domain_capability_repository,
+        onboarding_session_repository=session_repository,
+        domain_capability_growth_service=growth_service,
+        current_focus_resolver=lambda _profile_id: {},
+    )
+    app.include_router(buddy_router)
+    app.state.buddy_onboarding_service = onboarding_service
+    app.state.buddy_projection_service = projection_service
+    client = TestClient(app)
+
+    identity = client.post(
+        "/buddy/onboarding/identity",
+        json={
+            "display_name": "Man",
+            "profession": "Writer",
+            "current_stage": "restart",
+            "interests": ["writing", "story"],
+            "strengths": ["drafting"],
+            "constraints": ["need publishing workflow"],
+            "goal_intention": "I want to keep publishing fiction on a real platform.",
+        },
+    ).json()
+    clarification = client.post(
+        "/buddy/onboarding/clarify",
+        json={
+            "session_id": identity["session_id"],
+            "answer": "I want a repeatable browser workflow for drafting and cover uploads.",
+        },
+    ).json()
+    confirmation = client.post(
+        "/buddy/onboarding/confirm-direction",
+        json={
+            "session_id": identity["session_id"],
+            "selected_direction": clarification["recommended_direction"],
+            "capability_action": "start-new",
+        },
+    ).json()
+
+    instance_id = confirmation["execution_carrier"]["instance_id"]
+    stored_instance = app.state.industry_instance_repository.get_instance(instance_id)
+    assert stored_instance is not None
+    proof_role = next(
+        item
+        for item in list((stored_instance.team_payload or {}).get("agents") or [])
+        if item.get("role_id") == "proof-of-work"
+    )
+    target_agent_id = str(proof_role["agent_id"])
+
+    monkeypatch.setattr(
+        app.state.industry_service,
+        "_build_install_template_recommendations",
+        lambda **_kwargs: [],
+    )
+
+    async def _fake_build_curated_skill_recommendations(**_kwargs):
+        return (
+            [
+                IndustryCapabilityRecommendation(
+                    recommendation_id="curated-browser-gap",
+                    install_kind="hub-skill",
+                    template_id="browser-use-plus",
+                    title="Browser Use Plus",
+                    default_client_key="browser_use_plus",
+                    capability_ids=["tool:browser_use"],
+                    capability_families=["browser"],
+                    suggested_role_ids=["proof-of-work"],
+                    target_agent_ids=[target_agent_id],
+                    risk_level="auto",
+                    source_kind="skillhub-curated",
+                    source_label="SkillHub Curated",
+                    source_url="https://skillhub.example.com/browser-use-plus.zip",
+                    version="1.0.0",
+                    review_required=False,
+                ),
+            ],
+            [],
+        )
+
+    monkeypatch.setattr(
+        app.state.industry_service,
+        "_build_curated_skill_recommendations",
+        _fake_build_curated_skill_recommendations,
+    )
+
+    skill_service = app.state.capability_service._system_handler._skills._skill_service
+
+    def _fake_install_skill_from_hub(
+        *,
+        bundle_url: str,
+        version: str = "",
+        enable: bool = True,
+        overwrite: bool = False,
+    ):
+        _ = version, overwrite
+        skill_service.create_skill(
+            name="browser_use_plus",
+            content=(
+                "---\n"
+                "name: browser_use_plus\n"
+                "description: Browser skill installed from curated hub\n"
+                "---\n"
+                f"Installed from {bundle_url}"
+            ),
+            overwrite=True,
+        )
+        if enable:
+            skill_service.enable_skill("browser_use_plus")
+        return SimpleNamespace(
+            name="browser_use_plus",
+            enabled=enable,
+            source_url=bundle_url,
+        )
+
+    skill_service.install_skill_from_hub = _fake_install_skill_from_hub
+
+    message_text = (
+        "Open the web publishing dashboard, continue today's chapter draft, "
+        "and upload the latest cover image from Windows."
+    )
+    result = asyncio.run(
+        app.state.industry_service.apply_execution_chat_writeback(
+            industry_instance_id=instance_id,
+            message_text=message_text,
+            owner_agent_id="copaw-agent-runner",
+            session_id=f"industry-chat:{instance_id}:execution-core",
+            channel="console",
+            writeback_plan=build_chat_writeback_plan(
+                message_text,
+                approved_classifications=["backlog"],
+                goal_title="Publishing workflow follow-up",
+                goal_summary=message_text,
+                goal_plan_steps=[
+                    "Open the publishing dashboard in the browser.",
+                    "Continue the chapter draft and upload the new cover image.",
+                    "Write back the publishing result and next step.",
+                ],
+            ),
+        ),
+    )
+
+    assert result is not None
+    assert result["dispatch_deferred"] is True
+    assert result["target_owner_agent_id"] == target_agent_id
+    assert "capability-gap-closed" in result["classification"]
+    assert "temporary-seat-proposal" not in result["classification"]
+    assert "temporary-seat-auto" not in result["classification"]
+
+    override = app.state.agent_profile_override_repository.get_override(target_agent_id)
+    assert override is not None
+    assert "tool:browser_use" in (override.capabilities or [])
+
+
 def test_buddy_confirm_direction_real_kickoff_creates_leaf_tasks_for_specialist_agents(
     tmp_path,
 ) -> None:
@@ -189,6 +555,7 @@ def test_buddy_confirm_direction_real_kickoff_creates_leaf_tasks_for_specialist_
         relationship_repository=relationship_repository,
         domain_capability_repository=domain_capability_repository,
         onboarding_session_repository=session_repository,
+        onboarding_reasoner=DeterministicBuddyReasoner(),
         industry_instance_repository=app.state.industry_instance_repository,
         operating_lane_service=app.state.operating_lane_service,
         backlog_service=app.state.backlog_service,
@@ -300,6 +667,7 @@ def test_buddy_surface_repairs_legacy_buddy_execution_binding_before_chat(
         relationship_repository=relationship_repository,
         domain_capability_repository=domain_capability_repository,
         onboarding_session_repository=session_repository,
+        onboarding_reasoner=DeterministicBuddyReasoner(),
         industry_instance_repository=app.state.industry_instance_repository,
         operating_lane_service=app.state.operating_lane_service,
         backlog_service=app.state.backlog_service,
@@ -466,6 +834,7 @@ def test_buddy_confirm_direction_writes_back_completed_reports_to_control_thread
         relationship_repository=relationship_repository,
         domain_capability_repository=domain_capability_repository,
         onboarding_session_repository=session_repository,
+        onboarding_reasoner=DeterministicBuddyReasoner(),
         industry_instance_repository=app.state.industry_instance_repository,
         operating_lane_service=app.state.operating_lane_service,
         backlog_service=app.state.backlog_service,
@@ -604,6 +973,7 @@ def test_buddy_confirm_direction_seeds_durable_execution_core_schedules(
         relationship_repository=relationship_repository,
         domain_capability_repository=domain_capability_repository,
         onboarding_session_repository=session_repository,
+        onboarding_reasoner=DeterministicBuddyReasoner(),
         industry_instance_repository=app.state.industry_instance_repository,
         operating_lane_service=app.state.operating_lane_service,
         backlog_service=app.state.backlog_service,

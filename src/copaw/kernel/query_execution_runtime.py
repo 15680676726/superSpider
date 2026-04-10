@@ -2705,42 +2705,20 @@ class _QueryExecutionRuntimeMixin(
                         or "Execution-core chat writeback raised before durable persistence.",
                         "commit_key": "query_execution_runtime:writeback",
                     }
+        if isinstance(chat_writeback_summary, dict) and chat_writeback_summary:
+            chat_writeback_summary = self._annotate_requested_main_brain_writeback_summary(
+                chat_writeback_summary,
+            )
         industry_kickoff_summary = None
         if intake_contract.should_kickoff:
-            kickoff = getattr(service, "kickoff_execution_from_chat", None)
-            if callable(kickoff):
-                try:
-                    result = kickoff(
-                        **build_industry_chat_action_kwargs(
-                            industry_instance_id=industry_instance_id,
-                            message_text=intake_contract.message_text,
-                            owner_agent_id=owner_agent_id,
-                            request=request,
-                        ),
-                    )
-                    if asyncio.iscoroutine(result):
-                        result = await result
-                    industry_kickoff_summary = normalize_durable_commit_result(
-                        result,
-                        action_type="orchestrate_execution",
-                        commit_key="query_execution_runtime:kickoff",
-                        default_record_id=None,
-                        empty_reason="kickoff_handler_returned_no_result",
-                    )
-                    industry_kickoff_summary["action_type"] = "orchestrate_execution"
-                except Exception as exc:
-                    logger.exception(
-                        "Failed to kick off industry execution for '%s' from chat",
-                        industry_instance_id,
-                    )
-                    industry_kickoff_summary = {
-                        "status": "commit_failed",
-                        "action_type": "orchestrate_execution",
-                        "reason": "kickoff_handler_exception",
-                        "message": str(exc).strip()
-                        or "Execution kickoff raised before durable persistence.",
-                        "commit_key": "query_execution_runtime:kickoff",
-                    }
+            industry_kickoff_summary = await self._run_requested_main_brain_kickoff(
+                service=service,
+                industry_instance_id=industry_instance_id,
+                message_text=intake_contract.message_text,
+                owner_agent_id=owner_agent_id,
+                request=request,
+                chat_writeback_summary=chat_writeback_summary,
+            )
         commit_outcome = self._combine_requested_main_brain_commit_outcome(
             chat_writeback_summary=chat_writeback_summary,
             industry_kickoff_summary=industry_kickoff_summary,
@@ -2751,6 +2729,303 @@ class _QueryExecutionRuntimeMixin(
                 commit_outcome=commit_outcome,
             )
         return chat_writeback_summary, industry_kickoff_summary
+
+    def _annotate_requested_main_brain_writeback_summary(
+        self,
+        summary: dict[str, Any],
+    ) -> dict[str, Any]:
+        annotated = dict(summary)
+        created_backlog_ids = _string_list(annotated.get("created_backlog_ids"))
+        materialized_assignment_ids = _string_list(
+            annotated.get("materialized_assignment_ids"),
+        )
+        started_assignment_ids = _string_list(annotated.get("started_assignment_ids"))
+        seat_resolution_kind = _first_non_empty(annotated.get("seat_resolution_kind"))
+        proposal_status = _first_non_empty(annotated.get("proposal_status"))
+        decision_id = _first_non_empty(annotated.get("decision_id"))
+        if decision_id is None:
+            decision_id = _first_non_empty(annotated.get("decision_request_id"))
+        annotated["created_backlog_ids"] = created_backlog_ids
+        if materialized_assignment_ids:
+            annotated["materialized_assignment_ids"] = materialized_assignment_ids
+        if started_assignment_ids:
+            annotated["started_assignment_ids"] = started_assignment_ids
+        if decision_id is not None:
+            annotated["decision_id"] = decision_id
+        if proposal_status is not None:
+            annotated["proposal_status"] = proposal_status
+        if seat_resolution_kind is not None:
+            annotated["seat_resolution_kind"] = seat_resolution_kind
+        delegation_state = _first_non_empty(annotated.get("delegation_state"))
+        if started_assignment_ids:
+            delegation_state = "dispatched"
+        elif materialized_assignment_ids and delegation_state not in {"dispatched"}:
+            delegation_state = "materialized"
+        elif (
+            decision_id is not None or proposal_status == "waiting-confirm"
+        ) and delegation_state not in {"dispatched", "materialized"}:
+            delegation_state = "waiting_confirm"
+        elif (
+            seat_resolution_kind == "routing-pending"
+            and delegation_state not in {"dispatched", "materialized", "waiting_confirm"}
+        ):
+            delegation_state = "pending_staffing"
+        elif created_backlog_ids and delegation_state is None:
+            delegation_state = "recorded"
+        if delegation_state is not None:
+            annotated["delegation_state"] = delegation_state
+        return annotated
+
+    async def _run_requested_main_brain_kickoff(
+        self,
+        *,
+        service: Any,
+        industry_instance_id: str,
+        message_text: str,
+        owner_agent_id: str,
+        request: Any,
+        chat_writeback_summary: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        deferred = self._resolve_requested_main_brain_deferred_kickoff(
+            industry_instance_id=industry_instance_id,
+            chat_writeback_summary=chat_writeback_summary,
+        )
+        if deferred is not None:
+            return deferred
+        materialized_summary = await self._materialize_requested_main_brain_backlog(
+            service=service,
+            industry_instance_id=industry_instance_id,
+            chat_writeback_summary=chat_writeback_summary,
+        )
+        if materialized_summary is not None:
+            if isinstance(chat_writeback_summary, dict) and chat_writeback_summary:
+                chat_writeback_summary.update(
+                    self._annotate_requested_main_brain_writeback_summary(
+                        {
+                            **chat_writeback_summary,
+                            **materialized_summary,
+                        },
+                    ),
+                )
+            materialization_status = _first_non_empty(materialized_summary.get("status"))
+            if materialization_status in {
+                "commit_failed",
+                "governance_denied",
+                "confirm_required",
+                "commit_deferred",
+            } and not _string_list(materialized_summary.get("materialized_assignment_ids")):
+                return materialized_summary
+        kickoff = getattr(service, "kickoff_execution_from_chat", None)
+        if not callable(kickoff):
+            return {
+                "status": "commit_deferred",
+                "action_type": "orchestrate_execution",
+                "reason": "no_kickoff_handler",
+                "message": "Execution was recorded, but no kickoff handler is attached.",
+                "commit_key": "query_execution_runtime:kickoff",
+                "delegation_state": _first_non_empty(
+                    _mapping_value(chat_writeback_summary).get("delegation_state"),
+                    "recorded",
+                ),
+                "created_backlog_ids": _string_list(
+                    _mapping_value(chat_writeback_summary).get("created_backlog_ids"),
+                ),
+                "materialized_assignment_ids": _string_list(
+                    _mapping_value(chat_writeback_summary).get("materialized_assignment_ids"),
+                ),
+            }
+        try:
+            result = kickoff(
+                **build_industry_chat_action_kwargs(
+                    industry_instance_id=industry_instance_id,
+                    message_text=message_text,
+                    owner_agent_id=owner_agent_id,
+                    request=request,
+                ),
+            )
+            if asyncio.iscoroutine(result):
+                result = await result
+            industry_kickoff_summary = normalize_durable_commit_result(
+                result,
+                action_type="orchestrate_execution",
+                commit_key="query_execution_runtime:kickoff",
+                default_record_id=None,
+                empty_reason="kickoff_handler_returned_no_result",
+            )
+            industry_kickoff_summary["action_type"] = "orchestrate_execution"
+            return self._annotate_requested_main_brain_writeback_summary(
+                {
+                    **_mapping_value(chat_writeback_summary),
+                    **industry_kickoff_summary,
+                },
+            )
+        except Exception as exc:
+            logger.exception(
+                "Failed to kick off industry execution for '%s' from chat",
+                industry_instance_id,
+            )
+            return {
+                "status": "commit_failed",
+                "action_type": "orchestrate_execution",
+                "reason": "kickoff_handler_exception",
+                "message": str(exc).strip()
+                or "Execution kickoff raised before durable persistence.",
+                "commit_key": "query_execution_runtime:kickoff",
+            }
+
+    def _resolve_requested_main_brain_deferred_kickoff(
+        self,
+        *,
+        industry_instance_id: str,
+        chat_writeback_summary: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        writeback_summary = self._annotate_requested_main_brain_writeback_summary(
+            _mapping_value(chat_writeback_summary),
+        )
+        if not writeback_summary:
+            return None
+        decision_id = _first_non_empty(
+            writeback_summary.get("decision_id"),
+            writeback_summary.get("decision_request_id"),
+        )
+        proposal_status = _first_non_empty(writeback_summary.get("proposal_status"))
+        seat_resolution_kind = _first_non_empty(writeback_summary.get("seat_resolution_kind"))
+        created_backlog_ids = _string_list(writeback_summary.get("created_backlog_ids"))
+        materialized_assignment_ids = _string_list(
+            writeback_summary.get("materialized_assignment_ids"),
+        )
+        if decision_id is not None or proposal_status == "waiting-confirm":
+            return {
+                "status": "commit_deferred",
+                "action_type": "orchestrate_execution",
+                "reason": "waiting_confirm",
+                "message": "Execution was recorded and is waiting for confirmation before delegation.",
+                "commit_key": "query_execution_runtime:kickoff",
+                "decision_id": decision_id,
+                "proposal_status": proposal_status,
+                "delegation_state": "waiting_confirm",
+                "created_backlog_ids": created_backlog_ids,
+                "materialized_assignment_ids": materialized_assignment_ids,
+                "seat_resolution_kind": seat_resolution_kind,
+                "industry_instance_id": industry_instance_id,
+            }
+        if seat_resolution_kind == "routing-pending":
+            return {
+                "status": "commit_deferred",
+                "action_type": "orchestrate_execution",
+                "reason": "pending_staffing",
+                "message": "Execution was recorded and is waiting for staffing or routing resolution.",
+                "commit_key": "query_execution_runtime:kickoff",
+                "delegation_state": "pending_staffing",
+                "created_backlog_ids": created_backlog_ids,
+                "materialized_assignment_ids": materialized_assignment_ids,
+                "seat_resolution_kind": seat_resolution_kind,
+                "industry_instance_id": industry_instance_id,
+            }
+        return None
+
+    async def _materialize_requested_main_brain_backlog(
+        self,
+        *,
+        service: Any,
+        industry_instance_id: str,
+        chat_writeback_summary: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        writeback_summary = self._annotate_requested_main_brain_writeback_summary(
+            _mapping_value(chat_writeback_summary),
+        )
+        if not writeback_summary:
+            return None
+        created_backlog_ids = _string_list(writeback_summary.get("created_backlog_ids"))
+        if not created_backlog_ids:
+            return None
+        if _string_list(writeback_summary.get("materialized_assignment_ids")):
+            return None
+        if not _first_non_empty(
+            writeback_summary.get("target_owner_agent_id"),
+            writeback_summary.get("target_industry_role_id"),
+        ):
+            return {
+                "status": "commit_deferred",
+                "action_type": "materialize_execution",
+                "reason": "pending_staffing",
+                "message": "Execution was recorded, but no assignee is ready for same-turn materialization.",
+                "commit_key": "query_execution_runtime:materialize",
+                "delegation_state": "pending_staffing",
+                "created_backlog_ids": created_backlog_ids,
+            }
+        runner = getattr(service, "run_operating_cycle", None)
+        if not callable(runner):
+            return {
+                "status": "commit_deferred",
+                "action_type": "materialize_execution",
+                "reason": "materialization_unavailable",
+                "message": "Execution was recorded, but same-turn materialization is unavailable.",
+                "commit_key": "query_execution_runtime:materialize",
+                "delegation_state": "recorded",
+                "created_backlog_ids": created_backlog_ids,
+            }
+        try:
+            result = runner(
+                instance_id=industry_instance_id,
+                actor="query-runtime-frontdoor",
+                force=True,
+                backlog_item_ids=created_backlog_ids,
+                auto_dispatch_materialized_goals=False,
+            )
+            if asyncio.iscoroutine(result):
+                result = await result
+        except Exception as exc:
+            logger.exception(
+                "Failed to materialize same-turn backlog for industry '%s'",
+                industry_instance_id,
+            )
+            return {
+                "status": "commit_failed",
+                "action_type": "materialize_execution",
+                "reason": "materialization_exception",
+                "message": str(exc).strip()
+                or "Same-turn materialization raised before durable persistence.",
+                "commit_key": "query_execution_runtime:materialize",
+                "created_backlog_ids": created_backlog_ids,
+            }
+        processed_instances = list(_mapping_value(result).get("processed_instances") or [])
+        processed_instance = (
+            next(
+                (
+                    item
+                    for item in processed_instances
+                    if _first_non_empty(_mapping_value(item).get("instance_id")) == industry_instance_id
+                ),
+                None,
+            )
+            if processed_instances
+            else None
+        ) or (processed_instances[0] if processed_instances else None)
+        processed_payload = _mapping_value(processed_instance)
+        materialized_assignment_ids = _string_list(
+            processed_payload.get("created_assignment_ids"),
+        )
+        materialized_cycle_id = _first_non_empty(processed_payload.get("started_cycle_id"))
+        if not materialized_assignment_ids:
+            return {
+                "status": "commit_deferred",
+                "action_type": "materialize_execution",
+                "reason": "materialization_deferred",
+                "message": "Execution was recorded, but the assignment has not materialized yet.",
+                "commit_key": "query_execution_runtime:materialize",
+                "delegation_state": "recorded",
+                "created_backlog_ids": created_backlog_ids,
+            }
+        return {
+            "status": "committed",
+            "action_type": "materialize_execution",
+            "commit_key": "query_execution_runtime:materialize",
+            "delegation_state": "materialized",
+            "materialized_cycle_id": materialized_cycle_id,
+            "materialized_assignment_ids": materialized_assignment_ids,
+            "created_backlog_ids": created_backlog_ids,
+        }
 
     def _combine_requested_main_brain_commit_outcome(
         self,
@@ -2765,25 +3040,92 @@ class _QueryExecutionRuntimeMixin(
         ]
         if not outcomes:
             return None
+        writeback_payload = self._annotate_requested_main_brain_writeback_summary(
+            _mapping_value(chat_writeback_summary),
+        )
+        kickoff_payload = self._annotate_requested_main_brain_writeback_summary(
+            _mapping_value(industry_kickoff_summary),
+        )
+        combined = {
+            "action_type": (
+                "writeback_and_kickoff"
+                if len(outcomes) > 1
+                else _first_non_empty(outcomes[0].get("action_type"))
+                or "writeback_and_kickoff"
+            ),
+            "commit_key": "query_execution_runtime:intake",
+            "record_id": _first_non_empty(
+                _first_non_empty(
+                    _mapping_value(industry_kickoff_summary).get("record_id"),
+                    _mapping_value(chat_writeback_summary).get("record_id"),
+                ),
+                *(_string_list(kickoff_payload.get("started_assignment_ids"))),
+                *(_string_list(writeback_payload.get("materialized_assignment_ids"))),
+                *(_string_list(writeback_payload.get("created_backlog_ids"))),
+            ),
+            "delegation_state": _first_non_empty(
+                kickoff_payload.get("delegation_state"),
+                writeback_payload.get("delegation_state"),
+                (
+                    "dispatched"
+                    if _string_list(kickoff_payload.get("started_assignment_ids"))
+                    else None
+                ),
+                (
+                    "materialized"
+                    if _string_list(writeback_payload.get("materialized_assignment_ids"))
+                    else None
+                ),
+                (
+                    "recorded"
+                    if _string_list(writeback_payload.get("created_backlog_ids"))
+                    else None
+                ),
+            ),
+            "created_backlog_ids": _string_list(writeback_payload.get("created_backlog_ids")),
+            "materialized_assignment_ids": _string_list(
+                writeback_payload.get("materialized_assignment_ids"),
+            ),
+            "started_assignment_ids": _string_list(
+                kickoff_payload.get("started_assignment_ids"),
+            ),
+            "materialized_cycle_id": _first_non_empty(
+                writeback_payload.get("materialized_cycle_id"),
+            ),
+            "decision_id": _first_non_empty(
+                kickoff_payload.get("decision_id"),
+                writeback_payload.get("decision_id"),
+                writeback_payload.get("decision_request_id"),
+            ),
+            "proposal_status": _first_non_empty(
+                kickoff_payload.get("proposal_status"),
+                writeback_payload.get("proposal_status"),
+            ),
+            "seat_resolution_kind": _first_non_empty(
+                kickoff_payload.get("seat_resolution_kind"),
+                writeback_payload.get("seat_resolution_kind"),
+            ),
+        }
         for status in ("commit_failed", "governance_denied", "confirm_required", "commit_deferred"):
             for outcome in outcomes:
                 if str(outcome.get("status") or "").strip() == status:
-                    combined = dict(outcome)
-                    if len(outcomes) > 1:
-                        combined["action_type"] = "writeback_and_kickoff"
-                    return combined
+                    return {
+                        **combined,
+                        **dict(outcome),
+                        "action_type": combined["action_type"],
+                        "commit_key": "query_execution_runtime:intake",
+                    }
         if len(outcomes) == 1:
-            return dict(outcomes[0])
-        record_id = _first_non_empty(
-            outcomes[0].get("record_id"),
-            outcomes[1].get("record_id"),
-        )
+            return {
+                **combined,
+                **dict(outcomes[0]),
+                "action_type": combined["action_type"],
+                "commit_key": "query_execution_runtime:intake",
+            }
         return {
+            **combined,
             "status": "committed",
-            "action_type": "writeback_and_kickoff",
             "summary": "Durably persisted requested main-brain intake writeback and kickoff.",
-            "record_id": record_id,
-            "commit_key": "query_execution_runtime:intake",
         }
 
     def _persist_query_runtime_state(

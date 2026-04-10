@@ -31,6 +31,7 @@ from copaw.state.repositories_buddy import (
     SqliteGrowthTargetRepository,
     SqliteHumanProfileRepository,
 )
+from tests.shared.buddy_reasoners import DeterministicBuddyReasoner
 
 from .runtime_center_api_parts.shared import FakeTurnExecutor, build_runtime_center_app
 
@@ -48,6 +49,7 @@ def _build_client(tmp_path) -> TestClient:
         relationship_repository=relationship_repository,
         domain_capability_repository=domain_capability_repository,
         onboarding_session_repository=session_repository,
+        onboarding_reasoner=DeterministicBuddyReasoner(),
     )
     projection_service = BuddyProjectionService(
         profile_repository=profile_repository,
@@ -96,6 +98,7 @@ def _build_client_with_growth(tmp_path) -> tuple[TestClient, SQLiteStateStore]:
         relationship_repository=relationship_repository,
         domain_capability_repository=domain_capability_repository,
         onboarding_session_repository=session_repository,
+        onboarding_reasoner=DeterministicBuddyReasoner(),
         industry_instance_repository=industry_repository,
         operating_lane_service=lane_service,
         backlog_service=backlog_service,
@@ -313,6 +316,7 @@ def test_runtime_center_chat_run_preserves_strong_pull_signal_for_buddy_growth(t
         relationship_repository=relationship_repository,
         domain_capability_repository=SqliteBuddyDomainCapabilityRepository(store),
         onboarding_session_repository=session_repository,
+        onboarding_reasoner=DeterministicBuddyReasoner(),
     )
     projection_service = BuddyProjectionService(
         profile_repository=profile_repository,

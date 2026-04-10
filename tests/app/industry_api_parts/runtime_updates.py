@@ -1632,6 +1632,116 @@ def test_industry_chat_writeback_approved_staffing_proposal_unblocks_materializa
     assert backlog_item.assignment_id is not None
 
 
+def test_execution_chat_writeback_materialization_and_dispatch_attach_transition_evidence(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    profile = normalize_industry_profile(
+        IndustryPreviewRequest(
+            industry="Field Operations",
+            company_name="Northwind Robotics",
+            product="inspection orchestration",
+            goals=["build a stable inspection loop"],
+        ),
+    )
+    draft = FakeIndustryDraftGenerator().build_draft(
+        profile,
+        "industry-v1-northwind-robotics",
+    )
+    response = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": profile.model_dump(mode="json"),
+            "draft": draft.model_dump(mode="json"),
+            "auto_dispatch": True,
+            "execute": False,
+        },
+    )
+    assert response.status_code == 200
+    instance_id = response.json()["team"]["team_id"]
+
+    message_text = (
+        "must include market research and competitor monitoring in the main loop, weekly review"
+    )
+    writeback = asyncio.run(
+        app.state.industry_service.apply_execution_chat_writeback(
+            industry_instance_id=instance_id,
+            message_text=message_text,
+            owner_agent_id="copaw-agent-runner",
+            session_id=f"industry-chat:{instance_id}:execution-core",
+            channel="console",
+            writeback_plan=_build_test_chat_writeback_plan(message_text),
+        ),
+    )
+
+    assert writeback is not None
+    backlog_id = writeback["created_backlog_ids"][0]
+    backlog_item = app.state.backlog_item_repository.get_item(backlog_id)
+    assert backlog_item is not None
+
+    backlog_evidence = app.state.evidence_ledger.list_by_task(backlog_id)
+    accepted_evidence = next(
+        record
+        for record in backlog_evidence
+        if record.metadata.get("transition_kind") == "chat-writeback-accepted"
+    )
+    assert accepted_evidence.id in list(backlog_item.evidence_ids or [])
+
+    cycle_result = asyncio.run(
+        app.state.industry_service.run_operating_cycle(
+            instance_id=instance_id,
+            actor="test:frontdoor-transition-evidence",
+            force=True,
+            backlog_item_ids=[backlog_id],
+            auto_dispatch_materialized_goals=False,
+        ),
+    )
+    assignment_id = cycle_result["processed_instances"][0]["created_assignment_ids"][0]
+    assignment = app.state.assignment_repository.get_assignment(assignment_id)
+    assert assignment is not None
+
+    materialization_evidence = next(
+        record
+        for record in app.state.evidence_ledger.list_by_task(assignment_id)
+        if record.metadata.get("transition_kind") == "assignment-materialized"
+    )
+    backlog_item = app.state.backlog_item_repository.get_item(backlog_id)
+    assert backlog_item is not None
+    assert materialization_evidence.id in list(assignment.evidence_ids or [])
+    assert materialization_evidence.id in list(backlog_item.evidence_ids or [])
+
+    kickoff = asyncio.run(
+        app.state.industry_service.kickoff_execution_from_chat(
+            industry_instance_id=instance_id,
+            message_text=message_text,
+            owner_agent_id="copaw-agent-runner",
+            session_id=f"industry-chat:{instance_id}:execution-core",
+            channel="console",
+        ),
+    )
+
+    assert kickoff is not None
+    assert assignment_id in list(kickoff["started_assignment_ids"] or [])
+
+    assignment = app.state.assignment_repository.get_assignment(assignment_id)
+    assert assignment is not None
+    assignment_evidence = app.state.evidence_ledger.list_by_task(assignment_id)
+    dispatch_evidence = next(
+        record
+        for record in assignment_evidence
+        if record.metadata.get("transition_kind") == "assignment-dispatch-started"
+    )
+    transition_kinds = [
+        record.metadata.get("transition_kind")
+        for record in assignment_evidence
+    ]
+    assert "assignment-materialized" in transition_kinds
+    assert "assignment-dispatch-started" in transition_kinds
+    assert dispatch_evidence.id in list(assignment.evidence_ids or [])
+
+
 def test_bootstrap_researcher_schedule_report_keeps_main_brain_continuity(
     tmp_path,
 ) -> None:

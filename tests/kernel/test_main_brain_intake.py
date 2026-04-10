@@ -105,3 +105,21 @@ async def test_main_brain_intake_contract_for_content_creation_request_keeps_wri
     assert contract.has_active_writeback_plan is True
     assert contract.should_kickoff is True
     assert contract.should_route_to_orchestrate is True
+
+
+@pytest.mark.asyncio
+async def test_main_brain_intake_contract_raises_when_decision_model_is_unavailable(
+    monkeypatch,
+):
+    writeback_module.clear_chat_writeback_decision_cache()
+    monkeypatch.setattr(
+        writeback_module,
+        "_CHAT_WRITEBACK_DECISION_MODEL_FACTORY",
+        lambda: None,
+        raising=False,
+    )
+
+    with pytest.raises(RuntimeError, match="unavailable"):
+        await resolve_main_brain_intake_contract(
+            text="现在去写一篇短篇小说，保存成实际文件，完成后主动告诉我结果。",
+        )

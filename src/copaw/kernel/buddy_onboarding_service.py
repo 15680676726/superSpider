@@ -653,35 +653,35 @@ class BuddyOnboardingService:
             profile.profile_id,
         )
         transcript = [profile.goal_intention]
-        reasoned_turn = self._resolve_reasoned_turn(
-            profile=profile,
-            transcript=transcript,
-            question_count=1,
-            tightened=False,
-        )
+        try:
+            reasoned_turn = self._resolve_reasoned_turn(
+                profile=profile,
+                transcript=transcript,
+                question_count=1,
+                tightened=False,
+            )
+        except (
+            BuddyOnboardingReasonerTimeoutError,
+            TimeoutError,
+            BuddyOnboardingReasonerUnavailableError,
+        ):
+            self._persist_failed_onboarding_session(
+                profile_id=profile.profile_id,
+                existing_session=existing_session,
+                transcript=transcript,
+                question_count=1,
+                tightened=False,
+            )
+            raise
         session = BuddyOnboardingSessionRecord(
             profile_id=profile.profile_id,
             question_count=1,
             tightened=False,
             status="clarifying",
-            next_question=(
-                reasoned_turn.next_question.strip()
-                if reasoned_turn is not None and reasoned_turn.next_question.strip()
-                else _build_buddy_question(
-                    profile=profile,
-                    question_count=1,
-                    transcript=transcript,
-                )
-            ),
+            next_question=reasoned_turn.next_question.strip(),
             transcript=transcript,
-            candidate_directions=(
-                list(reasoned_turn.candidate_directions)
-                if reasoned_turn is not None
-                else []
-            ),
-            recommended_direction=(
-                reasoned_turn.recommended_direction if reasoned_turn is not None else ""
-            ),
+            candidate_directions=list(reasoned_turn.candidate_directions),
+            recommended_direction=reasoned_turn.recommended_direction,
             **self._build_reasoned_turn_cache(reasoned_turn),
         )
         if existing_session is not None:
@@ -716,44 +716,36 @@ class BuddyOnboardingService:
             max(existing_question_count or 0, session.question_count + 1),
         )
         tightened = question_count > self.TIGHTEN_AFTER
-        candidate_directions = _derive_candidate_directions(
-            profile=profile,
-            transcript=merged_transcript,
-        )
-        recommended = candidate_directions[0] if candidate_directions else ""
-        reasoned_turn = self._resolve_reasoned_turn(
-            profile=profile,
-            transcript=merged_transcript,
-            question_count=question_count,
-            tightened=tightened,
-        )
-        if reasoned_turn is not None:
-            candidate_directions = list(reasoned_turn.candidate_directions) or candidate_directions
-            recommended = reasoned_turn.recommended_direction or recommended
-        finished = (
-            question_count >= self.MAX_QUESTIONS
-            or (
-                reasoned_turn.finished
-                if reasoned_turn is not None
-                else self._should_finish_clarification(
-                    question_count=question_count,
-                    recommended_direction=recommended,
-                    transcript=merged_transcript,
-                )
+        try:
+            reasoned_turn = self._resolve_reasoned_turn(
+                profile=profile,
+                transcript=merged_transcript,
+                question_count=question_count,
+                tightened=tightened,
             )
-        )
+        except (
+            BuddyOnboardingReasonerTimeoutError,
+            TimeoutError,
+            BuddyOnboardingReasonerUnavailableError,
+        ):
+            self._persist_failed_onboarding_session(
+                profile_id=profile.profile_id,
+                existing_session=session,
+                transcript=merged_transcript,
+                question_count=question_count,
+                tightened=tightened,
+            )
+            raise
+        candidate_directions = list(reasoned_turn.candidate_directions)
+        recommended = reasoned_turn.recommended_direction
+        finished = question_count >= self.MAX_QUESTIONS or reasoned_turn.finished
+        if finished and (not candidate_directions or not recommended.strip()):
+            raise BuddyOnboardingReasonerUnavailableError(
+                "Buddy onboarding model failed to return a valid result.",
+            )
         next_question = ""
         if not finished:
-            next_question = (
-                reasoned_turn.next_question.strip()
-                if reasoned_turn is not None and reasoned_turn.next_question.strip()
-                else _build_buddy_question(
-                    profile=profile,
-                    question_count=question_count,
-                    tightened=tightened,
-                    transcript=merged_transcript,
-                )
-            )
+            next_question = reasoned_turn.next_question.strip()
         updated = self._onboarding_session_repository.upsert_session(
             session.model_copy(
                 update={
@@ -859,6 +851,8 @@ class BuddyOnboardingService:
                 transcript=session.transcript,
                 selected_direction=normalized,
             )
+        else:
+            growth_plan = self._validate_growth_plan_result(growth_plan)
         resolved_capability_action = str(
             capability_action or preview.recommended_action or "",
         ).strip()
@@ -872,16 +866,8 @@ class BuddyOnboardingService:
             GrowthTarget(
                 profile_id=profile.profile_id,
                 primary_direction=normalized,
-                final_goal=(
-                    growth_plan.final_goal
-                    if growth_plan is not None and growth_plan.final_goal.strip()
-                    else _derive_final_goal(profile=profile, direction=normalized)
-                ),
-                why_it_matters=(
-                    growth_plan.why_it_matters
-                    if growth_plan is not None and growth_plan.why_it_matters.strip()
-                    else _derive_why_it_matters(profile=profile)
-                ),
+                final_goal=growth_plan.final_goal,
+                why_it_matters=growth_plan.why_it_matters,
                 current_cycle_label="Cycle 1",
             ),
         )
@@ -1026,6 +1012,37 @@ class BuddyOnboardingService:
         )
         return updated
 
+    def _persist_failed_onboarding_session(
+        self,
+        *,
+        profile_id: str,
+        existing_session: BuddyOnboardingSessionRecord | None,
+        transcript: list[str],
+        question_count: int,
+        tightened: bool,
+    ) -> BuddyOnboardingSessionRecord:
+        session = BuddyOnboardingSessionRecord(
+            profile_id=profile_id,
+            status="clarifying",
+            question_count=max(1, int(question_count or 1)),
+            tightened=bool(tightened),
+            next_question="",
+            transcript=[str(item).strip() for item in transcript if str(item).strip()],
+            candidate_directions=[],
+            recommended_direction="",
+            selected_direction="",
+            **self._build_reasoned_turn_cache(None),
+        )
+        if existing_session is not None:
+            session = session.model_copy(
+                update={
+                    "session_id": existing_session.session_id,
+                    "created_at": existing_session.created_at,
+                    "updated_at": _utc_now(),
+                },
+            )
+        return self._onboarding_session_repository.upsert_session(session)
+
     def repair_active_domain_schedules(self, *, profile_id: str) -> int:
         if (
             self._domain_capability_repository is None
@@ -1149,11 +1166,13 @@ class BuddyOnboardingService:
         transcript: list[str],
         question_count: int,
         tightened: bool,
-    ) -> BuddyOnboardingReasonedTurn | None:
+    ) -> BuddyOnboardingReasonedTurn:
         if self._onboarding_reasoner is None:
-            return None
+            raise BuddyOnboardingReasonerUnavailableError(
+                "Buddy onboarding model is not available.",
+            )
         try:
-            return self._onboarding_reasoner.plan_turn(
+            reasoned_turn = self._onboarding_reasoner.plan_turn(
                 profile=profile,
                 transcript=transcript,
                 question_count=question_count,
@@ -1170,6 +1189,7 @@ class BuddyOnboardingService:
             raise BuddyOnboardingReasonerUnavailableError(
                 "Buddy onboarding model failed to return a valid result.",
             ) from None
+        return self._validate_reasoned_turn_result(reasoned_turn)
 
     def _resolve_growth_plan(
         self,
@@ -1177,11 +1197,13 @@ class BuddyOnboardingService:
         profile: HumanProfile,
         transcript: list[str],
         selected_direction: str,
-    ) -> BuddyOnboardingGrowthPlan | None:
+    ) -> BuddyOnboardingGrowthPlan:
         if self._onboarding_reasoner is None:
-            return None
+            raise BuddyOnboardingReasonerUnavailableError(
+                "Buddy onboarding model is not available.",
+            )
         try:
-            return self._onboarding_reasoner.build_growth_plan(
+            growth_plan = self._onboarding_reasoner.build_growth_plan(
                 profile=profile,
                 transcript=transcript,
                 selected_direction=selected_direction,
@@ -1197,6 +1219,49 @@ class BuddyOnboardingService:
             raise BuddyOnboardingReasonerUnavailableError(
                 "Buddy onboarding model failed to return a valid result.",
             ) from None
+        return self._validate_growth_plan_result(growth_plan)
+
+    def _validate_reasoned_turn_result(
+        self,
+        reasoned_turn: BuddyOnboardingReasonedTurn | None,
+    ) -> BuddyOnboardingReasonedTurn:
+        if reasoned_turn is None:
+            raise BuddyOnboardingReasonerUnavailableError(
+                "Buddy onboarding model failed to return a valid result.",
+            )
+        next_question = str(reasoned_turn.next_question or "").strip()
+        if not reasoned_turn.finished and not next_question:
+            raise BuddyOnboardingReasonerUnavailableError(
+                "Buddy onboarding model failed to return a valid result.",
+            )
+        return reasoned_turn
+
+    def _validate_growth_plan_result(
+        self,
+        growth_plan: BuddyOnboardingGrowthPlan | None,
+    ) -> BuddyOnboardingGrowthPlan:
+        if growth_plan is None:
+            raise BuddyOnboardingReasonerUnavailableError(
+                "Buddy onboarding model failed to return a valid result.",
+            )
+        final_goal = str(growth_plan.final_goal or "").strip()
+        why_it_matters = str(growth_plan.why_it_matters or "").strip()
+        backlog_items = [
+            item
+            for item in list(growth_plan.backlog_items or [])
+            if item.title.strip() and item.summary.strip()
+        ][:3]
+        if not final_goal or not why_it_matters or not backlog_items:
+            raise BuddyOnboardingReasonerUnavailableError(
+                "Buddy onboarding model failed to return a valid result.",
+            )
+        return growth_plan.model_copy(
+            update={
+                "final_goal": final_goal,
+                "why_it_matters": why_it_matters,
+                "backlog_items": backlog_items,
+            },
+        )
 
     def _validate_selected_direction(
         self,
@@ -1343,13 +1408,11 @@ class BuddyOnboardingService:
         return self._domain_capability_repository.upsert_domain_capability(created)
 
     def _present_domain_label(self, domain_key: str, selected_direction: str) -> str:
-        if domain_key == "stocks":
-            return "股票"
-        if domain_key == "writing":
-            return "写作"
-        if domain_key == "fitness":
-            return "健身"
-        return selected_direction.strip() or domain_key
+        normalized_direction = str(selected_direction or "").strip()
+        if normalized_direction:
+            return normalized_direction
+        normalized_domain = str(domain_key or "").strip().replace("-", " ")
+        return normalized_domain or "unscoped domain"
 
     def _ensure_growth_scaffold(
         self,
@@ -1902,14 +1965,12 @@ class BuddyOnboardingService:
             domain_key=domain_key,
             role_id="proof-of-work",
         )
-        growth_summary = f"持续确保{label}没有偏离已经确认的长期主方向。"
-        proof_summary = f"把{label}当前的主方向尽快变成看得见的证据、作品与推进势能。"
-        if domain_key == "writing":
-            growth_summary = f"持续确保{label}的写作主线、题材方向和更新节奏没有跑偏。"
-            proof_summary = f"把{label}的写作主线尽快变成章节草稿、平台发布证据和作品积累。"
-        elif domain_key == "stocks":
-            growth_summary = f"持续确保{label}的交易主线、策略边界和复盘节奏没有跑偏。"
-            proof_summary = f"把{label}的交易主线尽快变成可验证的观察、记录、复盘与结果证据。"
+        growth_summary = (
+            f"持续确保{label}没有偏离已经确认的长期主方向，并把周期重点压成可执行的下一步。"
+        )
+        proof_summary = (
+            f"把{label}当前的主方向尽快变成看得见的证据、实际产出和可继续推进的任务势能。"
+        )
         return [
             IndustryRoleBlueprint(
                 role_id="growth-focus",

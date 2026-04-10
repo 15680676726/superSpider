@@ -29,6 +29,7 @@ from copaw.state.repositories_buddy import (
     SqliteGrowthTargetRepository,
     SqliteHumanProfileRepository,
 )
+from tests.shared.buddy_reasoners import DeterministicBuddyReasoner
 
 
 def _build_client(tmp_path) -> TestClient:
@@ -39,6 +40,7 @@ def _build_client(tmp_path) -> TestClient:
         relationship_repository=SqliteCompanionRelationshipRepository(store),
         domain_capability_repository=SqliteBuddyDomainCapabilityRepository(store),
         onboarding_session_repository=SqliteBuddyOnboardingSessionRepository(store),
+        onboarding_reasoner=DeterministicBuddyReasoner(),
     )
     app = FastAPI()
     app.state.buddy_onboarding_service = service
@@ -254,6 +256,7 @@ def test_confirm_direction_registers_durable_buddy_schedules_with_cron_manager(
         relationship_repository=SqliteCompanionRelationshipRepository(store),
         domain_capability_repository=SqliteBuddyDomainCapabilityRepository(store),
         onboarding_session_repository=SqliteBuddyOnboardingSessionRepository(store),
+        onboarding_reasoner=DeterministicBuddyReasoner(),
         industry_instance_repository=industry_repository,
         operating_lane_service=lane_service,
         backlog_service=backlog_service,

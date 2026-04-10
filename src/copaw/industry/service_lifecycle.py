@@ -19,6 +19,7 @@ from ..compiler.planning import (
     build_uncertainty_register_payload,
 )
 from ..compiler.models import CompilationUnit
+from ..evidence import EvidenceRecord
 from ..kernel import KernelTask
 from ..state.strategy_memory_service import resolve_strategy_payload
 from .service_report_closure import (
@@ -1300,6 +1301,56 @@ class _IndustryLifecycleMixin:
             cycle_id=cycle.id,
             specs=assignment_specs,
         )
+        if self._backlog_service is not None and self._assignment_service is not None:
+            assignments_by_backlog_id = {
+                _string(assignment.backlog_item_id): assignment
+                for assignment in created_assignments
+                if _string(assignment.backlog_item_id) is not None
+            }
+            for item in selected_backlog:
+                assignment = assignments_by_backlog_id.get(item.id)
+                if assignment is None:
+                    continue
+                environment_ref = _string(
+                    _mapping(item.metadata).get("environment_ref"),
+                ) or _string(
+                    _mapping(assignment.metadata).get("environment_ref"),
+                )
+                evidence = self._append_frontdoor_transition_evidence(
+                    task_id=assignment.id,
+                    actor_ref=_string(assignment.owner_agent_id) or EXECUTION_CORE_AGENT_ID,
+                    environment_ref=environment_ref,
+                    action_summary="主脑已生成正式 assignment",
+                    result_summary="backlog 已在同一条正式链上 materialize 为 assignment。",
+                    metadata={
+                        "transition_kind": "assignment-materialized",
+                        "industry_instance_id": record.instance_id,
+                        "cycle_id": cycle.id,
+                        "backlog_item_id": item.id,
+                        "assignment_id": assignment.id,
+                        "lane_id": assignment.lane_id or item.lane_id,
+                        "work_context_id": _string(
+                            _mapping(item.metadata).get("work_context_id"),
+                        ) or _string(
+                            _mapping(assignment.metadata).get("work_context_id"),
+                        ),
+                        "control_thread_id": _string(
+                            _mapping(item.metadata).get("control_thread_id"),
+                        ) or _string(
+                            _mapping(assignment.metadata).get("control_thread_id"),
+                        ),
+                    },
+                )
+                if evidence is None:
+                    continue
+                self._assignment_service.attach_evidence_ids(
+                    assignment,
+                    evidence_ids=[evidence.id],
+                )
+                self._backlog_service.attach_evidence_ids(
+                    item,
+                    evidence_ids=[evidence.id],
+                )
         assignment_ids = [assignment.id for assignment in created_assignments]
         cycle = self._operating_cycle_service.update_cycle_links(
             cycle,
@@ -1540,6 +1591,34 @@ class _IndustryLifecycleMixin:
         session_id: str | None,
     ) -> str:
         return _string(session_id) or f"industry-chat:{instance_id}:{EXECUTION_CORE_ROLE_ID}"
+
+    def _append_frontdoor_transition_evidence(
+        self,
+        *,
+        task_id: str,
+        actor_ref: str,
+        environment_ref: str | None,
+        action_summary: str,
+        result_summary: str,
+        metadata: Mapping[str, object] | None = None,
+        capability_ref: str = "system:execution-frontdoor",
+        risk_level: str = "guarded",
+    ) -> EvidenceRecord | None:
+        if self._evidence_ledger is None:
+            return None
+        return self._evidence_ledger.append(
+            EvidenceRecord(
+                task_id=task_id,
+                actor_ref=actor_ref,
+                environment_ref=_string(environment_ref),
+                capability_ref=capability_ref,
+                risk_level=risk_level,
+                action_summary=action_summary,
+                result_summary=result_summary,
+                metadata=dict(metadata or {}),
+            ),
+        )
+
     async def _submit_chat_writeback_team_update(
         self,
         *,
@@ -1615,9 +1694,9 @@ class _IndustryLifecycleMixin:
             list(plan.goal.plan_steps) if plan.goal is not None else [],
             list(plan.classifications),
         )
-        recommendations = self._build_install_template_recommendations(
+        recommendations = await self._build_live_chat_gap_recommendations(
             profile=profile,
-            target_roles=[role],
+            role=role,
             goal_context_by_agent=goal_context_by_agent,
         )
         results: list[IndustryBootstrapInstallResult] = []
@@ -1642,6 +1721,35 @@ class _IndustryLifecycleMixin:
                 ),
             )
         return results
+
+    async def _build_live_chat_gap_recommendations(
+        self,
+        *,
+        profile: IndustryProfile,
+        role: IndustryRoleBlueprint,
+        goal_context_by_agent: dict[str, list[str]],
+    ) -> list[IndustryCapabilityRecommendation]:
+        target_roles = [role]
+        items = list(
+            self._build_install_template_recommendations(
+                profile=profile,
+                target_roles=target_roles,
+                goal_context_by_agent=goal_context_by_agent,
+            ),
+        )
+        curated_items, _curated_warnings = await self._build_curated_skill_recommendations(
+            profile=profile,
+            target_roles=target_roles,
+            goal_context_by_agent=goal_context_by_agent,
+        )
+        hub_items, _hub_warnings = await self._build_hub_skill_recommendations(
+            profile=profile,
+            target_roles=target_roles,
+            goal_context_by_agent=goal_context_by_agent,
+        )
+        items.extend(curated_items)
+        items.extend(hub_items)
+        return _standardize_recommendation_items(items, target_roles)
 
     async def _auto_close_temporary_seat_capability_gap(
         self,
@@ -3545,6 +3653,44 @@ class _IndustryLifecycleMixin:
             except Exception:
                 pass
         dispatch_deferred = bool(created_backlog_ids)
+        accepted_delegation_state = (
+            "waiting_confirm"
+            if decision_request_id is not None or proposal_status == "waiting-confirm"
+            else "pending_staffing"
+            if seat_resolution_kind == "routing-pending"
+            else "recorded"
+            if created_backlog_ids
+            else None
+        )
+        if created_backlog_ids and self._backlog_service is not None:
+            for backlog_id in created_backlog_ids:
+                evidence = self._append_frontdoor_transition_evidence(
+                    task_id=backlog_id,
+                    actor_ref=supervisor_owner_agent_id or EXECUTION_CORE_AGENT_ID,
+                    environment_ref=chat_writeback_environment_ref,
+                    action_summary="主脑已接受执行写回",
+                    result_summary="该请求已形成正式 backlog，等待 materialize / dispatch。",
+                    metadata={
+                        "transition_kind": "chat-writeback-accepted",
+                        "industry_instance_id": active_record.instance_id,
+                        "control_thread_id": control_thread_id,
+                        "session_id": control_thread_id,
+                        "work_context_id": control_thread_work_context_id,
+                        "backlog_item_id": backlog_id,
+                        "lane_id": target_lane.id if target_lane is not None else None,
+                        "decision_request_id": decision_request_id,
+                        "proposal_status": proposal_status,
+                        "seat_resolution_kind": seat_resolution_kind,
+                        "delegation_state": accepted_delegation_state,
+                        "requested_surfaces": list(requested_surfaces),
+                        "chat_writeback_fingerprint": plan.fingerprint,
+                    },
+                )
+                if evidence is not None:
+                    self._backlog_service.attach_evidence_ids(
+                        backlog_id,
+                        evidence_ids=[evidence.id],
+                    )
         return {
             "applied": bool(
                 strategy_updated
@@ -3588,6 +3734,7 @@ class _IndustryLifecycleMixin:
             "proposal_status": proposal_status,
             "dispatch_deferred": dispatch_deferred,
             "delegated": False,
+            "delegation_state": accepted_delegation_state,
         }
     def _stable_prediction_source_ref(
         self,
@@ -4337,12 +4484,54 @@ class _IndustryLifecycleMixin:
                     },
                 )
             if primary_task_id is not None and self._assignment_repository is not None:
+                dispatch_phase = (
+                    execution_result.phase
+                    if execution_result is not None
+                    else admitted.phase
+                )
+                dispatch_summary = (
+                    execution_result.summary
+                    if execution_result is not None
+                    else admitted.summary
+                )
+                dispatch_evidence = self._append_frontdoor_transition_evidence(
+                    task_id=assignment.id,
+                    actor_ref=actor,
+                    environment_ref=kernel_tasks[0].environment_ref if kernel_tasks else None,
+                    action_summary="assignment 已派发给执行位",
+                    result_summary=dispatch_summary or "正式 assignment 已进入 specialist 执行链。",
+                    metadata={
+                        "transition_kind": "assignment-dispatch-started",
+                        "industry_instance_id": record.instance_id,
+                        "assignment_id": assignment.id,
+                        "cycle_id": assignment.cycle_id,
+                        "lane_id": assignment.lane_id,
+                        "owner_agent_id": owner_agent_id,
+                        "owner_role_id": owner_role_id,
+                        "task_id": primary_task_id,
+                        "dispatch_phase": dispatch_phase,
+                    },
+                )
                 self._assignment_repository.upsert_assignment(
                     assignment.model_copy(
                         update={
                             "task_id": primary_task_id,
                             "owner_agent_id": owner_agent_id,
                             "owner_role_id": owner_role_id,
+                            "evidence_ids": (
+                                list(
+                                    dict.fromkeys(
+                                        [
+                                            *list(assignment.evidence_ids or []),
+                                            *(
+                                                [dispatch_evidence.id]
+                                                if dispatch_evidence is not None
+                                                else []
+                                            ),
+                                        ],
+                                    ),
+                                )
+                            ),
                             "updated_at": _utc_now(),
                         },
                     ),

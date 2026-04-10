@@ -5,6 +5,7 @@ import asyncio
 from types import SimpleNamespace
 
 import copaw.kernel.query_execution as query_execution_module
+import copaw.kernel.query_execution_prompt as query_execution_prompt_module
 from copaw.kernel.query_execution import KernelQueryExecutionService
 from copaw.state import (
     AgentRuntimeRecord,
@@ -136,3 +137,87 @@ def test_query_execution_service_appends_buddy_persona_prompt_when_bound_profile
     assert "伙伴名：小澄" in prompt_appendix
     assert "唯一下一步：现在先打开文档，写下这篇案例的标题和三条核心观点。" in prompt_appendix
     assert "避免高压催促" in prompt_appendix
+def test_query_execution_service_appends_current_time_grounding_for_buddy_runtime(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _FakeAgent.created.clear()
+    monkeypatch.setattr(query_execution_module, "CoPawAgent", _FakeAgent)
+    monkeypatch.setattr(
+        query_execution_module,
+        "stream_printing_messages",
+        _fake_stream_printing_messages,
+    )
+    monkeypatch.setattr(
+        query_execution_module,
+        "load_config",
+        lambda: SimpleNamespace(
+            agents=SimpleNamespace(
+                running=SimpleNamespace(max_iters=1, max_input_length=512),
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        query_execution_prompt_module,
+        "_current_prompt_time_snapshot",
+        lambda: "北京时间 2026-04-09 周四 10:00",
+        raising=False,
+    )
+
+    state_store = SQLiteStateStore(tmp_path / "state-time.sqlite3")
+    runtime_repository = SqliteAgentRuntimeRepository(state_store)
+    runtime_repository.upsert_runtime(
+        AgentRuntimeRecord(
+            agent_id="ops-agent",
+            actor_key="industry-v1-ops:execution-core",
+            actor_fingerprint="fp-ops",
+            actor_class="industry-dynamic",
+            desired_state="active",
+            runtime_status="idle",
+            industry_instance_id="industry-v1-ops",
+            industry_role_id="execution-core",
+            display_name="Ops Agent",
+            role_name="Operations lead",
+        ),
+    )
+    mailbox_repository = SqliteAgentMailboxRepository(state_store)
+    checkpoint_repository = SqliteAgentCheckpointRepository(state_store)
+    mailbox_service = ActorMailboxService(
+        mailbox_repository=mailbox_repository,
+        runtime_repository=runtime_repository,
+        checkpoint_repository=checkpoint_repository,
+    )
+
+    service = KernelQueryExecutionService(
+        session_backend=_FakeSessionBackend(),
+        capability_service=_FakeCapabilityService(),
+        agent_profile_service=_FakeAgentProfileService(),
+        industry_service=_FakeIndustryService(),
+        actor_mailbox_service=mailbox_service,
+        agent_runtime_repository=runtime_repository,
+        buddy_projection_service=_FakeBuddyProjectionService(),
+    )
+
+    async def _run():
+        async for _msg, _last in service.execute_stream(
+            msgs=[SimpleNamespace(get_text_content=lambda: "今天是周几，接下来等到哪天？")],
+            request=SimpleNamespace(
+                session_id="industry-chat:industry-v1-ops:execution-core",
+                user_id="ops-user",
+                agent_id="ops-agent",
+                channel="console",
+                industry_instance_id="industry-v1-ops",
+                industry_role_id="execution-core",
+                session_kind="industry-agent-chat",
+                buddy_profile_id="profile-buddy",
+            ),
+            kernel_task_id="kernel-main-brain-time-1",
+        ):
+            pass
+
+    asyncio.run(_run())
+
+    prompt_appendix = _FakeAgent.created[0].kwargs["prompt_appendix"]
+    assert "Current Time" in prompt_appendix
+    assert "北京时间 2026-04-09 周四 10:00" in prompt_appendix
+    assert "do not guess" in prompt_appendix.lower()

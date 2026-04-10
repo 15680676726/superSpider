@@ -493,17 +493,11 @@ class BuddyProjectionService:
         return "陪你一起往前走"
 
     def _present_domain_label(self, *, domain_key: str, selected_direction: str) -> str:
-        if domain_key == "writing":
-            return "写作"
-        if domain_key == "stocks":
-            return "股票"
-        if domain_key == "fitness":
-            return "健身"
-        if selected_direction.strip():
-            return selected_direction.strip()
-        if domain_key == "general":
-            return "通用"
-        return domain_key
+        normalized_direction = str(selected_direction or "").strip()
+        if normalized_direction:
+            return normalized_direction
+        normalized_domain = str(domain_key or "").strip().replace("-", " ")
+        return normalized_domain or "unscoped domain"
 
     def _rarity_for_stage(self, stage: str) -> str:
         mapping = {

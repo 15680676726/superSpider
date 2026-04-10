@@ -5,6 +5,8 @@ from types import SimpleNamespace
 
 from copaw.kernel.buddy_domain_capability import (
     BuddyDomainCapabilitySignals,
+    buddy_specialist_allowed_capabilities,
+    buddy_specialist_preferred_capability_families,
     derive_capability_metrics,
     derive_buddy_domain_key,
     preview_domain_transition,
@@ -298,3 +300,28 @@ def test_preview_domain_transition_starts_new_domain_when_no_match_exists() -> N
     assert preview.suggestion_kind == "start-new-domain"
     assert preview.recommended_action == "start-new"
     assert preview.archived_matches == []
+
+
+def test_generic_domain_keys_do_not_fall_back_to_fixed_buckets() -> None:
+    domain_key = derive_buddy_domain_key("跨境电商独立站运营与投放")
+
+    assert domain_key not in {"general", "writing", "stocks", "fitness"}
+    assert domain_key
+
+
+def test_generic_proof_of_work_role_still_gets_browser_and_execution_families() -> None:
+    domain_key = derive_buddy_domain_key("跨境电商独立站运营与投放")
+
+    allowed = buddy_specialist_allowed_capabilities(
+        domain_key=domain_key,
+        role_id="proof-of-work",
+    )
+    families = buddy_specialist_preferred_capability_families(
+        domain_key=domain_key,
+        role_id="proof-of-work",
+    )
+
+    assert "tool:browser_use" in allowed
+    assert "execution" in families
+    assert "evidence" in families
+    assert "browser" in families

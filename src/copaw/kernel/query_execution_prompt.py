@@ -1,9 +1,22 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from ..memory.models import MemoryRecallHit
 from .buddy_persona_prompt import build_buddy_persona_prompt
 from .query_execution_shared import *  # noqa: F401,F403
+
+
+_PROMPT_TIME_ZONE = ZoneInfo("Asia/Shanghai")
+_PROMPT_WEEKDAY_LABELS = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
+
+
+def _current_prompt_time_snapshot() -> str:
+    now = datetime.now(_PROMPT_TIME_ZONE)
+    weekday = _PROMPT_WEEKDAY_LABELS[now.weekday()]
+    return f"北京时间 {now:%Y-%m-%d} {weekday} {now:%H:%M}"
 
 
 def _path_guidance_summary(value: Any) -> str | None:
@@ -118,6 +131,10 @@ class _QueryExecutionPromptMixin:
             "# Runtime Agent Context",
             "",
             f"- Active agent id: {owner_agent_id}",
+            "",
+            "# Current Time",
+            f"- {_current_prompt_time_snapshot()}",
+            "- For any question about today, tomorrow, weekday, deadlines, or waiting until a specific day, use this current time and do not guess.",
         ]
         if profile is None and not execution_core_identity:
             return "\n".join(lines)

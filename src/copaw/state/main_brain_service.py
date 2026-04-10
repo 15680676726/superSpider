@@ -519,12 +519,13 @@ class BacklogService:
         goal_id: str | None,
         assignment_id: str | None,
     ) -> BacklogItemRecord:
+        current = self._repository.get_item(item.id) or item
         return self._repository.upsert_item(
-            item.model_copy(
+            current.model_copy(
                 update={
                     "cycle_id": cycle_id,
-                    "goal_id": goal_id or item.goal_id,
-                    "assignment_id": assignment_id or item.assignment_id,
+                    "goal_id": goal_id or current.goal_id,
+                    "assignment_id": assignment_id or current.assignment_id,
                     "status": "materialized",
                     "updated_at": _utc_now(),
                 },
@@ -534,6 +535,42 @@ class BacklogService:
     def mark_item_completed(self, item: BacklogItemRecord) -> BacklogItemRecord:
         return self._repository.upsert_item(
             item.model_copy(update={"status": "completed", "updated_at": _utc_now()}),
+        )
+
+    def attach_evidence_ids(
+        self,
+        item: BacklogItemRecord | str,
+        *,
+        evidence_ids: Sequence[str],
+    ) -> BacklogItemRecord | None:
+        current = (
+            self._repository.get_item(item)
+            if isinstance(item, str)
+            else item
+        )
+        if current is None:
+            return None
+        merged_ids = list(
+            dict.fromkeys(
+                [
+                    *list(current.evidence_ids or []),
+                    *[
+                        evidence_id
+                        for evidence_id in evidence_ids
+                        if _string(evidence_id) is not None
+                    ],
+                ],
+            ),
+        )
+        if merged_ids == list(current.evidence_ids or []):
+            return current
+        return self._repository.upsert_item(
+            current.model_copy(
+                update={
+                    "evidence_ids": merged_ids,
+                    "updated_at": _utc_now(),
+                },
+            ),
         )
 
 
@@ -744,6 +781,42 @@ class AssignmentService:
             )
             ensured.append(self._repository.upsert_assignment(assignment))
         return ensured
+
+    def attach_evidence_ids(
+        self,
+        assignment: AssignmentRecord | str,
+        *,
+        evidence_ids: Sequence[str],
+    ) -> AssignmentRecord | None:
+        current = (
+            self._repository.get_assignment(assignment)
+            if isinstance(assignment, str)
+            else assignment
+        )
+        if current is None:
+            return None
+        merged_ids = list(
+            dict.fromkeys(
+                [
+                    *list(current.evidence_ids or []),
+                    *[
+                        evidence_id
+                        for evidence_id in evidence_ids
+                        if _string(evidence_id) is not None
+                    ],
+                ],
+            ),
+        )
+        if merged_ids == list(current.evidence_ids or []):
+            return current
+        return self._repository.upsert_assignment(
+            current.model_copy(
+                update={
+                    "evidence_ids": merged_ids,
+                    "updated_at": _utc_now(),
+                },
+            ),
+        )
 
     def reconcile_assignments(
         self,

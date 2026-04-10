@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
+import pytest
 
 from copaw.industry.chat_writeback import build_chat_writeback_plan
 from copaw.kernel import query_execution_writeback as writeback_module
@@ -145,3 +146,56 @@ def test_chat_writeback_decision_prefers_model_for_actionable_creation_request(
     assert decision.should_writeback is True
     assert decision.kickoff_allowed is True
     assert decision.intent_signals == ["model-actionable"]
+
+
+def test_actionable_request_raises_when_chat_writeback_model_is_unavailable(
+    monkeypatch,
+) -> None:
+    writeback_module.clear_chat_writeback_decision_cache()
+    monkeypatch.setattr(
+        writeback_module,
+        "_CHAT_WRITEBACK_DECISION_MODEL_FACTORY",
+        lambda: None,
+        raising=False,
+    )
+
+    with pytest.raises(RuntimeError, match="unavailable"):
+        asyncio.run(
+            writeback_module.resolve_chat_writeback_model_decision(
+                text="现在去写一篇短篇小说，保存成实际文件，完成后主动告诉我结果。",
+            ),
+        )
+
+
+class _SlowStructuredDecisionModel:
+    stream = False
+
+    async def __call__(self, *, messages, structured_model=None, **kwargs):
+        _ = (messages, structured_model, kwargs)
+        await asyncio.sleep(0.05)
+        return SimpleNamespace(metadata={})
+
+
+def test_actionable_request_raises_when_chat_writeback_model_times_out(
+    monkeypatch,
+) -> None:
+    writeback_module.clear_chat_writeback_decision_cache()
+    monkeypatch.setattr(
+        writeback_module,
+        "_CHAT_WRITEBACK_DECISION_MODEL_FACTORY",
+        lambda: _SlowStructuredDecisionModel(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        writeback_module,
+        "_CHAT_WRITEBACK_MODEL_TIMEOUT_SECONDS",
+        0.01,
+        raising=False,
+    )
+
+    with pytest.raises(TimeoutError, match="timed out"):
+        asyncio.run(
+            writeback_module.resolve_chat_writeback_model_decision(
+                text="现在去写一篇短篇小说，保存成实际文件，完成后主动告诉我结果。",
+            ),
+        )

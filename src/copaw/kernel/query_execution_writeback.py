@@ -50,6 +50,14 @@ For the latest operator message, return a structured decision with:
 """.strip()
 
 
+class ChatWritebackDecisionModelUnavailableError(RuntimeError):
+    """Raised when the writeback decision model cannot be used."""
+
+
+class ChatWritebackDecisionModelTimeoutError(TimeoutError):
+    """Raised when the writeback decision model times out."""
+
+
 class _ChatWritebackStrategyPayload(BaseModel):
     operator_requirements: list[str] = Field(default_factory=list)
     priority_order: list[str] = Field(default_factory=list)
@@ -512,7 +520,9 @@ async def _resolve_model_chat_writeback_decision(
 ) -> _ChatWritebackModelDecision | None:
     model = _resolve_chat_writeback_decision_model()
     if model is None:
-        return None
+        raise ChatWritebackDecisionModelUnavailableError(
+            "Chat writeback decision model is unavailable.",
+        )
     try:
         response = await asyncio.wait_for(
             model(
@@ -529,10 +539,14 @@ async def _resolve_model_chat_writeback_decision(
         return _ChatWritebackModelDecision.model_validate(payload)
     except TimeoutError:
         logger.warning("Chat writeback decision model timed out.", exc_info=True)
-        return None
-    except Exception:
-        logger.debug("Chat writeback decision model failed; falling back to heuristics.", exc_info=True)
-        return None
+        raise ChatWritebackDecisionModelTimeoutError(
+            "Chat writeback decision model timed out.",
+        ) from None
+    except Exception as exc:
+        logger.debug("Chat writeback decision model failed.", exc_info=True)
+        raise ChatWritebackDecisionModelUnavailableError(
+            "Chat writeback decision model failed.",
+        ) from exc
 
 
 def _contains_any(text: str, needles: tuple[str, ...]) -> bool:
@@ -1025,8 +1039,6 @@ async def resolve_chat_writeback_model_decision(
         return _cache_chat_writeback_decision(normalized, heuristic)
 
     model_decision = await _resolve_model_chat_writeback_decision(normalized)
-    if model_decision is None:
-        return _cache_chat_writeback_decision(normalized, heuristic)
     return _cache_chat_writeback_decision(
         normalized,
         _merge_model_decision_with_heuristic(model_decision, heuristic),

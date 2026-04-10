@@ -30,6 +30,7 @@ from copaw.state.repositories_buddy import (
     SqliteGrowthTargetRepository,
     SqliteHumanProfileRepository,
 )
+from tests.shared.buddy_reasoners import DeterministicBuddyReasoner
 
 
 def _build_service(tmp_path) -> BuddyOnboardingService:
@@ -40,6 +41,7 @@ def _build_service(tmp_path) -> BuddyOnboardingService:
         relationship_repository=SqliteCompanionRelationshipRepository(store),
         domain_capability_repository=SqliteBuddyDomainCapabilityRepository(store),
         onboarding_session_repository=SqliteBuddyOnboardingSessionRepository(store),
+        onboarding_reasoner=DeterministicBuddyReasoner(),
     )
 
 
@@ -68,6 +70,7 @@ def _build_service_with_planning(tmp_path) -> tuple[BuddyOnboardingService, SQLi
         relationship_repository=SqliteCompanionRelationshipRepository(store),
         domain_capability_repository=SqliteBuddyDomainCapabilityRepository(store),
         onboarding_session_repository=SqliteBuddyOnboardingSessionRepository(store),
+        onboarding_reasoner=DeterministicBuddyReasoner(),
         industry_instance_repository=industry_repository,
         operating_lane_service=OperatingLaneService(
             repository=SqliteOperatingLaneRepository(store),

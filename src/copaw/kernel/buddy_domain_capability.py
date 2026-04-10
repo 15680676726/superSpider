@@ -135,19 +135,9 @@ _BUDDY_SPECIALIST_BASE_ALLOWED_CAPABILITIES: tuple[str, ...] = (
     "tool:edit_file",
 )
 
-_BUDDY_SPECIALIST_DOMAIN_FAMILIES: dict[str, dict[str, tuple[str, ...]]] = {
-    "growth-focus": {
-        "stocks": ("planning", "coordination", "research", "data"),
-        "writing": ("planning", "coordination", "content", "research"),
-        "fitness": ("planning", "coordination", "workflow", "data"),
-        "general": ("planning", "coordination"),
-    },
-    "proof-of-work": {
-        "stocks": ("execution", "evidence", "research", "data", "browser"),
-        "writing": ("execution", "evidence", "content", "browser", "workflow"),
-        "fitness": ("execution", "evidence", "workflow", "data"),
-        "general": ("execution", "evidence", "browser"),
-    },
+_BUDDY_SPECIALIST_ROLE_FAMILIES: dict[str, tuple[str, ...]] = {
+    "growth-focus": ("planning", "coordination", "research", "data"),
+    "proof-of-work": ("execution", "evidence", "browser", "workflow"),
 }
 
 _BUDDY_ROLE_BROWSER_HINTS: tuple[str, ...] = (
@@ -176,18 +166,86 @@ _BUDDY_ROLE_FAMILY_HINTS: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = 
     ),
 )
 
+_DOMAIN_FAMILY_HINTS: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
+    (
+        (
+            "writer",
+            "writing",
+            "creator",
+            "content",
+            "novel",
+            "story",
+            "publish",
+            "writing",
+            "鍐欎綔",
+            "鍐呭",
+            "鍒涗綔",
+            "灏忚",
+            "鍙戝竷",
+            "骞冲彴",
+        ),
+        ("content", "browser", "workflow"),
+    ),
+    (
+        (
+            "stock",
+            "stocks",
+            "trade",
+            "trading",
+            "invest",
+            "investing",
+            "quant",
+            "market",
+            "research",
+            "analysis",
+            "data",
+            "鑲＄エ",
+            "鐐掕偂",
+            "浜ゆ槗",
+            "鎶曡祫",
+            "琛屾儏",
+            "鐮旂┒",
+            "澶嶇洏",
+        ),
+        ("research", "data"),
+    ),
+    (
+        (
+            "fitness",
+            "health",
+            "habit",
+            "routine",
+            "workflow",
+            "operations",
+            "operate",
+            "system",
+            "杩愯惀",
+            "绯荤粺",
+            "娴佺▼",
+            "鍋ュ悍",
+            "鍋ヨ韩",
+            "涔犳儻",
+        ),
+        ("workflow", "data"),
+    ),
+)
+
 
 def _role_prefers_browser(role_id: str) -> bool:
     return any(token in role_id for token in _BUDDY_ROLE_BROWSER_HINTS)
 
 
 def _infer_specialist_families(*, domain_key: str, role_id: str) -> list[str]:
-    inferred: list[str] = []
+    inferred = list(_BUDDY_SPECIALIST_ROLE_FAMILIES.get(role_id, ()))
     for tokens, families in _BUDDY_ROLE_FAMILY_HINTS:
         if any(token in role_id for token in tokens):
             inferred.extend(families)
+    normalized_domain = _normalize_domain_text(domain_key)
+    for tokens, families in _DOMAIN_FAMILY_HINTS:
+        if any(token in normalized_domain for token in tokens):
+            inferred.extend(families)
     if not inferred:
-        if domain_key in {"stocks", "writing"}:
+        if _role_prefers_browser(role_id):
             inferred.extend(("execution", "evidence", "browser"))
         else:
             inferred.extend(("planning", "coordination"))
@@ -374,12 +432,11 @@ def derive_buddy_domain_key(direction: str) -> str:
 
 
 def buddy_specialist_allowed_capabilities(*, domain_key: str, role_id: str) -> list[str]:
+    del domain_key
     capabilities = list(_BUDDY_SPECIALIST_BASE_ALLOWED_CAPABILITIES)
     normalized_role_id = role_id.strip().lower()
-    normalized_domain_key = domain_key.strip().lower() or "general"
     if (
         normalized_role_id == "proof-of-work"
-        or normalized_domain_key in {"stocks", "writing"}
         or _role_prefers_browser(normalized_role_id)
     ):
         capabilities.append("tool:browser_use")
@@ -392,13 +449,8 @@ def buddy_specialist_preferred_capability_families(
     role_id: str,
 ) -> list[str]:
     normalized_role_id = role_id.strip().lower()
-    normalized_domain_key = domain_key.strip().lower() or "general"
-    family_map = _BUDDY_SPECIALIST_DOMAIN_FAMILIES.get(normalized_role_id, {})
-    families = family_map.get(normalized_domain_key) or family_map.get("general") or ()
-    if families:
-        return list(dict.fromkeys(families))
     return _infer_specialist_families(
-        domain_key=normalized_domain_key,
+        domain_key=domain_key.strip().lower(),
         role_id=normalized_role_id,
     )
 

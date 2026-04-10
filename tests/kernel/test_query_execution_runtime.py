@@ -694,6 +694,193 @@ async def test_query_execution_runtime_requires_durable_kickoff_proof_before_mar
 
 
 @pytest.mark.asyncio
+async def test_query_execution_runtime_materializes_backlog_before_same_turn_kickoff() -> None:
+    class _IndustryService:
+        def __init__(self) -> None:
+            self.run_cycle_calls: list[dict[str, object]] = []
+            self.kickoff_calls = 0
+
+        async def apply_execution_chat_writeback(self, **kwargs):
+            _ = kwargs
+            return {
+                "applied": True,
+                "strategy_updated": True,
+                "created_backlog_ids": ["backlog-1"],
+                "target_owner_agent_id": "writer-agent-1",
+                "target_industry_role_id": "writer",
+                "seat_resolution_kind": "existing-role",
+                "dispatch_deferred": True,
+                "delegated": False,
+            }
+
+        async def run_operating_cycle(self, **kwargs):
+            self.run_cycle_calls.append(dict(kwargs))
+            return {
+                "processed_instances": [
+                    {
+                        "started_cycle_id": "cycle-1",
+                        "created_assignment_ids": ["assignment-1"],
+                    }
+                ],
+            }
+
+        async def kickoff_execution_from_chat(self, **kwargs):
+            self.kickoff_calls += 1
+            _ = kwargs
+            return {
+                "activated": True,
+                "kickoff_stage": "execution",
+                "started_assignment_ids": ["assignment-1"],
+                "started_assignment_titles": ["Write the deliverable"],
+                "assignment_dispatches": [
+                    {
+                        "assignment_id": "assignment-1",
+                        "status": "started",
+                    }
+                ],
+                "pending_execution_remaining": False,
+            }
+
+    industry_service = _IndustryService()
+    service = KernelQueryExecutionService(
+        session_backend=object(),
+        industry_service=industry_service,
+    )
+    request = SimpleNamespace(
+        industry_instance_id="industry-v1-demo",
+        industry_role_id="execution-core",
+        session_id="industry-chat:industry-v1-demo:execution-core",
+        control_thread_id="industry-chat:industry-v1-demo:execution-core",
+        channel="console",
+        work_context_id="work-context-1",
+        _copaw_main_brain_intake_contract=MainBrainIntakeContract(
+            message_text="Write the deliverable and continue execution now.",
+            decision=SimpleNamespace(
+                intent_kind="execute-task",
+                should_writeback=True,
+                kickoff_allowed=True,
+                explicit_execution_confirmation=False,
+            ),
+            intent_kind="execute-task",
+            writeback_requested=True,
+            writeback_plan=SimpleNamespace(active=True, fingerprint="plan-1"),
+            should_kickoff=True,
+        ),
+    )
+
+    chat_writeback_summary, industry_kickoff_summary = (
+        await service._apply_requested_main_brain_intake(  # pylint: disable=protected-access
+            msgs=[Msg(name="user", role="user", content="Write the deliverable and continue execution now.")],
+            request=request,
+            owner_agent_id="execution-core-agent",
+            agent_profile=None,
+        )
+    )
+
+    assert industry_service.run_cycle_calls == [
+        {
+            "instance_id": "industry-v1-demo",
+            "actor": "query-runtime-frontdoor",
+            "force": True,
+            "backlog_item_ids": ["backlog-1"],
+            "auto_dispatch_materialized_goals": False,
+        }
+    ]
+    assert industry_service.kickoff_calls == 1
+    assert chat_writeback_summary["materialized_cycle_id"] == "cycle-1"
+    assert chat_writeback_summary["materialized_assignment_ids"] == ["assignment-1"]
+    assert chat_writeback_summary["delegation_state"] == "materialized"
+    assert industry_kickoff_summary["status"] == "committed"
+    assert industry_kickoff_summary["delegation_state"] == "dispatched"
+    runtime_context = getattr(request, "_copaw_main_brain_runtime_context")
+    assert runtime_context["commit_outcome"]["status"] == "committed"
+    assert runtime_context["commit_outcome"]["delegation_state"] == "dispatched"
+    assert runtime_context["commit_outcome"]["started_assignment_ids"] == ["assignment-1"]
+    assert runtime_context["commit_outcome"]["materialized_assignment_ids"] == ["assignment-1"]
+
+
+@pytest.mark.asyncio
+async def test_query_execution_runtime_preserves_waiting_confirm_without_attempting_kickoff() -> None:
+    class _IndustryService:
+        def __init__(self) -> None:
+            self.kickoff_calls = 0
+            self.run_cycle_calls = 0
+
+        async def apply_execution_chat_writeback(self, **kwargs):
+            _ = kwargs
+            return {
+                "applied": True,
+                "created_backlog_ids": ["backlog-1"],
+                "decision_request_id": "decision-1",
+                "proposal_status": "waiting-confirm",
+                "seat_resolution_kind": "temporary-seat-proposal",
+                "dispatch_deferred": True,
+                "delegated": False,
+            }
+
+        async def run_operating_cycle(self, **kwargs):
+            self.run_cycle_calls += 1
+            _ = kwargs
+            return {}
+
+        async def kickoff_execution_from_chat(self, **kwargs):
+            self.kickoff_calls += 1
+            _ = kwargs
+            return {
+                "activated": True,
+                "started_assignment_ids": ["assignment-should-not-start"],
+            }
+
+    industry_service = _IndustryService()
+    service = KernelQueryExecutionService(
+        session_backend=object(),
+        industry_service=industry_service,
+    )
+    request = SimpleNamespace(
+        industry_instance_id="industry-v1-demo",
+        industry_role_id="execution-core",
+        session_id="industry-chat:industry-v1-demo:execution-core",
+        control_thread_id="industry-chat:industry-v1-demo:execution-core",
+        channel="console",
+        work_context_id="work-context-1",
+        _copaw_main_brain_intake_contract=MainBrainIntakeContract(
+            message_text="Prepare the browser task and wait for explicit approval.",
+            decision=SimpleNamespace(
+                intent_kind="execute-task",
+                should_writeback=True,
+                kickoff_allowed=True,
+                explicit_execution_confirmation=True,
+            ),
+            intent_kind="execute-task",
+            writeback_requested=True,
+            writeback_plan=SimpleNamespace(active=True, fingerprint="plan-1"),
+            should_kickoff=True,
+        ),
+    )
+
+    _chat_writeback_summary, industry_kickoff_summary = (
+        await service._apply_requested_main_brain_intake(  # pylint: disable=protected-access
+            msgs=[Msg(name="user", role="user", content="Prepare the browser task and wait for explicit approval.")],
+            request=request,
+            owner_agent_id="execution-core-agent",
+            agent_profile=None,
+        )
+    )
+
+    assert industry_service.run_cycle_calls == 0
+    assert industry_service.kickoff_calls == 0
+    assert industry_kickoff_summary["status"] == "commit_deferred"
+    assert industry_kickoff_summary["reason"] == "waiting_confirm"
+    assert industry_kickoff_summary["delegation_state"] == "waiting_confirm"
+    assert industry_kickoff_summary["decision_id"] == "decision-1"
+    runtime_context = getattr(request, "_copaw_main_brain_runtime_context")
+    assert runtime_context["commit_outcome"]["status"] == "commit_deferred"
+    assert runtime_context["commit_outcome"]["reason"] == "waiting_confirm"
+    assert runtime_context["commit_outcome"]["delegation_state"] == "waiting_confirm"
+    assert runtime_context["commit_outcome"]["decision_id"] == "decision-1"
+
+
+@pytest.mark.asyncio
 async def test_query_execution_runtime_persists_accepted_boundary_and_commit_outcome_for_replay() -> None:
     class _IndustryService:
         async def apply_execution_chat_writeback(self, **kwargs):
