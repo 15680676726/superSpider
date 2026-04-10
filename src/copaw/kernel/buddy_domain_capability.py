@@ -113,70 +113,6 @@ _BUDDY_ROLE_FAMILY_HINTS: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = 
     ),
 )
 
-_DOMAIN_FAMILY_HINTS: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
-    (
-        (
-            "writer",
-            "writing",
-            "creator",
-            "content",
-            "novel",
-            "story",
-            "publish",
-            "writing",
-            "鍐欎綔",
-            "鍐呭",
-            "鍒涗綔",
-            "灏忚",
-            "鍙戝竷",
-            "骞冲彴",
-        ),
-        ("content", "browser", "workflow"),
-    ),
-    (
-        (
-            "stock",
-            "stocks",
-            "trade",
-            "trading",
-            "invest",
-            "investing",
-            "quant",
-            "market",
-            "research",
-            "analysis",
-            "data",
-            "鑲＄エ",
-            "鐐掕偂",
-            "浜ゆ槗",
-            "鎶曡祫",
-            "琛屾儏",
-            "鐮旂┒",
-            "澶嶇洏",
-        ),
-        ("research", "data"),
-    ),
-    (
-        (
-            "fitness",
-            "health",
-            "habit",
-            "routine",
-            "workflow",
-            "operations",
-            "operate",
-            "system",
-            "杩愯惀",
-            "绯荤粺",
-            "娴佺▼",
-            "鍋ュ悍",
-            "鍋ヨ韩",
-            "涔犳儻",
-        ),
-        ("workflow", "data"),
-    ),
-)
-
 
 def _role_prefers_browser(role_id: str) -> bool:
     return any(token in role_id for token in _BUDDY_ROLE_BROWSER_HINTS)
@@ -186,10 +122,6 @@ def _infer_specialist_families(*, domain_key: str, role_id: str) -> list[str]:
     inferred = list(_BUDDY_SPECIALIST_ROLE_FAMILIES.get(role_id, ()))
     for tokens, families in _BUDDY_ROLE_FAMILY_HINTS:
         if any(token in role_id for token in tokens):
-            inferred.extend(families)
-    normalized_domain = _normalize_domain_text(domain_key)
-    for tokens, families in _DOMAIN_FAMILY_HINTS:
-        if any(token in normalized_domain for token in tokens):
             inferred.extend(families)
     if not inferred:
         if _role_prefers_browser(role_id):
@@ -472,8 +404,8 @@ def _serialize_domain_record(record: object | None) -> dict[str, object] | None:
 
 def _normalize_domain_text(value: str | None) -> str:
     normalized = unicodedata.normalize("NFKC", str(value or "")).lower().strip()
-    normalized = normalized.replace("赚", " 盈利 ")
-    normalized = normalized.replace("變現", " 变现 ")
+    normalized = normalized.replace("赚钱", " 盈利 ")
+    normalized = normalized.replace("变现", " 兑现 ")
     return normalized
 
 

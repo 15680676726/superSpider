@@ -606,7 +606,7 @@ async def test_main_brain_chat_service_does_not_duplicate_save_on_clean_ttl_evic
 
 
 @pytest.mark.asyncio
-async def test_main_brain_chat_service_uses_fallback_text_for_empty_model_response():
+async def test_main_brain_chat_service_fails_closed_for_empty_model_response():
     backend = _FakeSessionBackend()
     model = _EmptyResponseModel()
     service = MainBrainChatService(
@@ -620,11 +620,11 @@ async def test_main_brain_chat_service_uses_fallback_text_for_empty_model_respon
         work_context_id=None,
         agent_id=None,
     )
-    msgs = [Msg(name="user", role="user", content="开始前先回我一句。")]
+    msgs = [Msg(name="user", role="user", content="start by replying once")]
 
-    streamed = [item async for item in service.execute_stream(msgs=msgs, request=request)]
+    with pytest.raises(RuntimeError):
+        _ = [item async for item in service.execute_stream(msgs=msgs, request=request)]
 
-    assert "没有拿到有效回复" in streamed[0][0].get_text_content()
     assert model.calls == [True, False]
     snapshot = backend.load_session_snapshot(
         session_id="sess-empty",
@@ -632,8 +632,7 @@ async def test_main_brain_chat_service_uses_fallback_text_for_empty_model_respon
         allow_not_exist=True,
     )
     texts = await _snapshot_texts(service, snapshot)
-    assert texts[0] == "开始前先回我一句。"
-    assert "没有拿到有效回复" in texts[-1]
+    assert texts == ["start by replying once"]
 
 
 @pytest.mark.asyncio
@@ -2109,3 +2108,44 @@ def test_main_brain_intake_materializes_execute_task_contract_from_model_decisio
     assert contract.has_active_writeback_plan is True
     assert contract.should_kickoff is True
     assert contract.should_route_to_orchestrate is True
+
+
+def test_main_brain_chat_service_commit_path_replay_ignores_query_runtime_commit_outcome_without_phase2_commit():
+    backend = _FakeSessionBackend()
+    control_thread_id = "industry-chat:industry-v1-demo:execution-core"
+    backend.save_session_snapshot(
+        session_id=control_thread_id,
+        user_id="ops-agent",
+        payload={
+            "agent": {"memory": []},
+            "query_runtime_state": {
+                "accepted_persistence": {
+                    "status": "accepted",
+                    "source": "query_execution_runtime",
+                    "boundary": "execution_runtime_intake",
+                    "control_thread_id": control_thread_id,
+                    "session_id": control_thread_id,
+                },
+                "commit_outcome": {
+                    "status": "committed",
+                    "action_type": "writeback_and_kickoff",
+                    "record_id": "assignment-query-runtime-1",
+                    "control_thread_id": control_thread_id,
+                    "session_id": control_thread_id,
+                },
+            },
+        },
+        source_ref="test:/query-runtime-only-commit-path",
+    )
+    service = MainBrainChatService(
+        session_backend=backend,
+        model_factory=lambda: _StaticResponseModel("ok"),
+    )
+
+    assert (
+        service.get_persisted_commit_state(
+            session_id=control_thread_id,
+            user_id="ops-agent",
+        )
+        is None
+    )

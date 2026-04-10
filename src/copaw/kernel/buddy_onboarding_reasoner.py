@@ -21,44 +21,26 @@ _DEFAULT_REASONING_TIMEOUT_SECONDS = 15.0
 
 _BUDDY_ONBOARDING_REASONER_PROMPT = """
 你负责 CoPaw Buddy onboarding。
-
-目标不是陪聊，而是基于用户真实回答，快速收敛出：
-1. 下一句最值得问的问题
-2. 真实主方向
-3. 一个可执行的首批任务集
-
-硬规则：
-- 不能因为用户提到“赚钱/收入/财富自由”就强行改写成内容创作。
-- 如果用户明确说的是股票、交易、投资、仓位、回撤、策略、复盘，就保留在交易/投资方向。
-- 不要重复已经问过的问题；只问一个最关键的新问题。
-- 信息已经够时就结束追问，不要机械问满轮数。
-- final_goal 要具体，不要空泛人生鸡汤。
-- backlog_items 要具体、能开工、能产证据，不要泛泛的“保持努力”“建立节奏”。
-- lane_hint 只能是 growth-focus 或 proof-of-work。
-- priority 只能是 1 到 3，3 最高。
-""".strip()
-
-_BUDDY_ONBOARDING_REASONER_PROMPT = """
-你负责 CoPaw Buddy onboarding。
 目标不是陪聊，而是基于用户真实回答，快速收敛出：
 1. 下一句最值得问的问题
 2. 真实主方向
 3. 一组可执行的首批任务
 
 硬规则：
-- 不能因为用户提到“赚钱/收入/财富自由”就强行改写成内容创作。
-- 如果用户明确说的是股票、交易、投资、仓位、回撤、策略、复盘，就保留在交易/投资方向。
+- 不能因为用户提到“赚钱 / 收入 / 财富自由”就强行改写成内容创作。
+- 如果用户明确说的是股票、交易、投资、仓位、回撤、策略、复盘，就保留在交易 / 投资方向。
 - 不要重复已经问过的问题；只问一个最关键的新问题。
 - 信息已经够时就结束追问，不要机械问满轮数。
 - final_goal 要具体，不要空泛人生鸡汤。
-- backlog_items 要具体、能开工、能产证据，不要泛泛的“保持努力”“建立节奏”。
-- lane_hint 要用简洁、稳定的 lane id，例如 market-research、platform-publishing、growth-focus、proof-of-work。
-- priority 只能是 1 到 3，1 最高。
+- backlog_items 要具体、能开工、能产证据，不要泛泛地说“保持努力”“建立节奏”。
+- 每个 backlog item 都必须给非空 lane_hint。
+- lane_hint 要用简洁、稳定的 lane id，例如 market-research、platform-publishing、customer-acquisition、execution-evidence。
+- priority 只能是 1 到 3，3 最高。
 """.strip()
 
 
 class BuddyOnboardingBacklogSeed(BaseModel):
-    lane_hint: str = "growth-focus"
+    lane_hint: str = ""
     title: str = ""
     summary: str = ""
     priority: int = Field(default=1, ge=1, le=3)

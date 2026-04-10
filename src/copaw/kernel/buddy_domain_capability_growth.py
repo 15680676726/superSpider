@@ -388,8 +388,8 @@ class BuddyDomainCapabilityGrowthService:
                 ),
             )
 
-    @staticmethod
     def _restore_or_build_buddy_roles(
+        self,
         *,
         record: object,
     ) -> list[IndustryRoleBlueprint]:
@@ -422,6 +422,32 @@ class BuddyDomainCapabilityGrowthService:
                 continue
             if normalized_role_id not in restored_role_ids:
                 restored_role_ids.append(normalized_role_id)
+        if not restored_role_ids and self._operating_lane_service is not None:
+            lanes = self._operating_lane_service.list_lanes(
+                industry_instance_id=instance_id,
+                limit=None,
+            )
+            for lane in lanes:
+                normalized_role_id = normalize_industry_role_id(
+                    _string(getattr(lane, "owner_role_id", None))
+                )
+                if normalized_role_id and normalized_role_id != EXECUTION_CORE_ROLE_ID:
+                    if normalized_role_id not in restored_role_ids:
+                        restored_role_ids.append(normalized_role_id)
+        if not restored_role_ids and self._assignment_service is not None:
+            assignments = self._assignment_service.list_assignments(
+                industry_instance_id=instance_id,
+                limit=None,
+            )
+            for assignment in assignments:
+                metadata = dict(getattr(assignment, "metadata", None) or {})
+                normalized_role_id = normalize_industry_role_id(
+                    _string(getattr(assignment, "owner_role_id", None))
+                    or _string(metadata.get("industry_role_id"))
+                )
+                if normalized_role_id and normalized_role_id != EXECUTION_CORE_ROLE_ID:
+                    if normalized_role_id not in restored_role_ids:
+                        restored_role_ids.append(normalized_role_id)
         if restored_role_ids:
             rebuilt_roles: list[IndustryRoleBlueprint] = []
             for role_id in restored_role_ids:
@@ -464,58 +490,7 @@ class BuddyDomainCapabilityGrowthService:
                 )
             if rebuilt_roles:
                 return rebuilt_roles
-        return [
-            IndustryRoleBlueprint(
-                role_id="growth-focus",
-                agent_id=f"{instance_id}:growth-focus",
-                actor_key=f"{instance_id}:growth-focus",
-                name=f"{label} Growth Focus",
-                role_name="成长主线",
-                role_summary=f"持续确保{label}没有偏离已经确认的长期主方向。",
-                mission=f"持续确保{label}没有偏离已经确认的长期主方向。",
-                goal_kind="growth-focus",
-                agent_class="business",
-                employment_mode="career",
-                activation_mode="persistent",
-                suspendable=False,
-                reports_to=EXECUTION_CORE_ROLE_ID,
-                risk_level="guarded",
-                allowed_capabilities=buddy_specialist_allowed_capabilities(
-                    domain_key=domain_key,
-                    role_id="growth-focus",
-                ),
-                preferred_capability_families=buddy_specialist_preferred_capability_families(
-                    domain_key=domain_key,
-                    role_id="growth-focus",
-                ),
-                evidence_expectations=["growth-focus completion note"],
-            ),
-            IndustryRoleBlueprint(
-                role_id="proof-of-work",
-                agent_id=f"{instance_id}:proof-of-work",
-                actor_key=f"{instance_id}:proof-of-work",
-                name=f"{label} Proof Of Work",
-                role_name="成果证明",
-                role_summary=f"把{label}当前的主方向尽快变成看得见的证据、作品与推进势能。",
-                mission=f"把{label}当前的主方向尽快变成看得见的证据、作品与推进势能。",
-                goal_kind="proof-of-work",
-                agent_class="business",
-                employment_mode="career",
-                activation_mode="persistent",
-                suspendable=False,
-                reports_to=EXECUTION_CORE_ROLE_ID,
-                risk_level="guarded",
-                allowed_capabilities=buddy_specialist_allowed_capabilities(
-                    domain_key=domain_key,
-                    role_id="proof-of-work",
-                ),
-                preferred_capability_families=buddy_specialist_preferred_capability_families(
-                    domain_key=domain_key,
-                    role_id="proof-of-work",
-                ),
-                evidence_expectations=["proof-of-work artifact"],
-            ),
-        ]
+        return []
 
     @staticmethod
     def _list_records(service: object | None, method_name: str, **kwargs) -> list[object]:

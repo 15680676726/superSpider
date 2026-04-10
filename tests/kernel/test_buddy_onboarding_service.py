@@ -1,7 +1,14 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import pytest
+
 from copaw.industry.models import IndustryProfile
+from copaw.kernel.buddy_onboarding_reasoner import (
+    BuddyOnboardingBacklogSeed,
+    BuddyOnboardingGrowthPlan,
+    BuddyOnboardingReasonerUnavailableError,
+)
 from copaw.kernel.buddy_domain_capability_growth import BuddyDomainCapabilityGrowthService
 from copaw.kernel.buddy_onboarding_service import (
     BuddyOnboardingService,
@@ -46,7 +53,11 @@ def _build_service(tmp_path) -> BuddyOnboardingService:
     )
 
 
-def _build_service_with_planning(tmp_path) -> tuple[BuddyOnboardingService, SQLiteStateStore]:
+def _build_service_with_planning(
+    tmp_path,
+    *,
+    reasoner=None,
+) -> tuple[BuddyOnboardingService, SQLiteStateStore]:
     store = SQLiteStateStore(tmp_path / "buddy-onboarding-planning.sqlite3")
     industry_repository = SqliteIndustryInstanceRepository(store)
     growth_service = BuddyDomainCapabilityGrowthService(
@@ -71,7 +82,7 @@ def _build_service_with_planning(tmp_path) -> tuple[BuddyOnboardingService, SQLi
         relationship_repository=SqliteCompanionRelationshipRepository(store),
         domain_capability_repository=SqliteBuddyDomainCapabilityRepository(store),
         onboarding_session_repository=SqliteBuddyOnboardingSessionRepository(store),
-        onboarding_reasoner=DeterministicBuddyReasoner(),
+        onboarding_reasoner=reasoner or DeterministicBuddyReasoner(),
         industry_instance_repository=industry_repository,
         operating_lane_service=OperatingLaneService(
             repository=SqliteOperatingLaneRepository(store),
@@ -88,6 +99,31 @@ def _build_service_with_planning(tmp_path) -> tuple[BuddyOnboardingService, SQLi
         domain_capability_growth_service=growth_service,
     )
     return service, store
+
+
+class _LaneLessBuddyReasoner(DeterministicBuddyReasoner):
+    def build_growth_plan(
+        self,
+        *,
+        profile,
+        transcript,
+        selected_direction: str,
+    ) -> BuddyOnboardingGrowthPlan:
+        _ = (profile, transcript)
+        return BuddyOnboardingGrowthPlan(
+            primary_direction=selected_direction.strip(),
+            final_goal="Build a durable direction without fallback roles.",
+            why_it_matters="The system must refuse lane-less growth plans instead of creating fixed seats.",
+            backlog_items=[
+                BuddyOnboardingBacklogSeed(
+                    lane_hint="",
+                    title="Ship the first real proof point",
+                    summary="Turn the first validated task into evidence without using fixed fallback seats.",
+                    priority=3,
+                    source_key="first-proof-point",
+                ),
+            ],
+        )
 
 
 def test_buddy_onboarding_caps_clarification_questions(tmp_path) -> None:
@@ -252,6 +288,34 @@ def test_buddy_confirm_primary_direction_accepts_free_text_direction_override(tm
     assert result.domain_capability.domain_key == derive_buddy_domain_key(
         result.growth_target.primary_direction,
     )
+
+
+def test_confirm_primary_direction_rejects_growth_plan_without_lane_hints(tmp_path) -> None:
+    service, _store = _build_service_with_planning(
+        tmp_path,
+        reasoner=_LaneLessBuddyReasoner(),
+    )
+    identity = service.submit_identity(
+        display_name="Mina",
+        profession="Operator",
+        current_stage="restart",
+        interests=["systems"],
+        strengths=["consistency"],
+        constraints=["money"],
+        goal_intention="I want one real long-term direction.",
+    )
+    clarification = service.answer_clarification_turn(
+        session_id=identity.session_id,
+        answer="I want a durable direction that can turn into real work.",
+        existing_question_count=9,
+    )
+
+    with pytest.raises(BuddyOnboardingReasonerUnavailableError):
+        service.confirm_primary_direction(
+            session_id=identity.session_id,
+            selected_direction=clarification.recommended_direction,
+            capability_action="start-new",
+        )
 
 
 def test_buddy_naming_updates_relationship(tmp_path) -> None:

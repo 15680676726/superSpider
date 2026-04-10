@@ -342,3 +342,26 @@ def test_generic_proof_of_work_role_still_gets_browser_and_execution_families() 
     assert "execution" in families
     assert "evidence" in families
     assert "browser" in families
+
+
+
+def test_specialist_families_do_not_change_just_because_domain_text_matches_old_buckets() -> None:
+    research_stock = buddy_specialist_preferred_capability_families(
+        domain_key=derive_buddy_domain_key("Build a disciplined stock trading path with real risk control."),
+        role_id="market-research",
+    )
+    research_writing = buddy_specialist_preferred_capability_families(
+        domain_key=derive_buddy_domain_key("Build a durable writing and publishing path with visible proof-of-work."),
+        role_id="market-research",
+    )
+    publish_stock = buddy_specialist_preferred_capability_families(
+        domain_key=derive_buddy_domain_key("Build a disciplined stock trading path with real risk control."),
+        role_id="platform-publishing",
+    )
+    publish_health = buddy_specialist_preferred_capability_families(
+        domain_key=derive_buddy_domain_key("Build a repeatable health routine with visible weekly evidence."),
+        role_id="platform-publishing",
+    )
+
+    assert research_stock == research_writing
+    assert publish_stock == publish_health

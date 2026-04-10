@@ -366,10 +366,10 @@ def test_confirm_primary_direction_shapes_domain_specific_specialist_capabilitie
     growth = by_role["growth-focus"]
 
     assert "tool:browser_use" in list(proof.get("allowed_capabilities") or [])
-    assert "content" in list(proof.get("preferred_capability_families") or [])
     assert "browser" in list(proof.get("preferred_capability_families") or [])
     assert "workflow" in list(proof.get("preferred_capability_families") or [])
-    assert "content" in list(growth.get("preferred_capability_families") or [])
+    assert "execution" in list(proof.get("preferred_capability_families") or [])
+    assert "planning" in list(growth.get("preferred_capability_families") or [])
 
 
 def test_confirm_primary_direction_materializes_model_lane_hints_into_dynamic_specialist_roles(

@@ -928,11 +928,28 @@ class BuddyOnboardingService:
             )
         final_goal = str(growth_plan.final_goal or "").strip()
         why_it_matters = str(growth_plan.why_it_matters or "").strip()
-        backlog_items = [
-            item
-            for item in list(growth_plan.backlog_items or [])
-            if item.title.strip() and item.summary.strip()
-        ][:3]
+        backlog_items: list[BuddyOnboardingBacklogSeed] = []
+        for index, item in enumerate(list(growth_plan.backlog_items or []), start=1):
+            title = item.title.strip()
+            summary = item.summary.strip()
+            if not title or not summary:
+                continue
+            lane_hint = _normalize_buddy_lane_hint(item.lane_hint)
+            if not lane_hint:
+                raise BuddyOnboardingReasonerUnavailableError(
+                    "Buddy onboarding model failed to return a valid lane hint.",
+                )
+            backlog_items.append(
+                item.model_copy(
+                    update={
+                        "lane_hint": lane_hint,
+                        "title": title,
+                        "summary": summary,
+                        "source_key": item.source_key.strip() or f"model-seed-{index}",
+                    },
+                )
+            )
+        backlog_items = backlog_items[:3]
         if not final_goal or not why_it_matters or not backlog_items:
             raise BuddyOnboardingReasonerUnavailableError(
                 "Buddy onboarding model failed to return a valid result.",
@@ -1581,68 +1598,9 @@ class BuddyOnboardingService:
                 )
             if dynamic_roles:
                 return dynamic_roles
-        growth_allowed = buddy_specialist_allowed_capabilities(
-            domain_key=domain_key,
-            role_id="growth-focus",
+        raise BuddyOnboardingReasonerUnavailableError(
+            "Buddy onboarding model failed to return dynamic specialist lanes.",
         )
-        proof_allowed = buddy_specialist_allowed_capabilities(
-            domain_key=domain_key,
-            role_id="proof-of-work",
-        )
-        growth_families = buddy_specialist_preferred_capability_families(
-            domain_key=domain_key,
-            role_id="growth-focus",
-        )
-        proof_families = buddy_specialist_preferred_capability_families(
-            domain_key=domain_key,
-            role_id="proof-of-work",
-        )
-        growth_summary = (
-            f"持续确保{label}没有偏离已经确认的长期主方向，并把周期重点压成可执行的下一步。"
-        )
-        proof_summary = (
-            f"把{label}当前的主方向尽快变成看得见的证据、实际产出和可继续推进的任务势能。"
-        )
-        return [
-            IndustryRoleBlueprint(
-                role_id="growth-focus",
-                agent_id=f"{instance_id}:growth-focus",
-                actor_key=f"{instance_id}:growth-focus",
-                name=f"{label} Growth Focus",
-                role_name="成长主线",
-                role_summary=growth_summary,
-                mission=growth_summary,
-                goal_kind="growth-focus",
-                agent_class="business",
-                employment_mode="career",
-                activation_mode="persistent",
-                suspendable=False,
-                reports_to=EXECUTION_CORE_ROLE_ID,
-                risk_level="guarded",
-                allowed_capabilities=growth_allowed,
-                preferred_capability_families=growth_families,
-                evidence_expectations=["growth-focus completion note"],
-            ),
-            IndustryRoleBlueprint(
-                role_id="proof-of-work",
-                agent_id=f"{instance_id}:proof-of-work",
-                actor_key=f"{instance_id}:proof-of-work",
-                name=f"{label} Proof Of Work",
-                role_name="成果证明",
-                role_summary=proof_summary,
-                mission=proof_summary,
-                goal_kind="proof-of-work",
-                agent_class="business",
-                employment_mode="career",
-                activation_mode="persistent",
-                suspendable=False,
-                reports_to=EXECUTION_CORE_ROLE_ID,
-                risk_level="guarded",
-                allowed_capabilities=proof_allowed,
-                preferred_capability_families=proof_families,
-                evidence_expectations=["proof-of-work artifact"],
-            ),
-        ]
 
     def _build_initial_backlog_specs(
         self,
@@ -1666,7 +1624,9 @@ class BuddyOnboardingService:
                 normalized_lane_hint = _normalize_buddy_lane_hint(item.lane_hint)
                 lane_id = lane_id_by_role.get(normalized_lane_hint)
                 if lane_id is None:
-                    lane_id = proof_lane_id if normalized_lane_hint == "proof-of-work" else primary_lane_id
+                    raise BuddyOnboardingReasonerUnavailableError(
+                        "Buddy onboarding model returned a backlog lane without a matching specialist role.",
+                    )
                 title = item.title.strip()
                 summary = item.summary.strip()
                 if not title or not summary:
@@ -1683,29 +1643,9 @@ class BuddyOnboardingService:
                 )
             if generated_specs:
                 return generated_specs
-        return [
-            (
-                primary_lane_id,
-                "先确认第一份可见证明",
-                f"明确第一份什么样的证明，才能说明{profile.display_name}已经开始朝“{growth_target.primary_direction}”真实前进。",
-                3,
-                f"profile:{profile.profile_id}:proof-point",
-            ),
-            (
-                proof_lane_id,
-                "产出第一份可见成长成果",
-                f"做出一份真正看得见的成果，让“{growth_target.final_goal}”开始从想象进入证据链。",
-                2,
-                f"profile:{profile.profile_id}:first-artifact",
-            ),
-            (
-                primary_lane_id,
-                "稳定每周推进节奏",
-                f"建立一套{profile.display_name}现实可持续、不会很快透支的每周推进节奏。",
-                1,
-                f"profile:{profile.profile_id}:weekly-rhythm",
-            ),
-        ]
+        raise BuddyOnboardingReasonerUnavailableError(
+            "Buddy onboarding model failed to return valid backlog seeds.",
+        )
 
     def _seed_avoidance_patterns(
         self,
