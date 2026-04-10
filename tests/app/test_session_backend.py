@@ -68,3 +68,19 @@ def test_safe_json_session_load_remains_available(tmp_path) -> None:
     )
 
     assert agent.loaded == {"memory": [{"role": "assistant", "content": "loaded"}]}
+
+
+def test_safe_json_session_recreates_missing_snapshot_table_on_read(tmp_path) -> None:
+    session = SafeJSONSession(database_path=tmp_path / "state.sqlite3")
+
+    import sqlite3
+
+    with sqlite3.connect(session.database_path) as connection:
+        connection.execute("DROP TABLE session_state_snapshots")
+
+    payload = session.load_merged_session_snapshot(
+        session_id="console:founder",
+        primary_user_id="founder",
+    )
+
+    assert payload is None

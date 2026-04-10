@@ -183,6 +183,7 @@ class SafeJSONSession(JSONSession):
     ) -> list[dict[str, Any]]:
         if self._database_path is None:
             return []
+        self._initialize_state_store()
         with sqlite3.connect(self._database_path) as connection:
             rows = connection.execute(
                 """
@@ -272,6 +273,7 @@ class SafeJSONSession(JSONSession):
     ) -> None:
         if self._database_path is None:
             return
+        self._initialize_state_store()
         with sqlite3.connect(self._database_path) as connection:
             connection.execute(
                 """
@@ -303,6 +305,7 @@ class SafeJSONSession(JSONSession):
     ) -> dict[str, Any] | None:
         if self._database_path is None:
             return None
+        self._initialize_state_store()
         with sqlite3.connect(self._database_path) as connection:
             row = connection.execute(
                 """
