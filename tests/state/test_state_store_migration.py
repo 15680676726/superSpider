@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import json
 import sqlite3
 
 from copaw.state import SQLiteStateStore, STATE_SCHEMA_VERSION
@@ -241,6 +242,11 @@ def test_sqlite_state_store_migrates_legacy_buddy_tables_to_contract_columns(
     tmp_path,
 ) -> None:
     path = tmp_path / "legacy-buddy-state.sqlite3"
+    legacy_candidate_directions = ["writing", "consulting"]
+    legacy_backlog_items = [
+        {"title": "Draft the first weekly essay"},
+        {"title": "Define the first offer"},
+    ]
     with sqlite3.connect(path) as conn:
         conn.executescript(
             """
@@ -298,6 +304,61 @@ def test_sqlite_state_store_migrates_legacy_buddy_tables_to_contract_columns(
             );
             """
         )
+        conn.execute(
+            """
+            INSERT INTO human_profiles (
+                profile_id, display_name, profession, current_stage,
+                interests_json, strengths_json, constraints_json, goal_intention,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "profile-1",
+                "Alex",
+                "Writer",
+                "transition",
+                "[]",
+                "[]",
+                "[]",
+                "Build a durable creative practice",
+                "2026-04-10T00:00:00Z",
+                "2026-04-10T00:00:00Z",
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO buddy_onboarding_sessions (
+                session_id, profile_id, status,
+                operation_id, operation_kind, operation_status, operation_error,
+                question_count, tightened, next_question, transcript_json,
+                candidate_directions_json, recommended_direction, selected_direction,
+                draft_direction, draft_final_goal, draft_why_it_matters,
+                draft_backlog_items_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "session-1",
+                "profile-1",
+                "clarifying",
+                "op-1",
+                "direction-compile",
+                "succeeded",
+                "",
+                4,
+                1,
+                "What should we prioritize next?",
+                json.dumps(["Q1", "Q2"], ensure_ascii=False),
+                json.dumps(legacy_candidate_directions, ensure_ascii=False),
+                "writing",
+                "consulting",
+                "writing",
+                "Publish a weekly essay and productize the workflow",
+                "This creates leverage and visible momentum.",
+                json.dumps(legacy_backlog_items, ensure_ascii=False),
+                "2026-04-10T00:00:00Z",
+                "2026-04-10T01:00:00Z",
+            ),
+        )
 
     store = SQLiteStateStore(path)
     store.initialize()
@@ -305,6 +366,16 @@ def test_sqlite_state_store_migrates_legacy_buddy_tables_to_contract_columns(
     with sqlite3.connect(path) as conn:
         relationship_columns = _column_names(conn, "companion_relationships")
         session_columns = _column_names(conn, "buddy_onboarding_sessions")
+        migrated_row = conn.execute(
+            """
+            SELECT status, candidate_directions_json, recommended_direction,
+                   selected_direction, draft_direction, draft_final_goal,
+                   draft_why_it_matters, draft_backlog_items_json
+            FROM buddy_onboarding_sessions
+            WHERE session_id = ?
+            """,
+            ("session-1",),
+        ).fetchone()
 
     assert {
         "service_intent",
@@ -322,3 +393,12 @@ def test_sqlite_state_store_migrates_legacy_buddy_tables_to_contract_columns(
         "report_style",
         "collaboration_notes",
     }.issubset(session_columns)
+    assert migrated_row is not None
+    assert migrated_row[0] == "contract-draft"
+    assert json.loads(migrated_row[1]) == legacy_candidate_directions
+    assert migrated_row[2] == "writing"
+    assert migrated_row[3] == "consulting"
+    assert migrated_row[4] == "writing"
+    assert migrated_row[5] == "Publish a weekly essay and productize the workflow"
+    assert migrated_row[6] == "This creates leverage and visible momentum."
+    assert json.loads(migrated_row[7]) == legacy_backlog_items
