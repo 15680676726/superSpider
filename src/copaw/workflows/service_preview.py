@@ -44,6 +44,30 @@ def _workflow_goal_task_payloads(detail: dict[str, Any]) -> list[dict[str, Any]]
     return payloads
 
 
+def _workflow_serialize_evidence(record: object) -> dict[str, Any]:
+    if isinstance(record, dict):
+        return dict(record)
+    return {
+        "id": getattr(record, "id", None),
+        "task_id": getattr(record, "task_id", None),
+        "actor_ref": getattr(record, "actor_ref", None),
+        "environment_ref": getattr(record, "environment_ref", None),
+        "capability_ref": getattr(record, "capability_ref", None),
+        "risk_level": getattr(record, "risk_level", None),
+        "action_summary": getattr(record, "action_summary", None),
+        "result_summary": getattr(record, "result_summary", None),
+        "created_at": (
+            getattr(record, "created_at").isoformat()
+            if getattr(record, "created_at", None) is not None
+            else None
+        ),
+        "status": getattr(record, "status", None),
+        "metadata": dict(getattr(record, "metadata", {}) or {}),
+        "artifact_count": len(tuple(getattr(record, "artifacts", ()) or ())),
+        "replay_count": len(tuple(getattr(record, "replay_pointers", ()) or ())),
+    }
+
+
 def _resolve_canonical_host_identity(
     host_payload: dict[str, Any] | None,
     *,
@@ -218,7 +242,8 @@ class _WorkflowServicePreviewMixin:
             if persisted_task_ids or persisted_decision_ids or persisted_evidence_ids:
                 continue
             visible_goal_ids.update(goal_ids_by_step.get(step.step_id, []))
-        goal_ids = sorted(visible_goal_ids)
+        runtime_goal_ids = _unique_strings(*goal_ids_by_step.values())
+        goal_ids = sorted(_unique_strings(visible_goal_ids, runtime_goal_ids))
         for goal_id in goal_ids:
             detail = self._goal_service.get_goal_detail(goal_id)
             if detail is None:
@@ -228,6 +253,11 @@ class _WorkflowServicePreviewMixin:
             tasks.extend(_workflow_goal_task_payloads(detail))
             decisions.extend(list(detail.get("decisions") or []))
             evidence.extend(list(detail.get("evidence") or []))
+        if self._task_repository is not None and runtime_goal_ids:
+            tasks.extend(
+                task.model_dump(mode="json")
+                for task in self._task_repository.list_tasks(goal_ids=runtime_goal_ids)
+            )
         persisted_task_ids = _unique_strings(
             *[
                 [
@@ -243,6 +273,57 @@ class _WorkflowServicePreviewMixin:
                 task.model_dump(mode="json")
                 for task in self._task_repository.list_tasks(task_ids=persisted_task_ids)
             )
+        task_ids_for_runtime_links = _unique_strings(
+            persisted_task_ids,
+            [
+                str(item.get("id") or "")
+                for item in tasks
+                if str(item.get("id") or "").strip()
+            ],
+        )
+        persisted_decision_ids = _unique_strings(
+            *[
+                [
+                    str(item)
+                    for item in list(seed.get("linked_decision_ids") or [])
+                    if str(item).strip()
+                ]
+                for seed in step_seed_items
+            ],
+        )
+        if self._decision_request_repository is not None:
+            if task_ids_for_runtime_links:
+                decisions.extend(
+                    decision.model_dump(mode="json")
+                    for decision in self._decision_request_repository.list_decision_requests(
+                        task_ids=task_ids_for_runtime_links,
+                        limit=None,
+                    )
+                )
+            for decision_id in persisted_decision_ids:
+                decision = self._decision_request_repository.get_decision_request(decision_id)
+                if decision is not None:
+                    decisions.append(decision.model_dump(mode="json"))
+        persisted_evidence_ids = _unique_strings(
+            *[
+                [
+                    str(item)
+                    for item in list(seed.get("linked_evidence_ids") or [])
+                    if str(item).strip()
+                ]
+                for seed in step_seed_items
+            ],
+        )
+        if self._evidence_ledger is not None:
+            for task_id in task_ids_for_runtime_links:
+                evidence.extend(
+                    _workflow_serialize_evidence(record)
+                    for record in self._evidence_ledger.list_by_task(task_id)
+                )
+            for evidence_id in persisted_evidence_ids:
+                record = self._evidence_ledger.get_record(evidence_id)
+                if record is not None:
+                    evidence.append(_workflow_serialize_evidence(record))
         schedules: list[dict[str, Any]] = []
         schedule_by_id: dict[str, dict[str, Any]] = {}
         schedule_ids = _workflow_schedule_ids_for_preview(run, preview)
@@ -269,6 +350,10 @@ class _WorkflowServicePreviewMixin:
             tasks=tasks,
             decisions=decisions,
             evidence=evidence,
+        )
+        run = self._persist_run_step_runtime_links(
+            run=run,
+            step_execution=step_execution,
         )
         diagnosis = self._build_run_diagnosis(
             run=run,
@@ -308,6 +393,67 @@ class _WorkflowServicePreviewMixin:
             },
         )
 
+    def _persist_run_step_runtime_links(
+        self,
+        *,
+        run: WorkflowRunRecord,
+        step_execution: list[WorkflowStepExecutionRecord],
+    ) -> WorkflowRunRecord:
+        step_execution_by_id = {
+            str(item.step_id or ""): item
+            for item in list(step_execution or [])
+            if str(item.step_id or "").strip()
+        }
+        metadata = dict(run.metadata or {})
+        step_seed_items = [
+            dict(item)
+            for item in list(metadata.get("step_execution_seed") or [])
+            if isinstance(item, dict)
+        ]
+        changed = False
+        updated_step_seed: list[dict[str, Any]] = []
+        for seed in step_seed_items:
+            copied = dict(seed)
+            step_id = str(copied.get("step_id") or "").strip()
+            record = step_execution_by_id.get(step_id)
+            if record is None:
+                updated_step_seed.append(copied)
+                continue
+            linked_task_ids = [str(item).strip() for item in list(record.linked_task_ids or []) if str(item).strip()]
+            linked_decision_ids = [
+                str(item).strip()
+                for item in list(record.linked_decision_ids or [])
+                if str(item).strip()
+            ]
+            linked_evidence_ids = [
+                str(item).strip()
+                for item in list(record.linked_evidence_ids or [])
+                if str(item).strip()
+            ]
+            if linked_task_ids and list(copied.get("linked_task_ids") or []) != linked_task_ids:
+                copied["linked_task_ids"] = linked_task_ids
+                changed = True
+            if linked_decision_ids and list(copied.get("linked_decision_ids") or []) != linked_decision_ids:
+                copied["linked_decision_ids"] = linked_decision_ids
+                changed = True
+            if linked_evidence_ids and list(copied.get("linked_evidence_ids") or []) != linked_evidence_ids:
+                copied["linked_evidence_ids"] = linked_evidence_ids
+                changed = True
+            updated_step_seed.append(copied)
+        if not changed:
+            return run
+        persisted = run.model_copy(
+            update={
+                "metadata": {
+                    **metadata,
+                    "step_execution_seed": updated_step_seed,
+                },
+                "updated_at": _utc_now(),
+            },
+        )
+        self._workflow_run_repository.upsert_run(persisted)
+        return persisted
+
     def _build_step_execution_records(
         self,
         *,
@@ -329,10 +475,11 @@ class _WorkflowServicePreviewMixin:
                 persisted_decision_ids,
                 persisted_evidence_ids,
             ) = _workflow_step_persisted_runtime_ids(seed)
+            runtime_goal_ids = list(goal_ids_by_step.get(step.step_id, []))
             linked_goal_ids = (
                 []
                 if persisted_task_ids or persisted_decision_ids or persisted_evidence_ids
-                else list(goal_ids_by_step.get(step.step_id, []))
+                else runtime_goal_ids
             )
             linked_schedule_ids = _workflow_step_schedule_ids(
                 run,
@@ -343,7 +490,7 @@ class _WorkflowServicePreviewMixin:
             linked_tasks = [
                 item
                 for item in tasks
-                if str(item.get("goal_id") or "") in linked_goal_ids
+                if str(item.get("goal_id") or "") in runtime_goal_ids
                 or str(item.get("id") or "") in set(persisted_task_ids)
             ]
             linked_task_ids = _unique_strings(

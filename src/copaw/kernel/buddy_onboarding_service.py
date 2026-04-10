@@ -123,12 +123,38 @@ class BuddyDirectionConfirmationResult:
     schedule_specs: list[dict[str, object]] | None = None
 
 
+class BuddyActivationRepairTarget(BaseModel):
+    session_id: str
+    profile_id: str
+    industry_instance_id: str
+
+
 _DEFAULT_DIRECTION = "建立稳定、自主、长期向上的人生主方向"
 _STOCKS_DIRECTION = "建立稳定、可验证的股票交易与投资成长路径"
 _CREATOR_DIRECTION = "建立独立创作与内容事业的长期成长路径"
 _DESIGN_DIRECTION = "建立高杠杆的设计与系统领导力成长路径"
 _OPERATIONS_DIRECTION = "建立从执行型走向策略型的长期职业跃迁路径"
 _HEALTH_DIRECTION = "建立自律、健康与自我掌控的人生重建路径"
+
+_BUDDY_LANE_LABEL_MAP: dict[str, str] = {
+    "growth-focus": "成长推进执行位",
+    "proof-of-work": "成果验证执行位",
+    "proof-work": "成果验证执行位",
+    "browser-work": "浏览器执行位",
+    "browser": "浏览器执行位",
+    "research": "调研执行位",
+    "planning": "规划执行位",
+    "strategy": "策略执行位",
+    "operations": "运营执行位",
+    "ops": "运营执行位",
+    "design": "设计执行位",
+    "writing": "写作执行位",
+    "publishing": "发布执行位",
+    "content": "内容执行位",
+    "analysis": "分析执行位",
+    "trading": "交易执行位",
+    "review": "复盘执行位",
+}
 
 
 def _unique(items: list[str]) -> list[str]:
@@ -176,10 +202,22 @@ def _normalize_buddy_lane_hint(value: str | None) -> str:
 def _present_buddy_lane_label(role_id: str) -> str:
     normalized = _normalize_buddy_lane_hint(role_id)
     if not normalized:
-        return "Specialist"
-    parts = [part for part in normalized.split("-") if part]
-    if all(part.isascii() for part in parts):
-        return " ".join(part.capitalize() for part in parts)
+        return "专项执行位"
+    if normalized in _BUDDY_LANE_LABEL_MAP:
+        return _BUDDY_LANE_LABEL_MAP[normalized]
+    translated_parts = [
+        _BUDDY_LANE_LABEL_MAP.get(part)
+        for part in normalized.split("-")
+        if part
+    ]
+    translated_parts = [part for part in translated_parts if part]
+    if translated_parts:
+        joined = "".join(translated_parts)
+        if joined.endswith("执行位"):
+            return joined
+        return f"{joined}执行位"
+    if all(part.isascii() for part in normalized.split("-") if part):
+        return "专项执行位"
     return normalized
 
 
@@ -771,6 +809,162 @@ class BuddyOnboardingService:
         )
         return self._onboarding_session_repository.upsert_session(updated)
 
+    def queue_activation(
+        self,
+        *,
+        session_id: str,
+    ) -> BuddyOnboardingSessionRecord:
+        session = self._require_session(session_id)
+        activation_id = _new_buddy_operation_id()
+        updated = session.model_copy(
+            update={
+                "activation_id": activation_id,
+                "activation_status": "queued",
+                "activation_error": "",
+                "activation_attempt_count": int(session.activation_attempt_count or 0) + 1,
+                "updated_at": _utc_now(),
+            },
+        )
+        return self._onboarding_session_repository.upsert_session(updated)
+
+    def mark_activation_started(
+        self,
+        *,
+        session_id: str,
+        activation_id: str,
+    ) -> BuddyOnboardingSessionRecord:
+        session = self._require_session(session_id)
+        if str(session.activation_id or "").strip() != str(activation_id or "").strip():
+            return session
+        updated = session.model_copy(
+            update={
+                "activation_status": "running",
+                "activation_error": "",
+                "updated_at": _utc_now(),
+            },
+        )
+        return self._onboarding_session_repository.upsert_session(updated)
+
+    def mark_activation_succeeded(
+        self,
+        *,
+        session_id: str,
+        activation_id: str,
+    ) -> BuddyOnboardingSessionRecord:
+        session = self._require_session(session_id)
+        if str(session.activation_id or "").strip() != str(activation_id or "").strip():
+            return session
+        updated = session.model_copy(
+            update={
+                "activation_status": "succeeded",
+                "activation_error": "",
+                "updated_at": _utc_now(),
+            },
+        )
+        return self._onboarding_session_repository.upsert_session(updated)
+
+    def mark_activation_deferred(
+        self,
+        *,
+        session_id: str,
+        activation_id: str,
+        error_message: str,
+    ) -> BuddyOnboardingSessionRecord:
+        session = self._require_session(session_id)
+        if str(session.activation_id or "").strip() != str(activation_id or "").strip():
+            return session
+        updated = session.model_copy(
+            update={
+                "activation_status": "deferred",
+                "activation_error": str(error_message or "").strip(),
+                "updated_at": _utc_now(),
+            },
+        )
+        return self._onboarding_session_repository.upsert_session(updated)
+
+    def mark_activation_failed(
+        self,
+        *,
+        session_id: str,
+        activation_id: str,
+        error_message: str,
+    ) -> BuddyOnboardingSessionRecord:
+        session = self._require_session(session_id)
+        if str(session.activation_id or "").strip() != str(activation_id or "").strip():
+            return session
+        updated = session.model_copy(
+            update={
+                "activation_status": "failed",
+                "activation_error": str(error_message or "").strip(),
+                "updated_at": _utc_now(),
+            },
+        )
+        return self._onboarding_session_repository.upsert_session(updated)
+
+    def complete_activation_from_result(
+        self,
+        *,
+        session_id: str,
+        activation_id: str,
+        result: Any,
+    ) -> BuddyOnboardingSessionRecord:
+        summary = dict(result) if isinstance(result, dict) else {}
+        activated = bool(summary.get("activated"))
+        started_assignment_ids = [
+            str(item).strip()
+            for item in list(summary.get("started_assignment_ids") or [])
+            if str(item).strip()
+        ]
+        assignment_dispatches = [
+            item
+            for item in list(summary.get("assignment_dispatches") or [])
+            if isinstance(item, dict)
+        ]
+        blocked_reason = str(summary.get("blocked_reason") or "").strip()
+        if activated or started_assignment_ids or assignment_dispatches:
+            return self.mark_activation_succeeded(
+                session_id=session_id,
+                activation_id=activation_id,
+            )
+        if blocked_reason:
+            return self.mark_activation_deferred(
+                session_id=session_id,
+                activation_id=activation_id,
+                error_message=blocked_reason,
+            )
+        return self.mark_activation_failed(
+            session_id=session_id,
+            activation_id=activation_id,
+            error_message="伙伴激活未确认正式派工已成功启动。",
+        )
+
+    def repair_failed_activation(
+        self,
+        *,
+        profile_id: str,
+    ) -> BuddyActivationRepairTarget | None:
+        if self._domain_capability_repository is None:
+            return None
+        session = self._onboarding_session_repository.get_latest_session_for_profile(profile_id)
+        if session is None:
+            return None
+        if str(session.activation_status or "").strip().lower() != "failed":
+            return None
+        if int(session.activation_attempt_count or 0) >= 3:
+            return None
+        growth_target = self._growth_target_repository.get_active_target(profile_id)
+        if growth_target is None:
+            return None
+        active_domain = self._domain_capability_repository.get_active_domain_capability(profile_id)
+        instance_id = str(getattr(active_domain, "industry_instance_id", "") or "").strip()
+        if not instance_id:
+            return None
+        return BuddyActivationRepairTarget(
+            session_id=session.session_id,
+            profile_id=profile_id,
+            industry_instance_id=instance_id,
+        )
+
     def record_chat_interaction(
         self,
         *,
@@ -918,9 +1112,9 @@ class BuddyOnboardingService:
     ) -> list[str]:
         return _unique(
             [
-                "Execution core coordinates direction, planning, supervision, and review instead of swallowing leaf execution.",
-                "Concrete execution should be delegated to the domain specialist lanes created from the collaboration contract backlog.",
-                f"Collaboration role: {collaboration_contract.collaboration_role or 'orchestrator'}.",
+                "执行中枢负责方向、规划、监督与复盘，不直接吞掉叶子执行。",
+                "具体执行应优先下放给由协作合同 backlog 生成的领域执行位。",
+                f"协作角色：{collaboration_contract.collaboration_role or 'orchestrator'}。",
             ],
         )
 
@@ -930,9 +1124,9 @@ class BuddyOnboardingService:
     ) -> list[str]:
         return _unique(
             [
-                "Main brain must not turn into the leaf executor for browser, desktop, or document work.",
-                "When execution capacity is missing, create or restore the right domain lane instead of letting the core execute directly.",
-                f"Autonomy level: {collaboration_contract.autonomy_level or 'proactive'}.",
+                "主脑不能退化成浏览器、桌面或文档动作的叶子执行器。",
+                "当执行能力缺失时，应先创建或恢复合适的领域执行位，而不是让中枢亲自下场。",
+                f"主动级别：{collaboration_contract.autonomy_level or 'proactive'}。",
             ],
         )
 
@@ -1770,7 +1964,7 @@ class BuddyOnboardingService:
                 continue
         if restored_roles:
             return restored_roles
-        label = profile.display_name.strip() or "Buddy"
+        label = profile.display_name.strip() or "伙伴"
         domain_key = derive_buddy_domain_key(direction_text or "")
         lane_hints = _resolve_growth_plan_lane_hints(growth_plan)
         if lane_hints:
@@ -1787,8 +1981,7 @@ class BuddyOnboardingService:
                     role_id=role_id,
                 )
                 lane_summary = (
-                    f"Owns the {lane_label} lane for {label} and turns it into concrete progress, "
-                    "evidence, and next actions."
+                    f"负责“{label}”当前的{lane_label}，把方向拆成可执行进展、证据和下一步动作。"
                 )
                 dynamic_roles.append(
                     IndustryRoleBlueprint(
@@ -1808,7 +2001,7 @@ class BuddyOnboardingService:
                         risk_level="guarded",
                         allowed_capabilities=allowed_capabilities,
                         preferred_capability_families=preferred_families,
-                        evidence_expectations=[f"{role_id} evidence"],
+                        evidence_expectations=[f"{lane_label}执行证据"],
                     ),
                 )
             if dynamic_roles:

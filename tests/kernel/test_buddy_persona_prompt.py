@@ -33,7 +33,7 @@ def test_build_buddy_persona_prompt_returns_shared_lines_and_signature() -> None
 
     lines, signature = build_buddy_persona_prompt(surface=surface, heading="##")
 
-    assert lines[0] == "## Buddy 对外人格"
+    assert lines[0] == "## 伙伴对外人格"
     assert "- 伙伴名：小澄" in lines
     assert any(line.endswith("阿澄 / 自由创作者 / 重建期") for line in lines)
     assert any(line.endswith("建立可持续的创作事业与独立成长轨道") for line in lines)
@@ -42,7 +42,7 @@ def test_build_buddy_persona_prompt_returns_shared_lines_and_signature() -> None
     assert any("默认会主动推进当前任务，不只是陪聊。" in line for line in lines)
     assert any("先直接推进任务，做完再同步结果和下一步。" in line for line in lines)
     assert signature == (
-        "buddy:profile-buddy|小澄|建立可持续的创作事业与独立成长轨道|"
+        "buddy:profile-buddy|小澄||||||建立可持续的创作事业与独立成长轨道|"
         "写出第一篇真正代表自己的案例文章|因为这是把长期方向从想象拉进现实的第一份证据。|"
         "现在先打开文档，写下标题和三条核心观点。|先直接推进任务，做完再同步结果和下一步。"
     )
@@ -53,7 +53,7 @@ def test_main_brain_buddy_block_uses_shared_helper(monkeypatch) -> None:
 
     def _fake_builder(*, surface, heading: str = "##"):
         seen.append((surface, heading))
-        return ["## Buddy 对外人格", "- 伙伴名：小澄"], "buddy:sig"
+        return ["## 伙伴对外人格", "- 伙伴名：小澄"], "buddy:sig"
 
     monkeypatch.setattr(main_brain_chat_module, "build_buddy_persona_prompt", _fake_builder)
     surface = SimpleNamespace(profile=SimpleNamespace(profile_id="profile-buddy"))
@@ -70,7 +70,7 @@ def test_main_brain_buddy_block_uses_shared_helper(monkeypatch) -> None:
     )
 
     assert seen == [(surface, "##")]
-    assert block == "## Buddy 对外人格\n- 伙伴名：小澄"
+    assert block == "## 伙伴对外人格\n- 伙伴名：小澄"
     assert signature == "buddy:sig"
 
 
@@ -79,7 +79,7 @@ def test_query_execution_buddy_lines_use_shared_helper(monkeypatch) -> None:
 
     def _fake_builder(*, surface, heading: str = "##"):
         seen.append((surface, heading))
-        return ["# Buddy 对外人格", "- 伙伴名：小澄"], "buddy:sig"
+        return ["# 伙伴对外人格", "- 伙伴名：小澄"], "buddy:sig"
 
     monkeypatch.setattr(query_prompt_module, "build_buddy_persona_prompt", _fake_builder)
     surface = SimpleNamespace(profile=SimpleNamespace(profile_id="profile-buddy"))
@@ -96,4 +96,4 @@ def test_query_execution_buddy_lines_use_shared_helper(monkeypatch) -> None:
     )
 
     assert seen == [(surface, "#")]
-    assert lines == ["# Buddy 对外人格", "- 伙伴名：小澄"]
+    assert lines == ["# 伙伴对外人格", "- 伙伴名：小澄"]

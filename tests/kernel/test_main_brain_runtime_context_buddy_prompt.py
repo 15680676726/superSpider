@@ -176,18 +176,18 @@ def test_query_execution_service_appends_buddy_persona_prompt_when_bound_profile
 
     prompt_appendix = _FakeAgent.created[0].kwargs["prompt_appendix"]
     expected_lines = [
-        "# Buddy",
-        "Buddy name: Nova",
-        "Service intent: Turn creative ambition into a steady weekly publishing rhythm.",
-        "Collaboration role: orchestrator",
-        "Autonomy level: guarded-proactive",
-        "Report style: decision-first",
-        "Confirm before: external spend, publishing under my real name",
-        "Collaboration notes: Keep reports short and escalate blockers with one recommendation.",
+        "# 伙伴对外人格",
+        "伙伴名：Nova",
+        "服务意图：Turn creative ambition into a steady weekly publishing rhythm.",
+        "协作角色：orchestrator",
+        "主动级别：guarded-proactive",
+        "汇报风格：decision-first",
+        "这些事项必须先确认：external spend, publishing under my real name",
+        "协作备注：Keep reports short and escalate blockers with one recommendation.",
         "# Execution Core Identity",
-        "Operating mode: guarded-collaboration",
-        "Delegation rule: Coordinate direction and delegate leaf execution to the right specialist lane.",
-        "Direct execution rule: Do not let the execution core swallow browser or document leaf work.",
+        "运行模式：guarded-collaboration",
+        "派工规则：Coordinate direction and delegate leaf execution to the right specialist lane.",
+        "直接执行规则：Do not let the execution core swallow browser or document leaf work.",
     ]
     for line in expected_lines:
         assert line in prompt_appendix

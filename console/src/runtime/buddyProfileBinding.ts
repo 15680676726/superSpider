@@ -1,4 +1,14 @@
 const BUDDY_PROFILE_STORAGE_KEY = "copaw.buddy_profile_id";
+const BUDDY_PROFILE_CHANGED_EVENT = "copaw:buddy-profile-changed";
+
+function normalizeThreadMeta(
+  meta: unknown,
+): Record<string, unknown> | null {
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) {
+    return null;
+  }
+  return meta as Record<string, unknown>;
+}
 
 export function normalizeBuddyProfileId(value: unknown): string | null {
   if (typeof value !== "string") {
@@ -22,6 +32,17 @@ function canUseStorage(): boolean {
   return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
 }
 
+function dispatchBuddyProfileChanged(profileId: string | null): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.dispatchEvent(
+    new CustomEvent(BUDDY_PROFILE_CHANGED_EVENT, {
+      detail: { profileId },
+    }),
+  );
+}
+
 export function readBuddyProfileId(): string | null {
   if (!canUseStorage()) {
     return null;
@@ -33,6 +54,27 @@ export function readBuddyProfileId(): string | null {
   }
 }
 
+export function resolveBuddyProfileIdFromThreadMeta(
+  threadMeta: unknown,
+): string | null {
+  const meta = normalizeThreadMeta(threadMeta);
+  if (!meta) {
+    return null;
+  }
+  return resolveCanonicalBuddyProfileId(
+    typeof meta.buddy_profile_id === "string" ? meta.buddy_profile_id : null,
+  );
+}
+
+export function readActiveBuddyProfileId(
+  threadMeta?: unknown,
+): string | null {
+  return resolveCanonicalBuddyProfileId(
+    resolveBuddyProfileIdFromThreadMeta(threadMeta),
+    readBuddyProfileId(),
+  );
+}
+
 export function writeBuddyProfileId(profileId: string | null | undefined): void {
   if (!canUseStorage()) {
     return;
@@ -41,9 +83,11 @@ export function writeBuddyProfileId(profileId: string | null | undefined): void 
   try {
     if (normalized) {
       window.localStorage.setItem(BUDDY_PROFILE_STORAGE_KEY, normalized);
+      dispatchBuddyProfileChanged(normalized);
       return;
     }
     window.localStorage.removeItem(BUDDY_PROFILE_STORAGE_KEY);
+    dispatchBuddyProfileChanged(null);
   } catch {
     // Ignore storage failures and keep the backend/runtime truth as primary.
   }
@@ -55,7 +99,10 @@ export function resetBuddyProfileBindingForTests(): void {
   }
   try {
     window.localStorage.removeItem(BUDDY_PROFILE_STORAGE_KEY);
+    dispatchBuddyProfileChanged(null);
   } catch {
     // Ignore storage failures in test cleanup.
   }
 }
+
+export { BUDDY_PROFILE_CHANGED_EVENT };

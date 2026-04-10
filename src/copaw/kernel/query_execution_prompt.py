@@ -569,29 +569,29 @@ class _QueryExecutionPromptMixin:
             execution_core_identity.get("direct_execution_policy"),
         )
         if identity_label:
-            lines.append(f"- Identity label: {identity_label}")
+            lines.append(f"- 身份标签：{identity_label}")
         if industry_summary:
-            lines.append(f"- Industry mandate: {industry_summary}")
+            lines.append(f"- 行业使命：{industry_summary}")
         if operating_mode:
-            lines.append(f"- Operating mode: {operating_mode}")
+            lines.append(f"- 运行模式：{operating_mode}")
         if service_intent:
-            lines.append(f"- Service intent: {service_intent}")
+            lines.append(f"- 服务意图：{service_intent}")
         if collaboration_role:
-            lines.append(f"- Collaboration role: {collaboration_role}")
+            lines.append(f"- 协作角色：{collaboration_role}")
         if autonomy_level:
-            lines.append(f"- Autonomy level: {autonomy_level}")
+            lines.append(f"- 主动级别：{autonomy_level}")
         if report_style:
-            lines.append(f"- Report style: {report_style}")
+            lines.append(f"- 汇报风格：{report_style}")
         if confirm_boundaries:
-            lines.append(f"- Confirm before: {', '.join(confirm_boundaries[:4])}")
+            lines.append(f"- 这些事项必须先确认：{', '.join(confirm_boundaries[:4])}")
         if collaboration_notes:
-            lines.append(f"- Collaboration notes: {collaboration_notes}")
+            lines.append(f"- 协作备注：{collaboration_notes}")
         for axis in thinking_axes[:6]:
-            lines.append(f"- Thinking axis: {axis}")
+            lines.append(f"- 思考轴：{axis}")
         for policy in delegation_policy[:3]:
-            lines.append(f"- Delegation rule: {policy}")
+            lines.append(f"- 派工规则：{policy}")
         for policy in direct_execution_policy[:2]:
-            lines.append(f"- Direct execution rule: {policy}")
+            lines.append(f"- 直接执行规则：{policy}")
         return lines
 
     def _resolve_active_strategy_memory_payload(
@@ -651,9 +651,9 @@ class _QueryExecutionPromptMixin:
         for priority in priorities[:4]:
             lines.append(f"- Priority: {priority}")
         for policy in delegation_policy[:3]:
-            lines.append(f"- Delegation rule: {policy}")
+            lines.append(f"- 派工规则：{policy}")
         for policy in direct_execution_policy[:2]:
-            lines.append(f"- Direct execution rule: {policy}")
+            lines.append(f"- 直接执行规则：{policy}")
         for constraint in execution_constraints[:4]:
             lines.append(f"- Execution constraint: {constraint}")
         return lines

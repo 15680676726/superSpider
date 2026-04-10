@@ -41,14 +41,21 @@ const noticeCopyMap: Record<
 
 export function ChatAccessGate({
   chatNoticeVariant,
+  threadBootstrapError,
+  requestedThreadId,
   showModelPrompt,
   onCloseModelPrompt,
   onOpenModelSettings,
   onOpenIdentityCenter,
+  onReload,
 }: ChatAccessGateProps) {
   const isLoading = chatNoticeVariant === "loading";
   const isGateActive = Boolean(chatNoticeVariant);
   let noticeCopy: (typeof noticeCopyMap)[keyof typeof noticeCopyMap] | null = null;
+  const showThreadRecovery =
+    Boolean(threadBootstrapError) &&
+    typeof requestedThreadId === "string" &&
+    requestedThreadId.length > 0;
 
   if (chatNoticeVariant && chatNoticeVariant !== "loading") {
     noticeCopy = noticeCopyMap[chatNoticeVariant];
@@ -67,12 +74,27 @@ export function ChatAccessGate({
             <div className={styles.centerResult}>
               <Result
                 status={noticeCopy?.status}
-                title={noticeCopy?.title}
-                subTitle={noticeCopy?.description}
+                title={showThreadRecovery ? "这段聊天暂时打不开" : noticeCopy?.title}
+                subTitle={
+                  showThreadRecovery
+                    ? "先重新加载这段聊天；如果还是不行，再回到建档入口。"
+                    : noticeCopy?.description
+                }
                 extra={
-                  <Button type="primary" onClick={onOpenIdentityCenter}>
-                    前往身份中心
-                  </Button>
+                  showThreadRecovery
+                    ? [
+                        <Button key="reload" type="primary" onClick={onReload}>
+                          重新加载
+                        </Button>,
+                        <Button key="identity" onClick={onOpenIdentityCenter}>
+                          前往身份中心
+                        </Button>,
+                      ]
+                    : (
+                      <Button type="primary" onClick={onOpenIdentityCenter}>
+                        前往身份中心
+                      </Button>
+                    )
                 }
               />
             </div>

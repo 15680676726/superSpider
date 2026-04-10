@@ -1446,7 +1446,7 @@ def test_main_brain_chat_service_prompt_includes_buddy_persona_block():
     )
 
     joined_prompt = "\n".join(message["content"] for message in prompt_messages)
-    assert "# Buddy 对外人格" in joined_prompt
+    assert "# 伙伴对外人格" in joined_prompt
     assert "伙伴名：小澄" in joined_prompt
     assert "默认只给用户最终目标、当前任务、为什么现在做、唯一下一步和已完成进展" in joined_prompt
     assert "唯一下一步：现在先打开文档，写下这篇案例的标题和三条核心观点。" in joined_prompt

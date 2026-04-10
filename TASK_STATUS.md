@@ -141,10 +141,13 @@
   - `next_question`
   - `existing_question_count`
 - `2026-04-05` 那条“最多 9 问澄清对话”的历史设计口径已被本条 supersede；当前正式方向是“身份建档 -> 协作合同 compile -> 方向确认 -> 首次命名/进入聊天”，不是继续维护问答机。
+- `2026-04-11` 本轮收尾补充：
+  - Buddy persona block 与 execution-core identity 里的协作合同标签已收口为中文提示，不再继续混入 `Buddy name / Service intent / Collaboration role` 这类英文标签。
+  - `docs/superpowers/plans/2026-04-05-main-brain-buddy-companion-implementation-plan.md` 已补强 supersede 说明；文中残留 `clarification / question_count / next_question` 等旧措辞只代表历史施工痕迹，不再代表当前正式合同。
 - 当前 fresh verification：
   - backend：
-    - `PYTHONPATH=src python -m pytest tests/kernel/test_buddy_projection_service.py tests/kernel/test_main_brain_runtime_context_buddy_prompt.py tests/kernel/test_main_brain_chat_service.py tests/app/test_buddy_onboarding_activation.py tests/kernel/test_buddy_onboarding_latency.py tests/kernel/test_buddy_projection_capability.py -q`
-    - 结果：`70 passed`
+    - `PYTHONPATH=src python -m pytest tests/kernel/test_buddy_persona_prompt.py tests/kernel/test_buddy_projection_service.py tests/kernel/test_main_brain_runtime_context_buddy_prompt.py tests/kernel/test_main_brain_chat_service.py tests/kernel/query_execution_environment_parts/lifecycle.py tests/app/test_buddy_onboarding_activation.py tests/kernel/test_buddy_onboarding_latency.py tests/kernel/test_buddy_projection_capability.py -q`
+    - 结果：`83 passed`
   - console：
     - `npm --prefix console run test -- src/api/modules/buddy.test.ts src/runtime/buddyFlow.test.ts src/pages/BuddyOnboarding/index.test.tsx src/routes/entryRedirect.test.tsx`
     - 结果：`14 passed`

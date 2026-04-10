@@ -114,6 +114,41 @@ function resolveChatThreadBootstrapState({
   };
 }
 
+function shouldRefreshBoundThreadFromRuntimeEvent({
+  requestedThreadId,
+  requestedThreadLooksBound,
+  eventName,
+}: {
+  requestedThreadId: string | null;
+  requestedThreadLooksBound: boolean;
+  eventName: string | null | undefined;
+}): boolean {
+  if (!requestedThreadLooksBound) {
+    return false;
+  }
+  const normalizedThreadId = normalizeThreadId(requestedThreadId);
+  if (!isFormalRuntimeThreadId(normalizedThreadId)) {
+    return false;
+  }
+  const normalizedEventName = (eventName || "").trim();
+  if (!normalizedEventName || normalizedEventName.endsWith(".heartbeat")) {
+    return false;
+  }
+  const topic = normalizedEventName.split(".", 1)[0] ?? "";
+  return [
+    "actor",
+    "task",
+    "assignment",
+    "report",
+    "industry",
+    "cycle",
+    "backlog",
+    "strategy",
+    "automation",
+    "schedule",
+  ].includes(topic);
+}
+
 export {
   CHAT_RUNTIME_TEXT,
   normalizeThreadId,
@@ -122,4 +157,5 @@ export {
   parseIndustryThreadId,
   resolveChatThreadBootstrapState,
   resolveChatRouteRecoveryTarget,
+  shouldRefreshBoundThreadFromRuntimeEvent,
 };

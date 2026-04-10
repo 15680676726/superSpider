@@ -162,6 +162,52 @@ describe("RightPanel", () => {
     expect(await screen.findByText("测试伙伴")).toBeInTheDocument();
   });
 
+  it("shows the panel after the active thread publishes a buddy profile id", async () => {
+    render(
+      <MemoryRouter
+        initialEntries={["/chat?threadId=industry-chat%3Aindustry-1%3Aexecution-core"]}
+      >
+        <RightPanel />
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByText("测试伙伴")).not.toBeInTheDocument();
+
+    window.dispatchEvent(
+      new CustomEvent("copaw:thread-context", {
+        detail: {
+          meta: {
+            buddy_profile_id: "profile-1",
+          },
+        },
+      }),
+    );
+
+    await waitFor(() => {
+      expect(apiMock.getBuddySurface).toHaveBeenCalledWith("profile-1");
+    });
+
+    expect(await screen.findByText("测试伙伴")).toBeInTheDocument();
+  });
+
+  it("shows the panel immediately when the buddy profile is written on the same route", async () => {
+    render(
+      <MemoryRouter initialEntries={["/buddy-onboarding"]}>
+        <RightPanel />
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByText("测试伙伴")).not.toBeInTheDocument();
+
+    writeBuddyProfileId("profile-1");
+
+    await waitFor(() => {
+      expect(apiMock.getBuddySurface).toHaveBeenCalledWith("profile-1");
+    });
+
+    expect(await screen.findByText("测试伙伴")).toBeInTheDocument();
+  });
+
   it("renders sprites with a larger left-aligned monospace block", async () => {
     writeBuddyProfileId("profile-1");
 

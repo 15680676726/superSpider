@@ -402,3 +402,132 @@ def test_sqlite_state_store_migrates_legacy_buddy_tables_to_contract_columns(
     assert migrated_row[5] == "Publish a weekly essay and productize the workflow"
     assert migrated_row[6] == "This creates leverage and visible momentum."
     assert json.loads(migrated_row[7]) == legacy_backlog_items
+
+
+def test_sqlite_state_store_migrates_legacy_buddy_tables_and_preserves_activation_fields(
+    tmp_path,
+) -> None:
+    path = tmp_path / "legacy-buddy-activation-state.sqlite3"
+    with sqlite3.connect(path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE human_profiles (
+                profile_id TEXT PRIMARY KEY,
+                display_name TEXT NOT NULL,
+                profession TEXT NOT NULL,
+                current_stage TEXT NOT NULL,
+                interests_json TEXT NOT NULL DEFAULT '[]',
+                strengths_json TEXT NOT NULL DEFAULT '[]',
+                constraints_json TEXT NOT NULL DEFAULT '[]',
+                goal_intention TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE buddy_onboarding_sessions (
+                session_id TEXT PRIMARY KEY,
+                profile_id TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'clarifying',
+                operation_id TEXT NOT NULL DEFAULT '',
+                operation_kind TEXT NOT NULL DEFAULT '',
+                operation_status TEXT NOT NULL DEFAULT 'idle',
+                operation_error TEXT NOT NULL DEFAULT '',
+                activation_id TEXT NOT NULL DEFAULT '',
+                activation_status TEXT NOT NULL DEFAULT 'idle',
+                activation_error TEXT NOT NULL DEFAULT '',
+                activation_attempt_count INTEGER NOT NULL DEFAULT 0,
+                question_count INTEGER NOT NULL DEFAULT 1,
+                tightened INTEGER NOT NULL DEFAULT 0,
+                next_question TEXT NOT NULL DEFAULT '',
+                transcript_json TEXT NOT NULL DEFAULT '[]',
+                candidate_directions_json TEXT NOT NULL DEFAULT '[]',
+                recommended_direction TEXT NOT NULL DEFAULT '',
+                selected_direction TEXT NOT NULL DEFAULT '',
+                draft_direction TEXT NOT NULL DEFAULT '',
+                draft_final_goal TEXT NOT NULL DEFAULT '',
+                draft_why_it_matters TEXT NOT NULL DEFAULT '',
+                draft_backlog_items_json TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            """,
+        )
+        conn.execute(
+            """
+            INSERT INTO human_profiles (
+                profile_id, display_name, profession, current_stage,
+                interests_json, strengths_json, constraints_json, goal_intention,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "profile-activation-1",
+                "Alex",
+                "Writer",
+                "transition",
+                "[]",
+                "[]",
+                "[]",
+                "Build a durable creative practice",
+                "2026-04-10T00:00:00Z",
+                "2026-04-10T00:00:00Z",
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO buddy_onboarding_sessions (
+                session_id, profile_id, status,
+                operation_id, operation_kind, operation_status, operation_error,
+                activation_id, activation_status, activation_error, activation_attempt_count,
+                question_count, tightened, next_question, transcript_json,
+                candidate_directions_json, recommended_direction, selected_direction,
+                draft_direction, draft_final_goal, draft_why_it_matters,
+                draft_backlog_items_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "session-activation-1",
+                "profile-activation-1",
+                "clarifying",
+                "op-1",
+                "direction-compile",
+                "succeeded",
+                "",
+                "activation-1",
+                "running",
+                "still working",
+                3,
+                4,
+                1,
+                "What should we prioritize next?",
+                json.dumps(["Q1", "Q2"], ensure_ascii=False),
+                json.dumps(["writing"], ensure_ascii=False),
+                "writing",
+                "writing",
+                "writing",
+                "Publish a weekly essay",
+                "This creates leverage and visible momentum.",
+                json.dumps([{"title": "Write outline"}], ensure_ascii=False),
+                "2026-04-10T00:00:00Z",
+                "2026-04-10T01:00:00Z",
+            ),
+        )
+
+    store = SQLiteStateStore(path)
+    store.initialize()
+
+    with sqlite3.connect(path) as conn:
+        migrated_row = conn.execute(
+            """
+            SELECT activation_id, activation_status, activation_error, activation_attempt_count
+            FROM buddy_onboarding_sessions
+            WHERE session_id = ?
+            """,
+            ("session-activation-1",),
+        ).fetchone()
+
+    assert migrated_row is not None
+    assert migrated_row[0] == "activation-1"
+    assert migrated_row[1] == "running"
+    assert migrated_row[2] == "still working"
+    assert migrated_row[3] == 3

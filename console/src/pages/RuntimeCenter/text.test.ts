@@ -5,10 +5,11 @@ import {
   MAIN_BRAIN_COCKPIT_TEXT,
   RUNTIME_CENTER_TEXT,
   formatMainBrainSignalLabel,
-  localizeRuntimeText,
   formatRouteTitle,
+  formatRuntimeFieldLabel,
   formatRuntimeSectionLabel,
   formatRuntimeStatus,
+  localizeRuntimeText,
 } from "./text";
 
 describe("RuntimeCenter text", () => {
@@ -81,6 +82,13 @@ describe("RuntimeCenter text", () => {
   it("keeps explicit labels for execution-side host surfaces", () => {
     expect(formatRuntimeSectionLabel("host_twin")).toBe("宿主孪生");
     expect(formatRuntimeSectionLabel("workspace_graph")).toBe("工作区图谱");
+  });
+
+  it("keeps runtime review labels fully in Chinese", () => {
+    expect(formatRuntimeFieldLabel("headline")).toBe("回顾标题");
+    expect(formatRuntimeFieldLabel("objective")).toBe("任务目标");
+    expect(formatRuntimeFieldLabel("owner_agent_name")).toBe("负责人");
+    expect(formatRuntimeFieldLabel("embedding_api_key_configured")).toBe("已配置嵌入密钥");
   });
 
   it("labels the main-brain cockpit signals explicitly", () => {

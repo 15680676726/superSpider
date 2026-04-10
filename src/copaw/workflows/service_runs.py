@@ -842,15 +842,16 @@ class _WorkflowServiceRunMixin:
         persisted_task_ids, persisted_decision_ids, persisted_evidence_ids = (
             _workflow_step_persisted_runtime_ids(seed)
         )
+        goal_ids_from_context = list(
+            _workflow_goal_ids_by_step(
+                run,
+                goal_override_repository=self._goal_override_repository,
+            ).get(step_id, []),
+        )
         linked_goal_ids = (
             []
-            if persisted_task_ids or persisted_decision_ids or persisted_evidence_ids
-            else list(
-                _workflow_goal_ids_by_step(
-                    run,
-                    goal_override_repository=self._goal_override_repository,
-                ).get(step_id, []),
-            )
+            if persisted_decision_ids or persisted_evidence_ids
+            else goal_ids_from_context
         )
         linked_schedule_ids = _workflow_step_schedule_ids(
             run,

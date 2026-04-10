@@ -229,6 +229,10 @@ def test_buddy_repositories_round_trip_contract_fields(tmp_path) -> None:
         candidate_directions=["writing"],
         recommended_direction="writing",
         selected_direction="writing",
+        activation_id="activation-1",
+        activation_status="queued",
+        activation_error="",
+        activation_attempt_count=2,
         draft_direction="writing",
         draft_final_goal="Ship a weekly essay",
         draft_why_it_matters="Momentum compounds with visible output.",
@@ -247,6 +251,10 @@ def test_buddy_repositories_round_trip_contract_fields(tmp_path) -> None:
     assert stored_session is not None
     assert stored_session.service_intent == session.service_intent
     assert stored_session.confirm_boundaries == ["payments", "publishing"]
+    assert stored_session.activation_id == "activation-1"
+    assert stored_session.activation_status == "queued"
+    assert stored_session.activation_error == ""
+    assert stored_session.activation_attempt_count == 2
     assert stored_session.draft_backlog_items == [{"title": "Write outline"}]
 
     with sqlite3.connect(database_path) as conn:
@@ -270,7 +278,8 @@ def test_buddy_repositories_round_trip_contract_fields(tmp_path) -> None:
         session_row = conn.execute(
             """
             SELECT service_intent, collaboration_role, autonomy_level,
-                   confirm_boundaries_json, report_style, collaboration_notes
+                   confirm_boundaries_json, report_style, collaboration_notes,
+                   activation_id, activation_status, activation_error, activation_attempt_count
             FROM buddy_onboarding_sessions
             WHERE session_id = ?
             """,
@@ -289,6 +298,10 @@ def test_buddy_repositories_round_trip_contract_fields(tmp_path) -> None:
     assert session_row is not None
     assert session_row[0] == "co-drive weekly execution with clear boundaries"
     assert json.loads(session_row[3]) == ["payments", "publishing"]
+    assert session_row[6] == "activation-1"
+    assert session_row[7] == "queued"
+    assert session_row[8] == ""
+    assert session_row[9] == 2
 
 
 def test_buddy_models_accept_points_and_gate_metrics() -> None:

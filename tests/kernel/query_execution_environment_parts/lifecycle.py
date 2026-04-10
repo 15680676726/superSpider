@@ -460,7 +460,7 @@ def test_query_execution_service_uses_agent_profile_and_capability_graph(
     assert "# Team Roster" in agent.kwargs["prompt_appendix"]
     assert "# Delegation Policy" in agent.kwargs["prompt_appendix"]
     assert "# Team Operating Model" in agent.kwargs["prompt_appendix"]
-    assert "Operating mode: team control core." in agent.kwargs["prompt_appendix"]
+    assert "- Task mode: team orchestration" in agent.kwargs["prompt_appendix"]
     assert "Prefer dispatching, delegating, supervising, and verifying" in agent.kwargs[
         "prompt_appendix"
     ]
@@ -756,9 +756,9 @@ def test_query_execution_service_injects_execution_core_industry_identity(
     assert "Current focus:" not in prompt_appendix
     assert "# Execution Core Identity" in prompt_appendix
     assert "# Team Operating Model" in prompt_appendix
-    assert "Identity label: Ops Industry Team / 白泽执行中枢" in prompt_appendix
-    assert "Thinking axis: Industry focus: Operations consulting" in prompt_appendix
-    assert "Thinking axis: Channel lens: LinkedIn, Email" in prompt_appendix
+    assert "身份标签：Ops Industry Team / 白泽执行中枢" in prompt_appendix
+    assert "思考轴：Industry focus: Operations consulting" in prompt_appendix
+    assert "思考轴：Channel lens: LinkedIn, Email" in prompt_appendix
 
 
 def test_query_execution_service_keeps_execution_core_identity_for_task_chat_session(
@@ -836,7 +836,7 @@ def test_query_execution_service_keeps_execution_core_identity_for_task_chat_ses
     assert "Industry role id: execution-core" in prompt_appendix
     assert "# Execution Core Identity" in prompt_appendix
     assert "# Strategy Memory" in prompt_appendix
-    assert "Identity label: Ops Industry Team /" in prompt_appendix
+    assert "身份标签：Ops Industry Team /" in prompt_appendix
     assert (
         "Mission: Keep the runtime center reliable while delegating the next concrete move."
         in prompt_appendix
@@ -1391,9 +1391,9 @@ def test_query_execution_service_limits_strategy_memory_surface_in_prompt(
     for marker in ("PRIORITY-01", "PRIORITY-02", "PRIORITY-03", "PRIORITY-04"):
         assert f"Priority: {marker}" in prompt_appendix
     for marker in ("DELEGATE-01", "DELEGATE-02", "DELEGATE-03"):
-        assert f"Delegation rule: {marker}" in prompt_appendix
+        assert f"派工规则：{marker}" in prompt_appendix
     for marker in ("DIRECT-01", "DIRECT-02"):
-        assert f"Direct execution rule: {marker}" in prompt_appendix
+        assert f"直接执行规则：{marker}" in prompt_appendix
     for marker in ("CONSTRAINT-01", "CONSTRAINT-02", "CONSTRAINT-03", "CONSTRAINT-04"):
         assert f"Execution constraint: {marker}" in prompt_appendix
     for marker in (

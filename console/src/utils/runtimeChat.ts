@@ -214,7 +214,7 @@ export function buildBoundAgentChatBinding(params: {
     normalizeThreadId(params.threadId);
   if (!threadId) {
     throw new Error(
-      `Agent '${params.agentName || params.agentId}' does not have a live chat binding.`,
+      `智能体“${params.agentName || params.agentId}”当前没有可用的正式聊天线程。`,
     );
   }
   const bindingMeta =
@@ -333,6 +333,7 @@ export async function openRuntimeChat(
   binding: RuntimeChatBinding,
   navigate: NavigateFunction,
   options?: {
+    replace?: boolean;
     shouldNavigate?: () => boolean;
   },
 ): Promise<void> {
@@ -340,5 +341,7 @@ export async function openRuntimeChat(
   if (options?.shouldNavigate && !options.shouldNavigate()) {
     return;
   }
-  navigate(`/chat?threadId=${encodeURIComponent(thread.id)}`);
+  navigate(`/chat?threadId=${encodeURIComponent(thread.id)}`, {
+    replace: options?.replace === true,
+  });
 }

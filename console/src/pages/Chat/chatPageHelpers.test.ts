@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   resolveChatRouteRecoveryTarget,
   resolveChatThreadBootstrapState,
+  shouldRefreshBoundThreadFromRuntimeEvent,
 } from "./chatPageHelpers";
 
 describe("chatPageHelpers", () => {
@@ -60,5 +61,53 @@ describe("chatPageHelpers", () => {
       initialAutoBindingPending: false,
       recoveryTarget: null,
     });
+  });
+
+  it("refreshes a bound formal thread when execution-progress events arrive", () => {
+    expect(
+      shouldRefreshBoundThreadFromRuntimeEvent({
+        requestedThreadId: "industry-chat:industry-1:execution-core",
+        requestedThreadLooksBound: true,
+        eventName: "assignment.updated",
+      }),
+    ).toBe(true);
+    expect(
+      shouldRefreshBoundThreadFromRuntimeEvent({
+        requestedThreadId: "industry-chat:industry-1:execution-core",
+        requestedThreadLooksBound: true,
+        eventName: "report.created",
+      }),
+    ).toBe(true);
+    expect(
+      shouldRefreshBoundThreadFromRuntimeEvent({
+        requestedThreadId: "industry-chat:industry-1:execution-core",
+        requestedThreadLooksBound: true,
+        eventName: "task.completed",
+      }),
+    ).toBe(true);
+  });
+
+  it("ignores heartbeat and unrelated events for bound thread refresh", () => {
+    expect(
+      shouldRefreshBoundThreadFromRuntimeEvent({
+        requestedThreadId: "industry-chat:industry-1:execution-core",
+        requestedThreadLooksBound: true,
+        eventName: "runtime.heartbeat",
+      }),
+    ).toBe(false);
+    expect(
+      shouldRefreshBoundThreadFromRuntimeEvent({
+        requestedThreadId: "industry-chat:industry-1:execution-core",
+        requestedThreadLooksBound: true,
+        eventName: "model.changed",
+      }),
+    ).toBe(false);
+    expect(
+      shouldRefreshBoundThreadFromRuntimeEvent({
+        requestedThreadId: null,
+        requestedThreadLooksBound: false,
+        eventName: "report.created",
+      }),
+    ).toBe(false);
   });
 });

@@ -8,6 +8,15 @@
 
 **Tech Stack:** FastAPI, Pydantic, Python state/kernel services, React + TypeScript + Ant Design, Less, pytest, frontend unit tests
 
+> **状态更新（2026-04-11）：**
+> 这份计划仍然是 Buddy 总体施工顺序的基础文档，但其中关于 onboarding 第二步“clarification flow / 9 问澄清”的内容已经被后续 hard-cut 文档正式替代。
+> 当前 onboarding 的唯一有效细节合同以以下文档为准：
+> - `docs/superpowers/specs/2026-04-10-buddy-onboarding-collaboration-contract-cutover-design.md`
+> - `docs/superpowers/plans/2026-04-10-buddy-onboarding-collaboration-contract-cutover-implementation-plan.md`
+> 当前正式前门不是 `/buddy/onboarding/clarify*`，而是：
+> `identity -> contract -> candidates -> direction-transition-preview -> confirm-direction -> name -> surface`
+> 本文其余段落若仍出现 `clarification / clarify / question_count / next_question / existing_question_count` 等旧措辞，均视为历史施工痕迹，不再代表当前正式实现合同。
+
 ---
 
 ## File Structure
@@ -19,7 +28,7 @@
 - `src/copaw/state/repositories_buddy.py`
   - persistence seams for human profile / relationship / direction-confirmation data
 - `src/copaw/kernel/buddy_onboarding_service.py`
-  - onboarding identity intake, clarification turn handling, candidate direction generation, primary direction confirmation
+  - onboarding identity intake, collaboration contract compile, candidate direction generation, primary direction confirmation
 - `src/copaw/kernel/buddy_projection_service.py`
   - derive Buddy presentation/growth payload from formal truth
 - `src/copaw/app/routers/buddy_routes.py`
@@ -45,7 +54,7 @@
 - `console/src/api/modules/buddy.ts`
   - onboarding + buddy surface API client
 - `console/src/pages/BuddyOnboarding/index.tsx`
-  - first-entry identity form + clarification flow
+  - first-entry identity form + collaboration contract flow
 - `console/src/pages/BuddyOnboarding/index.test.tsx`
   - onboarding UI tests
 - `console/src/pages/Chat/BuddyCompanion.tsx`

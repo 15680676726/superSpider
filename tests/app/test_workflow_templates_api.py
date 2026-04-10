@@ -987,7 +987,7 @@ def test_workflow_presets_can_be_created_and_applied(tmp_path) -> None:
     assert preview_payload["parameters"]["daily_review_time"] == "0 7 * * *"
 
 
-def test_workflow_template_launch_route_is_retired(tmp_path) -> None:
+def test_workflow_template_launch_route_materializes_run(tmp_path) -> None:
     client = TestClient(_build_workflow_app(tmp_path))
     instance_id = _bootstrap_industry(client)
 
@@ -1004,7 +1004,11 @@ def test_workflow_template_launch_route_is_retired(tmp_path) -> None:
             "execute": False,
         },
     )
-    assert launched.status_code == 404
+    assert launched.status_code == 200
+    launched_payload = launched.json()
+    assert launched_payload["run"]["template_id"] == "industry-weekly-research-synthesis"
+    assert launched_payload["run"]["industry_instance_id"] == instance_id
+    assert launched_payload["diagnosis"]["status"] == "planned"
 
 
 def test_workflow_template_service_launch_materializes_run(tmp_path) -> None:
@@ -1177,31 +1181,25 @@ def test_workflow_run_step_detail_stays_read_only_and_service_resume_rehydrates_
         ),
     )
 
-    retired = client.post(
+    resumed = client.post(
         f"/workflow-runs/{run_id}/resume",
         json={"actor": "copaw-operator"},
     )
-    assert retired.status_code == 404
-
-    resumed = asyncio.run(
-        client.app.state.workflow_template_service.resume_run(
-            run_id,
-            actor="copaw-operator",
-        )
-    )
-    assert (dict(resumed.run or {}).get("metadata") or {}).get("resume_count") == 1
+    assert resumed.status_code == 200
+    resumed_payload = resumed.json()
+    assert (dict(resumed_payload["run"] or {}).get("metadata") or {}).get("resume_count") == 1
     resumed_goal_step = next(
         item
-        for item in resumed.step_execution
-        if item.step_id == goal_step["step_id"]
+        for item in resumed_payload["step_execution"]
+        if item["step_id"] == goal_step["step_id"]
     )
     resumed_schedule_step = next(
         item
-        for item in resumed.step_execution
-        if item.step_id == schedule_step["step_id"]
+        for item in resumed_payload["step_execution"]
+        if item["step_id"] == schedule_step["step_id"]
     )
-    assert not hasattr(resumed_goal_step, "linked_goal_ids")
-    assert not hasattr(resumed_schedule_step, "linked_schedule_ids")
+    assert "linked_goal_ids" not in resumed_goal_step
+    assert "linked_schedule_ids" not in resumed_schedule_step
 
     resumed_step_detail = client.get(
         f"/workflow-runs/{run_id}/steps/{goal_step['step_id']}",
@@ -1238,9 +1236,12 @@ def test_workflow_step_detail_prefers_persisted_task_links_over_legacy_goal_link
         for item in detail_payload["step_execution"]
         if item["kind"] == "goal"
     )
-    step_detail = client.get(f"/workflow-runs/{run_id}/steps/{goal_step['step_id']}")
-    assert step_detail.status_code == 200
-    goal_id = step_detail.json()["linked_goals"][0]["id"]
+    linked_task_id = goal_step["linked_task_ids"][0]
+    goal_id = next(
+        item["goal_id"]
+        for item in detail_payload["tasks"]
+        if item["id"] == linked_task_id
+    )
     service = client.app.state.workflow_template_service
     service._task_repository.upsert_task(
         TaskRecord(
@@ -1332,6 +1333,95 @@ def test_workflow_step_detail_prefers_persisted_task_links_over_legacy_goal_link
     refreshed_step_detail_payload = refreshed_step_detail.json()
     assert refreshed_step_detail_payload["linked_goals"] == []
     assert refreshed_step_detail_payload["linked_tasks"]
+
+
+def test_workflow_run_detail_persists_runtime_links_back_to_run_seed(tmp_path) -> None:
+    client = TestClient(_build_workflow_app(tmp_path))
+    instance_id = _bootstrap_industry(client)
+
+    launched = _launch_workflow_via_service(
+        client,
+        template_id="industry-weekly-research-synthesis",
+        industry_instance_id=instance_id,
+        parameters={
+            "focus_area": "channel conversion",
+            "weekly_review_cron": "0 12 * * 2",
+            "timezone": "UTC",
+        },
+    )
+    run_id = launched.run["run_id"]
+
+    detail = client.get(f"/workflow-runs/{run_id}")
+    assert detail.status_code == 200
+    detail_payload = detail.json()
+    goal_step = next(
+        item
+        for item in detail_payload["step_execution"]
+        if item["kind"] == "goal"
+    )
+    linked_task_id = goal_step["linked_task_ids"][0]
+    goal_id = next(
+        item["goal_id"]
+        for item in detail_payload["tasks"]
+        if item["id"] == linked_task_id
+    )
+
+    service = client.app.state.workflow_template_service
+    service._task_repository.upsert_task(
+        TaskRecord(
+            id="task-workflow-auto-persist",
+            goal_id=goal_id,
+            title="Workflow auto-persist follow-up",
+            summary="Run detail should write linked runtime ids back into workflow run truth.",
+            task_type="analysis",
+            status="running",
+            owner_agent_id="industry-solution-lead-northwind-robotics",
+        ),
+    )
+    service._decision_request_repository.upsert_decision_request(
+        DecisionRequestRecord(
+            id="decision-workflow-auto-persist",
+            task_id="task-workflow-auto-persist",
+            decision_type="manual-review",
+            summary="Confirm the linked workflow follow-up.",
+            requested_by="copaw-operator",
+            status="reviewing",
+        ),
+    )
+    service._evidence_ledger.append(
+        EvidenceRecord(
+            task_id="task-workflow-auto-persist",
+            actor_ref="industry-solution-lead-northwind-robotics",
+            capability_ref="analysis",
+            risk_level="guarded",
+            action_summary="Captured workflow-linked progress",
+            result_summary="Workflow-linked task is active.",
+        ),
+    )
+
+    refreshed = client.get(f"/workflow-runs/{run_id}")
+    assert refreshed.status_code == 200
+    refreshed_payload = refreshed.json()
+    refreshed_goal_step = next(
+        item
+        for item in refreshed_payload["step_execution"]
+        if item["step_id"] == goal_step["step_id"]
+    )
+    assert refreshed_goal_step["linked_task_ids"]
+    assert refreshed_goal_step["linked_decision_ids"]
+    assert refreshed_goal_step["linked_evidence_ids"]
+
+    run_record = client.app.state.workflow_run_repository.get_run(run_id)
+    assert run_record is not None
+    step_seed_by_id = {
+        str(item.get("step_id") or ""): dict(item)
+        for item in list(dict(run_record.metadata or {}).get("step_execution_seed") or [])
+        if isinstance(item, dict)
+    }
+    persisted_goal_step = step_seed_by_id[goal_step["step_id"]]
+    assert persisted_goal_step["linked_task_ids"] == refreshed_goal_step["linked_task_ids"]
+    assert persisted_goal_step["linked_decision_ids"] == refreshed_goal_step["linked_decision_ids"]
+    assert persisted_goal_step["linked_evidence_ids"] == refreshed_goal_step["linked_evidence_ids"]
 
 
 def test_workflow_step_detail_uses_goal_override_context_when_legacy_goal_links_are_missing(

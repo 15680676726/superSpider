@@ -93,4 +93,37 @@ describe("ChatAccessGate", () => {
     fireEvent.click(screen.getByRole("button", { name: /去模型设置/ }));
     expect(onOpenModelSettings).toHaveBeenCalledTimes(1);
   });
+
+  it("offers reload first when a bound chat thread fails to recover", () => {
+    const onReload = vi.fn();
+    const onOpenIdentityCenter = vi.fn();
+
+    render(
+      <ChatAccessGate
+        chatNoticeVariant="binding"
+        threadBootstrapError="session missing"
+        autoBindingPending={false}
+        requestedThreadId="industry-chat:industry-1:execution-core"
+        industryTeamsError={null}
+        hasSuggestedTeams={false}
+        effectiveThreadPending={false}
+        showModelPrompt={false}
+        onCloseModelPrompt={vi.fn()}
+        onOpenModelSettings={vi.fn()}
+        onOpenIdentityCenter={onOpenIdentityCenter}
+        onReload={onReload}
+      />,
+    );
+
+    expect(screen.getByText("这段聊天暂时打不开")).toBeInTheDocument();
+    expect(
+      screen.getByText("先重新加载这段聊天；如果还是不行，再回到建档入口。"),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "重新加载" }));
+    expect(onReload).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "前往身份中心" }));
+    expect(onOpenIdentityCenter).toHaveBeenCalledTimes(1);
+  });
 });

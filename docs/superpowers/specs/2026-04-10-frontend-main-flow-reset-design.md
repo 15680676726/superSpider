@@ -2,6 +2,11 @@
 
 ## Why This Exists
 
+> **状态更新（2026-04-11）：**
+> 这份文档继续负责“前端主路径 / 壳层稳定 / 页面切换 / 右侧面板时机”这些问题。
+> 但它不再定义 Buddy onboarding 第二步的具体内容。
+> onboarding 第二步已被 `2026-04-10-buddy-onboarding-collaboration-contract-cutover-design.md` 正式改成“协作合同表单”，因此本文里所有“不要改建档提问内容 / 保持原问答内容不变”的说法都已失效。
+
 The current frontend feels slow, jumpy, and overcomplicated because the main user path is no longer simple:
 
 - onboarding and chat responsibilities are mixed together
@@ -26,7 +31,7 @@ This design resets the frontend back to a simple main flow:
 
 ## Non-Goals
 
-- Do not redesign the onboarding question content.
+- Do not redefine the collaboration-contract fields in onboarding step 2 here.
 - Do not redesign the current right-panel content in this pass.
 - Do not rebuild the entire frontend from scratch.
 
@@ -61,7 +66,7 @@ The onboarding page is only responsible for creating the profile correctly.
 
 ### Rules
 
-- Keep the current onboarding content unchanged.
+- Keep the onboarding shell and step boundaries stable; step-2 field content follows the collaboration-contract cutover spec.
 - Use 3 steps.
 - Move buddy naming into step 3.
 - Auto-save after each step.

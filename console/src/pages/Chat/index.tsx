@@ -28,6 +28,7 @@ import type {
   MediaAnalysisSummary,
   MediaSourceSpec,
 } from "../../api/modules/media";
+import { subscribe } from "../../runtime/eventBus";
 import { resolveMediaTitle } from "../../utils/mediaPresentation";
 import type { ChatMediaDraftItem } from "./useChatMedia";
 import { ChatAccessGate } from "./ChatAccessGate";
@@ -35,6 +36,7 @@ import {
   normalizeThreadId,
   normalizeThreadMeta,
   resolveChatThreadBootstrapState,
+  shouldRefreshBoundThreadFromRuntimeEvent,
 } from "./chatPageHelpers";
 import {
   resolveChatComposerKey,
@@ -272,6 +274,7 @@ export default function ChatPage() {
   const [, setRuntimeHealthNotice] = useState<unknown>(null);
   const [, setRuntimeLifecycleState] = useState<unknown>(null);
   const recoveryAttemptsRef = useRef<Set<string>>(new Set());
+  const threadRefreshTimerRef = useRef<number | null>(null);
   const optionsConfig: OptionsConfig = defaultConfig;
 
   const activeWorkContextId =
@@ -370,6 +373,55 @@ export default function ChatPage() {
     window.addEventListener("copaw:thread-context", sync);
     return () => window.removeEventListener("copaw:thread-context", sync);
   }, []);
+
+  useEffect(() => {
+    if (!requestedThreadId || !requestedThreadLooksBound) {
+      return;
+    }
+    let cancelled = false;
+    const scheduleRefresh = () => {
+      if (threadRefreshTimerRef.current !== null) {
+        window.clearTimeout(threadRefreshTimerRef.current);
+      }
+      threadRefreshTimerRef.current = window.setTimeout(() => {
+        threadRefreshTimerRef.current = null;
+        void sessionApi.getSession(requestedThreadId)
+          .then((thread) => {
+            if (cancelled) {
+              return;
+            }
+            setThreadMeta(
+              normalizeThreadMeta((thread as { meta?: Record<string, unknown> }).meta),
+            );
+          })
+          .catch(() => {
+            // Keep the current chat stable when a background refresh misses.
+          });
+      }, 350);
+    };
+
+    const unsubscribe = subscribe("*", (event) => {
+      if (
+        !shouldRefreshBoundThreadFromRuntimeEvent({
+          requestedThreadId,
+          requestedThreadLooksBound,
+          eventName: event.event_name,
+        })
+      ) {
+        return;
+      }
+      scheduleRefresh();
+    });
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+      if (threadRefreshTimerRef.current !== null) {
+        window.clearTimeout(threadRefreshTimerRef.current);
+        threadRefreshTimerRef.current = null;
+      }
+    };
+  }, [requestedThreadId, requestedThreadLooksBound]);
 
   const runtimeState = useChatRuntimeState({
     activeAgentId,

@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-STATE_SCHEMA_VERSION = 36
+STATE_SCHEMA_VERSION = 37
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS human_profiles (
@@ -79,6 +79,10 @@ CREATE TABLE IF NOT EXISTS buddy_onboarding_sessions (
     confirm_boundaries_json TEXT NOT NULL DEFAULT '[]',
     report_style TEXT NOT NULL DEFAULT 'result-first',
     collaboration_notes TEXT NOT NULL DEFAULT '',
+    activation_id TEXT NOT NULL DEFAULT '',
+    activation_status TEXT NOT NULL DEFAULT 'idle',
+    activation_error TEXT NOT NULL DEFAULT '',
+    activation_attempt_count INTEGER NOT NULL DEFAULT 0,
     candidate_directions_json TEXT NOT NULL DEFAULT '[]',
     recommended_direction TEXT NOT NULL DEFAULT '',
     selected_direction TEXT NOT NULL DEFAULT '',
@@ -2102,6 +2106,10 @@ _ADDITIVE_SCHEMA_COLUMNS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = 
             ("operation_kind", "TEXT NOT NULL DEFAULT ''"),
             ("operation_status", "TEXT NOT NULL DEFAULT 'idle'"),
             ("operation_error", "TEXT NOT NULL DEFAULT ''"),
+            ("activation_id", "TEXT NOT NULL DEFAULT ''"),
+            ("activation_status", "TEXT NOT NULL DEFAULT 'idle'"),
+            ("activation_error", "TEXT NOT NULL DEFAULT ''"),
+            ("activation_attempt_count", "INTEGER NOT NULL DEFAULT 0"),
         ),
     ),
     (
@@ -2230,6 +2238,14 @@ def _migrate_buddy_onboarding_sessions_contract_table(
     legacy_columns = {"question_count", "tightened", "next_question", "transcript_json"}
     if legacy_columns.isdisjoint(columns):
         return
+    activation_id_sql = "COALESCE(activation_id, '')" if "activation_id" in columns else "''"
+    activation_status_sql = "COALESCE(activation_status, 'idle')" if "activation_status" in columns else "'idle'"
+    activation_error_sql = "COALESCE(activation_error, '')" if "activation_error" in columns else "''"
+    activation_attempt_count_sql = (
+        "COALESCE(activation_attempt_count, 0)"
+        if "activation_attempt_count" in columns
+        else "0"
+    )
     conn.execute(
         "ALTER TABLE buddy_onboarding_sessions RENAME TO buddy_onboarding_sessions_legacy_cutover",
     )
@@ -2243,6 +2259,10 @@ def _migrate_buddy_onboarding_sessions_contract_table(
             operation_kind TEXT NOT NULL DEFAULT '',
             operation_status TEXT NOT NULL DEFAULT 'idle',
             operation_error TEXT NOT NULL DEFAULT '',
+            activation_id TEXT NOT NULL DEFAULT '',
+            activation_status TEXT NOT NULL DEFAULT 'idle',
+            activation_error TEXT NOT NULL DEFAULT '',
+            activation_attempt_count INTEGER NOT NULL DEFAULT 0,
             service_intent TEXT NOT NULL DEFAULT '',
             collaboration_role TEXT NOT NULL DEFAULT 'orchestrator',
             autonomy_level TEXT NOT NULL DEFAULT 'proactive',
@@ -2263,10 +2283,11 @@ def _migrate_buddy_onboarding_sessions_contract_table(
         """,
     )
     conn.execute(
-        """
+        f"""
         INSERT INTO buddy_onboarding_sessions (
             session_id, profile_id, status,
             operation_id, operation_kind, operation_status, operation_error,
+            activation_id, activation_status, activation_error, activation_attempt_count,
             service_intent, collaboration_role, autonomy_level,
             confirm_boundaries_json, report_style, collaboration_notes,
             candidate_directions_json, recommended_direction, selected_direction,
@@ -2284,6 +2305,10 @@ def _migrate_buddy_onboarding_sessions_contract_table(
             COALESCE(operation_kind, ''),
             COALESCE(operation_status, 'idle'),
             COALESCE(operation_error, ''),
+            {activation_id_sql},
+            {activation_status_sql},
+            {activation_error_sql},
+            {activation_attempt_count_sql},
             COALESCE(service_intent, ''),
             COALESCE(collaboration_role, 'orchestrator'),
             COALESCE(autonomy_level, 'proactive'),

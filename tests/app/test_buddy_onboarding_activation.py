@@ -70,53 +70,21 @@ class _FakeIndustryService:
         }
 
 
-class _FakeWritingBuddyReasoner:
-    def plan_turn(
-        self,
-        *,
-        profile,
-        transcript,
-        question_count: int,
-        tightened: bool,
-    ) -> BuddyOnboardingReasonedTurn:
-        _ = (profile, transcript, tightened)
-        finished = question_count >= 2
-        return BuddyOnboardingReasonedTurn(
-            finished=finished,
-            next_question="" if finished else "你是先写长篇连载，还是先做第一章验证？",
-            candidate_directions=["建立稳定、可持续的写作与内容发布成长路径"],
-            recommended_direction="建立稳定、可持续的写作与内容发布成长路径",
-        )
+class _FlakyIndustryService:
+    def __init__(self, *, fail_times: int = 1) -> None:
+        self.fail_times = fail_times
+        self.calls: list[dict[str, object]] = []
 
-    def build_growth_plan(
-        self,
-        *,
-        profile,
-        transcript,
-        selected_direction: str,
-    ) -> BuddyOnboardingGrowthPlan:
-        _ = (profile, transcript)
-        return BuddyOnboardingGrowthPlan(
-            primary_direction=selected_direction,
-            final_goal="先建立稳定的番茄写作与发布节奏，并产出第一轮作品证据。",
-            why_it_matters="把写作从口头计划收成能持续发布、能形成作品资产的长期主线。",
-            backlog_items=[
-                BuddyOnboardingBacklogSeed(
-                    lane_hint="growth-focus",
-                    title="明确连载方向与更新节奏",
-                    summary="先确定题材、更新频率和最小可持续字数目标。",
-                    priority=3,
-                    source_key="writing-direction",
-                ),
-                BuddyOnboardingBacklogSeed(
-                    lane_hint="proof-of-work",
-                    title="完成第一章并进入平台草稿",
-                    summary="完成第一章初稿，准备进入番茄平台草稿箱。",
-                    priority=2,
-                    source_key="writing-first-chapter",
-                ),
-            ],
-        )
+    async def kickoff_execution_from_chat(self, **kwargs):
+        self.calls.append(dict(kwargs))
+        if self.fail_times > 0:
+            self.fail_times -= 1
+            raise RuntimeError("kickoff exploded")
+        return {
+            "activated": True,
+            "industry_instance_id": kwargs["industry_instance_id"],
+            "started_assignment_ids": ["assignment-1"],
+        }
 
 
 class _ContractWritingBuddyReasoner:
@@ -282,6 +250,201 @@ def test_buddy_confirm_direction_auto_activates_execution_when_industry_service_
         "growth-focus",
         "proof-of-work",
     }
+
+
+def test_buddy_confirm_direction_persists_activation_failure_before_surface_retry(tmp_path) -> None:
+    store = SQLiteStateStore(tmp_path / "buddy-onboarding-activation-failure.sqlite3")
+    profile_repository = SqliteHumanProfileRepository(store)
+    growth_target_repository = SqliteGrowthTargetRepository(store)
+    relationship_repository = SqliteCompanionRelationshipRepository(store)
+    domain_capability_repository = SqliteBuddyDomainCapabilityRepository(store)
+    session_repository = SqliteBuddyOnboardingSessionRepository(store)
+    industry_repository = SqliteIndustryInstanceRepository(store)
+    lane_service = OperatingLaneService(repository=SqliteOperatingLaneRepository(store))
+    backlog_service = BacklogService(repository=SqliteBacklogItemRepository(store))
+    cycle_service = OperatingCycleService(repository=SqliteOperatingCycleRepository(store))
+    assignment_service = AssignmentService(repository=SqliteAssignmentRepository(store))
+    growth_service = BuddyDomainCapabilityGrowthService(
+        domain_capability_repository=domain_capability_repository,
+        industry_instance_repository=industry_repository,
+        operating_lane_service=lane_service,
+        backlog_service=backlog_service,
+        operating_cycle_service=cycle_service,
+        assignment_service=assignment_service,
+    )
+    onboarding_service = BuddyOnboardingService(
+        profile_repository=profile_repository,
+        growth_target_repository=growth_target_repository,
+        relationship_repository=relationship_repository,
+        domain_capability_repository=domain_capability_repository,
+        onboarding_session_repository=session_repository,
+        onboarding_reasoner=DeterministicBuddyReasoner(),
+        industry_instance_repository=industry_repository,
+        operating_lane_service=lane_service,
+        backlog_service=backlog_service,
+        operating_cycle_service=cycle_service,
+        assignment_service=assignment_service,
+        domain_capability_growth_service=growth_service,
+    )
+    projection_service = BuddyProjectionService(
+        profile_repository=profile_repository,
+        growth_target_repository=growth_target_repository,
+        relationship_repository=relationship_repository,
+        domain_capability_repository=domain_capability_repository,
+        onboarding_session_repository=session_repository,
+        domain_capability_growth_service=growth_service,
+        current_focus_resolver=lambda _profile_id: {},
+    )
+    fake_industry_service = _FlakyIndustryService(fail_times=1)
+    app = FastAPI()
+    app.include_router(buddy_router)
+    app.state.buddy_onboarding_service = onboarding_service
+    app.state.buddy_projection_service = projection_service
+    app.state.industry_service = fake_industry_service
+    client = TestClient(app)
+
+    identity = client.post(
+        "/buddy/onboarding/identity",
+        json={
+            "display_name": "Kai",
+            "profession": "Analyst",
+            "current_stage": "restart",
+            "interests": ["stocks", "trading"],
+            "strengths": ["discipline"],
+            "constraints": ["money"],
+            "goal_intention": "I want a real stock trading path.",
+        },
+    ).json()
+    contract = _submit_contract(
+        client,
+        identity["session_id"],
+        service_intent="Help me build a durable trading system with clear risk control.",
+    )
+
+    response = client.post(
+        "/buddy/onboarding/confirm-direction",
+        json={
+            "session_id": identity["session_id"],
+            "selected_direction": contract["recommended_direction"],
+            "capability_action": "start-new",
+        },
+    )
+
+    assert response.status_code == 200
+    deadline = time.time() + 1.5
+    session_payload = None
+    while time.time() < deadline:
+        session_payload = session_repository.get_latest_session_for_profile(
+            identity["profile"]["profile_id"],
+        )
+        if (
+            session_payload is not None
+            and session_payload.activation_status == "failed"
+        ):
+            break
+        time.sleep(0.02)
+
+    assert session_payload is not None
+    assert session_payload.activation_status == "failed"
+    assert "kickoff exploded" in session_payload.activation_error
+
+
+def test_buddy_surface_requeues_failed_activation_and_marks_it_succeeded(tmp_path) -> None:
+    store = SQLiteStateStore(tmp_path / "buddy-onboarding-activation-retry.sqlite3")
+    profile_repository = SqliteHumanProfileRepository(store)
+    growth_target_repository = SqliteGrowthTargetRepository(store)
+    relationship_repository = SqliteCompanionRelationshipRepository(store)
+    domain_capability_repository = SqliteBuddyDomainCapabilityRepository(store)
+    session_repository = SqliteBuddyOnboardingSessionRepository(store)
+    industry_repository = SqliteIndustryInstanceRepository(store)
+    lane_service = OperatingLaneService(repository=SqliteOperatingLaneRepository(store))
+    backlog_service = BacklogService(repository=SqliteBacklogItemRepository(store))
+    cycle_service = OperatingCycleService(repository=SqliteOperatingCycleRepository(store))
+    assignment_service = AssignmentService(repository=SqliteAssignmentRepository(store))
+    growth_service = BuddyDomainCapabilityGrowthService(
+        domain_capability_repository=domain_capability_repository,
+        industry_instance_repository=industry_repository,
+        operating_lane_service=lane_service,
+        backlog_service=backlog_service,
+        operating_cycle_service=cycle_service,
+        assignment_service=assignment_service,
+    )
+    onboarding_service = BuddyOnboardingService(
+        profile_repository=profile_repository,
+        growth_target_repository=growth_target_repository,
+        relationship_repository=relationship_repository,
+        domain_capability_repository=domain_capability_repository,
+        onboarding_session_repository=session_repository,
+        onboarding_reasoner=DeterministicBuddyReasoner(),
+        industry_instance_repository=industry_repository,
+        operating_lane_service=lane_service,
+        backlog_service=backlog_service,
+        operating_cycle_service=cycle_service,
+        assignment_service=assignment_service,
+        domain_capability_growth_service=growth_service,
+    )
+    projection_service = BuddyProjectionService(
+        profile_repository=profile_repository,
+        growth_target_repository=growth_target_repository,
+        relationship_repository=relationship_repository,
+        domain_capability_repository=domain_capability_repository,
+        onboarding_session_repository=session_repository,
+        domain_capability_growth_service=growth_service,
+        current_focus_resolver=lambda _profile_id: {},
+    )
+    flaky_industry_service = _FlakyIndustryService(fail_times=1)
+    app = FastAPI()
+    app.include_router(buddy_router)
+    app.state.buddy_onboarding_service = onboarding_service
+    app.state.buddy_projection_service = projection_service
+    app.state.industry_service = flaky_industry_service
+    client = TestClient(app)
+
+    identity = client.post(
+        "/buddy/onboarding/identity",
+        json={
+            "display_name": "Kai",
+            "profession": "Analyst",
+            "current_stage": "restart",
+            "interests": ["stocks", "trading"],
+            "strengths": ["discipline"],
+            "constraints": ["money"],
+            "goal_intention": "I want a real stock trading path.",
+        },
+    ).json()
+    contract = _submit_contract(
+        client,
+        identity["session_id"],
+        service_intent="Help me build a durable trading system with clear risk control.",
+    )
+
+    response = client.post(
+        "/buddy/onboarding/confirm-direction",
+        json={
+            "session_id": identity["session_id"],
+            "selected_direction": contract["recommended_direction"],
+            "capability_action": "start-new",
+        },
+    )
+
+    assert response.status_code == 200
+    deadline = time.time() + 2.0
+    surface_payload = None
+    while time.time() < deadline:
+        candidate = client.get(
+            "/buddy/surface",
+            params={"profile_id": identity["profile"]["profile_id"]},
+        )
+        assert candidate.status_code == 200
+        surface_payload = candidate.json()
+        if surface_payload["onboarding"].get("activation_status") == "succeeded":
+            break
+        time.sleep(0.02)
+
+    assert len(flaky_industry_service.calls) >= 2
+    assert surface_payload is not None
+    assert surface_payload["onboarding"]["activation_status"] == "succeeded"
+    assert surface_payload["onboarding"]["activation_attempt_count"] >= 2
 
 
 def test_buddy_writing_instance_auto_closes_browser_specialist_gap_before_temp_seat(
@@ -987,6 +1150,12 @@ def test_buddy_confirm_direction_writes_back_completed_reports_to_control_thread
         message.get("metadata", {}).get("control_thread_id")
         for message in report_messages
     } == {control_thread_id}
+    first_message_text = (
+        (((report_messages[0].get("content") or [])[0] or {}).get("text"))
+        if report_messages
+        else ""
+    )
+    assert "我刚完成" in str(first_message_text)
 
 
 def test_buddy_confirm_direction_seeds_durable_execution_core_schedules(

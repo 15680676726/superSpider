@@ -31,6 +31,10 @@ class BuddyOnboardingSessionRecord(UpdatedRecord):
     confirm_boundaries: list[str] = Field(default_factory=list)
     report_style: str = "result-first"
     collaboration_notes: str = ""
+    activation_id: str = ""
+    activation_status: str = "idle"
+    activation_error: str = ""
+    activation_attempt_count: int = 0
     candidate_directions: list[str] = Field(default_factory=list)
     recommended_direction: str = ""
     selected_direction: str = ""
@@ -71,6 +75,15 @@ def _decode_json_object_list(value: object | None) -> list[dict[str, object]]:
     if not isinstance(payload, list):
         return []
     return [dict(item) for item in payload if isinstance(item, dict)]
+
+
+def _coerce_int(value: object | None, default: int = 0) -> int:
+    if value in (None, ""):
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _human_profile_from_row(row) -> HumanProfile | None:
@@ -122,6 +135,10 @@ def _session_from_row(row) -> BuddyOnboardingSessionRecord | None:
     if row is None:
         return None
     payload = dict(row)
+    payload["activation_attempt_count"] = _coerce_int(
+        payload.get("activation_attempt_count"),
+        0,
+    )
     payload["confirm_boundaries"] = _decode_json_list(
         payload.pop("confirm_boundaries_json", None),
     )
@@ -538,6 +555,7 @@ class SqliteBuddyOnboardingSessionRepository:
                     operation_id, operation_kind, operation_status, operation_error,
                     service_intent, collaboration_role, autonomy_level,
                     confirm_boundaries_json, report_style, collaboration_notes,
+                    activation_id, activation_status, activation_error, activation_attempt_count,
                     candidate_directions_json,
                     recommended_direction, selected_direction,
                     draft_direction, draft_final_goal, draft_why_it_matters, draft_backlog_items_json,
@@ -546,7 +564,9 @@ class SqliteBuddyOnboardingSessionRepository:
                     :session_id, :profile_id, :status,
                     :operation_id, :operation_kind, :operation_status, :operation_error,
                     :service_intent, :collaboration_role, :autonomy_level,
-                    :confirm_boundaries_json, :report_style, :collaboration_notes, :candidate_directions_json,
+                    :confirm_boundaries_json, :report_style, :collaboration_notes,
+                    :activation_id, :activation_status, :activation_error, :activation_attempt_count,
+                    :candidate_directions_json,
                     :recommended_direction, :selected_direction,
                     :draft_direction, :draft_final_goal, :draft_why_it_matters, :draft_backlog_items_json,
                     :created_at, :updated_at
@@ -564,6 +584,10 @@ class SqliteBuddyOnboardingSessionRepository:
                     confirm_boundaries_json = excluded.confirm_boundaries_json,
                     report_style = excluded.report_style,
                     collaboration_notes = excluded.collaboration_notes,
+                    activation_id = excluded.activation_id,
+                    activation_status = excluded.activation_status,
+                    activation_error = excluded.activation_error,
+                    activation_attempt_count = excluded.activation_attempt_count,
                     candidate_directions_json = excluded.candidate_directions_json,
                     recommended_direction = excluded.recommended_direction,
                     selected_direction = excluded.selected_direction,

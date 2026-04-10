@@ -1,53 +1,43 @@
-import { describe, expect, it } from "vitest";
+// @vitest-environment jsdom
 
-import {
-  buildBuddyExecutionCarrierChatBinding,
-  resolveRuntimeChatEntryPath,
-} from "./runtimeChat";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-describe("resolveRuntimeChatEntryPath", () => {
-  it("keeps a formal runtime thread bound to the chat route", () => {
-    expect(
-      resolveRuntimeChatEntryPath("industry-chat:industry-1:execution-core"),
-    ).toBe("/chat?threadId=industry-chat%3Aindustry-1%3Aexecution-core");
-  });
+const { openBoundThreadMock } = vi.hoisted(() => ({
+  openBoundThreadMock: vi.fn(),
+}));
 
-  it("falls back to the generic chat route when no formal thread is active", () => {
-    expect(resolveRuntimeChatEntryPath(null)).toBe("/chat");
-    expect(resolveRuntimeChatEntryPath("chat:transient")).toBe("/chat");
-  });
+vi.mock("../pages/Chat/sessionApi", () => ({
+  default: {
+    openBoundThread: openBoundThreadMock,
+  },
+}));
 
-  it("prefers the canonical buddy control thread derived from instance_id over stale carrier ids", () => {
-    const binding = buildBuddyExecutionCarrierChatBinding({
-      profileId: "profile-1",
-      profileDisplayName: "Buddy",
-      executionCarrier: {
-        instance_id: "buddy:profile-1:domain-current",
-        label: "Buddy Carrier",
-        owner_scope: "profile-1",
-        current_cycle_id: "cycle-1",
-        team_generated: true,
-        thread_id: "industry-chat:buddy:profile-1:domain-stale:execution-core",
-        control_thread_id: "industry-chat:buddy:profile-1:domain-stale:execution-core",
-        chat_binding: {
-          thread_id: "industry-chat:buddy:profile-1:domain-stale:execution-core",
-          control_thread_id: "industry-chat:buddy:profile-1:domain-stale:execution-core",
-          context_key:
-            "control-thread:industry-chat:buddy:profile-1:domain-stale:execution-core",
-          binding_kind: "buddy-execution-carrier",
-        },
-      },
-      entrySource: "buddy-onboarding-resume",
+import { openRuntimeChat } from "./runtimeChat";
+
+describe("openRuntimeChat", () => {
+  beforeEach(() => {
+    openBoundThreadMock.mockReset();
+    openBoundThreadMock.mockResolvedValue({
+      id: "industry-chat:industry-1:execution-core",
     });
+  });
 
-    expect(binding.threadId).toBe(
-      "industry-chat:buddy:profile-1:domain-current:execution-core",
+  it("replaces browser history when the caller requests a redirect-style open", async () => {
+    const navigate = vi.fn();
+
+    await openRuntimeChat(
+      {
+        name: "执行中枢",
+        threadId: "industry-chat:industry-1:execution-core",
+        userId: "buddy:profile-1",
+      },
+      navigate,
+      { replace: true },
     );
-    expect(binding.meta?.control_thread_id).toBe(
-      "industry-chat:buddy:profile-1:domain-current:execution-core",
-    );
-    expect(binding.meta?.context_key).toBe(
-      "control-thread:industry-chat:buddy:profile-1:domain-current:execution-core",
+
+    expect(navigate).toHaveBeenCalledWith(
+      "/chat?threadId=industry-chat%3Aindustry-1%3Aexecution-core",
+      { replace: true },
     );
   });
 });
