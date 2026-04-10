@@ -230,6 +230,32 @@ def test_runtime_center_human_assist_task_endpoints(tmp_path) -> None:
     assert detail_response.json()["task"]["id"] == issued.id
 
 
+def test_runtime_center_human_assist_current_endpoint_returns_503_when_query_wire_is_missing(
+    tmp_path,
+) -> None:
+    app, _service, _turn_executor, _query_execution_service = _build_human_assist_app(
+        tmp_path,
+    )
+    state_store = SQLiteStateStore(tmp_path / "state-missing-wire.sqlite3")
+    app.state.state_query_service = RuntimeCenterStateQueryService(
+        task_repository=SqliteTaskRepository(state_store),
+        task_runtime_repository=SqliteTaskRuntimeRepository(state_store),
+        schedule_repository=SqliteScheduleRepository(state_store),
+        decision_request_repository=SqliteDecisionRequestRepository(state_store),
+        evidence_ledger=EvidenceLedger(database_path=tmp_path / "evidence-missing-wire.sqlite3"),
+        human_assist_task_service=None,
+    )
+    client = TestClient(app)
+
+    response = client.get(
+        "/runtime-center/human-assist-tasks/current",
+        params={"chat_thread_id": "industry-chat:industry-1:execution-core"},
+    )
+
+    assert response.status_code == 503
+    assert "not available" in response.json()["detail"]
+
+
 def test_runtime_center_chat_run_intercepts_human_assist_submission_when_explicit_action_is_set(
     tmp_path,
 ) -> None:

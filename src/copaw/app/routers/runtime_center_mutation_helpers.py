@@ -9,6 +9,7 @@ from contextlib import contextmanager
 
 from fastapi import HTTPException, Request
 
+from ..runtime_center.state_query import RuntimeCenterReadModelUnavailableError
 from .governed_mutations import dispatch_governed_mutation, translate_dispatcher_error
 
 
@@ -22,10 +23,13 @@ async def _call_runtime_query_method(
         method = getattr(target, method_name, None)
         if not callable(method):
             continue
-        result = method(**kwargs)
-        if inspect.isawaitable(result):
-            result = await result
-        return result
+        try:
+            result = method(**kwargs)
+            if inspect.isawaitable(result):
+                result = await result
+            return result
+        except RuntimeCenterReadModelUnavailableError as exc:
+            raise HTTPException(503, detail=not_available_detail) from exc
     raise HTTPException(503, detail=not_available_detail)
 
 

@@ -32,35 +32,43 @@ It should now be read as:
 The detailed issue sections are intentionally preserved as original audit
 records.
 
-Use the status bands below for current truth.
-
-#### Still Open
+As of the current runtime-chain hardening pass, the audited `10` closure items
+that were still being tracked on `2026-04-10` are now closed:
 
 - `P0-001`
 - `P0-002`
 - `P0-003`
 - `P0-004`
 - `P0-009`
-- `P0-019`
-
-#### Partially Tightened But Not Fully Closed
-
 - `P0-010`
 - `P0-012`
 - `P0-015`
 - `P0-017`
+- `P0-019`
+
+Use the status band below for current truth.
 
 #### Fixed / Safe To Treat As Archived Audit Items
 
+- `P0-001`
+- `P0-002`
+- `P0-003`
+- `P0-004`
 - `P0-005`
 - `P0-006`
 - `P0-007`
 - `P0-008`
+- `P0-009`
+- `P0-010`
 - `P0-011`
+- `P0-012`
 - `P0-013`
 - `P0-014`
+- `P0-015`
 - `P0-016`
+- `P0-017`
 - `P0-018`
+- `P0-019`
 - `P0-020`
 - `P0-021`
 

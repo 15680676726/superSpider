@@ -126,6 +126,19 @@ def _build_test_chat_writeback_plan(message_text: str):
             priority_order=["先做现场验证", "再做规模复制"],
             switch_to_operator_guided=True,
         )
+    if "write the deliverable" in lowered and "report back" in lowered:
+        return build_chat_writeback_plan(
+            message_text,
+            approved_classifications=["backlog"],
+            operator_requirements=[message_text],
+            goal_title="deliver the requested output",
+            goal_summary=message_text,
+            goal_plan_steps=[
+                "Deliver the requested output through a specialist lane.",
+                "Keep execution moving until the assignment is formally running.",
+                "Report the execution result back to the control thread.",
+            ],
+        )
     raise AssertionError(f"Missing test writeback plan fixture for: {message_text}")
 
 
@@ -1740,6 +1753,67 @@ def test_execution_chat_writeback_materialization_and_dispatch_attach_transition
     assert "assignment-materialized" in transition_kinds
     assert "assignment-dispatch-started" in transition_kinds
     assert dispatch_evidence.id in list(assignment.evidence_ids or [])
+
+
+def test_execution_chat_writeback_materializes_assignment_same_turn_when_target_is_ready(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+    profile = IndustryProfile(
+        industry="northwind robotics",
+        company="Northwind Robotics",
+        product_or_service="Warehouse robots",
+        target_customers=["Operations teams"],
+        goals=["Improve warehouse throughput"],
+    )
+    draft = FakeIndustryDraftGenerator().build_draft(
+        profile,
+        "industry-v1-northwind-robotics",
+    )
+    response = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": profile.model_dump(mode="json"),
+            "draft": draft.model_dump(mode="json"),
+            "auto_dispatch": True,
+            "execute": False,
+        },
+    )
+    assert response.status_code == 200
+    instance_id = response.json()["team"]["team_id"]
+
+    message_text = "write the deliverable, keep execution running, and report back"
+    writeback = asyncio.run(
+        app.state.industry_service.apply_execution_chat_writeback(
+            industry_instance_id=instance_id,
+            message_text=message_text,
+            owner_agent_id="copaw-agent-runner",
+            session_id=f"industry-chat:{instance_id}:execution-core",
+            channel="console",
+            writeback_plan=_build_test_chat_writeback_plan(message_text),
+        ),
+    )
+
+    assert writeback is not None
+    backlog_id = writeback["created_backlog_ids"][0]
+    assert writeback["materialized_assignment_ids"]
+    assert writeback["materialized_cycle_id"]
+    assert writeback["delegation_state"] == "materialized"
+    assignment_id = writeback["materialized_assignment_ids"][0]
+    assignment = app.state.assignment_repository.get_assignment(assignment_id)
+    assert assignment is not None
+
+    backlog_evidence = app.state.evidence_ledger.list_by_task(backlog_id)
+    assert any(
+        record.metadata.get("transition_kind") == "chat-writeback-accepted"
+        for record in backlog_evidence
+    )
+    assignment_evidence = app.state.evidence_ledger.list_by_task(assignment_id)
+    assert any(
+        record.metadata.get("transition_kind") == "assignment-materialized"
+        for record in assignment_evidence
+    )
 
 
 def test_bootstrap_researcher_schedule_report_keeps_main_brain_continuity(

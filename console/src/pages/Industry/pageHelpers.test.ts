@@ -5,6 +5,7 @@ import { runtimeStatusColor as sharedRuntimeStatusColor } from "../../runtime/ta
 import {
   INDUSTRY_EXPERIENCE_TEXT,
   INDUSTRY_TEXT,
+  deriveIndustryTeamStatus,
   formatIndustryDetailStats,
   formatIndustryDisplayToken,
   presentIndustryEmploymentMode,
@@ -29,6 +30,16 @@ describe("formatIndustryDetailStats", () => {
     expect(summary).toContain("泳道 5");
     expect(summary).toContain("待办 6");
     expect(summary).toContain("派单 7");
+  });
+  it("does not treat an empty industry as active only because the carrier status is active", () => {
+    expect(
+      deriveIndustryTeamStatus({
+        status: "active",
+        execution: null,
+        agents: [],
+        schedules: [],
+      } as never),
+    ).toBe("idle");
   });
 });
 

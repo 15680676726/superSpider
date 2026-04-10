@@ -60,6 +60,9 @@ type ProjectInstallNotice = {
   description?: string;
 };
 
+const PROJECT_INSTALL_POLL_INTERVAL_MS = 2000;
+const PROJECT_INSTALL_POLL_MAX_ATTEMPTS = 20;
+
 function resolveAttachmentSummary(
   attachment: CapabilityMarketAttachmentTruth | null | undefined,
   fallback: string,
@@ -113,6 +116,37 @@ function buildProjectInstallNoticeFromResult(
       attachedCount > 0
         ? `已挂到 ${attachedCount} 个执行位。`
         : "当前只进入能力库存，尚未挂到执行位。",
+  };
+}
+
+async function waitForProjectInstallPoll(ms: number): Promise<void> {
+  await new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+async function pollProjectInstallJobUntilTerminal(
+  taskId: string,
+): Promise<CapabilityMarketProjectInstallJobStatusResponse> {
+  let latestJob = await api.getCapabilityMarketProjectInstallJob(taskId);
+  let attempts = 1;
+  while (
+    latestJob.status !== "completed" &&
+    latestJob.status !== "failed" &&
+    attempts < PROJECT_INSTALL_POLL_MAX_ATTEMPTS
+  ) {
+    await waitForProjectInstallPoll(PROJECT_INSTALL_POLL_INTERVAL_MS);
+    latestJob = await api.getCapabilityMarketProjectInstallJob(taskId);
+    attempts += 1;
+  }
+  return latestJob;
+}
+
+function presentAttachmentNotice(
+  attachment: CapabilityMarketAttachmentTruth | null | undefined,
+  fallback: string,
+): { method: "success" | "info"; message: string } {
+  return {
+    method: attachment?.status === "attached" ? "success" : "info",
+    message: resolveAttachmentSummary(attachment, fallback),
   };
 }
 
@@ -201,9 +235,8 @@ export default function CapabilityMarketPage() {
           review_acknowledged: Boolean(curatedReviewAcknowledgements[installKey]),
           enable: true,
         });
-        message.success(
-          resolveAttachmentSummary(result.attachment, "安装成功"),
-        );
+        const notice = presentAttachmentNotice(result.attachment, "安装成功");
+        message[notice.method](notice.message);
       } catch (error) {
         message.error(error instanceof Error ? error.message : String(error));
       } finally {
@@ -230,9 +263,12 @@ export default function CapabilityMarketPage() {
     try {
       const config = await buildTemplateConfigPayload();
       const result = await api.installCapabilityMarketInstallTemplate(requestedTemplateId, { config, enabled: true });
-      setTemplateInstallSummary(
-        resolveAttachmentSummary(result.attachment, result.summary || "安装成功"),
+      const notice = presentAttachmentNotice(
+        result.attachment,
+        result.summary || "安装成功",
       );
+      setTemplateInstallSummary(notice.message);
+      message[notice.method](notice.message);
     } catch (error) {
       message.error(error instanceof Error ? error.message : String(error));
     } finally {
@@ -266,14 +302,20 @@ export default function CapabilityMarketPage() {
         const acceptedNotice = buildProjectInstallNoticeFromAccepted(accepted);
         setProjectInstallNotice(acceptedNotice);
 
-        const job = await api.getCapabilityMarketProjectInstallJob(accepted.task_id);
+        const job = await pollProjectInstallJobUntilTerminal(accepted.task_id);
         if (job.status === "completed") {
           const result =
             job.result ||
             (await api.getCapabilityMarketProjectInstallJobResult(accepted.task_id));
           const resultNotice = buildProjectInstallNoticeFromResult(result);
           setProjectInstallNotice(resultNotice);
-          message.success(resultNotice.message);
+          message[
+            resultNotice.type === "error"
+              ? "error"
+              : resultNotice.type === "success"
+                ? "success"
+                : "info"
+          ](resultNotice.message);
           await handleRefreshAll();
         } else if (job.status === "failed") {
           const failedNotice = buildProjectInstallNoticeFromJob(job);

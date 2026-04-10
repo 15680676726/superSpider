@@ -40,6 +40,10 @@ from .projection_utils import first_non_empty, string_list_from_values
 from .work_context_projection import RuntimeCenterWorkContextProjector
 
 
+class RuntimeCenterReadModelUnavailableError(RuntimeError):
+    """Raised when a Runtime Center read chain is missing a required service."""
+
+
 class RuntimeCenterStateQueryService:
     """Read-only Runtime Center state queries."""
 
@@ -200,7 +204,9 @@ class RuntimeCenterStateQueryService:
         service = self._human_assist_task_service
         list_tasks = getattr(service, "list_tasks", None)
         if not callable(list_tasks):
-            return []
+            raise RuntimeCenterReadModelUnavailableError(
+                "Human assist task service is not wired into Runtime Center state queries.",
+            )
         tasks = list_tasks(
             chat_thread_id=chat_thread_id,
             industry_instance_id=industry_instance_id,
@@ -221,7 +227,9 @@ class RuntimeCenterStateQueryService:
         if not callable(getter):
             getter = getattr(service, "get_current_task", None)
         if not callable(getter):
-            return None
+            raise RuntimeCenterReadModelUnavailableError(
+                "Human assist current-task queries are not wired into Runtime Center state queries.",
+            )
         task = getter(chat_thread_id=chat_thread_id)
         if task is None:
             return None
@@ -231,7 +239,9 @@ class RuntimeCenterStateQueryService:
         service = self._human_assist_task_service
         getter = getattr(service, "get_task", None)
         if not callable(getter):
-            return None
+            raise RuntimeCenterReadModelUnavailableError(
+                "Human assist detail queries are not wired into Runtime Center state queries.",
+            )
         task = getter(task_id)
         if task is None:
             return None

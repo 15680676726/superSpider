@@ -89,6 +89,14 @@ export default function IndustryRuntimeCockpitPanel({
     decision: detail.decisions.length,
     patch: detail.patches.length,
   };
+  const strategyRuntimeStatus = detail.strategy_memory?.status || (detail.strategy_memory ? "active" : "idle");
+  const laneRuntimeStatus = lanes.length > 0 ? "active" : "idle";
+  const environmentRuntimeStatus =
+    environmentVisibility.environment ||
+    environmentVisibility.hostTwinSummary ||
+    environmentVisibility.constraints.length
+      ? String(detail.execution?.status || "active")
+      : "idle";
   const runtimeChainNodes: RuntimeChainNode[] = [
     {
       key: "carrier",
@@ -107,14 +115,14 @@ export default function IndustryRuntimeCockpitPanel({
         detail.strategy_memory?.summary ||
         "暂无策略记忆。",
       note: presentList(detail.strategy_memory?.current_focuses as string[] | undefined),
-      status: String(detail.strategy_memory?.status || detail.status),
+      status: String(strategyRuntimeStatus),
     },
     {
       key: "lane",
       label: "泳道",
       value: `${lanes.length} 条`,
       note: lanes[0]?.title || null,
-      status: detail.status,
+      status: laneRuntimeStatus,
     },
     {
       key: "backlog",
@@ -140,7 +148,7 @@ export default function IndustryRuntimeCockpitPanel({
         ? detail.current_cycle.title || detail.current_cycle.cycle_id
         : "暂无活动周期",
       note: detail.current_cycle?.summary || null,
-      status: detail.current_cycle?.status || detail.status,
+      status: detail.current_cycle?.status || "idle",
     },
     {
       key: "assignment",
@@ -177,28 +185,28 @@ export default function IndustryRuntimeCockpitPanel({
       label: "环境",
       value: environmentVisibility.environment || "未暴露",
       note: environmentVisibility.hostTwinSummary || null,
-      status: detail.status,
+      status: environmentRuntimeStatus,
     },
     {
       key: "evidence",
       label: "证据",
       value: `${runtimeSignalCounts.evidence} 条`,
       note: detail.execution?.latest_evidence_summary || null,
-      status: detail.status,
+      status: runtimeSignalCounts.evidence > 0 ? "active" : "idle",
     },
     {
       key: "decision",
       label: "决策",
       value: `${runtimeSignalCounts.decision} 条`,
       note: runtimeSignalCounts.decision > 0 ? "等待治理链消费。" : null,
-      status: runtimeSignalCounts.decision > 0 ? "guarded" : detail.status,
+      status: runtimeSignalCounts.decision > 0 ? "guarded" : "idle",
     },
     {
       key: "patch",
       label: "补丁",
       value: `${runtimeSignalCounts.patch} 条`,
       note: runtimeSignalCounts.patch > 0 ? "等待学习补丁审查。" : null,
-      status: runtimeSignalCounts.patch > 0 ? "guarded" : detail.status,
+      status: runtimeSignalCounts.patch > 0 ? "guarded" : "idle",
     },
   ];
 

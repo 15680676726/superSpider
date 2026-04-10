@@ -723,7 +723,10 @@ function deriveIndustryTeamStatus(detail: IndustryInstanceDetail | null): string
   if (detail.agents.some((agent) => deriveIndustryAgentStatus(agent) === "waiting-confirm")) {
     return "waiting-confirm";
   }
-  if (detail.agents.every((agent) => deriveIndustryAgentStatus(agent) === "degraded")) {
+  if (
+    detail.agents.length > 0 &&
+    detail.agents.every((agent) => deriveIndustryAgentStatus(agent) === "degraded")
+  ) {
     return "degraded";
   }
   if (
@@ -732,7 +735,18 @@ function deriveIndustryTeamStatus(detail: IndustryInstanceDetail | null): string
   ) {
     return "active";
   }
-  return detail.status || "draft";
+  const detailStatus = String(detail.status || "").trim();
+  if (detailStatus === "draft") {
+    return "draft";
+  }
+  if (
+    ["waiting-confirm", "degraded", "blocked", "retired", "paused"].includes(
+      detailStatus,
+    )
+  ) {
+    return detailStatus;
+  }
+  return "idle";
 }
 
 

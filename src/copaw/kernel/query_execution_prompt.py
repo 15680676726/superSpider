@@ -695,7 +695,14 @@ class _QueryExecutionPromptMixin:
             lines.append(f"- Newly recorded recurring loop: {title}")
         if chat_writeback_summary.get("deduplicated"):
             lines.append("- This instruction already exists in formal state; no duplicate record was created.")
-        if chat_writeback_summary.get("dispatch_deferred"):
+        materialized_assignment_ids = _string_list(
+            chat_writeback_summary.get("materialized_assignment_ids"),
+        )
+        if materialized_assignment_ids:
+            lines.append(
+                "- This instruction already materialized formal execution assignments and is waiting for dispatch/seat runtime start.",
+            )
+        elif chat_writeback_summary.get("dispatch_deferred"):
             requested_surfaces = _string_list(
                 chat_writeback_summary.get("seat_requested_surfaces"),
             )

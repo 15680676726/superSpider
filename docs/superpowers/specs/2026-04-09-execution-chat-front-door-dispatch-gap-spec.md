@@ -30,19 +30,22 @@ recording than true execution-first delegation.
 
 ### 0.1 Validation Note (`2026-04-10`)
 
-This spec still records a real open problem.
+This spec now serves as an audit record of a gap that has been closed.
 
-What changed after the original audit is not the core judgment itself, but the
-surrounding chain:
+What changed after the original audit:
 
-- several adjacent runtime/chat continuity seams were fixed
-- several UI read-model seams were tightened
-- but the same-turn dispatch gap itself still remains
+- execution-chat writeback now attempts same-turn cycle materialization when the
+  target seat is already resolvable
+- query-runtime commit/readback now prefers materialized assignment truth over a
+  generic deferred summary
+- the remaining "pending staffing / routing" path is now treated as a separate
+  governed state, not as evidence that an execution-ready instruction was left
+  waiting for the later automation sweep
 
 So this document should now be read as:
 
-- `still-open core issue`
-- not `proof that the whole front door is still broadly broken`
+- `archived audit record`
+- not `current open front-door blocker`
 
 ---
 

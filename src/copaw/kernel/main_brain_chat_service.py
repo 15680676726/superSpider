@@ -1313,12 +1313,6 @@ class MainBrainChatService:
             request=request,
         )
         effective_commit_state = commit_state
-        if (
-            persisted_commit_state is not None
-            and commit_state.status == "commit_deferred"
-            and commit_state.reason == "no_commit_action"
-        ):
-            effective_commit_state = persisted_commit_state
         self._cache_commit_state(
             cache_entry=cache_entry,
             commit_state=commit_state,

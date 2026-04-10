@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -98,6 +98,7 @@ describe("CapabilityMarketPage", () => {
     mockedInstallProject.mockReset();
     mockedGetProjectInstallJob.mockReset();
     mockedGetProjectInstallJobResult.mockReset();
+    vi.useRealTimers();
   });
 
   it("renders the new projects tab alongside the existing market tabs", () => {
@@ -297,11 +298,122 @@ describe("CapabilityMarketPage", () => {
       </MemoryRouter>,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /安\s*装/ }));
+    fireEvent.click(screen.getAllByRole("button").at(-1)!);
 
     expect(
       await screen.findByText("Project donor install job accepted."),
     ).toBeInTheDocument();
     expect(mockedGetProjectInstallJobResult).not.toHaveBeenCalled();
   });
+
+  it("polls donor install jobs until terminal truth is available", async () => {
+    mockedInstallProject.mockResolvedValue({
+      accepted: true,
+      task_id: "ktask:project-install-2",
+      status: "queued",
+      phase: "executing",
+      title: "Install project donor https://github.com/psf/black",
+      source_url: "https://github.com/psf/black",
+      capability_kind: "project-package",
+      candidate_id: "candidate-black",
+      progress_summary: "Project donor install job accepted.",
+      routes: {
+        status: "/api/capability-market/projects/install-jobs/ktask:project-install-2",
+        result:
+          "/api/capability-market/projects/install-jobs/ktask:project-install-2/result",
+      },
+    } as never);
+    mockedGetProjectInstallJob
+      .mockResolvedValueOnce({
+        task_id: "ktask:project-install-2",
+        status: "running",
+        phase: "executing",
+        stage: "installing",
+        title: "Install project donor https://github.com/psf/black",
+        source_url: "https://github.com/psf/black",
+        capability_kind: "project-package",
+        candidate_id: "candidate-black",
+        target_agent_id: null,
+        progress_summary: "Installing donor package.",
+        error: null,
+        installed_capability_ids: [],
+        result: null,
+        created_at: null,
+        updated_at: null,
+        routes: {
+          status: "/api/capability-market/projects/install-jobs/ktask:project-install-2",
+          result:
+            "/api/capability-market/projects/install-jobs/ktask:project-install-2/result",
+        },
+      } as never)
+      .mockResolvedValueOnce({
+        task_id: "ktask:project-install-2",
+        status: "completed",
+        phase: "completed",
+        stage: "completed",
+        title: "Install project donor https://github.com/psf/black",
+        source_url: "https://github.com/psf/black",
+        capability_kind: "project-package",
+        candidate_id: "candidate-black",
+        target_agent_id: "agent-writer",
+        progress_summary: "Install completed.",
+        error: null,
+        installed_capability_ids: ["project:black"],
+        result: null,
+        created_at: null,
+        updated_at: null,
+        routes: {
+          status: "/api/capability-market/projects/install-jobs/ktask:project-install-2",
+          result:
+            "/api/capability-market/projects/install-jobs/ktask:project-install-2/result",
+        },
+      } as never);
+    mockedGetProjectInstallJobResult.mockResolvedValue({
+      installed: true,
+      enabled: true,
+      source_url: "https://github.com/psf/black",
+      installed_capability_ids: ["project:black"],
+      capability_kind: "project-package",
+      attachment: {
+        status: "attached",
+        summary: "Capability lifecycle attached.",
+        attached_agent_ids: ["agent-writer"],
+      },
+    } as never);
+    stateMock.mockReturnValue({
+      ...baseState,
+      activeTab: "projects",
+      projectResults: [
+        {
+          display_name: "psf/black",
+          summary: "Python formatter",
+          source_kind: "github-repo",
+          candidate_kind: "project",
+          source_url: "https://github.com/psf/black",
+          version: "main",
+          capability_keys: ["formatting"],
+          install_supported: true,
+          metadata: {},
+          routes: {},
+        },
+      ],
+    });
+
+    render(
+      <MemoryRouter>
+        <CapabilityMarketPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getAllByRole("button").at(-1)!);
+
+    await screen.findByText("Project donor install job accepted.");
+    await waitFor(
+      () => {
+        expect(mockedGetProjectInstallJob).toHaveBeenCalledTimes(2);
+        expect(mockedGetProjectInstallJobResult).toHaveBeenCalledTimes(1);
+      },
+      { timeout: 7000 },
+    );
+  }, 15000);
 });

@@ -3652,12 +3652,63 @@ class _IndustryLifecycleMixin:
                 )
             except Exception:
                 pass
+        materialized_cycle_id: str | None = None
+        materialized_assignment_ids: list[str] = []
+        if (
+            created_backlog_ids
+            and decision_request_id is None
+            and proposal_status != "waiting-confirm"
+            and seat_resolution_kind != "routing-pending"
+            and _string(target_owner_agent_id or target_industry_role_id) is not None
+        ):
+            try:
+                cycle_result = await self.run_operating_cycle(
+                    instance_id=active_record.instance_id,
+                    actor="chat-writeback-frontdoor",
+                    force=True,
+                    backlog_item_ids=created_backlog_ids,
+                    auto_dispatch_materialized_goals=False,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to materialize chat writeback backlog for industry '%s'",
+                    active_record.instance_id,
+                )
+            else:
+                processed_instances = self._mapping_list(
+                    cycle_result.get("processed_instances")
+                    if isinstance(cycle_result, Mapping)
+                    else None,
+                )
+                processed_instance = (
+                    next(
+                        (
+                            item
+                            for item in processed_instances
+                            if _string(item.get("instance_id")) == active_record.instance_id
+                        ),
+                        None,
+                    )
+                    or (processed_instances[0] if processed_instances else None)
+                    or {}
+                )
+                materialized_cycle_id = _string(processed_instance.get("started_cycle_id"))
+                materialized_assignment_ids = [
+                    assignment_id
+                    for assignment_id in (
+                        _string(item)
+                        for item in list(processed_instance.get("created_assignment_ids") or [])
+                    )
+                    if assignment_id is not None
+                ]
         dispatch_deferred = bool(created_backlog_ids)
         accepted_delegation_state = (
             "waiting_confirm"
             if decision_request_id is not None or proposal_status == "waiting-confirm"
             else "pending_staffing"
             if seat_resolution_kind == "routing-pending"
+            else "materialized"
+            if materialized_assignment_ids
             else "recorded"
             if created_backlog_ids
             else None
@@ -3711,6 +3762,8 @@ class _IndustryLifecycleMixin:
             "created_goal_titles": created_goal_titles,
             "created_backlog_ids": created_backlog_ids,
             "goal_dispatches": goal_dispatches,
+            "materialized_cycle_id": materialized_cycle_id,
+            "materialized_assignment_ids": materialized_assignment_ids,
             "reused_backlog_ids": reused_backlog_ids,
             "created_schedule_ids": created_schedule_ids,
             "created_schedule_titles": created_schedule_titles,

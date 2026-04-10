@@ -700,7 +700,7 @@ async def test_main_brain_chat_service_yields_first_stream_chunk_without_waiting
 
 
 @pytest.mark.asyncio
-async def test_main_brain_chat_service_reads_persisted_commit_state_from_bound_agent_snapshot():
+async def test_main_brain_chat_service_bound_snapshot_commit_truth_does_not_override_new_pure_chat_turn():
     backend = _FakeSessionBackend()
     backend.save_session_snapshot(
         session_id="industry-chat:industry-v1-demo:execution-core",
@@ -723,6 +723,12 @@ async def test_main_brain_chat_service_reads_persisted_commit_state_from_bound_a
         session_backend=backend,
         model_factory=lambda: _StaticResponseModel("reply"),
     )
+    persisted = service.get_persisted_commit_state(
+        session_id="industry-chat:industry-v1-demo:execution-core",
+        user_id="execution-core-agent",
+    )
+    assert persisted is not None
+    assert persisted.status == "confirm_required"
     request = SimpleNamespace(
         session_id="industry-chat:industry-v1-demo:execution-core",
         user_id="operator-user",
@@ -736,7 +742,8 @@ async def test_main_brain_chat_service_reads_persisted_commit_state_from_bound_a
 
     commit_state = getattr(request, "_copaw_main_brain_commit_state", None)
     assert commit_state is not None
-    assert commit_state.status == "confirm_required"
+    assert commit_state.status == "commit_deferred"
+    assert commit_state.reason == "no_commit_action"
 
 
 @pytest.mark.asyncio
@@ -2149,3 +2156,54 @@ def test_main_brain_chat_service_commit_path_replay_ignores_query_runtime_commit
         )
         is None
     )
+
+
+@pytest.mark.asyncio
+async def test_main_brain_chat_service_pure_chat_turn_does_not_rehydrate_prior_phase2_commit_into_request_runtime():
+    backend = _FakeSessionBackend()
+    control_thread_id = "industry-chat:industry-v1-demo:execution-core"
+    backend.save_session_snapshot(
+        session_id=control_thread_id,
+        user_id="execution-core-agent",
+        payload={
+            "agent": {"memory": []},
+            "main_brain": {
+                "phase2_commit": {
+                    "status": "committed",
+                    "action_type": "writeback_operating_truth",
+                    "record_id": "truth-1",
+                    "control_thread_id": control_thread_id,
+                    "session_id": control_thread_id,
+                }
+            },
+        },
+        source_ref="test:/prior-phase2-commit",
+    )
+    service = MainBrainChatService(
+        session_backend=backend,
+        model_factory=lambda: _StaticResponseModel("just chat this turn"),
+    )
+    request = SimpleNamespace(
+        session_id=control_thread_id,
+        user_id="operator-user",
+        agent_id="execution-core-agent",
+        industry_instance_id="industry-v1-demo",
+        work_context_id=None,
+    )
+
+    streamed = [
+        item
+        async for item in service.execute_stream(
+            msgs=[Msg(name="user", role="user", content="just chat")],
+            request=request,
+        )
+    ]
+
+    assert streamed[-1][0].get_text_content() == "just chat this turn"
+    commit_state = getattr(request, "_copaw_main_brain_commit_state", None)
+    assert commit_state is not None
+    assert commit_state.status == "commit_deferred"
+    assert commit_state.reason == "no_commit_action"
+    runtime_context = getattr(request, "_copaw_main_brain_runtime_context", None)
+    assert runtime_context["commit_outcome"]["status"] == "commit_deferred"
+    assert runtime_context["commit_outcome"]["reason"] == "no_commit_action"
