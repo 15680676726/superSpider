@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import copaw.kernel.query_execution as query_execution_module
 import copaw.kernel.query_execution_prompt as query_execution_prompt_module
+from copaw.kernel import ActorMailboxService
 from copaw.kernel.query_execution import KernelQueryExecutionService
 from copaw.state import (
     AgentRuntimeRecord,
@@ -16,7 +17,6 @@ from copaw.state.repositories import (
     SqliteAgentMailboxRepository,
     SqliteAgentRuntimeRepository,
 )
-from copaw.kernel import ActorMailboxService
 
 from .query_execution_environment_parts.shared import *  # noqa: F401,F403
 
@@ -24,30 +24,46 @@ from .query_execution_environment_parts.shared import *  # noqa: F401,F403
 class _FakeBuddyProjectionService:
     def build_chat_surface(self, *, profile_id: str | None = None):
         assert profile_id == "profile-buddy"
+        contract = {
+            "service_intent": "Turn creative ambition into a steady weekly publishing rhythm.",
+            "collaboration_role": "orchestrator",
+            "autonomy_level": "guarded-proactive",
+            "report_style": "decision-first",
+            "confirm_boundaries": ["external spend", "publishing under my real name"],
+            "collaboration_notes": "Keep reports short and escalate blockers with one recommendation.",
+        }
         return SimpleNamespace(
             profile=SimpleNamespace(
                 profile_id="profile-buddy",
-                display_name="阿澄",
-                profession="自由创作者",
-                current_stage="重建期",
+                display_name="Ava",
+                profession="Independent creator",
+                current_stage="rebuilding",
             ),
             growth_target=SimpleNamespace(
-                primary_direction="建立独立创作与内容事业的长期成长路径",
-                final_goal="帮助阿澄建立可持续的创作事业与独立成长轨道",
+                primary_direction="Build an independent creative business with proof of work.",
+                final_goal="Create a durable publishing rhythm that compounds into a real business.",
             ),
             relationship=SimpleNamespace(
+                **contract,
                 encouragement_style="old-friend",
-                effective_reminders=["先把任务缩成一个最小动作"],
-                ineffective_reminders=["高压催促"],
-                avoidance_patterns=["刷短视频逃避"],
+                effective_reminders=["Shrink the task to one concrete move."],
+                ineffective_reminders=["Do not use high-pressure pushing."],
+                avoidance_patterns=["Doom-scrolling instead of shipping."],
+            ),
+            onboarding=SimpleNamespace(
+                status="named",
+                **contract,
             ),
             presentation=SimpleNamespace(
-                buddy_name="小澄",
-                current_goal_summary="帮助阿澄建立可持续的创作事业与独立成长轨道",
-                current_task_summary="写出第一篇真正能代表自己的案例文章",
-                why_now_summary="因为这是把长期方向从想象拉进现实的第一份证据。",
-                single_next_action_summary="现在先打开文档，写下这篇案例的标题和三条核心观点。",
-                companion_strategy_summary="先接住情绪，再把任务缩成一个最小动作；避免高压催促；一旦出现刷短视频逃避，就立刻拉回一个最小动作。",
+                buddy_name="Nova",
+                current_goal_summary="Create a durable publishing rhythm that compounds into a real business.",
+                current_task_summary="Draft the first public case study.",
+                why_now_summary="Because this is the first proof that turns direction into reality.",
+                single_next_action_summary="Open the draft and write the headline plus three proof points.",
+                companion_strategy_summary=(
+                    "Receive emotion first, then shrink the task to one concrete move; "
+                    "avoid high-pressure pushing and pull attention back from doom-scrolling."
+                ),
             ),
             growth=SimpleNamespace(
                 intimacy=42,
@@ -56,6 +72,32 @@ class _FakeBuddyProjectionService:
                 evolution_stage="bonded",
             ),
         )
+
+
+class _ContractAwareIndustryService(_FakeIndustryService):
+    def get_instance_detail(self, instance_id: str):
+        detail = super().get_instance_detail(instance_id)
+        detail.execution_core_identity.update(
+            {
+                "operator_service_intent": "Turn creative ambition into a steady weekly publishing rhythm.",
+                "collaboration_role": "orchestrator",
+                "autonomy_level": "guarded-proactive",
+                "report_style": "decision-first",
+                "confirm_boundaries": [
+                    "external spend",
+                    "publishing under my real name",
+                ],
+                "collaboration_notes": "Keep reports short and escalate blockers with one recommendation.",
+                "operating_mode": "guarded-collaboration",
+                "delegation_policy": [
+                    "Coordinate direction and delegate leaf execution to the right specialist lane.",
+                ],
+                "direct_execution_policy": [
+                    "Do not let the execution core swallow browser or document leaf work.",
+                ],
+            },
+        )
+        return detail
 
 
 def test_query_execution_service_appends_buddy_persona_prompt_when_bound_profile_exists(
@@ -107,7 +149,7 @@ def test_query_execution_service_appends_buddy_persona_prompt_when_bound_profile
         session_backend=_FakeSessionBackend(),
         capability_service=_FakeCapabilityService(),
         agent_profile_service=_FakeAgentProfileService(),
-        industry_service=_FakeIndustryService(),
+        industry_service=_ContractAwareIndustryService(),
         actor_mailbox_service=mailbox_service,
         agent_runtime_repository=runtime_repository,
         buddy_projection_service=_FakeBuddyProjectionService(),
@@ -115,7 +157,7 @@ def test_query_execution_service_appends_buddy_persona_prompt_when_bound_profile
 
     async def _run():
         async for _msg, _last in service.execute_stream(
-            msgs=[SimpleNamespace(get_text_content=lambda: "继续帮我把这一步推进下去")],
+            msgs=[SimpleNamespace(get_text_content=lambda: "Help me push this step forward.")],
             request=SimpleNamespace(
                 session_id="industry-chat:industry-v1-ops:execution-core",
                 user_id="ops-user",
@@ -133,10 +175,24 @@ def test_query_execution_service_appends_buddy_persona_prompt_when_bound_profile
     asyncio.run(_run())
 
     prompt_appendix = _FakeAgent.created[0].kwargs["prompt_appendix"]
-    assert "# Buddy 对外人格" in prompt_appendix
-    assert "伙伴名：小澄" in prompt_appendix
-    assert "唯一下一步：现在先打开文档，写下这篇案例的标题和三条核心观点。" in prompt_appendix
-    assert "避免高压催促" in prompt_appendix
+    expected_lines = [
+        "# Buddy",
+        "Buddy name: Nova",
+        "Service intent: Turn creative ambition into a steady weekly publishing rhythm.",
+        "Collaboration role: orchestrator",
+        "Autonomy level: guarded-proactive",
+        "Report style: decision-first",
+        "Confirm before: external spend, publishing under my real name",
+        "Collaboration notes: Keep reports short and escalate blockers with one recommendation.",
+        "# Execution Core Identity",
+        "Operating mode: guarded-collaboration",
+        "Delegation rule: Coordinate direction and delegate leaf execution to the right specialist lane.",
+        "Direct execution rule: Do not let the execution core swallow browser or document leaf work.",
+    ]
+    for line in expected_lines:
+        assert line in prompt_appendix
+
+
 def test_query_execution_service_appends_current_time_grounding_for_buddy_runtime(
     tmp_path,
     monkeypatch,
@@ -160,7 +216,7 @@ def test_query_execution_service_appends_current_time_grounding_for_buddy_runtim
     monkeypatch.setattr(
         query_execution_prompt_module,
         "_current_prompt_time_snapshot",
-        lambda: "北京时间 2026-04-09 周四 10:00",
+        lambda: "Beijing time 2026-04-09 Thu 10:00",
         raising=False,
     )
 
@@ -192,7 +248,7 @@ def test_query_execution_service_appends_current_time_grounding_for_buddy_runtim
         session_backend=_FakeSessionBackend(),
         capability_service=_FakeCapabilityService(),
         agent_profile_service=_FakeAgentProfileService(),
-        industry_service=_FakeIndustryService(),
+        industry_service=_ContractAwareIndustryService(),
         actor_mailbox_service=mailbox_service,
         agent_runtime_repository=runtime_repository,
         buddy_projection_service=_FakeBuddyProjectionService(),
@@ -200,7 +256,7 @@ def test_query_execution_service_appends_current_time_grounding_for_buddy_runtim
 
     async def _run():
         async for _msg, _last in service.execute_stream(
-            msgs=[SimpleNamespace(get_text_content=lambda: "今天是周几，接下来等到哪天？")],
+            msgs=[SimpleNamespace(get_text_content=lambda: "What day is it today?")],
             request=SimpleNamespace(
                 session_id="industry-chat:industry-v1-ops:execution-core",
                 user_id="ops-user",
@@ -219,5 +275,5 @@ def test_query_execution_service_appends_current_time_grounding_for_buddy_runtim
 
     prompt_appendix = _FakeAgent.created[0].kwargs["prompt_appendix"]
     assert "Current Time" in prompt_appendix
-    assert "北京时间 2026-04-09 周四 10:00" in prompt_appendix
+    assert "Beijing time 2026-04-09 Thu 10:00" in prompt_appendix
     assert "do not guess" in prompt_appendix.lower()

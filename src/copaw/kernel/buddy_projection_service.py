@@ -55,6 +55,12 @@ class BuddyOnboardingProjection(BaseModel):
     candidate_directions: list[str] = Field(default_factory=list)
     recommended_direction: str = ""
     selected_direction: str = ""
+    service_intent: str = ""
+    collaboration_role: str = "orchestrator"
+    autonomy_level: str = "proactive"
+    confirm_boundaries: list[str] = Field(default_factory=list)
+    report_style: str = "result-first"
+    collaboration_notes: str = ""
     requires_direction_confirmation: bool = False
     requires_naming: bool = False
     completed: bool = False
@@ -141,7 +147,29 @@ class BuddyProjectionService:
         relationship_communication_count = (
             int(relationship.communication_count) if relationship is not None else 0
         )
-        communication_count = relationship_communication_count
+        onboarding_signal_count = 0
+        if session is not None:
+            if any(
+                str(getattr(session, field, "") or "").strip()
+                for field in (
+                    "service_intent",
+                    "collaboration_role",
+                    "autonomy_level",
+                    "report_style",
+                    "collaboration_notes",
+                )
+            ) or list(getattr(session, "confirm_boundaries", []) or []):
+                onboarding_signal_count += 1
+            if (
+                str(getattr(session, "recommended_direction", "") or "").strip()
+                or str(getattr(session, "selected_direction", "") or "").strip()
+                or str(getattr(session, "draft_final_goal", "") or "").strip()
+                or list(getattr(session, "draft_backlog_items", []) or [])
+            ):
+                onboarding_signal_count += 1
+        if relationship is not None and str(getattr(relationship, "buddy_name", "") or "").strip():
+            onboarding_signal_count += 1
+        communication_count = max(relationship_communication_count, onboarding_signal_count)
         relationship_pleasant_score = (
             int(relationship.pleasant_interaction_score) if relationship is not None else 0
         )
@@ -364,6 +392,25 @@ class BuddyProjectionService:
         candidate_directions = list(getattr(session, "candidate_directions", []) or [])
         recommended_direction = str(getattr(session, "recommended_direction", "") or "").strip()
         selected_direction = str(getattr(session, "selected_direction", "") or "").strip()
+        contract_source = relationship if relationship is not None and target is not None else session
+        service_intent = str(getattr(contract_source, "service_intent", "") or "").strip()
+        collaboration_role = (
+            str(getattr(contract_source, "collaboration_role", "") or "").strip() or "orchestrator"
+        )
+        autonomy_level = (
+            str(getattr(contract_source, "autonomy_level", "") or "").strip() or "proactive"
+        )
+        confirm_boundaries = [
+            str(item).strip()
+            for item in list(getattr(contract_source, "confirm_boundaries", []) or [])
+            if str(item).strip()
+        ]
+        report_style = (
+            str(getattr(contract_source, "report_style", "") or "").strip() or "result-first"
+        )
+        collaboration_notes = str(
+            getattr(contract_source, "collaboration_notes", "") or ""
+        ).strip()
         if target is not None and not selected_direction:
             selected_direction = target.primary_direction
         if target is not None and not recommended_direction:
@@ -387,6 +434,12 @@ class BuddyProjectionService:
             candidate_directions=candidate_directions,
             recommended_direction=recommended_direction,
             selected_direction=selected_direction,
+            service_intent=service_intent,
+            collaboration_role=collaboration_role,
+            autonomy_level=autonomy_level,
+            confirm_boundaries=confirm_boundaries,
+            report_style=report_style,
+            collaboration_notes=collaboration_notes,
             requires_direction_confirmation=requires_direction_confirmation,
             requires_naming=requires_naming,
             completed=completed,

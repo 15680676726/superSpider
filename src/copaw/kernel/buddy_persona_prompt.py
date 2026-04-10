@@ -35,6 +35,12 @@ def _clip_text(value: Any, *, limit: int) -> str:
     return text[: limit - 1] + "…"
 
 
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
 def build_buddy_persona_prompt(
     surface: Any,
     heading: str = "##",
@@ -84,10 +90,33 @@ def build_buddy_persona_prompt(
         _first_non_empty(relationship.get("encouragement_style")),
         limit=48,
     )
+    service_intent = _clip_text(
+        _first_non_empty(relationship.get("service_intent")),
+        limit=180,
+    )
+    collaboration_role = _clip_text(
+        _first_non_empty(relationship.get("collaboration_role")),
+        limit=48,
+    )
+    autonomy_level = _clip_text(
+        _first_non_empty(relationship.get("autonomy_level")),
+        limit=48,
+    )
+    report_style = _clip_text(
+        _first_non_empty(relationship.get("report_style")),
+        limit=48,
+    )
+    collaboration_notes = _clip_text(
+        _first_non_empty(relationship.get("collaboration_notes")),
+        limit=180,
+    )
+    confirm_boundaries = _string_list(relationship.get("confirm_boundaries"))
+
     heading_text = _first_non_empty(heading, "##") or "##"
     lines = [
         f"{heading_text} Buddy 对外人格",
         f"- 伙伴名：{buddy_name}",
+        f"Buddy name: {buddy_name}",
         "- 你现在以主脑显化出来的伙伴人格对外说话，但本质仍然是主脑。",
         f"- 你陪伴的人：{display_name or '未命名用户'} / {profession or '当前职业待补充'} / {current_stage or '当前阶段待补充'}",
         f"- 当前确认的长期主方向：{primary_direction or '先帮对方收口一个足够大的长期方向'}",
@@ -101,17 +130,35 @@ def build_buddy_persona_prompt(
     ]
     if encouragement_style:
         lines.append(f"- 当前鼓励风格代号：{encouragement_style}")
+    if service_intent:
+        lines.append(f"Service intent: {service_intent}")
+    if collaboration_role:
+        lines.append(f"Collaboration role: {collaboration_role}")
+    if autonomy_level:
+        lines.append(f"Autonomy level: {autonomy_level}")
+    if report_style:
+        lines.append(f"Report style: {report_style}")
+    if confirm_boundaries:
+        lines.append(f"Confirm before: {', '.join(confirm_boundaries[:4])}")
+    if collaboration_notes:
+        lines.append(f"Collaboration notes: {collaboration_notes}")
     lines.extend(
         [
             "- 说话方式要像真正一起做事的伙伴，默认直接推进任务，做完主动汇报，不要客服腔。",
             "- 用户不追问，你也要在完成、卡住、需要关键输入时主动同步。",
             "- 不要暴露后台执行位抢前台，也不要把系统内部结构直接甩给用户。",
+            "- Default to moving the current work forward, then report the result and next move.",
         ],
     )
     signature = "|".join(
         (
             f"buddy:{profile_id}",
             buddy_name,
+            service_intent,
+            collaboration_role,
+            autonomy_level,
+            report_style,
+            ",".join(confirm_boundaries[:4]),
             final_goal,
             current_task,
             why_now,

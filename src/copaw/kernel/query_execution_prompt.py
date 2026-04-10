@@ -543,6 +543,24 @@ class _QueryExecutionPromptMixin:
         operating_mode = _first_non_empty(
             execution_core_identity.get("operating_mode"),
         )
+        service_intent = _first_non_empty(
+            execution_core_identity.get("operator_service_intent"),
+        )
+        collaboration_role = _first_non_empty(
+            execution_core_identity.get("collaboration_role"),
+        )
+        autonomy_level = _first_non_empty(
+            execution_core_identity.get("autonomy_level"),
+        )
+        report_style = _first_non_empty(
+            execution_core_identity.get("report_style"),
+        )
+        collaboration_notes = _first_non_empty(
+            execution_core_identity.get("collaboration_notes"),
+        )
+        confirm_boundaries = _string_list(
+            execution_core_identity.get("confirm_boundaries"),
+        )
         thinking_axes = _string_list(execution_core_identity.get("thinking_axes"))
         delegation_policy = _string_list(
             execution_core_identity.get("delegation_policy"),
@@ -556,6 +574,18 @@ class _QueryExecutionPromptMixin:
             lines.append(f"- Industry mandate: {industry_summary}")
         if operating_mode:
             lines.append(f"- Operating mode: {operating_mode}")
+        if service_intent:
+            lines.append(f"- Service intent: {service_intent}")
+        if collaboration_role:
+            lines.append(f"- Collaboration role: {collaboration_role}")
+        if autonomy_level:
+            lines.append(f"- Autonomy level: {autonomy_level}")
+        if report_style:
+            lines.append(f"- Report style: {report_style}")
+        if confirm_boundaries:
+            lines.append(f"- Confirm before: {', '.join(confirm_boundaries[:4])}")
+        if collaboration_notes:
+            lines.append(f"- Collaboration notes: {collaboration_notes}")
         for axis in thinking_axes[:6]:
             lines.append(f"- Thinking axis: {axis}")
         for policy in delegation_policy[:3]:

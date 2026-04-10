@@ -76,27 +76,6 @@ def build_buddy_current_focus_resolver(
         active_instance_id = str(getattr(active_domain, "industry_instance_id", "") or "").strip()
         if active_instance_id and callable(get_instance):
             instance = get_instance(active_instance_id)
-        if instance is None and callable(get_instance):
-            instance = get_instance(f"buddy:{profile_id}")
-        if instance is None:
-            list_instances = getattr(industry_instance_repository, "list_instances", None)
-            if callable(list_instances):
-                try:
-                    instances = list_instances(owner_scope=profile_id, status="active", limit=20)
-                except TypeError:
-                    instances = list_instances(owner_scope=profile_id, limit=20)
-                preferred_prefix = f"buddy:{profile_id}:"
-                for candidate in instances or []:
-                    candidate_id = str(getattr(candidate, "instance_id", "") or "").strip()
-                    if candidate_id.startswith(preferred_prefix):
-                        instance = candidate
-                        break
-                if instance is None:
-                    for candidate in instances or []:
-                        candidate_id = str(getattr(candidate, "instance_id", "") or "").strip()
-                        if candidate_id:
-                            instance = candidate
-                            break
         if instance is not None:
             list_assignments = getattr(assignment_service, "list_assignments", None)
             if callable(list_assignments):

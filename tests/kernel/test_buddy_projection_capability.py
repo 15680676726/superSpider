@@ -39,6 +39,18 @@ from copaw.state.repositories_buddy import (
 from tests.shared.buddy_reasoners import DeterministicBuddyReasoner
 
 
+def _submit_contract(onboarding: BuddyOnboardingService, session_id: str):
+    return onboarding.submit_contract(
+        session_id=session_id,
+        service_intent="Help me turn creative ambition into durable proof of work.",
+        collaboration_role="orchestrator",
+        autonomy_level="guarded-proactive",
+        confirm_boundaries=["external spend"],
+        report_style="decision-first",
+        collaboration_notes="Keep the work moving and escalate blockers with one recommendation.",
+    )
+
+
 def _build_services(tmp_path):
     store = SQLiteStateStore(tmp_path / "buddy-projection-capability.sqlite3")
     profile_repository = SqliteHumanProfileRepository(store)
@@ -103,14 +115,10 @@ def test_buddy_projection_refreshes_stage_from_runtime_capability_growth(tmp_pat
         constraints=["time"],
         goal_intention="Build a meaningful long-term creative career.",
     )
-    clarification = onboarding.answer_clarification_turn(
-        session_id=identity.session_id,
-        answer="I want leverage, proof of work, and independence.",
-        existing_question_count=9,
-    )
+    contract = _submit_contract(onboarding, identity.session_id)
     result = onboarding.confirm_primary_direction(
         session_id=identity.session_id,
-        selected_direction=clarification.recommended_direction,
+        selected_direction=contract.recommended_direction,
         capability_action="start-new",
     )
     assignment_repository = SqliteAssignmentRepository(store)
@@ -166,14 +174,10 @@ def test_relationship_experience_no_longer_upgrades_stage_without_domain_progres
         constraints=["time"],
         goal_intention="Build a meaningful long-term creative career.",
     )
-    clarification = onboarding.answer_clarification_turn(
-        session_id=identity.session_id,
-        answer="I want leverage, proof of work, and independence.",
-        existing_question_count=9,
-    )
+    contract = _submit_contract(onboarding, identity.session_id)
     onboarding.confirm_primary_direction(
         session_id=identity.session_id,
-        selected_direction=clarification.recommended_direction,
+        selected_direction=contract.recommended_direction,
         capability_action="start-new",
     )
     baseline = projection.build_chat_surface(profile_id=identity.profile.profile_id)
@@ -208,14 +212,10 @@ def test_invalid_closure_without_report_or_evidence_does_not_add_points(tmp_path
         constraints=["time"],
         goal_intention="Build a meaningful long-term creative career.",
     )
-    clarification = onboarding.answer_clarification_turn(
-        session_id=identity.session_id,
-        answer="I want leverage, proof of work, and independence.",
-        existing_question_count=9,
-    )
+    contract = _submit_contract(onboarding, identity.session_id)
     result = onboarding.confirm_primary_direction(
         session_id=identity.session_id,
-        selected_direction=clarification.recommended_direction,
+        selected_direction=contract.recommended_direction,
         capability_action="start-new",
     )
     assignment_repository = SqliteAssignmentRepository(store)

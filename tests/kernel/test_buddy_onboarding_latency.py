@@ -3,9 +3,9 @@ from __future__ import annotations
 
 from copaw.kernel.buddy_domain_capability_growth import BuddyDomainCapabilityGrowthService
 from copaw.kernel.buddy_onboarding_reasoner import (
+    BuddyCollaborationContract,
     BuddyOnboardingBacklogSeed,
-    BuddyOnboardingGrowthPlan,
-    BuddyOnboardingReasonedTurn,
+    BuddyOnboardingContractCompileResult,
 )
 from copaw.kernel.buddy_onboarding_service import BuddyOnboardingService, _STOCKS_DIRECTION
 from copaw.state import SQLiteStateStore
@@ -31,30 +31,23 @@ from copaw.state.repositories_buddy import (
 )
 
 
-class _CachedTurnReasoner:
+class _CachedContractReasoner:
     def __init__(self) -> None:
-        self.turn_calls: list[dict[str, object]] = []
-        self.plan_calls: list[dict[str, object]] = []
+        self.compile_calls: list[dict[str, object]] = []
 
-    def plan_turn(
+    def compile_contract(
         self,
         *,
         profile,
-        transcript,
-        question_count: int,
-        tightened: bool,
-    ) -> BuddyOnboardingReasonedTurn:
-        self.turn_calls.append(
+        collaboration_contract: BuddyCollaborationContract,
+    ) -> BuddyOnboardingContractCompileResult:
+        self.compile_calls.append(
             {
                 "profile_id": profile.profile_id,
-                "transcript": list(transcript),
-                "question_count": question_count,
-                "tightened": tightened,
+                "contract": collaboration_contract.model_dump(mode="json"),
             },
         )
-        return BuddyOnboardingReasonedTurn(
-            finished=question_count >= 2,
-            next_question="" if question_count >= 2 else "What trading horizon do you want first?",
+        return BuddyOnboardingContractCompileResult(
             candidate_directions=[_STOCKS_DIRECTION],
             recommended_direction=_STOCKS_DIRECTION,
             final_goal="Build a disciplined stock trading path with verifiable review evidence.",
@@ -76,28 +69,6 @@ class _CachedTurnReasoner:
                 ),
             ],
         )
-
-    def build_growth_plan(
-        self,
-        *,
-        profile,
-        transcript,
-        selected_direction: str,
-    ) -> BuddyOnboardingGrowthPlan:
-        self.plan_calls.append(
-            {
-                "profile_id": profile.profile_id,
-                "transcript": list(transcript),
-                "selected_direction": selected_direction,
-            },
-        )
-        return BuddyOnboardingGrowthPlan(
-            primary_direction=selected_direction,
-            final_goal="fallback should not run",
-            why_it_matters="fallback should not run",
-            backlog_items=[],
-        )
-
 
 def _build_service_with_planning(tmp_path, *, reasoner) -> tuple[BuddyOnboardingService, SQLiteStateStore]:
     store = SQLiteStateStore(tmp_path / "buddy-onboarding-latency.sqlite3")
@@ -126,8 +97,8 @@ def _build_service_with_planning(tmp_path, *, reasoner) -> tuple[BuddyOnboarding
     return service, store
 
 
-def test_confirm_primary_direction_reuses_cached_reasoned_turn_without_second_model_call(tmp_path) -> None:
-    reasoner = _CachedTurnReasoner()
+def test_confirm_primary_direction_reuses_cached_contract_compile_without_second_model_call(tmp_path) -> None:
+    reasoner = _CachedContractReasoner()
     service, store = _build_service_with_planning(tmp_path, reasoner=reasoner)
 
     identity = service.submit_identity(
@@ -139,14 +110,19 @@ def test_confirm_primary_direction_reuses_cached_reasoned_turn_without_second_mo
         constraints=["capital"],
         goal_intention="Build a real stock trading path.",
     )
-    clarification = service.answer_clarification_turn(
+    contract = service.submit_contract(
         session_id=identity.session_id,
-        answer="I want a durable swing-trading path with strict risk control.",
+        service_intent="Help me build a durable swing-trading system with strict risk control.",
+        collaboration_role="orchestrator",
+        autonomy_level="guarded-proactive",
+        confirm_boundaries=["external spend"],
+        report_style="result-first",
+        collaboration_notes="Keep the loop disciplined and evidence-based.",
     )
 
     result = service.confirm_primary_direction(
         session_id=identity.session_id,
-        selected_direction=clarification.recommended_direction,
+        selected_direction=contract.recommended_direction,
         capability_action="start-new",
     )
 
@@ -161,4 +137,4 @@ def test_confirm_primary_direction_reuses_cached_reasoned_turn_without_second_mo
         "Define the trading boundary",
         "Produce the first trade review",
     ]
-    assert reasoner.plan_calls == []
+    assert len(reasoner.compile_calls) == 1

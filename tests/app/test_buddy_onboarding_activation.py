@@ -14,9 +14,9 @@ from copaw.industry import IndustryCapabilityRecommendation
 from copaw.industry.chat_writeback import build_chat_writeback_plan
 from copaw.kernel.buddy_domain_capability_growth import BuddyDomainCapabilityGrowthService
 from copaw.kernel.buddy_onboarding_reasoner import (
+    BuddyCollaborationContract,
     BuddyOnboardingBacklogSeed,
-    BuddyOnboardingGrowthPlan,
-    BuddyOnboardingReasonedTurn,
+    BuddyOnboardingContractCompileResult,
 )
 from copaw.kernel.buddy_onboarding_service import BuddyOnboardingService
 from copaw.kernel.buddy_projection_service import BuddyProjectionService
@@ -119,6 +119,58 @@ class _FakeWritingBuddyReasoner:
         )
 
 
+class _ContractWritingBuddyReasoner:
+    def compile_contract(
+        self,
+        *,
+        profile,
+        collaboration_contract: BuddyCollaborationContract,
+    ) -> BuddyOnboardingContractCompileResult:
+        _ = (profile, collaboration_contract)
+        return BuddyOnboardingContractCompileResult(
+            candidate_directions=["Build a durable fiction writing and publishing path."],
+            recommended_direction="Build a durable fiction writing and publishing path.",
+            final_goal="Establish a steady fiction publishing rhythm and produce the first proof-of-work cycle.",
+            why_it_matters="Turn writing from intention into a compounding publishing practice with visible assets.",
+            backlog_items=[
+                BuddyOnboardingBacklogSeed(
+                    lane_hint="growth-focus",
+                    title="Lock the story direction and publishing rhythm",
+                    summary="Choose the format, cadence, and smallest sustainable chapter scope.",
+                    priority=3,
+                    source_key="writing-direction",
+                ),
+                BuddyOnboardingBacklogSeed(
+                    lane_hint="proof-of-work",
+                    title="Finish the first chapter and open the publishing draft",
+                    summary="Draft the first chapter and prepare the real platform draft plus cover upload.",
+                    priority=2,
+                    source_key="writing-first-chapter",
+                ),
+            ],
+        )
+
+
+def _submit_contract(
+    client: TestClient,
+    session_id: str,
+    **overrides,
+) -> dict[str, object]:
+    payload = {
+        "session_id": session_id,
+        "service_intent": "Help me build a durable trading system with clear risk control.",
+        "collaboration_role": "orchestrator",
+        "autonomy_level": "guarded-proactive",
+        "confirm_boundaries": ["external spend"],
+        "report_style": "result-first",
+        "collaboration_notes": "Move the work forward but surface meaningful risk before acting.",
+    }
+    payload.update(overrides)
+    response = client.post("/buddy/onboarding/contract", json=payload)
+    assert response.status_code == 200
+    return response.json()
+
+
 def test_buddy_confirm_direction_auto_activates_execution_when_industry_service_exists(tmp_path) -> None:
     store = SQLiteStateStore(tmp_path / "buddy-onboarding-activation.sqlite3")
     profile_repository = SqliteHumanProfileRepository(store)
@@ -182,19 +234,13 @@ def test_buddy_confirm_direction_auto_activates_execution_when_industry_service_
             "goal_intention": "I want a real stock trading path.",
         },
     ).json()
-    clarification = client.post(
-        "/buddy/onboarding/clarify",
-        json={
-            "session_id": identity["session_id"],
-            "answer": "I want a durable trading system with clear risk control.",
-        },
-    ).json()
+    contract = _submit_contract(client, identity["session_id"])
 
     response = client.post(
         "/buddy/onboarding/confirm-direction",
         json={
             "session_id": identity["session_id"],
-            "selected_direction": clarification["recommended_direction"],
+            "selected_direction": contract["recommended_direction"],
             "capability_action": "start-new",
         },
     )
@@ -270,7 +316,7 @@ def test_buddy_writing_instance_auto_closes_browser_specialist_gap_before_temp_s
         assignment_service=app.state.assignment_service,
         schedule_repository=app.state.schedule_repository,
         domain_capability_growth_service=growth_service,
-        onboarding_reasoner=_FakeWritingBuddyReasoner(),
+        onboarding_reasoner=_ContractWritingBuddyReasoner(),
     )
     projection_service = BuddyProjectionService(
         profile_repository=profile_repository,
@@ -299,10 +345,10 @@ def test_buddy_writing_instance_auto_closes_browser_specialist_gap_before_temp_s
         },
     ).json()
     clarification = client.post(
-        "/buddy/onboarding/clarify",
+        "/buddy/onboarding/contract",
         json={
             "session_id": identity["session_id"],
-            "answer": "我想先把长篇连载写起来，再逐步稳定更新。",
+            "service_intent": "I want to build a durable fiction writing rhythm with publishing follow-through.",
         },
     ).json()
     confirmation = client.post(
@@ -386,7 +432,7 @@ def test_buddy_writing_instance_auto_closes_curated_browser_skill_gap_when_templ
         assignment_service=app.state.assignment_service,
         schedule_repository=app.state.schedule_repository,
         domain_capability_growth_service=growth_service,
-        onboarding_reasoner=_FakeWritingBuddyReasoner(),
+        onboarding_reasoner=_ContractWritingBuddyReasoner(),
     )
     projection_service = BuddyProjectionService(
         profile_repository=profile_repository,
@@ -414,18 +460,17 @@ def test_buddy_writing_instance_auto_closes_curated_browser_skill_gap_when_templ
             "goal_intention": "I want to keep publishing fiction on a real platform.",
         },
     ).json()
-    clarification = client.post(
-        "/buddy/onboarding/clarify",
-        json={
-            "session_id": identity["session_id"],
-            "answer": "I want a repeatable browser workflow for drafting and cover uploads.",
-        },
-    ).json()
+    contract = _submit_contract(
+        client,
+        identity["session_id"],
+        service_intent="Help me build a repeatable browser workflow for drafting and cover uploads.",
+        collaboration_notes="Stay proactive on browser workflow setup and publishing evidence.",
+    )
     confirmation = client.post(
         "/buddy/onboarding/confirm-direction",
         json={
             "session_id": identity["session_id"],
-            "selected_direction": clarification["recommended_direction"],
+            "selected_direction": contract["recommended_direction"],
             "capability_action": "start-new",
         },
     ).json()
@@ -604,19 +649,13 @@ def test_buddy_confirm_direction_real_kickoff_creates_leaf_tasks_for_specialist_
             "goal_intention": "I want a real stock trading path.",
         },
     ).json()
-    clarification = client.post(
-        "/buddy/onboarding/clarify",
-        json={
-            "session_id": identity["session_id"],
-            "answer": "I want a durable trading system with clear risk control.",
-        },
-    ).json()
+    contract = _submit_contract(client, identity["session_id"])
 
     confirmation = client.post(
         "/buddy/onboarding/confirm-direction",
         json={
             "session_id": identity["session_id"],
-            "selected_direction": clarification["recommended_direction"],
+            "selected_direction": contract["recommended_direction"],
             "capability_action": "start-new",
         },
     )
@@ -716,18 +755,12 @@ def test_buddy_surface_repairs_legacy_buddy_execution_binding_before_chat(
             "goal_intention": "I want a real stock trading path.",
         },
     ).json()
-    clarification = client.post(
-        "/buddy/onboarding/clarify",
-        json={
-            "session_id": identity["session_id"],
-            "answer": "I want a durable trading system with clear risk control.",
-        },
-    ).json()
+    contract = _submit_contract(client, identity["session_id"])
     confirmation = client.post(
         "/buddy/onboarding/confirm-direction",
         json={
             "session_id": identity["session_id"],
-            "selected_direction": clarification["recommended_direction"],
+            "selected_direction": contract["recommended_direction"],
             "capability_action": "start-new",
         },
     ).json()
@@ -883,18 +916,12 @@ def test_buddy_confirm_direction_writes_back_completed_reports_to_control_thread
             "goal_intention": "I want a real stock trading path.",
         },
     ).json()
-    clarification = client.post(
-        "/buddy/onboarding/clarify",
-        json={
-            "session_id": identity["session_id"],
-            "answer": "I want a durable trading system with clear risk control.",
-        },
-    ).json()
+    contract = _submit_contract(client, identity["session_id"])
     confirmation = client.post(
         "/buddy/onboarding/confirm-direction",
         json={
             "session_id": identity["session_id"],
-            "selected_direction": clarification["recommended_direction"],
+            "selected_direction": contract["recommended_direction"],
             "capability_action": "start-new",
         },
     )
@@ -1022,18 +1049,12 @@ def test_buddy_confirm_direction_seeds_durable_execution_core_schedules(
             "goal_intention": "I want a real stock trading path.",
         },
     ).json()
-    clarification = client.post(
-        "/buddy/onboarding/clarify",
-        json={
-            "session_id": identity["session_id"],
-            "answer": "I want a durable trading system with clear risk control.",
-        },
-    ).json()
+    contract = _submit_contract(client, identity["session_id"])
     confirmation = client.post(
         "/buddy/onboarding/confirm-direction",
         json={
             "session_id": identity["session_id"],
-            "selected_direction": clarification["recommended_direction"],
+            "selected_direction": contract["recommended_direction"],
             "capability_action": "start-new",
         },
     )
@@ -1128,18 +1149,12 @@ def test_buddy_execution_core_schedule_dispatch_keeps_buddy_profile_binding(
             "goal_intention": "I want a real stock trading path.",
         },
     ).json()
-    clarification = client.post(
-        "/buddy/onboarding/clarify",
-        json={
-            "session_id": identity["session_id"],
-            "answer": "I want a durable trading system with clear risk control.",
-        },
-    ).json()
+    contract = _submit_contract(client, identity["session_id"])
     confirmation = client.post(
         "/buddy/onboarding/confirm-direction",
         json={
             "session_id": identity["session_id"],
-            "selected_direction": clarification["recommended_direction"],
+            "selected_direction": contract["recommended_direction"],
             "capability_action": "start-new",
         },
     )

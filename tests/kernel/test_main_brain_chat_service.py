@@ -115,6 +115,14 @@ class _PromptCapturingResponseModel:
 class _FakeBuddyProjectionService:
     def build_chat_surface(self, *, profile_id: str | None = None):
         assert profile_id == "profile-buddy"
+        contract = {
+            "service_intent": "Turn creative ambition into a steady weekly publishing rhythm.",
+            "collaboration_role": "orchestrator",
+            "autonomy_level": "guarded-proactive",
+            "report_style": "decision-first",
+            "confirm_boundaries": ["external spend", "publishing under my real name"],
+            "collaboration_notes": "Keep reports short and escalate blockers with one recommendation.",
+        }
         return SimpleNamespace(
             profile=SimpleNamespace(
                 profile_id="profile-buddy",
@@ -132,6 +140,7 @@ class _FakeBuddyProjectionService:
                 why_it_matters="因为她不想再把真正想过的人生继续往后拖。",
             ),
             relationship=SimpleNamespace(
+                **contract,
                 encouragement_style="old-friend",
                 effective_reminders=["先把任务缩成一个最小动作"],
                 ineffective_reminders=["高压催促"],
