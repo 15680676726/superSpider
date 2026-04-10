@@ -308,16 +308,23 @@ class ModelDrivenBuddyOnboardingReasoner:
         recommended = str(payload.recommended_direction or "").strip()
         if recommended and recommended not in directions:
             directions = [recommended, *directions]
+        final_goal = str(payload.final_goal or "").strip()
+        why_it_matters = str(payload.why_it_matters or "").strip()
+        backlog_items = [
+            item
+            for item in payload.backlog_items
+            if item.lane_hint.strip() and item.title.strip() and item.summary.strip()
+        ][:3]
+        if not recommended or not final_goal or not why_it_matters or not backlog_items:
+            raise BuddyOnboardingReasonerUnavailableError(
+                "Buddy onboarding model failed to return a valid result.",
+            )
         return BuddyOnboardingContractCompileResult(
             candidate_directions=directions[:3],
             recommended_direction=recommended,
-            final_goal=str(payload.final_goal or "").strip(),
-            why_it_matters=str(payload.why_it_matters or "").strip(),
-            backlog_items=[
-                item
-                for item in payload.backlog_items
-                if item.title.strip() and item.summary.strip()
-            ][:3],
+            final_goal=final_goal,
+            why_it_matters=why_it_matters,
+            backlog_items=backlog_items,
         )
 
 

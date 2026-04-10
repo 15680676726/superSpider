@@ -10,10 +10,10 @@ from fastapi.testclient import TestClient
 from copaw.app.routers.buddy_routes import router as buddy_router
 from copaw.kernel.buddy_domain_capability_growth import BuddyDomainCapabilityGrowthService
 from copaw.kernel.buddy_onboarding_reasoner import (
-    BuddyOnboardingGrowthPlan,
-    BuddyOnboardingReasonedTurn,
+    BuddyOnboardingBacklogSeed,
+    BuddyOnboardingContractCompileResult,
 )
-from copaw.kernel.buddy_onboarding_service import BuddyOnboardingService
+from copaw.kernel.buddy_onboarding_service import BuddyOnboardingService, _STOCKS_DIRECTION
 from copaw.kernel.buddy_projection_service import BuddyProjectionService
 from copaw.state import SQLiteStateStore
 from copaw.state.main_brain_service import (
@@ -37,7 +37,6 @@ from copaw.state.repositories_buddy import (
     SqliteGrowthTargetRepository,
     SqliteHumanProfileRepository,
 )
-from tests.shared.buddy_reasoners import DeterministicBuddyReasoner
 
 
 class _FakeCronManager:
@@ -48,35 +47,57 @@ class _FakeCronManager:
         self.jobs.append(spec)
 
 
-class _BlockingIdentityReasoner(DeterministicBuddyReasoner):
+class _BaseContractCompiler:
+    def _result(self) -> BuddyOnboardingContractCompileResult:
+        return BuddyOnboardingContractCompileResult(
+            candidate_directions=[_STOCKS_DIRECTION],
+            recommended_direction=_STOCKS_DIRECTION,
+            final_goal="Build a disciplined stock trading system with visible weekly evidence.",
+            why_it_matters="Turn trading into a durable operating path instead of emotional reactions.",
+            backlog_items=[
+                BuddyOnboardingBacklogSeed(
+                    lane_hint="growth-focus",
+                    title="Define the first-cycle risk boundary",
+                    summary="Lock the market scope, risk cap, and stop-loss rule for the first cycle.",
+                    priority=3,
+                    source_key="trading-boundary",
+                )
+            ],
+        )
+
+
+class _BlockingContractCompiler(_BaseContractCompiler):
     def __init__(self) -> None:
-        self.release_plan_turn = threading.Event()
+        self.release_compile = threading.Event()
 
-    def plan_turn(self, **kwargs) -> BuddyOnboardingReasonedTurn:
-        released = self.release_plan_turn.wait(timeout=5)
+    def compile_contract(self, **kwargs) -> BuddyOnboardingContractCompileResult:
+        _ = kwargs
+        released = self.release_compile.wait(timeout=5)
         if not released:
-            raise TimeoutError("test plan_turn gate timed out")
-        return super().plan_turn(**kwargs)
+            raise TimeoutError("test compile_contract gate timed out")
+        return self._result()
 
 
-class _BlockingConfirmReasoner(DeterministicBuddyReasoner):
+class _FailOnceThenSucceedContractCompiler(_BaseContractCompiler):
     def __init__(self) -> None:
-        self.release_growth_plan = threading.Event()
+        self.calls = 0
 
-    def build_growth_plan(self, **kwargs) -> BuddyOnboardingGrowthPlan:
-        released = self.release_growth_plan.wait(timeout=5)
-        if not released:
-            raise TimeoutError("test build_growth_plan gate timed out")
-        return super().build_growth_plan(**kwargs)
-
-
-class _TimeoutIdentityReasoner(DeterministicBuddyReasoner):
-    def plan_turn(self, **kwargs) -> BuddyOnboardingReasonedTurn:
-        raise TimeoutError("Buddy onboarding model timed out.")
+    def compile_contract(self, **kwargs) -> BuddyOnboardingContractCompileResult:
+        _ = kwargs
+        self.calls += 1
+        if self.calls == 1:
+            raise TimeoutError("Buddy onboarding model timed out.")
+        return self._result()
 
 
-def _build_app(tmp_path, *, reasoner) -> FastAPI:
-    store = SQLiteStateStore(tmp_path / "buddy-async-onboarding.sqlite3")
+class _DeterministicContractCompiler(_BaseContractCompiler):
+    def compile_contract(self, **kwargs) -> BuddyOnboardingContractCompileResult:
+        _ = kwargs
+        return self._result()
+
+
+def _build_app(tmp_path, *, compiler) -> FastAPI:
+    store = SQLiteStateStore(tmp_path / "buddy-async-contract.sqlite3")
     profile_repository = SqliteHumanProfileRepository(store)
     growth_target_repository = SqliteGrowthTargetRepository(store)
     relationship_repository = SqliteCompanionRelationshipRepository(store)
@@ -109,7 +130,7 @@ def _build_app(tmp_path, *, reasoner) -> FastAPI:
         assignment_service=assignment_service,
         schedule_repository=schedule_repository,
         domain_capability_growth_service=growth_service,
-        onboarding_reasoner=reasoner,
+        onboarding_reasoner=compiler,
     )
     projection = BuddyProjectionService(
         profile_repository=profile_repository,
@@ -127,7 +148,36 @@ def _build_app(tmp_path, *, reasoner) -> FastAPI:
     return app
 
 
-def _wait_for_surface(client: TestClient, profile_id: str, *, operation_status: str, timeout: float = 5.0) -> dict[str, object]:
+def _identity_payload() -> dict[str, object]:
+    return {
+        "display_name": "Kai",
+        "profession": "Trader",
+        "current_stage": "restart",
+        "interests": ["stocks", "trading"],
+        "strengths": ["review"],
+        "constraints": ["capital"],
+        "goal_intention": "Build a real stock trading path.",
+    }
+
+
+def _contract_payload() -> dict[str, object]:
+    return {
+        "service_intent": "Turn trading ambition into a disciplined weekly execution path.",
+        "collaboration_role": "orchestrator",
+        "autonomy_level": "guarded-proactive",
+        "confirm_boundaries": ["external spend", "irreversible actions"],
+        "report_style": "decision-first",
+        "collaboration_notes": "Escalate when an action exceeds the agreed risk boundary.",
+    }
+
+
+def _wait_for_surface(
+    client: TestClient,
+    profile_id: str,
+    *,
+    operation_status: str,
+    timeout: float = 5.0,
+) -> dict[str, object]:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         response = client.get("/buddy/surface", params={"profile_id": profile_id})
@@ -136,60 +186,51 @@ def _wait_for_surface(client: TestClient, profile_id: str, *, operation_status: 
         if payload["onboarding"]["operation_status"] == operation_status:
             return payload
         time.sleep(0.05)
-    raise AssertionError(f"Buddy surface did not reach operation_status={operation_status!r} in time")
+    raise AssertionError(
+        f"Buddy surface did not reach operation_status={operation_status!r} in time"
+    )
 
 
-def test_start_identity_runs_in_background_and_surface_transitions_to_succeeded(tmp_path) -> None:
-    reasoner = _BlockingIdentityReasoner()
-    client = TestClient(_build_app(tmp_path, reasoner=reasoner))
+def test_start_contract_compile_runs_in_background_and_surface_transitions_to_succeeded(
+    tmp_path,
+) -> None:
+    compiler = _BlockingContractCompiler()
+    client = TestClient(_build_app(tmp_path, compiler=compiler))
+    identity = client.post("/buddy/onboarding/identity", json=_identity_payload()).json()
 
     response = client.post(
-        "/buddy/onboarding/identity/start",
-        json={
-            "display_name": "Kai",
-            "profession": "Trader",
-            "current_stage": "restart",
-            "interests": ["stocks"],
-            "strengths": ["review"],
-            "constraints": ["capital"],
-            "goal_intention": "Build a real stock trading path.",
-        },
+        "/buddy/onboarding/contract/start",
+        json={"session_id": identity["session_id"], **_contract_payload()},
     )
 
     assert response.status_code == 202
     handle = response.json()
-    assert handle["operation_kind"] == "identity"
+    assert handle["operation_kind"] == "contract"
     running_surface = _wait_for_surface(
         client,
         handle["profile_id"],
         operation_status="running",
     )
-    assert running_surface["onboarding"]["session_id"] == handle["session_id"]
-    assert running_surface["onboarding"]["operation_id"] == handle["operation_id"]
-    reasoner.release_plan_turn.set()
+    assert running_surface["onboarding"]["status"] == "contract-draft"
+    compiler.release_compile.set()
     succeeded_surface = _wait_for_surface(
         client,
         handle["profile_id"],
         operation_status="succeeded",
     )
-    assert succeeded_surface["onboarding"]["next_question"]
-    assert succeeded_surface["onboarding"]["status"] == "clarifying"
+    assert succeeded_surface["onboarding"]["status"] == "contract-ready"
+    assert succeeded_surface["onboarding"]["recommended_direction"] == _STOCKS_DIRECTION
+    assert "next_question" not in succeeded_surface["onboarding"]
 
 
-def test_start_identity_surfaces_fail_closed_timeout(tmp_path) -> None:
-    client = TestClient(_build_app(tmp_path, reasoner=_TimeoutIdentityReasoner()))
+def test_sync_contract_submit_clears_stale_async_failure_on_surface(tmp_path) -> None:
+    compiler = _FailOnceThenSucceedContractCompiler()
+    client = TestClient(_build_app(tmp_path, compiler=compiler))
+    identity = client.post("/buddy/onboarding/identity", json=_identity_payload()).json()
 
     response = client.post(
-        "/buddy/onboarding/identity/start",
-        json={
-            "display_name": "Kai",
-            "profession": "Trader",
-            "current_stage": "restart",
-            "interests": ["stocks"],
-            "strengths": ["review"],
-            "constraints": ["capital"],
-            "goal_intention": "Build a real stock trading path.",
-        },
+        "/buddy/onboarding/contract/start",
+        json={"session_id": identity["session_id"], **_contract_payload()},
     )
 
     assert response.status_code == 202
@@ -200,53 +241,40 @@ def test_start_identity_surfaces_fail_closed_timeout(tmp_path) -> None:
         operation_status="failed",
     )
     assert "timed out" in failed_surface["onboarding"]["operation_error"].lower()
-    assert failed_surface["onboarding"]["recommended_direction"] == ""
+
+    retry = client.post(
+        "/buddy/onboarding/contract",
+        json={"session_id": identity["session_id"], **_contract_payload()},
+    )
+
+    assert retry.status_code == 200
+    surface = client.get("/buddy/surface", params={"profile_id": handle["profile_id"]}).json()
+    assert surface["onboarding"]["status"] == "contract-ready"
+    assert surface["onboarding"]["operation_status"] == "idle"
+    assert surface["onboarding"]["operation_error"] == ""
 
 
-def test_start_confirm_direction_runs_in_background_and_materializes_execution_carrier(
+def test_start_confirm_direction_materializes_execution_carrier_after_contract_ready(
     tmp_path,
 ) -> None:
-    reasoner = _BlockingConfirmReasoner()
-    client = TestClient(_build_app(tmp_path, reasoner=reasoner))
-
-    identity = client.post(
-        "/buddy/onboarding/identity",
-        json={
-            "display_name": "Kai",
-            "profession": "Trader",
-            "current_stage": "restart",
-            "interests": ["stocks", "trading"],
-            "strengths": ["review"],
-            "constraints": ["capital"],
-            "goal_intention": "Build a real stock trading path.",
-        },
-    ).json()
-    clarification = client.post(
-        "/buddy/onboarding/clarify",
-        json={
-            "session_id": identity["session_id"],
-            "answer": "I want a durable trading system with strict risk control.",
-        },
+    client = TestClient(_build_app(tmp_path, compiler=_DeterministicContractCompiler()))
+    identity = client.post("/buddy/onboarding/identity", json=_identity_payload()).json()
+    contract = client.post(
+        "/buddy/onboarding/contract",
+        json={"session_id": identity["session_id"], **_contract_payload()},
     ).json()
 
     response = client.post(
         "/buddy/onboarding/confirm-direction/start",
         json={
             "session_id": identity["session_id"],
-            "selected_direction": clarification["recommended_direction"],
+            "selected_direction": contract["recommended_direction"],
             "capability_action": "start-new",
         },
     )
 
     assert response.status_code == 202
     handle = response.json()
-    running_surface = _wait_for_surface(
-        client,
-        handle["profile_id"],
-        operation_status="running",
-    )
-    assert running_surface["onboarding"]["operation_kind"] == "confirm"
-    reasoner.release_growth_plan.set()
     succeeded_surface = _wait_for_surface(
         client,
         handle["profile_id"],
@@ -254,4 +282,7 @@ def test_start_confirm_direction_runs_in_background_and_materializes_execution_c
     )
     assert succeeded_surface["growth_target"] is not None
     assert succeeded_surface["execution_carrier"] is not None
-    assert succeeded_surface["onboarding"]["selected_direction"] == clarification["recommended_direction"]
+    assert (
+        succeeded_surface["onboarding"]["selected_direction"]
+        == contract["recommended_direction"]
+    )

@@ -200,6 +200,26 @@ class _LaneLessContractCompiler(_DeterministicContractCompiler):
         )
 
 
+class _MultiCandidateContractCompiler(_DeterministicContractCompiler):
+    def compile_contract(
+        self,
+        *,
+        profile,
+        collaboration_contract,
+    ) -> _ContractCompileResult:
+        compiled = super().compile_contract(
+            profile=profile,
+            collaboration_contract=collaboration_contract,
+        )
+        return _ContractCompileResult(
+            candidate_directions=[_STOCKS_DIRECTION, _CREATOR_DIRECTION],
+            recommended_direction=_STOCKS_DIRECTION,
+            final_goal=compiled.final_goal,
+            why_it_matters=compiled.why_it_matters,
+            backlog_items=compiled.backlog_items,
+        )
+
+
 def _build_service(
     tmp_path,
     *,
@@ -447,6 +467,135 @@ def test_confirm_primary_direction_persists_contract_and_execution_identity_payl
     assert instance.execution_core_identity_payload["delegation_policy"]
     assert instance.execution_core_identity_payload["direct_execution_policy"]
     assert len(compiler.compile_calls) == 1
+
+
+def test_confirm_primary_direction_requires_completed_contract_compile(tmp_path) -> None:
+    service, _store = _build_service_with_planning(tmp_path)
+    identity = service.submit_identity(
+        display_name="Nora",
+        profession="Writer",
+        current_stage="restart",
+        interests=["writing", "content"],
+        strengths=["storytelling"],
+        constraints=["time"],
+        goal_intention="I want a real creator direction that can change my life.",
+    )
+
+    with pytest.raises(ValueError, match="contract"):
+        service.confirm_primary_direction(
+            session_id=identity.session_id,
+            selected_direction=_CREATOR_DIRECTION,
+            capability_action="start-new",
+        )
+
+    assert service._growth_target_repository.get_active_target(identity.profile.profile_id) is None  # pylint: disable=protected-access
+    assert service._relationship_repository.get_relationship(identity.profile.profile_id) is None  # pylint: disable=protected-access
+
+
+def test_confirm_primary_direction_rejects_selected_direction_without_matching_compile(
+    tmp_path,
+) -> None:
+    compiler = _MultiCandidateContractCompiler()
+    service, _store = _build_service_with_planning(tmp_path, compiler=compiler)
+    identity = service.submit_identity(
+        display_name="Kai",
+        profession="Trader",
+        current_stage="restart",
+        interests=["stocks", "writing"],
+        strengths=["discipline"],
+        constraints=["money"],
+        goal_intention="I want a real stock trading path with visible proof.",
+    )
+    compiled = service.submit_contract(
+        session_id=identity.session_id,
+        **_contract_payload(
+            service_intent="Turn trading ambition into a disciplined weekly execution path.",
+        ),
+    )
+
+    assert compiled.candidate_directions == [_STOCKS_DIRECTION, _CREATOR_DIRECTION]
+
+    with pytest.raises(ValueError, match="fresh contract compile"):
+        service.confirm_primary_direction(
+            session_id=identity.session_id,
+            selected_direction=_CREATOR_DIRECTION,
+            capability_action="start-new",
+        )
+
+    assert service._growth_target_repository.get_active_target(identity.profile.profile_id) is None  # pylint: disable=protected-access
+    assert len(compiler.compile_calls) == 1
+
+
+def test_submit_contract_clears_stale_failed_async_operation_state(tmp_path) -> None:
+    service = _build_service(tmp_path)
+    identity = service.submit_identity(
+        display_name="Kai",
+        profession="Trader",
+        current_stage="restart",
+        interests=["stocks"],
+        strengths=["review"],
+        constraints=["capital"],
+        goal_intention="Build a real stock trading path.",
+    )
+    service.mark_operation_failed(
+        session_id=identity.session_id,
+        operation_id="op-contract-failed",
+        operation_kind="contract",
+        error_message="old compiler failure",
+    )
+
+    service.submit_contract(
+        session_id=identity.session_id,
+        **_contract_payload(
+            service_intent="Turn trading ambition into a disciplined weekly execution path.",
+        ),
+    )
+
+    stored = service._onboarding_session_repository.get_session(identity.session_id)  # pylint: disable=protected-access
+
+    assert stored is not None
+    assert stored.status == "contract-ready"
+    assert stored.operation_id == ""
+    assert stored.operation_kind == ""
+    assert stored.operation_status == "idle"
+    assert stored.operation_error == ""
+
+
+def test_confirm_primary_direction_clears_stale_failed_async_operation_state(tmp_path) -> None:
+    service, _store = _build_service_with_planning(tmp_path)
+    identity = service.submit_identity(
+        display_name="Kai",
+        profession="Trader",
+        current_stage="restart",
+        interests=["stocks"],
+        strengths=["review"],
+        constraints=["capital"],
+        goal_intention="Build a real stock trading path.",
+    )
+    compiled = service.submit_contract(
+        session_id=identity.session_id,
+        **_contract_payload(
+            service_intent="Turn trading ambition into a disciplined weekly execution path.",
+        ),
+    )
+    service.mark_operation_failed(
+        session_id=identity.session_id,
+        operation_id="op-confirm-failed",
+        operation_kind="confirm",
+        error_message="old confirmation failure",
+    )
+
+    result = service.confirm_primary_direction(
+        session_id=identity.session_id,
+        selected_direction=compiled.recommended_direction,
+        capability_action="start-new",
+    )
+
+    assert result.session.status == "confirmed"
+    assert result.session.operation_id == ""
+    assert result.session.operation_kind == ""
+    assert result.session.operation_status == "idle"
+    assert result.session.operation_error == ""
 
 
 def test_confirm_primary_direction_generates_formal_growth_scaffold(tmp_path) -> None:

@@ -470,6 +470,7 @@ class BuddyOnboardingService:
             session.model_copy(
                 update={
                     "status": "contract-ready",
+                    **self._clear_operation_state(),
                     "service_intent": collaboration_contract.service_intent,
                     "collaboration_role": collaboration_contract.collaboration_role,
                     "autonomy_level": collaboration_contract.autonomy_level,
@@ -610,17 +611,10 @@ class BuddyOnboardingService:
             session_id=session_id,
             selected_direction=normalized,
         )
-        compiled_contract = self._resolve_cached_contract_compile(
+        compiled_contract = self._require_confirmable_contract_compile(
             session=session,
             selected_direction=normalized,
         )
-        if compiled_contract is None:
-            compiled_contract = self._resolve_contract_compile(
-                profile=profile,
-                collaboration_contract=self._build_contract_from_session(session),
-            )
-        else:
-            compiled_contract = self._validate_contract_compile_result(compiled_contract)
         resolved_capability_action = str(
             capability_action or preview.recommended_action or "",
         ).strip()
@@ -695,6 +689,7 @@ class BuddyOnboardingService:
             session.model_copy(
                 update={
                     "status": "confirmed",
+                    **self._clear_operation_state(),
                     "selected_direction": normalized,
                     "recommended_direction": session.recommended_direction or normalized,
                     **self._build_contract_compile_cache(compiled_contract),
@@ -1035,6 +1030,14 @@ class BuddyOnboardingService:
             collaboration_notes=session.collaboration_notes,
         )
 
+    def _clear_operation_state(self) -> dict[str, object]:
+        return {
+            "operation_id": "",
+            "operation_kind": "",
+            "operation_status": "idle",
+            "operation_error": "",
+        }
+
     def _resolve_cached_contract_compile(
         self,
         *,
@@ -1059,6 +1062,28 @@ class BuddyOnboardingService:
             why_it_matters=why_it_matters,
             backlog_items=backlog_items[:3],
         )
+
+    def _require_confirmable_contract_compile(
+        self,
+        *,
+        session: BuddyOnboardingSessionRecord,
+        selected_direction: str,
+    ) -> BuddyOnboardingContractCompileResult:
+        normalized_direction = selected_direction.strip()
+        candidate_directions = _unique(list(session.candidate_directions or []))
+        if normalized_direction and candidate_directions and normalized_direction not in candidate_directions:
+            raise ValueError("selected_direction must come from the current contract candidates")
+        cached = self._resolve_cached_contract_compile(
+            session=session,
+            selected_direction=normalized_direction,
+        )
+        if cached is not None:
+            return self._validate_contract_compile_result(cached)
+        if str(session.draft_direction or "").strip():
+            raise ValueError(
+                "selected_direction requires a fresh contract compile before confirmation",
+            )
+        raise ValueError("contract compile must be completed before confirming a direction")
 
     def _resolve_contract_compile(
         self,
