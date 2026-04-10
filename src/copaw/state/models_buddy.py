@@ -78,6 +78,12 @@ class CompanionRelationship(UpdatedRecord):
     relationship_id: str = Field(default_factory=_new_record_id, min_length=1)
     profile_id: str = Field(..., min_length=1)
     buddy_name: str = ""
+    service_intent: str = ""
+    collaboration_role: str = "orchestrator"
+    autonomy_level: str = "proactive"
+    confirm_boundaries: list[str] = Field(default_factory=list)
+    report_style: str = "result-first"
+    collaboration_notes: str = ""
     encouragement_style: str = Field(default="old-friend", min_length=1)
     effective_reminders: list[str] = Field(default_factory=list)
     ineffective_reminders: list[str] = Field(default_factory=list)
@@ -89,6 +95,7 @@ class CompanionRelationship(UpdatedRecord):
     last_interaction_at: str | None = None
 
     @field_validator(
+        "confirm_boundaries",
         "effective_reminders",
         "ineffective_reminders",
         "avoidance_patterns",

@@ -198,3 +198,127 @@ def test_sqlite_state_store_initialize_upgrades_legacy_tables_before_schema_inde
         }.issubset(_column_names(conn, "human_assist_tasks"))
         assert {"work_context_id"}.issubset(_column_names(conn, "media_analyses"))
         assert conn.execute("PRAGMA user_version").fetchone()[0] == STATE_SCHEMA_VERSION
+
+
+def test_sqlite_state_store_initializes_buddy_contract_schema_without_clarify_columns(
+    tmp_path,
+) -> None:
+    path = tmp_path / "buddy-contract-state.sqlite3"
+    store = SQLiteStateStore(path)
+    store.initialize()
+
+    with sqlite3.connect(path) as conn:
+        relationship_columns = _column_names(conn, "companion_relationships")
+        session_columns = _column_names(conn, "buddy_onboarding_sessions")
+
+    assert {
+        "service_intent",
+        "collaboration_role",
+        "autonomy_level",
+        "confirm_boundaries_json",
+        "report_style",
+        "collaboration_notes",
+    }.issubset(relationship_columns)
+    assert {
+        "service_intent",
+        "collaboration_role",
+        "autonomy_level",
+        "confirm_boundaries_json",
+        "report_style",
+        "collaboration_notes",
+    }.issubset(session_columns)
+    assert {
+        "question_count",
+        "tightened",
+        "next_question",
+        "transcript_json",
+    }.isdisjoint(session_columns)
+    assert "metadata_json" not in relationship_columns
+    assert "metadata_json" not in session_columns
+
+
+def test_sqlite_state_store_migrates_legacy_buddy_tables_to_contract_columns(
+    tmp_path,
+) -> None:
+    path = tmp_path / "legacy-buddy-state.sqlite3"
+    with sqlite3.connect(path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE human_profiles (
+                profile_id TEXT PRIMARY KEY,
+                display_name TEXT NOT NULL,
+                profession TEXT NOT NULL,
+                current_stage TEXT NOT NULL,
+                interests_json TEXT NOT NULL DEFAULT '[]',
+                strengths_json TEXT NOT NULL DEFAULT '[]',
+                constraints_json TEXT NOT NULL DEFAULT '[]',
+                goal_intention TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE companion_relationships (
+                relationship_id TEXT PRIMARY KEY,
+                profile_id TEXT NOT NULL,
+                buddy_name TEXT NOT NULL DEFAULT '',
+                encouragement_style TEXT NOT NULL DEFAULT 'old-friend',
+                effective_reminders_json TEXT NOT NULL DEFAULT '[]',
+                ineffective_reminders_json TEXT NOT NULL DEFAULT '[]',
+                avoidance_patterns_json TEXT NOT NULL DEFAULT '[]',
+                communication_count INTEGER NOT NULL DEFAULT 0,
+                pleasant_interaction_score INTEGER NOT NULL DEFAULT 0,
+                companion_experience INTEGER NOT NULL DEFAULT 0,
+                strong_pull_count INTEGER NOT NULL DEFAULT 0,
+                last_interaction_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE buddy_onboarding_sessions (
+                session_id TEXT PRIMARY KEY,
+                profile_id TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'clarifying',
+                operation_id TEXT NOT NULL DEFAULT '',
+                operation_kind TEXT NOT NULL DEFAULT '',
+                operation_status TEXT NOT NULL DEFAULT 'idle',
+                operation_error TEXT NOT NULL DEFAULT '',
+                question_count INTEGER NOT NULL DEFAULT 1,
+                tightened INTEGER NOT NULL DEFAULT 0,
+                next_question TEXT NOT NULL DEFAULT '',
+                transcript_json TEXT NOT NULL DEFAULT '[]',
+                candidate_directions_json TEXT NOT NULL DEFAULT '[]',
+                recommended_direction TEXT NOT NULL DEFAULT '',
+                selected_direction TEXT NOT NULL DEFAULT '',
+                draft_direction TEXT NOT NULL DEFAULT '',
+                draft_final_goal TEXT NOT NULL DEFAULT '',
+                draft_why_it_matters TEXT NOT NULL DEFAULT '',
+                draft_backlog_items_json TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            """
+        )
+
+    store = SQLiteStateStore(path)
+    store.initialize()
+
+    with sqlite3.connect(path) as conn:
+        relationship_columns = _column_names(conn, "companion_relationships")
+        session_columns = _column_names(conn, "buddy_onboarding_sessions")
+
+    assert {
+        "service_intent",
+        "collaboration_role",
+        "autonomy_level",
+        "confirm_boundaries_json",
+        "report_style",
+        "collaboration_notes",
+    }.issubset(relationship_columns)
+    assert {
+        "service_intent",
+        "collaboration_role",
+        "autonomy_level",
+        "confirm_boundaries_json",
+        "report_style",
+        "collaboration_notes",
+    }.issubset(session_columns)

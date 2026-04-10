@@ -5,9 +5,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
-from .model_support import UpdatedRecord, _new_record_id
+from .model_support import UpdatedRecord, _new_record_id, _normalize_text_list
 from .models_buddy import (
     BuddyDomainCapabilityRecord,
     CompanionRelationship,
@@ -20,15 +20,17 @@ from .store import SQLiteStateStore
 class BuddyOnboardingSessionRecord(UpdatedRecord):
     session_id: str = Field(default_factory=_new_record_id, min_length=1)
     profile_id: str = Field(..., min_length=1)
-    status: str = Field(default="clarifying", min_length=1)
+    status: str = Field(default="contract-draft", min_length=1)
     operation_id: str = ""
     operation_kind: str = ""
     operation_status: str = "idle"
     operation_error: str = ""
-    question_count: int = Field(default=1, ge=1)
-    tightened: bool = False
-    next_question: str = ""
-    transcript: list[str] = Field(default_factory=list)
+    service_intent: str = ""
+    collaboration_role: str = "orchestrator"
+    autonomy_level: str = "proactive"
+    confirm_boundaries: list[str] = Field(default_factory=list)
+    report_style: str = "result-first"
+    collaboration_notes: str = ""
     candidate_directions: list[str] = Field(default_factory=list)
     recommended_direction: str = ""
     selected_direction: str = ""
@@ -36,6 +38,11 @@ class BuddyOnboardingSessionRecord(UpdatedRecord):
     draft_final_goal: str = ""
     draft_why_it_matters: str = ""
     draft_backlog_items: list[dict[str, object]] = Field(default_factory=list)
+
+    @field_validator("confirm_boundaries", "candidate_directions", mode="before")
+    @classmethod
+    def _normalize_list_fields(cls, value: object) -> list[str]:
+        return _normalize_text_list(value)
 
 
 def _encode_json(value: object) -> str:
@@ -86,6 +93,9 @@ def _relationship_from_row(row) -> CompanionRelationship | None:
     if row is None:
         return None
     payload = dict(row)
+    payload["confirm_boundaries"] = _decode_json_list(
+        payload.pop("confirm_boundaries_json", None),
+    )
     payload["effective_reminders"] = _decode_json_list(
         payload.pop("effective_reminders_json", None),
     )
@@ -112,8 +122,9 @@ def _session_from_row(row) -> BuddyOnboardingSessionRecord | None:
     if row is None:
         return None
     payload = dict(row)
-    payload["tightened"] = bool(payload.get("tightened", 0))
-    payload["transcript"] = _decode_json_list(payload.pop("transcript_json", None))
+    payload["confirm_boundaries"] = _decode_json_list(
+        payload.pop("confirm_boundaries_json", None),
+    )
     payload["candidate_directions"] = _decode_json_list(
         payload.pop("candidate_directions_json", None),
     )
@@ -254,6 +265,9 @@ class SqliteCompanionRelationshipRepository:
         relationship: CompanionRelationship,
     ) -> CompanionRelationship:
         payload = relationship.model_dump(mode="json")
+        payload["confirm_boundaries_json"] = _encode_json(
+            relationship.confirm_boundaries,
+        )
         payload["effective_reminders_json"] = _encode_json(
             relationship.effective_reminders,
         )
@@ -267,13 +281,19 @@ class SqliteCompanionRelationshipRepository:
             conn.execute(
                 """
                 INSERT INTO companion_relationships (
-                    relationship_id, profile_id, buddy_name, encouragement_style,
+                    relationship_id, profile_id, buddy_name,
+                    service_intent, collaboration_role, autonomy_level,
+                    confirm_boundaries_json, report_style, collaboration_notes,
+                    encouragement_style,
                     effective_reminders_json, ineffective_reminders_json,
                     avoidance_patterns_json, communication_count,
                     pleasant_interaction_score, companion_experience,
                     strong_pull_count, last_interaction_at, created_at, updated_at
                 ) VALUES (
-                    :relationship_id, :profile_id, :buddy_name, :encouragement_style,
+                    :relationship_id, :profile_id, :buddy_name,
+                    :service_intent, :collaboration_role, :autonomy_level,
+                    :confirm_boundaries_json, :report_style, :collaboration_notes,
+                    :encouragement_style,
                     :effective_reminders_json, :ineffective_reminders_json,
                     :avoidance_patterns_json, :communication_count,
                     :pleasant_interaction_score, :companion_experience,
@@ -282,6 +302,12 @@ class SqliteCompanionRelationshipRepository:
                 ON CONFLICT(relationship_id) DO UPDATE SET
                     profile_id = excluded.profile_id,
                     buddy_name = excluded.buddy_name,
+                    service_intent = excluded.service_intent,
+                    collaboration_role = excluded.collaboration_role,
+                    autonomy_level = excluded.autonomy_level,
+                    confirm_boundaries_json = excluded.confirm_boundaries_json,
+                    report_style = excluded.report_style,
+                    collaboration_notes = excluded.collaboration_notes,
                     encouragement_style = excluded.encouragement_style,
                     effective_reminders_json = excluded.effective_reminders_json,
                     ineffective_reminders_json = excluded.ineffective_reminders_json,
@@ -501,8 +527,7 @@ class SqliteBuddyOnboardingSessionRepository:
         session: BuddyOnboardingSessionRecord,
     ) -> BuddyOnboardingSessionRecord:
         payload = session.model_dump(mode="json")
-        payload["tightened"] = 1 if session.tightened else 0
-        payload["transcript_json"] = _encode_json(session.transcript)
+        payload["confirm_boundaries_json"] = _encode_json(session.confirm_boundaries)
         payload["candidate_directions_json"] = _encode_json(session.candidate_directions)
         payload["draft_backlog_items_json"] = _encode_json(session.draft_backlog_items)
         with self._store.connection() as conn:
@@ -511,16 +536,17 @@ class SqliteBuddyOnboardingSessionRepository:
                 INSERT INTO buddy_onboarding_sessions (
                     session_id, profile_id, status,
                     operation_id, operation_kind, operation_status, operation_error,
-                    question_count, tightened,
-                    next_question, transcript_json, candidate_directions_json,
+                    service_intent, collaboration_role, autonomy_level,
+                    confirm_boundaries_json, report_style, collaboration_notes,
+                    candidate_directions_json,
                     recommended_direction, selected_direction,
                     draft_direction, draft_final_goal, draft_why_it_matters, draft_backlog_items_json,
                     created_at, updated_at
                 ) VALUES (
                     :session_id, :profile_id, :status,
                     :operation_id, :operation_kind, :operation_status, :operation_error,
-                    :question_count, :tightened,
-                    :next_question, :transcript_json, :candidate_directions_json,
+                    :service_intent, :collaboration_role, :autonomy_level,
+                    :confirm_boundaries_json, :report_style, :collaboration_notes, :candidate_directions_json,
                     :recommended_direction, :selected_direction,
                     :draft_direction, :draft_final_goal, :draft_why_it_matters, :draft_backlog_items_json,
                     :created_at, :updated_at
@@ -532,10 +558,12 @@ class SqliteBuddyOnboardingSessionRepository:
                     operation_kind = excluded.operation_kind,
                     operation_status = excluded.operation_status,
                     operation_error = excluded.operation_error,
-                    question_count = excluded.question_count,
-                    tightened = excluded.tightened,
-                    next_question = excluded.next_question,
-                    transcript_json = excluded.transcript_json,
+                    service_intent = excluded.service_intent,
+                    collaboration_role = excluded.collaboration_role,
+                    autonomy_level = excluded.autonomy_level,
+                    confirm_boundaries_json = excluded.confirm_boundaries_json,
+                    report_style = excluded.report_style,
+                    collaboration_notes = excluded.collaboration_notes,
                     candidate_directions_json = excluded.candidate_directions_json,
                     recommended_direction = excluded.recommended_direction,
                     selected_direction = excluded.selected_direction,

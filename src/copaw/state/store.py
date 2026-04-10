@@ -42,6 +42,12 @@ CREATE TABLE IF NOT EXISTS companion_relationships (
     relationship_id TEXT PRIMARY KEY,
     profile_id TEXT NOT NULL,
     buddy_name TEXT NOT NULL DEFAULT '',
+    service_intent TEXT NOT NULL DEFAULT '',
+    collaboration_role TEXT NOT NULL DEFAULT 'orchestrator',
+    autonomy_level TEXT NOT NULL DEFAULT 'proactive',
+    confirm_boundaries_json TEXT NOT NULL DEFAULT '[]',
+    report_style TEXT NOT NULL DEFAULT 'result-first',
+    collaboration_notes TEXT NOT NULL DEFAULT '',
     encouragement_style TEXT NOT NULL DEFAULT 'old-friend',
     effective_reminders_json TEXT NOT NULL DEFAULT '[]',
     ineffective_reminders_json TEXT NOT NULL DEFAULT '[]',
@@ -62,15 +68,17 @@ CREATE INDEX IF NOT EXISTS idx_companion_relationships_profile_updated
 CREATE TABLE IF NOT EXISTS buddy_onboarding_sessions (
     session_id TEXT PRIMARY KEY,
     profile_id TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'clarifying',
+    status TEXT NOT NULL DEFAULT 'contract-draft',
     operation_id TEXT NOT NULL DEFAULT '',
     operation_kind TEXT NOT NULL DEFAULT '',
     operation_status TEXT NOT NULL DEFAULT 'idle',
     operation_error TEXT NOT NULL DEFAULT '',
-    question_count INTEGER NOT NULL DEFAULT 1,
-    tightened INTEGER NOT NULL DEFAULT 0,
-    next_question TEXT NOT NULL DEFAULT '',
-    transcript_json TEXT NOT NULL DEFAULT '[]',
+    service_intent TEXT NOT NULL DEFAULT '',
+    collaboration_role TEXT NOT NULL DEFAULT 'orchestrator',
+    autonomy_level TEXT NOT NULL DEFAULT 'proactive',
+    confirm_boundaries_json TEXT NOT NULL DEFAULT '[]',
+    report_style TEXT NOT NULL DEFAULT 'result-first',
+    collaboration_notes TEXT NOT NULL DEFAULT '',
     candidate_directions_json TEXT NOT NULL DEFAULT '[]',
     recommended_direction TEXT NOT NULL DEFAULT '',
     selected_direction TEXT NOT NULL DEFAULT '',
@@ -1745,6 +1753,12 @@ _ADDITIVE_SCHEMA_COLUMNS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = 
     (
         "buddy_onboarding_sessions",
         (
+            ("service_intent", "TEXT NOT NULL DEFAULT ''"),
+            ("collaboration_role", "TEXT NOT NULL DEFAULT 'orchestrator'"),
+            ("autonomy_level", "TEXT NOT NULL DEFAULT 'proactive'"),
+            ("confirm_boundaries_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("report_style", "TEXT NOT NULL DEFAULT 'result-first'"),
+            ("collaboration_notes", "TEXT NOT NULL DEFAULT ''"),
             ("draft_direction", "TEXT NOT NULL DEFAULT ''"),
             ("draft_final_goal", "TEXT NOT NULL DEFAULT ''"),
             ("draft_why_it_matters", "TEXT NOT NULL DEFAULT ''"),
@@ -1770,6 +1784,12 @@ _ADDITIVE_SCHEMA_COLUMNS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = 
     (
         "companion_relationships",
         (
+            ("service_intent", "TEXT NOT NULL DEFAULT ''"),
+            ("collaboration_role", "TEXT NOT NULL DEFAULT 'orchestrator'"),
+            ("autonomy_level", "TEXT NOT NULL DEFAULT 'proactive'"),
+            ("confirm_boundaries_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("report_style", "TEXT NOT NULL DEFAULT 'result-first'"),
+            ("collaboration_notes", "TEXT NOT NULL DEFAULT ''"),
             ("communication_count", "INTEGER NOT NULL DEFAULT 0"),
             ("pleasant_interaction_score", "INTEGER NOT NULL DEFAULT 0"),
             ("companion_experience", "INTEGER NOT NULL DEFAULT 0"),
@@ -2121,8 +2141,13 @@ class SQLiteStateStore:
                     conn,
                     existing_tables=existing_tables,
                 )
+                _migrate_buddy_onboarding_sessions_contract_table(
+                    conn,
+                    existing_tables=existing_tables,
+                )
             conn.executescript(_SCHEMA)
             _ensure_additive_schema_columns(conn)
+            _migrate_buddy_onboarding_sessions_contract_table(conn)
             conn.execute(f"PRAGMA user_version = {STATE_SCHEMA_VERSION}")
 
     @contextmanager
@@ -2188,3 +2213,93 @@ def _ensure_additive_schema_columns(
                 column_name=column_name,
                 column_sql=column_sql,
             )
+
+
+def _migrate_buddy_onboarding_sessions_contract_table(
+    conn: sqlite3.Connection,
+    *,
+    existing_tables: set[str] | None = None,
+) -> None:
+    table_names = existing_tables if existing_tables is not None else _list_table_names(conn)
+    if "buddy_onboarding_sessions" not in table_names:
+        return
+    columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(buddy_onboarding_sessions)").fetchall()
+    }
+    legacy_columns = {"question_count", "tightened", "next_question", "transcript_json"}
+    if legacy_columns.isdisjoint(columns):
+        return
+    conn.execute(
+        "ALTER TABLE buddy_onboarding_sessions RENAME TO buddy_onboarding_sessions_legacy_cutover",
+    )
+    conn.execute(
+        """
+        CREATE TABLE buddy_onboarding_sessions (
+            session_id TEXT PRIMARY KEY,
+            profile_id TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'contract-draft',
+            operation_id TEXT NOT NULL DEFAULT '',
+            operation_kind TEXT NOT NULL DEFAULT '',
+            operation_status TEXT NOT NULL DEFAULT 'idle',
+            operation_error TEXT NOT NULL DEFAULT '',
+            service_intent TEXT NOT NULL DEFAULT '',
+            collaboration_role TEXT NOT NULL DEFAULT 'orchestrator',
+            autonomy_level TEXT NOT NULL DEFAULT 'proactive',
+            confirm_boundaries_json TEXT NOT NULL DEFAULT '[]',
+            report_style TEXT NOT NULL DEFAULT 'result-first',
+            collaboration_notes TEXT NOT NULL DEFAULT '',
+            candidate_directions_json TEXT NOT NULL DEFAULT '[]',
+            recommended_direction TEXT NOT NULL DEFAULT '',
+            selected_direction TEXT NOT NULL DEFAULT '',
+            draft_direction TEXT NOT NULL DEFAULT '',
+            draft_final_goal TEXT NOT NULL DEFAULT '',
+            draft_why_it_matters TEXT NOT NULL DEFAULT '',
+            draft_backlog_items_json TEXT NOT NULL DEFAULT '[]',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY(profile_id) REFERENCES human_profiles(profile_id) ON DELETE CASCADE
+        )
+        """,
+    )
+    conn.execute(
+        """
+        INSERT INTO buddy_onboarding_sessions (
+            session_id, profile_id, status,
+            operation_id, operation_kind, operation_status, operation_error,
+            service_intent, collaboration_role, autonomy_level,
+            confirm_boundaries_json, report_style, collaboration_notes,
+            candidate_directions_json, recommended_direction, selected_direction,
+            draft_direction, draft_final_goal, draft_why_it_matters, draft_backlog_items_json,
+            created_at, updated_at
+        )
+        SELECT
+            session_id,
+            profile_id,
+            CASE
+                WHEN status IN ('', 'clarifying') THEN 'contract-draft'
+                ELSE status
+            END,
+            COALESCE(operation_id, ''),
+            COALESCE(operation_kind, ''),
+            COALESCE(operation_status, 'idle'),
+            COALESCE(operation_error, ''),
+            COALESCE(service_intent, ''),
+            COALESCE(collaboration_role, 'orchestrator'),
+            COALESCE(autonomy_level, 'proactive'),
+            COALESCE(confirm_boundaries_json, '[]'),
+            COALESCE(report_style, 'result-first'),
+            COALESCE(collaboration_notes, ''),
+            COALESCE(candidate_directions_json, '[]'),
+            COALESCE(recommended_direction, ''),
+            COALESCE(selected_direction, ''),
+            COALESCE(draft_direction, ''),
+            COALESCE(draft_final_goal, ''),
+            COALESCE(draft_why_it_matters, ''),
+            COALESCE(draft_backlog_items_json, '[]'),
+            created_at,
+            updated_at
+        FROM buddy_onboarding_sessions_legacy_cutover
+        """,
+    )
+    conn.execute("DROP TABLE buddy_onboarding_sessions_legacy_cutover")
