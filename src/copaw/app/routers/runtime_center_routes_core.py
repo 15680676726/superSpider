@@ -210,6 +210,34 @@ def _resolve_runtime_chat_thread_id(request_payload: AgentRequest) -> str | None
     )
 
 
+def _normalize_runtime_chat_thread_binding(request_payload: AgentRequest) -> AgentRequest:
+    control_thread_id = _first_non_empty_text(
+        getattr(request_payload, "control_thread_id", None),
+        getattr(request_payload, "thread_id", None),
+        getattr(request_payload, "session_id", None),
+    )
+    thread_id = _first_non_empty_text(
+        getattr(request_payload, "thread_id", None),
+        control_thread_id,
+        getattr(request_payload, "session_id", None),
+    )
+    session_kind = _first_non_empty_text(getattr(request_payload, "session_kind", None))
+    updates: dict[str, object] = {}
+    if control_thread_id and not _first_non_empty_text(getattr(request_payload, "control_thread_id", None)):
+        updates["control_thread_id"] = control_thread_id
+    if thread_id and not _first_non_empty_text(getattr(request_payload, "thread_id", None)):
+        updates["thread_id"] = thread_id
+    if (
+        not session_kind
+        and control_thread_id
+        and control_thread_id.startswith("industry-chat:")
+    ):
+        updates["session_kind"] = "industry-control-thread"
+    if not updates:
+        return request_payload
+    return request_payload.model_copy(update=updates)
+
+
 def _string_list(value: object | None) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -1303,6 +1331,7 @@ async def _run_runtime_chat_turn(
     default_mode: str,
 ) -> StreamingResponse:
     turn_executor = _get_turn_executor(request)
+    request_payload = _normalize_runtime_chat_thread_binding(request_payload)
     request_payload = _merge_runtime_chat_requested_actions(request_payload)
     raw_interaction_mode = getattr(request_payload, "interaction_mode", None)
     interaction_mode = _resolve_runtime_chat_interaction_mode(

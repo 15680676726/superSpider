@@ -374,6 +374,74 @@ def test_runtime_center_chat_run_preserves_strong_pull_signal_for_buddy_growth(t
     assert relationship.strong_pull_count == 1
 
 
+def test_runtime_center_chat_run_uses_confirmed_buddy_execution_carrier_binding(tmp_path) -> None:
+    client, store = _build_client_with_growth(tmp_path)
+    turn_executor = FakeTurnExecutor()
+    client.app.state.turn_executor = turn_executor
+
+    identity = client.post(
+        "/buddy/onboarding/identity",
+        json={
+            "display_name": "Kai",
+            "profession": "Analyst",
+            "current_stage": "restart",
+            "interests": ["stocks", "trading"],
+            "strengths": ["discipline"],
+            "constraints": ["money"],
+            "goal_intention": "I want a real stock trading path.",
+        },
+    ).json()
+    clarification = client.post(
+        "/buddy/onboarding/clarify",
+        json={
+            "session_id": identity["session_id"],
+            "answer": "I want a durable trading system with clear risk control.",
+        },
+    ).json()
+    confirmation = client.post(
+        "/buddy/onboarding/confirm-direction",
+        json={
+            "session_id": identity["session_id"],
+            "selected_direction": clarification["recommended_direction"],
+            "capability_action": "start-new",
+        },
+    ).json()
+
+    execution_carrier = confirmation["execution_carrier"]
+    control_thread_id = execution_carrier["control_thread_id"]
+    response = client.post(
+        "/runtime-center/chat/run",
+        json={
+            "id": "req-buddy-confirmed-carrier",
+            "session_id": control_thread_id,
+            "thread_id": control_thread_id,
+            "user_id": identity["profile"]["profile_id"],
+            "channel": "console",
+            "buddy_profile_id": identity["profile"]["profile_id"],
+            "input": [
+                {
+                    "role": "user",
+                    "type": "message",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "先把今天最关键的一步推进下去，做完再回来告诉我。",
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    request_payload = turn_executor.stream_calls[0]["request_payload"]
+    assert getattr(request_payload, "session_id", None) == control_thread_id
+    assert getattr(request_payload, "thread_id", None) == control_thread_id
+    assert getattr(request_payload, "control_thread_id", None) == control_thread_id
+    assert getattr(request_payload, "buddy_profile_id", None) == identity["profile"]["profile_id"]
+    assert getattr(request_payload, "session_kind", None) == "industry-control-thread"
+
+
 def test_http_buddy_surfaces_refresh_capability_growth_from_runtime_truth(tmp_path) -> None:
     client, store = _build_client_with_growth(tmp_path)
     identity = client.post(

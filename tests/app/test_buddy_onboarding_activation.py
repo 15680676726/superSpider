@@ -7,6 +7,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import time
 
+from copaw.app.crons.executor import CronExecutor
+from copaw.app.crons.models import CronJobSpec
 from copaw.app.routers.buddy_routes import router as buddy_router
 from copaw.industry import IndustryCapabilityRecommendation
 from copaw.industry.chat_writeback import build_chat_writeback_plan
@@ -41,6 +43,18 @@ from copaw.state.repositories_buddy import (
 )
 from tests.app.industry_api_parts.shared import _build_industry_app
 from tests.shared.buddy_reasoners import DeterministicBuddyReasoner
+
+
+class _CapturingCronKernelDispatcher:
+    def __init__(self) -> None:
+        self.tasks: list[object] = []
+
+    def submit(self, task):
+        self.tasks.append(task)
+        return SimpleNamespace(phase="executing", task_id=task.id)
+
+    async def execute_task(self, task_id: str):
+        return SimpleNamespace(success=True, error=None, summary=task_id)
 
 
 class _FakeIndustryService:
@@ -1044,3 +1058,115 @@ def test_buddy_confirm_direction_seeds_durable_execution_core_schedules(
         for schedule in schedules
     } == {control_thread_id}
     assert all(schedule.enabled for schedule in schedules)
+    assert {
+        (schedule.spec_payload.get("request") or {}).get("buddy_profile_id")
+        for schedule in schedules
+    } == {identity["profile"]["profile_id"]}
+    assert {
+        (schedule.spec_payload.get("request") or {}).get("owner_scope")
+        for schedule in schedules
+    } == {identity["profile"]["profile_id"]}
+
+
+def test_buddy_execution_core_schedule_dispatch_keeps_buddy_profile_binding(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    store = app.state.state_store
+    profile_repository = SqliteHumanProfileRepository(store)
+    growth_target_repository = SqliteGrowthTargetRepository(store)
+    relationship_repository = SqliteCompanionRelationshipRepository(store)
+    domain_capability_repository = SqliteBuddyDomainCapabilityRepository(store)
+    session_repository = SqliteBuddyOnboardingSessionRepository(store)
+    growth_service = BuddyDomainCapabilityGrowthService(
+        domain_capability_repository=domain_capability_repository,
+        industry_instance_repository=app.state.industry_instance_repository,
+        operating_lane_service=app.state.operating_lane_service,
+        backlog_service=app.state.backlog_service,
+        operating_cycle_service=app.state.operating_cycle_service,
+        assignment_service=app.state.assignment_service,
+        agent_report_service=app.state.agent_report_service,
+    )
+    onboarding_service = BuddyOnboardingService(
+        profile_repository=profile_repository,
+        growth_target_repository=growth_target_repository,
+        relationship_repository=relationship_repository,
+        domain_capability_repository=domain_capability_repository,
+        onboarding_session_repository=session_repository,
+        onboarding_reasoner=DeterministicBuddyReasoner(),
+        industry_instance_repository=app.state.industry_instance_repository,
+        operating_lane_service=app.state.operating_lane_service,
+        backlog_service=app.state.backlog_service,
+        operating_cycle_service=app.state.operating_cycle_service,
+        assignment_service=app.state.assignment_service,
+        schedule_repository=app.state.schedule_repository,
+        domain_capability_growth_service=growth_service,
+    )
+    projection_service = BuddyProjectionService(
+        profile_repository=profile_repository,
+        growth_target_repository=growth_target_repository,
+        relationship_repository=relationship_repository,
+        domain_capability_repository=domain_capability_repository,
+        onboarding_session_repository=session_repository,
+        domain_capability_growth_service=growth_service,
+        current_focus_resolver=lambda _profile_id: {},
+    )
+    app.include_router(buddy_router)
+    app.state.buddy_onboarding_service = onboarding_service
+    app.state.buddy_projection_service = projection_service
+    client = TestClient(app)
+
+    identity = client.post(
+        "/buddy/onboarding/identity",
+        json={
+            "display_name": "Kai",
+            "profession": "Analyst",
+            "current_stage": "restart",
+            "interests": ["stocks", "trading"],
+            "strengths": ["discipline"],
+            "constraints": ["money"],
+            "goal_intention": "I want a real stock trading path.",
+        },
+    ).json()
+    clarification = client.post(
+        "/buddy/onboarding/clarify",
+        json={
+            "session_id": identity["session_id"],
+            "answer": "I want a durable trading system with clear risk control.",
+        },
+    ).json()
+    confirmation = client.post(
+        "/buddy/onboarding/confirm-direction",
+        json={
+            "session_id": identity["session_id"],
+            "selected_direction": clarification["recommended_direction"],
+            "capability_action": "start-new",
+        },
+    )
+
+    assert confirmation.status_code == 200
+    payload = confirmation.json()
+    instance_id = payload["execution_carrier"]["instance_id"]
+    control_thread_id = payload["execution_carrier"]["control_thread_id"]
+    schedules = [
+        schedule
+        for schedule in app.state.schedule_repository.list_schedules()
+        if schedule.status != "deleted"
+        and (
+            schedule.spec_payload.get("meta", {}).get("industry_instance_id") == instance_id
+            or schedule.spec_payload.get("request", {}).get("industry_instance_id") == instance_id
+        )
+    ]
+    assert schedules
+
+    dispatcher = _CapturingCronKernelDispatcher()
+    executor = CronExecutor(kernel_dispatcher=dispatcher)
+    asyncio.run(executor.execute(CronJobSpec.model_validate(schedules[0].spec_payload)))
+
+    assert dispatcher.tasks
+    submitted = dispatcher.tasks[0]
+    request_payload = dict(submitted.payload.get("request") or {})
+    assert request_payload.get("buddy_profile_id") == identity["profile"]["profile_id"]
+    assert request_payload.get("owner_scope") == identity["profile"]["profile_id"]
+    assert request_payload.get("session_id") == control_thread_id
+    assert request_payload.get("control_thread_id") == control_thread_id

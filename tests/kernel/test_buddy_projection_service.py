@@ -12,6 +12,7 @@ from copaw.state.repositories_buddy import (
     SqliteGrowthTargetRepository,
     SqliteHumanProfileRepository,
 )
+from tests.shared.buddy_reasoners import DeterministicBuddyReasoner
 
 
 def _build_services(tmp_path):
@@ -27,6 +28,7 @@ def _build_services(tmp_path):
         relationship_repository=relationship_repository,
         domain_capability_repository=domain_capability_repository,
         onboarding_session_repository=session_repository,
+        onboarding_reasoner=DeterministicBuddyReasoner(),
     )
     projection = BuddyProjectionService(
         profile_repository=profile_repository,
@@ -242,6 +244,7 @@ def test_buddy_projection_honestly_degrades_when_runtime_focus_is_missing(tmp_pa
         relationship_repository=relationship_repository,
         domain_capability_repository=SqliteBuddyDomainCapabilityRepository(store),
         onboarding_session_repository=session_repository,
+        onboarding_reasoner=DeterministicBuddyReasoner(),
     )
     identity = onboarding.submit_identity(
         display_name="Mina",

@@ -27,6 +27,7 @@ from copaw.state.repositories_buddy import (
     SqliteGrowthTargetRepository,
     SqliteHumanProfileRepository,
 )
+from tests.shared.buddy_reasoners import DeterministicBuddyReasoner
 
 
 def _build_services(tmp_path):
@@ -63,6 +64,7 @@ def _build_services(tmp_path):
         operating_cycle_service=cycle_service,
         assignment_service=assignment_service,
         domain_capability_growth_service=growth_service,
+        onboarding_reasoner=DeterministicBuddyReasoner(),
     )
     projection = BuddyProjectionService(
         profile_repository=profile_repository,

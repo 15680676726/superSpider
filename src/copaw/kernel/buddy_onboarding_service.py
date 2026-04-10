@@ -1323,15 +1323,27 @@ class BuddyOnboardingService:
         )
         normalized_specs: list[dict[str, object]] = []
         for seed in seeds:
+            request_payload = {
+                **dict(seed.request_payload),
+                "buddy_profile_id": profile.profile_id,
+            }
             if seed.dispatch_session_id != control_thread_id:
+                request_payload.update(
+                    {
+                        "session_id": control_thread_id,
+                        "control_thread_id": control_thread_id,
+                    },
+                )
                 seed = seed.model_copy(
                     update={
                         "dispatch_session_id": control_thread_id,
-                        "request_payload": {
-                            **dict(seed.request_payload),
-                            "session_id": control_thread_id,
-                            "control_thread_id": control_thread_id,
-                        },
+                        "request_payload": request_payload,
+                    },
+                )
+            else:
+                seed = seed.model_copy(
+                    update={
+                        "request_payload": request_payload,
                     },
                 )
             spec = self._build_schedule_spec(seed)
