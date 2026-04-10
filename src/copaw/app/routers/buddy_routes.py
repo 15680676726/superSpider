@@ -26,10 +26,14 @@ class BuddyIdentityRequest(BaseModel):
     goal_intention: str = Field(..., min_length=1)
 
 
-class BuddyClarifyRequest(BaseModel):
+class BuddyContractRequest(BaseModel):
     session_id: str = Field(..., min_length=1)
-    answer: str = Field(..., min_length=1)
-    existing_question_count: int | None = Field(default=None, ge=1)
+    service_intent: str = Field(..., min_length=1)
+    collaboration_role: str = Field(default="orchestrator", min_length=1)
+    autonomy_level: str = Field(default="proactive", min_length=1)
+    confirm_boundaries: list[str] = Field(default_factory=list)
+    report_style: str = Field(default="result-first", min_length=1)
+    collaboration_notes: str = ""
 
 
 class BuddyConfirmDirectionRequest(BaseModel):
@@ -259,14 +263,14 @@ async def start_buddy_identity(
     return handle.model_dump(mode="json")
 
 
-@router.post("/onboarding/clarify")
-async def answer_buddy_clarification(
+@router.post("/onboarding/contract")
+async def submit_buddy_contract(
     request: Request,
-    payload: BuddyClarifyRequest,
+    payload: BuddyContractRequest,
 ) -> dict[str, object]:
     service = _get_buddy_onboarding_service(request)
     try:
-        result = service.answer_clarification_turn(**payload.model_dump())
+        result = service.submit_contract(**payload.model_dump())
     except TimeoutError as exc:
         raise HTTPException(504, detail=str(exc) or "Buddy onboarding model timed out.") from exc
     except BuddyOnboardingReasonerUnavailableError as exc:
@@ -276,14 +280,14 @@ async def answer_buddy_clarification(
     return result.model_dump(mode="json")
 
 
-@router.post("/onboarding/clarify/start", status_code=202)
-async def start_buddy_clarification(
+@router.post("/onboarding/contract/start", status_code=202)
+async def start_buddy_contract_compile(
     request: Request,
-    payload: BuddyClarifyRequest,
+    payload: BuddyContractRequest,
 ) -> dict[str, object]:
     service = _get_buddy_onboarding_service(request)
     try:
-        handle = service.start_clarification_operation(session_id=payload.session_id)
+        handle = service.start_contract_compile(session_id=payload.session_id)
     except ValueError as exc:
         raise HTTPException(400, detail=str(exc)) from exc
 
@@ -291,7 +295,7 @@ async def start_buddy_clarification(
 
     def _work() -> None:
         try:
-            service.answer_clarification_turn(**payload_data)
+            service.submit_contract(**payload_data)
         except TimeoutError as exc:
             service.mark_operation_failed(
                 session_id=handle.session_id,
@@ -321,7 +325,7 @@ async def start_buddy_clarification(
             )
 
     _spawn_buddy_onboarding_operation(
-        name=f"buddy-onboarding-clarify-{handle.session_id}",
+        name=f"buddy-onboarding-contract-{handle.session_id}",
         work=_work,
     )
     return handle.model_dump(mode="json")

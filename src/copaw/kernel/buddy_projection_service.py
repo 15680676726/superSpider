@@ -52,9 +52,6 @@ class BuddyOnboardingProjection(BaseModel):
     operation_kind: str = ""
     operation_status: str = "idle"
     operation_error: str = ""
-    question_count: int = 0
-    tightened: bool = False
-    next_question: str = ""
     candidate_directions: list[str] = Field(default_factory=list)
     recommended_direction: str = ""
     selected_direction: str = ""
@@ -141,11 +138,10 @@ class BuddyProjectionService:
             if relationship is not None and relationship.buddy_name.strip()
             else "你的伙伴"
         )
-        onboarding_turn_count = len(session.transcript) if session is not None else 0
         relationship_communication_count = (
             int(relationship.communication_count) if relationship is not None else 0
         )
-        communication_count = onboarding_turn_count + relationship_communication_count
+        communication_count = relationship_communication_count
         relationship_pleasant_score = (
             int(relationship.pleasant_interaction_score) if relationship is not None else 0
         )
@@ -365,9 +361,6 @@ class BuddyProjectionService:
         operation_kind = str(getattr(session, "operation_kind", "") or "").strip()
         operation_status = str(getattr(session, "operation_status", "") or "").strip() or "idle"
         operation_error = str(getattr(session, "operation_error", "") or "").strip()
-        question_count = int(getattr(session, "question_count", 0) or 0)
-        tightened = bool(getattr(session, "tightened", False))
-        next_question = str(getattr(session, "next_question", "") or "").strip()
         candidate_directions = list(getattr(session, "candidate_directions", []) or [])
         recommended_direction = str(getattr(session, "recommended_direction", "") or "").strip()
         selected_direction = str(getattr(session, "selected_direction", "") or "").strip()
@@ -375,12 +368,12 @@ class BuddyProjectionService:
             selected_direction = target.primary_direction
         if target is not None and not recommended_direction:
             recommended_direction = selected_direction
-        if target is not None and status in {"unborn", "clarifying", "direction-ready"}:
+        if target is not None and status in {"unborn", "contract-draft", "contract-ready"}:
             status = "confirmed"
-        if buddy_name and status in {"confirmed", "direction-ready", "clarifying", "unborn"}:
+        if buddy_name and status in {"confirmed", "contract-ready", "contract-draft", "unborn"}:
             status = "named"
         requires_direction_confirmation = target is None and (
-            status == "direction-ready" or bool(candidate_directions)
+            status == "contract-ready" or bool(candidate_directions)
         )
         requires_naming = target is not None and not buddy_name
         completed = target is not None and bool(buddy_name)
@@ -391,9 +384,6 @@ class BuddyProjectionService:
             operation_kind=operation_kind,
             operation_status=operation_status,
             operation_error=operation_error,
-            question_count=question_count,
-            tightened=tightened,
-            next_question=next_question,
             candidate_directions=candidate_directions,
             recommended_direction=recommended_direction,
             selected_direction=selected_direction,

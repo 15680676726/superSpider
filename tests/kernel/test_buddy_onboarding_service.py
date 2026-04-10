@@ -1,22 +1,22 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+from pydantic import BaseModel
 import pytest
 
 from copaw.industry.models import IndustryProfile
+from copaw.kernel.buddy_domain_capability import derive_buddy_domain_key
+from copaw.kernel.buddy_domain_capability_growth import BuddyDomainCapabilityGrowthService
 from copaw.kernel.buddy_onboarding_reasoner import (
     BuddyOnboardingBacklogSeed,
-    BuddyOnboardingGrowthPlan,
     BuddyOnboardingReasonerUnavailableError,
 )
-from copaw.kernel.buddy_domain_capability_growth import BuddyDomainCapabilityGrowthService
 from copaw.kernel.buddy_onboarding_service import (
     BuddyOnboardingService,
     _CREATOR_DIRECTION,
     _HEALTH_DIRECTION,
     _STOCKS_DIRECTION,
 )
-from copaw.kernel.buddy_domain_capability import derive_buddy_domain_key
 from copaw.state import SQLiteStateStore
 from copaw.state.main_brain_service import (
     AssignmentService,
@@ -30,6 +30,7 @@ from copaw.state.repositories import (
     SqliteIndustryInstanceRepository,
     SqliteOperatingCycleRepository,
     SqliteOperatingLaneRepository,
+    SqliteScheduleRepository,
 )
 from copaw.state.repositories_buddy import (
     SqliteBuddyDomainCapabilityRepository,
@@ -38,10 +39,172 @@ from copaw.state.repositories_buddy import (
     SqliteGrowthTargetRepository,
     SqliteHumanProfileRepository,
 )
-from tests.shared.buddy_reasoners import DeterministicBuddyReasoner
 
 
-def _build_service(tmp_path) -> BuddyOnboardingService:
+def _contract_payload(
+    *,
+    service_intent: str = "Turn long-term goals into steady weekly execution.",
+    collaboration_role: str = "orchestrator",
+    autonomy_level: str = "proactive",
+    confirm_boundaries: list[str] | None = None,
+    report_style: str = "result-first",
+    collaboration_notes: str = "Prefer concise updates with one concrete next step.",
+) -> dict[str, object]:
+    return {
+        "service_intent": service_intent,
+        "collaboration_role": collaboration_role,
+        "autonomy_level": autonomy_level,
+        "confirm_boundaries": confirm_boundaries or ["external spend", "irreversible actions"],
+        "report_style": report_style,
+        "collaboration_notes": collaboration_notes,
+    }
+
+
+class _ContractCompileResult(BaseModel):
+    candidate_directions: list[str]
+    recommended_direction: str
+    final_goal: str
+    why_it_matters: str
+    backlog_items: list[BuddyOnboardingBacklogSeed]
+
+
+class _DeterministicContractCompiler:
+    def __init__(self) -> None:
+        self.compile_calls: list[dict[str, object]] = []
+
+    def compile_contract(
+        self,
+        *,
+        profile,
+        collaboration_contract,
+    ) -> _ContractCompileResult:
+        self.compile_calls.append(
+            {
+                "profile": profile,
+                "collaboration_contract": collaboration_contract,
+            }
+        )
+        direction = self._resolve_direction(
+            profile_goal=profile.goal_intention,
+            service_intent=str(getattr(collaboration_contract, "service_intent", "") or ""),
+            notes=str(getattr(collaboration_contract, "collaboration_notes", "") or ""),
+        )
+        final_goal, why_it_matters, backlog_items = self._growth_plan(direction)
+        return _ContractCompileResult(
+            candidate_directions=[direction],
+            recommended_direction=direction,
+            final_goal=final_goal,
+            why_it_matters=why_it_matters,
+            backlog_items=backlog_items,
+        )
+
+    def _resolve_direction(
+        self,
+        *,
+        profile_goal: str,
+        service_intent: str,
+        notes: str,
+    ) -> str:
+        source = " ".join([profile_goal, service_intent, notes]).lower()
+        if any(token in source for token in ("stock", "stocks", "trade", "trading", "invest", "股票", "交易", "投资")):
+            return _STOCKS_DIRECTION
+        if any(token in source for token in ("health", "fitness", "exercise", "健康", "健身", "训练")):
+            return _HEALTH_DIRECTION
+        return _CREATOR_DIRECTION
+
+    def _growth_plan(
+        self,
+        direction: str,
+    ) -> tuple[str, str, list[BuddyOnboardingBacklogSeed]]:
+        if direction == _STOCKS_DIRECTION:
+            return (
+                "Build a disciplined stock trading system with visible risk control evidence.",
+                "This turns trading into a durable operating path instead of emotional reaction.",
+                [
+                    BuddyOnboardingBacklogSeed(
+                        lane_hint="growth-focus",
+                        title="Define trading boundaries",
+                        summary="Lock the market scope, position sizing, and max-loss rule for the first cycle.",
+                        priority=3,
+                        source_key="trading-boundary",
+                    ),
+                    BuddyOnboardingBacklogSeed(
+                        lane_hint="proof-of-work",
+                        title="Produce the first review packet",
+                        summary="Complete one evidence-backed review of a real or simulated trade sample.",
+                        priority=2,
+                        source_key="trading-review",
+                    ),
+                ],
+            )
+        if direction == _HEALTH_DIRECTION:
+            return (
+                "Build a repeatable health routine with visible weekly proof.",
+                "This turns recovery into an operating rhythm instead of a vague intention.",
+                [
+                    BuddyOnboardingBacklogSeed(
+                        lane_hint="growth-focus",
+                        title="Lock the weekly routine",
+                        summary="Define the minimum viable meal and workout rhythm for the coming week.",
+                        priority=3,
+                        source_key="health-routine",
+                    ),
+                    BuddyOnboardingBacklogSeed(
+                        lane_hint="proof-of-work",
+                        title="Record the first checkpoint",
+                        summary="Capture the first weekly evidence checkpoint for training and recovery.",
+                        priority=2,
+                        source_key="health-checkpoint",
+                    ),
+                ],
+            )
+        return (
+            "Build a durable writing and publishing path with visible proof-of-work.",
+            "This turns expression into an accumulative path that can keep producing real artifacts.",
+            [
+                BuddyOnboardingBacklogSeed(
+                    lane_hint="growth-focus",
+                    title="Define the first publishing lane",
+                    summary="Choose the topic, cadence, and minimum shippable unit for the first cycle.",
+                    priority=3,
+                    source_key="writing-direction",
+                ),
+                BuddyOnboardingBacklogSeed(
+                    lane_hint="proof-of-work",
+                    title="Ship the first publishable artifact",
+                    summary="Finish the first chapter or draft and move it into a publish-ready state.",
+                    priority=2,
+                    source_key="writing-first-artifact",
+                ),
+            ],
+        )
+
+
+class _LaneLessContractCompiler(_DeterministicContractCompiler):
+    def _growth_plan(
+        self,
+        direction: str,
+    ) -> tuple[str, str, list[BuddyOnboardingBacklogSeed]]:
+        return (
+            f"Build a durable path around {direction}.",
+            "The system must reject compile results without lane hints.",
+            [
+                BuddyOnboardingBacklogSeed(
+                    lane_hint="",
+                    title="Ship the first proof point",
+                    summary="Turn the first validated action into evidence without a lane.",
+                    priority=3,
+                    source_key="missing-lane",
+                ),
+            ],
+        )
+
+
+def _build_service(
+    tmp_path,
+    *,
+    compiler: _DeterministicContractCompiler | None = None,
+) -> BuddyOnboardingService:
     store = SQLiteStateStore(tmp_path / "buddy-onboarding.sqlite3")
     return BuddyOnboardingService(
         profile_repository=SqliteHumanProfileRepository(store),
@@ -49,14 +212,14 @@ def _build_service(tmp_path) -> BuddyOnboardingService:
         relationship_repository=SqliteCompanionRelationshipRepository(store),
         domain_capability_repository=SqliteBuddyDomainCapabilityRepository(store),
         onboarding_session_repository=SqliteBuddyOnboardingSessionRepository(store),
-        onboarding_reasoner=DeterministicBuddyReasoner(),
+        onboarding_reasoner=compiler or _DeterministicContractCompiler(),
     )
 
 
 def _build_service_with_planning(
     tmp_path,
     *,
-    reasoner=None,
+    compiler: _DeterministicContractCompiler | None = None,
 ) -> tuple[BuddyOnboardingService, SQLiteStateStore]:
     store = SQLiteStateStore(tmp_path / "buddy-onboarding-planning.sqlite3")
     industry_repository = SqliteIndustryInstanceRepository(store)
@@ -82,7 +245,7 @@ def _build_service_with_planning(
         relationship_repository=SqliteCompanionRelationshipRepository(store),
         domain_capability_repository=SqliteBuddyDomainCapabilityRepository(store),
         onboarding_session_repository=SqliteBuddyOnboardingSessionRepository(store),
-        onboarding_reasoner=reasoner or DeterministicBuddyReasoner(),
+        onboarding_reasoner=compiler or _DeterministicContractCompiler(),
         industry_instance_repository=industry_repository,
         operating_lane_service=OperatingLaneService(
             repository=SqliteOperatingLaneRepository(store),
@@ -96,39 +259,18 @@ def _build_service_with_planning(
         assignment_service=AssignmentService(
             repository=SqliteAssignmentRepository(store),
         ),
+        schedule_repository=SqliteScheduleRepository(store),
         domain_capability_growth_service=growth_service,
     )
     return service, store
 
 
-class _LaneLessBuddyReasoner(DeterministicBuddyReasoner):
-    def build_growth_plan(
-        self,
-        *,
-        profile,
-        transcript,
-        selected_direction: str,
-    ) -> BuddyOnboardingGrowthPlan:
-        _ = (profile, transcript)
-        return BuddyOnboardingGrowthPlan(
-            primary_direction=selected_direction.strip(),
-            final_goal="Build a durable direction without fallback roles.",
-            why_it_matters="The system must refuse lane-less growth plans instead of creating fixed seats.",
-            backlog_items=[
-                BuddyOnboardingBacklogSeed(
-                    lane_hint="",
-                    title="Ship the first real proof point",
-                    summary="Turn the first validated task into evidence without using fixed fallback seats.",
-                    priority=3,
-                    source_key="first-proof-point",
-                ),
-            ],
-        )
-
-
-def test_buddy_onboarding_caps_clarification_questions(tmp_path) -> None:
+def test_submit_identity_creates_contract_draft_session_without_interview_fields(
+    tmp_path,
+) -> None:
     service = _build_service(tmp_path)
-    identity = service.submit_identity(
+
+    result = service.submit_identity(
         display_name="Alex",
         profession="Designer",
         current_stage="transition",
@@ -138,74 +280,23 @@ def test_buddy_onboarding_caps_clarification_questions(tmp_path) -> None:
         goal_intention="I feel lost but want meaningful long-term growth.",
     )
 
-    result = service.answer_clarification_turn(
-        session_id=identity.session_id,
-        answer="I still feel lost and need help choosing a direction.",
-    )
+    payload = result.model_dump(mode="json")
+    session = service._onboarding_session_repository.get_session(result.session_id)  # pylint: disable=protected-access
 
-    assert result.finished is False
-    assert result.question_count == 2
-
-    capped = service.answer_clarification_turn(
-        session_id=identity.session_id,
-        answer="I still feel lost",
-        existing_question_count=9,
-    )
-
-    assert capped.finished is True
-    assert capped.question_count == 9
-    assert 1 <= len(capped.candidate_directions) <= 3
-    assert capped.recommended_direction in capped.candidate_directions
+    assert result.session_id
+    assert result.profile.profile_id
+    assert payload["status"] == "contract-draft"
+    assert "question_count" not in payload
+    assert "next_question" not in payload
+    assert session is not None
+    assert session.status == "contract-draft"
 
 
-def test_buddy_onboarding_derives_direction_candidates_from_chinese_profile(tmp_path) -> None:
-    service = _build_service(tmp_path)
-    identity = service.submit_identity(
-        display_name="林夏",
-        profession="内容运营",
-        current_stage="转型期",
-        interests=["写作", "内容", "表达"],
-        strengths=["长期主义", "表达能力"],
-        constraints=["时间有限"],
-        goal_intention="我想找到能长期积累、能靠作品和内容建立独立收入的方向。",
-    )
-
-    result = service.answer_clarification_turn(
-        session_id=identity.session_id,
-        answer="我不想一直做零碎执行，我想慢慢建立自己的内容作品和长期影响力。",
-        existing_question_count=9,
-    )
-
-    assert result.finished is True
-    assert _CREATOR_DIRECTION in result.candidate_directions
-    assert result.recommended_direction == _CREATOR_DIRECTION
-
-
-def test_buddy_onboarding_derives_video_creator_direction_from_chinese_profile(tmp_path) -> None:
-    service = _build_service(tmp_path)
-    identity = service.submit_identity(
-        display_name="周舟",
-        profession="社区运营",
-        current_stage="探索期",
-        interests=["视频表达", "讲故事"],
-        strengths=["镜头感", "长期主义"],
-        constraints=["时间有限"],
-        goal_intention="我想做个人IP，通过视频和观点输出建立影响力。",
-    )
-
-    result = service.answer_clarification_turn(
-        session_id=identity.session_id,
-        answer="我不想一直做运营执行，我想做一个有内容作品和个人品牌的人。",
-        existing_question_count=9,
-    )
-
-    assert result.finished is True
-    assert _CREATOR_DIRECTION in result.candidate_directions
-    assert result.recommended_direction == _CREATOR_DIRECTION
-
-
-def test_buddy_onboarding_finishes_early_for_clear_stock_trading_goal(tmp_path) -> None:
-    service = _build_service(tmp_path)
+def test_submit_contract_compiles_direction_goal_and_backlog_without_next_question(
+    tmp_path,
+) -> None:
+    compiler = _DeterministicContractCompiler()
+    service = _build_service(tmp_path, compiler=compiler)
     identity = service.submit_identity(
         display_name="Kai",
         profession="Analyst",
@@ -215,86 +306,44 @@ def test_buddy_onboarding_finishes_early_for_clear_stock_trading_goal(tmp_path) 
         constraints=["money"],
         goal_intention="I want to build a real stock trading path and achieve financial freedom.",
     )
-
-    result = service.answer_clarification_turn(
-        session_id=identity.session_id,
-        answer="I want a durable trading system, better risk control, and independent income.",
+    contract = _contract_payload(
+        service_intent="Turn trading ambition into a disciplined weekly execution path.",
+        collaboration_notes="Escalate when a move would exceed my risk boundary.",
     )
 
-    assert result.finished is True
-    assert result.question_count == 2
-    assert result.next_question == ""
-    assert _STOCKS_DIRECTION in result.candidate_directions
+    result = service.submit_contract(
+        session_id=identity.session_id,
+        **contract,
+    )
+
+    payload = result.model_dump(mode="json")
+    stored_session = service._onboarding_session_repository.get_session(identity.session_id)  # pylint: disable=protected-access
+
     assert result.recommended_direction == _STOCKS_DIRECTION
+    assert result.candidate_directions == [_STOCKS_DIRECTION]
+    assert result.final_goal
+    assert result.why_it_matters
+    assert result.backlog_items
+    assert "next_question" not in payload
+    assert "finished" not in payload
+    assert compiler.compile_calls[-1]["profile"].profile_id == identity.profile.profile_id
+    assert (
+        compiler.compile_calls[-1]["collaboration_contract"].service_intent
+        == contract["service_intent"]
+    )
+    assert stored_session is not None
+    assert stored_session.service_intent == contract["service_intent"]
+    assert stored_session.collaboration_role == contract["collaboration_role"]
+    assert stored_session.autonomy_level == contract["autonomy_level"]
+    assert stored_session.report_style == contract["report_style"]
+    assert stored_session.confirm_boundaries == contract["confirm_boundaries"]
+    assert stored_session.draft_final_goal == result.final_goal
+    assert stored_session.draft_why_it_matters == result.why_it_matters
+    assert stored_session.draft_backlog_items
 
 
-def test_buddy_onboarding_requires_exactly_one_primary_direction(tmp_path) -> None:
-    service = _build_service(tmp_path)
-    identity = service.submit_identity(
-        display_name="Mina",
-        profession="Operator",
-        current_stage="exploring",
-        interests=["content"],
-        strengths=["consistency"],
-        constraints=["money"],
-        goal_intention="I want a bigger life direction.",
-    )
-    clarification = service.answer_clarification_turn(
-        session_id=identity.session_id,
-        answer="I want a direction with growth and independent leverage.",
-        existing_question_count=9,
-    )
-
-    result = service.confirm_primary_direction(
-        session_id=identity.session_id,
-        selected_direction=clarification.recommended_direction,
-        capability_action="start-new",
-    )
-
-    assert result.growth_target.primary_direction == clarification.recommended_direction
-    assert result.relationship.encouragement_style == "old-friend"
-    assert result.domain_capability.domain_key == derive_buddy_domain_key(
-        clarification.recommended_direction,
-    )
-    assert result.domain_capability.status == "active"
-
-
-def test_buddy_confirm_primary_direction_accepts_free_text_direction_override(tmp_path) -> None:
-    service = _build_service(tmp_path)
-    identity = service.submit_identity(
-        display_name="Mina",
-        profession="Operator",
-        current_stage="restart",
-        interests=["investing"],
-        strengths=["consistency"],
-        constraints=["money"],
-        goal_intention="I want a real stock trading direction.",
-    )
-    service.answer_clarification_turn(
-        session_id=identity.session_id,
-        answer="I want to stop drifting and build a disciplined trading path.",
-        existing_question_count=9,
-    )
-
-    result = service.confirm_primary_direction(
-        session_id=identity.session_id,
-        selected_direction="Build a disciplined stock trading path with real risk control.",
-        capability_action="start-new",
-    )
-
-    assert result.growth_target.primary_direction == (
-        "Build a disciplined stock trading path with real risk control."
-    )
-    assert result.domain_capability.domain_key == derive_buddy_domain_key(
-        result.growth_target.primary_direction,
-    )
-
-
-def test_confirm_primary_direction_rejects_growth_plan_without_lane_hints(tmp_path) -> None:
-    service, _store = _build_service_with_planning(
-        tmp_path,
-        reasoner=_LaneLessBuddyReasoner(),
-    )
+def test_submit_contract_rejects_compile_without_lane_hints(tmp_path) -> None:
+    service = _build_service(tmp_path, compiler=_LaneLessContractCompiler())
     identity = service.submit_identity(
         display_name="Mina",
         profession="Operator",
@@ -304,48 +353,12 @@ def test_confirm_primary_direction_rejects_growth_plan_without_lane_hints(tmp_pa
         constraints=["money"],
         goal_intention="I want one real long-term direction.",
     )
-    clarification = service.answer_clarification_turn(
-        session_id=identity.session_id,
-        answer="I want a durable direction that can turn into real work.",
-        existing_question_count=9,
-    )
 
     with pytest.raises(BuddyOnboardingReasonerUnavailableError):
-        service.confirm_primary_direction(
+        service.submit_contract(
             session_id=identity.session_id,
-            selected_direction=clarification.recommended_direction,
-            capability_action="start-new",
+            **_contract_payload(),
         )
-
-
-def test_buddy_naming_updates_relationship(tmp_path) -> None:
-    service = _build_service(tmp_path)
-    identity = service.submit_identity(
-        display_name="Mina",
-        profession="Operator",
-        current_stage="exploring",
-        interests=["content"],
-        strengths=["consistency"],
-        constraints=["money"],
-        goal_intention="I want a bigger life direction.",
-    )
-    clarification = service.answer_clarification_turn(
-        session_id=identity.session_id,
-        answer="I want a direction with growth and independent leverage.",
-        existing_question_count=9,
-    )
-    service.confirm_primary_direction(
-        session_id=identity.session_id,
-        selected_direction=clarification.recommended_direction,
-        capability_action="start-new",
-    )
-
-    relationship = service.name_buddy(
-        session_id=identity.session_id,
-        buddy_name="Mochi",
-    )
-
-    assert relationship.buddy_name == "Mochi"
 
 
 def test_submit_identity_reuses_single_current_profile(tmp_path) -> None:
@@ -376,6 +389,66 @@ def test_submit_identity_reuses_single_current_profile(tmp_path) -> None:
     assert service._profile_repository.count_profiles() == 1  # pylint: disable=protected-access
 
 
+def test_confirm_primary_direction_persists_contract_and_execution_identity_payload(
+    tmp_path,
+) -> None:
+    compiler = _DeterministicContractCompiler()
+    service, store = _build_service_with_planning(tmp_path, compiler=compiler)
+    identity = service.submit_identity(
+        display_name="Nora",
+        profession="Writer",
+        current_stage="restart",
+        interests=["writing", "content"],
+        strengths=["storytelling"],
+        constraints=["time", "money"],
+        goal_intention="I want a real creator direction that can change my life.",
+    )
+    contract = _contract_payload(
+        service_intent="Turn creative ambition into a weekly publishing rhythm.",
+        collaboration_role="orchestrator",
+        autonomy_level="guarded-proactive",
+        confirm_boundaries=["external spend", "publishing under my real name"],
+        report_style="decision-first",
+        collaboration_notes="Keep reports short and escalate blockers with one recommendation.",
+    )
+    compiled = service.submit_contract(
+        session_id=identity.session_id,
+        **contract,
+    )
+
+    result = service.confirm_primary_direction(
+        session_id=identity.session_id,
+        selected_direction=compiled.recommended_direction,
+        capability_action="start-new",
+    )
+
+    instance = SqliteIndustryInstanceRepository(store).get_instance(
+        result.domain_capability.industry_instance_id,
+    )
+    growth_payload = result.growth_target.model_dump(mode="json")
+
+    assert result.growth_target.primary_direction == compiled.recommended_direction
+    assert result.growth_target.final_goal == compiled.final_goal
+    assert result.growth_target.why_it_matters == compiled.why_it_matters
+    assert "service_intent" not in growth_payload
+    assert result.relationship.service_intent == contract["service_intent"]
+    assert result.relationship.collaboration_role == contract["collaboration_role"]
+    assert result.relationship.autonomy_level == contract["autonomy_level"]
+    assert result.relationship.confirm_boundaries == contract["confirm_boundaries"]
+    assert result.relationship.report_style == contract["report_style"]
+    assert result.relationship.collaboration_notes == contract["collaboration_notes"]
+    assert instance is not None
+    assert instance.execution_core_identity_payload["operator_service_intent"] == contract["service_intent"]
+    assert instance.execution_core_identity_payload["collaboration_role"] == contract["collaboration_role"]
+    assert instance.execution_core_identity_payload["autonomy_level"] == contract["autonomy_level"]
+    assert instance.execution_core_identity_payload["report_style"] == contract["report_style"]
+    assert instance.execution_core_identity_payload["confirm_boundaries"] == contract["confirm_boundaries"]
+    assert instance.execution_core_identity_payload["operating_mode"]
+    assert instance.execution_core_identity_payload["delegation_policy"]
+    assert instance.execution_core_identity_payload["direct_execution_policy"]
+    assert len(compiler.compile_calls) == 1
+
+
 def test_confirm_primary_direction_generates_formal_growth_scaffold(tmp_path) -> None:
     service, store = _build_service_with_planning(tmp_path)
     identity = service.submit_identity(
@@ -387,15 +460,14 @@ def test_confirm_primary_direction_generates_formal_growth_scaffold(tmp_path) ->
         constraints=["time"],
         goal_intention="I want a real creator direction that can change my life.",
     )
-    clarification = service.answer_clarification_turn(
+    compiled = service.submit_contract(
         session_id=identity.session_id,
-        answer="I want a long-term creator path with proof of work and income autonomy.",
-        existing_question_count=9,
+        **_contract_payload(),
     )
 
     result = service.confirm_primary_direction(
         session_id=identity.session_id,
-        selected_direction=clarification.recommended_direction,
+        selected_direction=compiled.recommended_direction,
         capability_action="start-new",
     )
 
@@ -417,15 +489,13 @@ def test_confirm_primary_direction_generates_formal_growth_scaffold(tmp_path) ->
     assert instance.autonomy_status == "coordinating"
 
     lanes = lane_repository.list_lanes(industry_instance_id=instance.instance_id)
-    assert any(lane.industry_instance_id == instance.instance_id for lane in lanes)
-
     backlog = backlog_repository.list_items(industry_instance_id=instance.instance_id)
-    assert any(item.industry_instance_id == instance.instance_id for item in backlog)
-
     cycles = cycle_repository.list_cycles(industry_instance_id=instance.instance_id)
-    assert any(cycle.industry_instance_id == instance.instance_id for cycle in cycles)
-
     assignments = assignment_repository.list_assignments(industry_instance_id=instance.instance_id)
+
+    assert any(lane.industry_instance_id == instance.instance_id for lane in lanes)
+    assert any(item.industry_instance_id == instance.instance_id for item in backlog)
+    assert any(cycle.industry_instance_id == instance.instance_id for cycle in cycles)
     assert any(assignment.industry_instance_id == instance.instance_id for assignment in assignments)
     assert result.domain_capability.capability_points == 0
     assert result.domain_capability.capability_score == 0
@@ -444,20 +514,20 @@ def test_confirm_primary_direction_writes_direction_first_industry_profile(tmp_p
         constraints=["time", "money"],
         goal_intention="I want a real creator direction that can change my life.",
     )
-    clarification = service.answer_clarification_turn(
+    compiled = service.submit_contract(
         session_id=identity.session_id,
-        answer="I want a long-term creator path with proof of work and income autonomy.",
-        existing_question_count=9,
+        **_contract_payload(),
     )
 
     result = service.confirm_primary_direction(
         session_id=identity.session_id,
-        selected_direction=clarification.recommended_direction,
+        selected_direction=compiled.recommended_direction,
         capability_action="start-new",
     )
 
-    industry_repository = SqliteIndustryInstanceRepository(store)
-    instance = industry_repository.get_instance(result.domain_capability.industry_instance_id)
+    instance = SqliteIndustryInstanceRepository(store).get_instance(
+        result.domain_capability.industry_instance_id,
+    )
 
     assert instance is not None
     profile = IndustryProfile.model_validate(instance.profile_payload)
@@ -468,7 +538,9 @@ def test_confirm_primary_direction_writes_direction_first_industry_profile(tmp_p
     assert "current_stage" not in instance.profile_payload
 
 
-def test_confirm_primary_direction_start_new_creates_fresh_domain_carrier_binding(tmp_path) -> None:
+def test_confirm_primary_direction_start_new_and_restore_archived_domain_carrier(
+    tmp_path,
+) -> None:
     service, store = _build_service_with_planning(tmp_path)
     creator_identity = service.submit_identity(
         display_name="Nora",
@@ -479,67 +551,13 @@ def test_confirm_primary_direction_start_new_creates_fresh_domain_carrier_bindin
         constraints=["time"],
         goal_intention="Build a creator path with long-term proof of work.",
     )
-    creator_clarification = service.answer_clarification_turn(
+    creator_compiled = service.submit_contract(
         session_id=creator_identity.session_id,
-        answer="I want a creator direction with proof of work and leverage.",
-        existing_question_count=9,
+        **_contract_payload(),
     )
     creator = service.confirm_primary_direction(
         session_id=creator_identity.session_id,
-        selected_direction=creator_clarification.recommended_direction,
-        capability_action="start-new",
-    )
-
-    health_identity = service.submit_identity(
-        display_name="Nora",
-        profession="Writer",
-        current_stage="restart",
-        interests=["health", "fitness"],
-        strengths=["consistency"],
-        constraints=["time"],
-        goal_intention="I need to rebuild my health and discipline.",
-    )
-    service.answer_clarification_turn(
-        session_id=health_identity.session_id,
-        answer="I want to rebuild energy, exercise, and stable health habits.",
-        existing_question_count=9,
-    )
-    health = service.confirm_primary_direction(
-        session_id=health_identity.session_id,
-        selected_direction=_HEALTH_DIRECTION,
-        capability_action="start-new",
-    )
-
-    assert creator.domain_capability.industry_instance_id
-    assert creator.domain_capability.control_thread_id
-    assert health.domain_capability.industry_instance_id
-    assert health.domain_capability.control_thread_id
-    assert health.domain_capability.industry_instance_id != creator.domain_capability.industry_instance_id
-    assert health.domain_capability.control_thread_id != creator.domain_capability.control_thread_id
-    assert SqliteIndustryInstanceRepository(store).get_instance(
-        health.domain_capability.industry_instance_id,
-    ) is not None
-
-
-def test_confirm_primary_direction_restore_archived_reuses_archived_carrier_binding(tmp_path) -> None:
-    service = _build_service_with_planning(tmp_path)[0]
-    creator_identity = service.submit_identity(
-        display_name="Nora",
-        profession="Writer",
-        current_stage="restart",
-        interests=["writing"],
-        strengths=["storytelling"],
-        constraints=["time"],
-        goal_intention="Build a creator path with long-term proof of work.",
-    )
-    creator_clarification = service.answer_clarification_turn(
-        session_id=creator_identity.session_id,
-        answer="I want a creator direction with proof of work and leverage.",
-        existing_question_count=9,
-    )
-    creator = service.confirm_primary_direction(
-        session_id=creator_identity.session_id,
-        selected_direction=creator_clarification.recommended_direction,
+        selected_direction=creator_compiled.recommended_direction,
         capability_action="start-new",
     )
     creator_instance_id = creator.domain_capability.industry_instance_id
@@ -554,16 +572,24 @@ def test_confirm_primary_direction_restore_archived_reuses_archived_carrier_bind
         constraints=["time"],
         goal_intention="I need to rebuild my health and discipline.",
     )
-    service.answer_clarification_turn(
+    health_compiled = service.submit_contract(
         session_id=health_identity.session_id,
-        answer="I want to rebuild energy, exercise, and stable health habits.",
-        existing_question_count=9,
+        **_contract_payload(
+            service_intent="Turn recovery into a steady weekly execution rhythm.",
+            collaboration_notes="Escalate if a step would exceed the current recovery boundary.",
+        ),
     )
-    service.confirm_primary_direction(
+    health = service.confirm_primary_direction(
         session_id=health_identity.session_id,
-        selected_direction=_HEALTH_DIRECTION,
+        selected_direction=health_compiled.recommended_direction,
         capability_action="start-new",
     )
+
+    assert health.domain_capability.industry_instance_id != creator.domain_capability.industry_instance_id
+    assert health.domain_capability.control_thread_id != creator.domain_capability.control_thread_id
+    assert SqliteIndustryInstanceRepository(store).get_instance(
+        health.domain_capability.industry_instance_id,
+    ) is not None
 
     creator_return_identity = service.submit_identity(
         display_name="Nora",
@@ -574,277 +600,17 @@ def test_confirm_primary_direction_restore_archived_reuses_archived_carrier_bind
         constraints=["time"],
         goal_intention="Return to creator work.",
     )
-    creator_return_clarification = service.answer_clarification_turn(
+    creator_return_compiled = service.submit_contract(
         session_id=creator_return_identity.session_id,
-        answer="I want to return to the same creator direction I was already building.",
-        existing_question_count=9,
+        **_contract_payload(),
     )
     preview = service.preview_primary_direction_transition(
         session_id=creator_return_identity.session_id,
-        selected_direction=creator_return_clarification.recommended_direction,
+        selected_direction=creator_return_compiled.recommended_direction,
     )
     restored = service.confirm_primary_direction(
         session_id=creator_return_identity.session_id,
-        selected_direction=creator_return_clarification.recommended_direction,
-        capability_action="restore-archived",
-        target_domain_id=preview.archived_matches[0]["domain_id"],
-    )
-
-    assert restored.domain_capability.industry_instance_id == creator_instance_id
-    assert restored.domain_capability.control_thread_id == creator_thread_id
-    assert restored.execution_carrier is not None
-    assert restored.execution_carrier["instance_id"] == creator_instance_id
-    assert restored.execution_carrier["control_thread_id"] == creator_thread_id
-
-
-def test_record_chat_interaction_increments_strong_pull_for_stuck_or_avoidance_messages(
-    tmp_path,
-) -> None:
-    service = _build_service(tmp_path)
-    identity = service.submit_identity(
-        display_name="Nora",
-        profession="Writer",
-        current_stage="restart",
-        interests=["writing"],
-        strengths=["clarity"],
-        constraints=["time"],
-        goal_intention="Build a real long-term direction.",
-    )
-
-    relationship = service.record_chat_interaction(
-        profile_id=identity.profile.profile_id,
-        user_message="I'm stuck, I keep avoiding this, and I don't want to do it right now.",
-        interaction_mode="chat",
-    )
-
-    assert relationship is not None
-    assert relationship.strong_pull_count == 1
-    assert relationship.communication_count == 0
-    assert relationship.companion_experience == 0
-
-
-def test_record_chat_interaction_advances_growth_only_on_runtime_checkpoint(tmp_path) -> None:
-    service = _build_service(tmp_path)
-    identity = service.submit_identity(
-        display_name="Nora",
-        profession="Writer",
-        current_stage="restart",
-        interests=["writing"],
-        strengths=["clarity"],
-        constraints=["time"],
-        goal_intention="Build a real long-term direction.",
-    )
-
-    relationship = service.record_chat_interaction(
-        profile_id=identity.profile.profile_id,
-        user_message="I completed the submission and got an accepted checkpoint.",
-        interaction_mode="checkpoint",
-    )
-
-    assert relationship is not None
-    assert relationship.communication_count == 1
-    assert relationship.companion_experience > 0
-
-
-def test_preview_primary_direction_transition_keeps_same_domain_capability(tmp_path) -> None:
-    service = _build_service(tmp_path)
-    identity = service.submit_identity(
-        display_name="Nora",
-        profession="Writer",
-        current_stage="restart",
-        interests=["writing"],
-        strengths=["storytelling"],
-        constraints=["time"],
-        goal_intention="Build a creator path with long-term proof of work.",
-    )
-    clarification = service.answer_clarification_turn(
-        session_id=identity.session_id,
-        answer="I want a creator direction with proof of work and leverage.",
-        existing_question_count=9,
-    )
-    first = service.confirm_primary_direction(
-        session_id=identity.session_id,
-        selected_direction=clarification.recommended_direction,
-        capability_action="start-new",
-    )
-    seeded = first.domain_capability.model_copy(
-        update={"capability_score": 68, "evolution_stage": "seasoned"},
-    )
-    service._domain_capability_repository.upsert_domain_capability(  # pylint: disable=protected-access
-        seeded,
-    )
-
-    second_identity = service.submit_identity(
-        display_name="Nora",
-        profession="Writer",
-        current_stage="restart",
-        interests=["writing", "content"],
-        strengths=["storytelling"],
-        constraints=["time"],
-        goal_intention="Scale the same creator direction further.",
-    )
-    second_clarification = service.answer_clarification_turn(
-        session_id=second_identity.session_id,
-        answer="I want to stay on the same creator track and push it further.",
-        existing_question_count=9,
-    )
-
-    preview = service.preview_primary_direction_transition(
-        session_id=second_identity.session_id,
-        selected_direction=second_clarification.recommended_direction,
-    )
-    result = service.confirm_primary_direction(
-        session_id=second_identity.session_id,
-        selected_direction=second_clarification.recommended_direction,
-        capability_action="keep-active",
-    )
-
-    assert preview.suggestion_kind == "same-domain"
-    assert preview.recommended_action == "keep-active"
-    assert result.domain_capability.capability_score == 68
-    assert result.domain_capability.evolution_stage == "seasoned"
-
-
-def test_confirm_primary_direction_archives_old_domain_and_starts_new_one(tmp_path) -> None:
-    service = _build_service(tmp_path)
-    creator_identity = service.submit_identity(
-        display_name="Nora",
-        profession="Writer",
-        current_stage="restart",
-        interests=["writing"],
-        strengths=["storytelling"],
-        constraints=["time"],
-        goal_intention="Build a creator path with long-term proof of work.",
-    )
-    creator_clarification = service.answer_clarification_turn(
-        session_id=creator_identity.session_id,
-        answer="I want a creator direction with proof of work and leverage.",
-        existing_question_count=9,
-    )
-    creator_result = service.confirm_primary_direction(
-        session_id=creator_identity.session_id,
-        selected_direction=creator_clarification.recommended_direction,
-        capability_action="start-new",
-    )
-    service._domain_capability_repository.upsert_domain_capability(  # pylint: disable=protected-access
-        creator_result.domain_capability.model_copy(
-            update={"capability_score": 68, "evolution_stage": "seasoned"},
-        )
-    )
-
-    health_identity = service.submit_identity(
-        display_name="Nora",
-        profession="Writer",
-        current_stage="restart",
-        interests=["health", "fitness"],
-        strengths=["consistency"],
-        constraints=["time"],
-        goal_intention="I need to rebuild my health and discipline.",
-    )
-    health_clarification = service.answer_clarification_turn(
-        session_id=health_identity.session_id,
-        answer="I want to rebuild energy, exercise, and stable health habits.",
-        existing_question_count=9,
-    )
-
-    preview = service.preview_primary_direction_transition(
-        session_id=health_identity.session_id,
-        selected_direction=_HEALTH_DIRECTION,
-    )
-    result = service.confirm_primary_direction(
-        session_id=health_identity.session_id,
-        selected_direction=_HEALTH_DIRECTION,
-        capability_action="start-new",
-    )
-    records = service._domain_capability_repository.list_domain_capabilities(  # pylint: disable=protected-access
-        creator_identity.profile.profile_id,
-    )
-    creator_record = next(
-        record
-        for record in records
-        if record.domain_key == derive_buddy_domain_key(creator_result.growth_target.primary_direction)
-    )
-
-    assert health_clarification.recommended_direction == _HEALTH_DIRECTION
-    assert preview.suggestion_kind == "start-new-domain"
-    assert result.domain_capability.domain_key == derive_buddy_domain_key(
-        result.growth_target.primary_direction,
-    )
-    assert result.domain_capability.capability_score == 0
-    assert result.domain_capability.evolution_stage == "seed"
-    assert creator_record.status == "archived"
-    assert creator_record.capability_score == 68
-
-
-def test_confirm_primary_direction_restores_matching_archived_domain(tmp_path) -> None:
-    service = _build_service(tmp_path)
-    creator_identity = service.submit_identity(
-        display_name="Nora",
-        profession="Writer",
-        current_stage="restart",
-        interests=["writing"],
-        strengths=["storytelling"],
-        constraints=["time"],
-        goal_intention="Build a creator path with long-term proof of work.",
-    )
-    creator_clarification = service.answer_clarification_turn(
-        session_id=creator_identity.session_id,
-        answer="I want a creator direction with proof of work and leverage.",
-        existing_question_count=9,
-    )
-    creator_result = service.confirm_primary_direction(
-        session_id=creator_identity.session_id,
-        selected_direction=creator_clarification.recommended_direction,
-        capability_action="start-new",
-    )
-    service._domain_capability_repository.upsert_domain_capability(  # pylint: disable=protected-access
-        creator_result.domain_capability.model_copy(
-            update={"capability_score": 68, "evolution_stage": "seasoned"},
-        )
-    )
-
-    health_identity = service.submit_identity(
-        display_name="Nora",
-        profession="Writer",
-        current_stage="restart",
-        interests=["health", "fitness"],
-        strengths=["consistency"],
-        constraints=["time"],
-        goal_intention="I need to rebuild my health and discipline.",
-    )
-    service.answer_clarification_turn(
-        session_id=health_identity.session_id,
-        answer="I want to rebuild energy, exercise, and stable health habits.",
-        existing_question_count=9,
-    )
-    service.confirm_primary_direction(
-        session_id=health_identity.session_id,
-        selected_direction=_HEALTH_DIRECTION,
-        capability_action="start-new",
-    )
-
-    creator_return_identity = service.submit_identity(
-        display_name="Nora",
-        profession="Writer",
-        current_stage="restart",
-        interests=["writing"],
-        strengths=["storytelling"],
-        constraints=["time"],
-        goal_intention="Return to creator work.",
-    )
-    creator_return_clarification = service.answer_clarification_turn(
-        session_id=creator_return_identity.session_id,
-        answer="I want to return to the same creator direction I was already building.",
-        existing_question_count=9,
-    )
-
-    preview = service.preview_primary_direction_transition(
-        session_id=creator_return_identity.session_id,
-        selected_direction=creator_return_clarification.recommended_direction,
-    )
-    restored = service.confirm_primary_direction(
-        session_id=creator_return_identity.session_id,
-        selected_direction=creator_return_clarification.recommended_direction,
+        selected_direction=creator_return_compiled.recommended_direction,
         capability_action="restore-archived",
         target_domain_id=preview.archived_matches[0]["domain_id"],
     )
@@ -855,11 +621,40 @@ def test_confirm_primary_direction_restores_matching_archived_domain(tmp_path) -
     assert preview.suggestion_kind == "switch-to-archived-domain"
     assert preview.recommended_action == "restore-archived"
     assert restored.domain_capability.domain_key == derive_buddy_domain_key(
-        creator_result.growth_target.primary_direction,
+        creator.growth_target.primary_direction,
     )
-    assert restored.domain_capability.capability_score == 68
-    assert restored.domain_capability.evolution_stage == "seasoned"
+    assert restored.domain_capability.industry_instance_id == creator_instance_id
+    assert restored.domain_capability.control_thread_id == creator_thread_id
     assert active is not None
     assert active.domain_key == derive_buddy_domain_key(
-        creator_result.growth_target.primary_direction,
+        creator.growth_target.primary_direction,
     )
+
+
+def test_name_buddy_updates_relationship_after_contract_confirmation(tmp_path) -> None:
+    service = _build_service(tmp_path)
+    identity = service.submit_identity(
+        display_name="Mina",
+        profession="Operator",
+        current_stage="exploring",
+        interests=["content"],
+        strengths=["consistency"],
+        constraints=["money"],
+        goal_intention="I want a bigger life direction.",
+    )
+    compiled = service.submit_contract(
+        session_id=identity.session_id,
+        **_contract_payload(),
+    )
+    service.confirm_primary_direction(
+        session_id=identity.session_id,
+        selected_direction=compiled.recommended_direction,
+        capability_action="start-new",
+    )
+
+    relationship = service.name_buddy(
+        session_id=identity.session_id,
+        buddy_name="Mochi",
+    )
+
+    assert relationship.buddy_name == "Mochi"

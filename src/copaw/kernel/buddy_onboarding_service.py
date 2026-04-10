@@ -21,8 +21,8 @@ from .buddy_execution_carrier import (
 )
 from .buddy_onboarding_reasoner import (
     BuddyOnboardingBacklogSeed,
-    BuddyOnboardingGrowthPlan,
-    BuddyOnboardingReasonedTurn,
+    BuddyCollaborationContract,
+    BuddyOnboardingContractCompileResult,
     BuddyOnboardingReasoner,
     BuddyOnboardingReasonerUnavailableError,
     BuddyOnboardingReasonerTimeoutError,
@@ -75,19 +75,23 @@ logger = logging.getLogger(__name__)
 class BuddyIdentitySubmitResult(BaseModel):
     session_id: str
     profile: HumanProfile
-    question_count: int = Field(ge=1)
-    next_question: str
-    finished: bool = False
+    status: str = "contract-draft"
 
 
-class BuddyClarificationResult(BaseModel):
+class BuddyContractCompileSubmitResult(BaseModel):
     session_id: str
-    question_count: int = Field(ge=1)
-    tightened: bool = False
-    finished: bool = False
-    next_question: str = ""
+    status: str = "contract-ready"
+    service_intent: str = ""
+    collaboration_role: str = "orchestrator"
+    autonomy_level: str = "proactive"
+    confirm_boundaries: list[str] = Field(default_factory=list)
+    report_style: str = "result-first"
+    collaboration_notes: str = ""
     candidate_directions: list[str] = Field(default_factory=list)
     recommended_direction: str = ""
+    final_goal: str = ""
+    why_it_matters: str = ""
+    backlog_items: list[BuddyOnboardingBacklogSeed] = Field(default_factory=list)
 
 
 class BuddyDirectionTransitionPreviewResult(BaseModel):
@@ -180,7 +184,7 @@ def _present_buddy_lane_label(role_id: str) -> str:
 
 
 def _resolve_growth_plan_lane_hints(
-    growth_plan: BuddyOnboardingGrowthPlan | None,
+    growth_plan: BuddyOnboardingContractCompileResult | None,
 ) -> list[str]:
     if growth_plan is None:
         return []
@@ -347,37 +351,13 @@ class BuddyOnboardingService:
         existing_session = self._onboarding_session_repository.get_latest_session_for_profile(
             profile.profile_id,
         )
-        transcript = [profile.goal_intention]
-        try:
-            reasoned_turn = self._resolve_reasoned_turn(
-                profile=profile,
-                transcript=transcript,
-                question_count=1,
-                tightened=False,
-            )
-        except (
-            BuddyOnboardingReasonerTimeoutError,
-            TimeoutError,
-            BuddyOnboardingReasonerUnavailableError,
-        ):
-            self._persist_failed_onboarding_session(
-                profile_id=profile.profile_id,
-                existing_session=existing_session,
-                transcript=transcript,
-                question_count=1,
-                tightened=False,
-            )
-            raise
-        session = BuddyOnboardingSessionRecord(
-            profile_id=profile.profile_id,
-            question_count=1,
-            tightened=False,
-            status="clarifying",
-            next_question=reasoned_turn.next_question.strip(),
-            transcript=transcript,
-            candidate_directions=list(reasoned_turn.candidate_directions),
-            recommended_direction=reasoned_turn.recommended_direction,
-            **self._build_reasoned_turn_cache(reasoned_turn),
+        session = self._build_contract_draft_session(
+            profile=profile,
+            existing_session=existing_session,
+            operation_id=str(getattr(existing_session, "operation_id", "") or "").strip(),
+            operation_kind=str(getattr(existing_session, "operation_kind", "") or "").strip(),
+            operation_status=str(getattr(existing_session, "operation_status", "") or "idle").strip() or "idle",
+            operation_error=str(getattr(existing_session, "operation_error", "") or "").strip(),
         )
         if existing_session is not None:
             session = session.model_copy(
@@ -391,9 +371,7 @@ class BuddyOnboardingService:
         return BuddyIdentitySubmitResult(
             session_id=session.session_id,
             profile=profile,
-            question_count=session.question_count,
-            next_question=session.next_question,
-            finished=False,
+            status=session.status,
         )
 
     def start_identity_operation(
@@ -432,21 +410,13 @@ class BuddyOnboardingService:
         if existing_session is not None and existing_session.operation_status == "running":
             raise ValueError("Buddy onboarding is already processing.")
         operation_id = _new_buddy_operation_id()
-        session = BuddyOnboardingSessionRecord(
-            profile_id=profile.profile_id,
-            status="clarifying",
+        session = self._build_contract_draft_session(
+            profile=profile,
+            existing_session=existing_session,
             operation_id=operation_id,
             operation_kind="identity",
             operation_status="running",
             operation_error="",
-            question_count=1,
-            tightened=False,
-            next_question="",
-            transcript=[profile.goal_intention],
-            candidate_directions=[],
-            recommended_direction="",
-            selected_direction="",
-            **self._build_reasoned_turn_cache(None),
         )
         if existing_session is not None:
             session = session.model_copy(
@@ -464,76 +434,75 @@ class BuddyOnboardingService:
             operation_kind="identity",
         )
 
-    def answer_clarification_turn(
+    def submit_contract(
         self,
         *,
         session_id: str,
-        answer: str,
-        existing_question_count: int | None = None,
-    ) -> BuddyClarificationResult:
+        service_intent: str,
+        collaboration_role: str = "orchestrator",
+        autonomy_level: str = "proactive",
+        confirm_boundaries: list[str] | None = None,
+        report_style: str = "result-first",
+        collaboration_notes: str = "",
+    ) -> BuddyContractCompileSubmitResult:
         session = self._require_session(session_id)
         profile = self._require_profile(session.profile_id)
-        merged_transcript = [*session.transcript, answer.strip()]
-        question_count = min(
-            self.MAX_QUESTIONS,
-            max(existing_question_count or 0, session.question_count + 1),
+        collaboration_contract = BuddyCollaborationContract(
+            service_intent=service_intent,
+            collaboration_role=collaboration_role,
+            autonomy_level=autonomy_level,
+            confirm_boundaries=confirm_boundaries or [],
+            report_style=report_style,
+            collaboration_notes=collaboration_notes,
         )
-        tightened = question_count > self.TIGHTEN_AFTER
         try:
-            reasoned_turn = self._resolve_reasoned_turn(
+            compiled_contract = self._resolve_contract_compile(
                 profile=profile,
-                transcript=merged_transcript,
-                question_count=question_count,
-                tightened=tightened,
+                collaboration_contract=collaboration_contract,
             )
         except (
             BuddyOnboardingReasonerTimeoutError,
             TimeoutError,
             BuddyOnboardingReasonerUnavailableError,
         ):
-            self._persist_failed_onboarding_session(
-                profile_id=profile.profile_id,
-                existing_session=session,
-                transcript=merged_transcript,
-                question_count=question_count,
-                tightened=tightened,
-            )
             raise
-        candidate_directions = list(reasoned_turn.candidate_directions)
-        recommended = reasoned_turn.recommended_direction
-        finished = question_count >= self.MAX_QUESTIONS or reasoned_turn.finished
-        if finished and (not candidate_directions or not recommended.strip()):
-            raise BuddyOnboardingReasonerUnavailableError(
-                "Buddy onboarding model failed to return a valid result.",
-            )
-        next_question = ""
-        if not finished:
-            next_question = reasoned_turn.next_question.strip()
         updated = self._onboarding_session_repository.upsert_session(
             session.model_copy(
                 update={
-                    "question_count": question_count,
-                    "tightened": tightened,
-                    "next_question": next_question,
-                    "transcript": merged_transcript,
-                    "candidate_directions": candidate_directions,
-                    "recommended_direction": recommended,
-                    "status": "direction-ready" if finished else "clarifying",
-                    **self._build_reasoned_turn_cache(reasoned_turn),
+                    "status": "contract-ready",
+                    "service_intent": collaboration_contract.service_intent,
+                    "collaboration_role": collaboration_contract.collaboration_role,
+                    "autonomy_level": collaboration_contract.autonomy_level,
+                    "confirm_boundaries": list(collaboration_contract.confirm_boundaries),
+                    "report_style": collaboration_contract.report_style,
+                    "collaboration_notes": collaboration_contract.collaboration_notes,
+                    "candidate_directions": list(compiled_contract.candidate_directions),
+                    "recommended_direction": compiled_contract.recommended_direction,
+                    **self._build_contract_compile_cache(compiled_contract),
                 },
             ),
         )
-        return BuddyClarificationResult(
+        return BuddyContractCompileSubmitResult(
             session_id=updated.session_id,
-            question_count=updated.question_count,
-            tightened=updated.tightened,
-            finished=finished,
-            next_question=updated.next_question,
+            status=updated.status,
+            service_intent=updated.service_intent,
+            collaboration_role=updated.collaboration_role,
+            autonomy_level=updated.autonomy_level,
+            confirm_boundaries=list(updated.confirm_boundaries),
+            report_style=updated.report_style,
+            collaboration_notes=updated.collaboration_notes,
             candidate_directions=updated.candidate_directions,
             recommended_direction=updated.recommended_direction,
+            final_goal=updated.draft_final_goal,
+            why_it_matters=updated.draft_why_it_matters,
+            backlog_items=[
+                BuddyOnboardingBacklogSeed.model_validate(item)
+                for item in list(updated.draft_backlog_items or [])
+                if isinstance(item, dict)
+            ],
         )
 
-    def start_clarification_operation(
+    def start_contract_compile(
         self,
         *,
         session_id: str,
@@ -546,7 +515,7 @@ class BuddyOnboardingService:
             session.model_copy(
                 update={
                     "operation_id": operation_id,
-                    "operation_kind": "clarify",
+                    "operation_kind": "contract",
                     "operation_status": "running",
                     "operation_error": "",
                     "updated_at": _utc_now(),
@@ -557,19 +526,29 @@ class BuddyOnboardingService:
             session_id=updated.session_id,
             profile_id=updated.profile_id,
             operation_id=operation_id,
-            operation_kind="clarify",
+            operation_kind="contract",
         )
 
-    def get_candidate_directions(self, *, session_id: str) -> BuddyClarificationResult:
+    def get_candidate_directions(self, *, session_id: str) -> BuddyContractCompileSubmitResult:
         session = self._require_session(session_id)
-        return BuddyClarificationResult(
+        return BuddyContractCompileSubmitResult(
             session_id=session.session_id,
-            question_count=session.question_count,
-            tightened=session.tightened,
-            finished=bool(session.candidate_directions),
-            next_question=session.next_question,
+            status=session.status,
+            service_intent=session.service_intent,
+            collaboration_role=session.collaboration_role,
+            autonomy_level=session.autonomy_level,
+            confirm_boundaries=list(session.confirm_boundaries),
+            report_style=session.report_style,
+            collaboration_notes=session.collaboration_notes,
             candidate_directions=session.candidate_directions,
             recommended_direction=session.recommended_direction,
+            final_goal=session.draft_final_goal,
+            why_it_matters=session.draft_why_it_matters,
+            backlog_items=[
+                BuddyOnboardingBacklogSeed.model_validate(item)
+                for item in list(session.draft_backlog_items or [])
+                if isinstance(item, dict)
+            ],
         )
 
     def preview_primary_direction_transition(
@@ -631,18 +610,17 @@ class BuddyOnboardingService:
             session_id=session_id,
             selected_direction=normalized,
         )
-        growth_plan = self._resolve_cached_growth_plan(
+        compiled_contract = self._resolve_cached_contract_compile(
             session=session,
             selected_direction=normalized,
         )
-        if growth_plan is None:
-            growth_plan = self._resolve_growth_plan(
+        if compiled_contract is None:
+            compiled_contract = self._resolve_contract_compile(
                 profile=profile,
-                transcript=session.transcript,
-                selected_direction=normalized,
+                collaboration_contract=self._build_contract_from_session(session),
             )
         else:
-            growth_plan = self._validate_growth_plan_result(growth_plan)
+            compiled_contract = self._validate_contract_compile_result(compiled_contract)
         resolved_capability_action = str(
             capability_action or preview.recommended_action or "",
         ).strip()
@@ -656,8 +634,8 @@ class BuddyOnboardingService:
             GrowthTarget(
                 profile_id=profile.profile_id,
                 primary_direction=normalized,
-                final_goal=growth_plan.final_goal,
-                why_it_matters=growth_plan.why_it_matters,
+                final_goal=compiled_contract.final_goal,
+                why_it_matters=compiled_contract.why_it_matters,
                 current_cycle_label="Cycle 1",
             ),
         )
@@ -666,6 +644,12 @@ class BuddyOnboardingService:
             (existing_relationship or CompanionRelationship(profile_id=profile.profile_id)).model_copy(
                 update={
                     "profile_id": profile.profile_id,
+                    "service_intent": session.service_intent,
+                    "collaboration_role": session.collaboration_role,
+                    "autonomy_level": session.autonomy_level,
+                    "confirm_boundaries": list(session.confirm_boundaries),
+                    "report_style": session.report_style,
+                    "collaboration_notes": session.collaboration_notes,
                     "encouragement_style": "old-friend",
                     "effective_reminders": _unique(
                         list((existing_relationship.effective_reminders if existing_relationship else []) or [])
@@ -677,7 +661,11 @@ class BuddyOnboardingService:
                     )[:3],
                     "avoidance_patterns": self._seed_avoidance_patterns(
                         profile=profile,
-                        transcript=session.transcript,
+                        signals=[
+                            session.service_intent,
+                            session.collaboration_notes,
+                            *list(session.confirm_boundaries or []),
+                        ],
                         existing=existing_relationship.avoidance_patterns if existing_relationship else None,
                     )[:3],
                 },
@@ -695,7 +683,7 @@ class BuddyOnboardingService:
             growth_target=growth_target,
             domain_capability=domain_capability,
             capability_action=resolved_capability_action,
-            growth_plan=growth_plan,
+            growth_plan=compiled_contract,
         )
         if self._domain_capability_growth_service is not None:
             refreshed = self._domain_capability_growth_service.refresh_active_domain_capability(
@@ -709,10 +697,7 @@ class BuddyOnboardingService:
                     "status": "confirmed",
                     "selected_direction": normalized,
                     "recommended_direction": session.recommended_direction or normalized,
-                    **self._build_growth_plan_cache(
-                        selected_direction=normalized,
-                        growth_plan=growth_plan,
-                    ),
+                    **self._build_contract_compile_cache(compiled_contract),
                 },
             ),
         )
@@ -868,37 +853,6 @@ class BuddyOnboardingService:
         )
         return updated
 
-    def _persist_failed_onboarding_session(
-        self,
-        *,
-        profile_id: str,
-        existing_session: BuddyOnboardingSessionRecord | None,
-        transcript: list[str],
-        question_count: int,
-        tightened: bool,
-    ) -> BuddyOnboardingSessionRecord:
-        session = BuddyOnboardingSessionRecord(
-            profile_id=profile_id,
-            status="clarifying",
-            question_count=max(1, int(question_count or 1)),
-            tightened=bool(tightened),
-            next_question="",
-            transcript=[str(item).strip() for item in transcript if str(item).strip()],
-            candidate_directions=[],
-            recommended_direction="",
-            selected_direction="",
-            **self._build_reasoned_turn_cache(None),
-        )
-        if existing_session is not None:
-            session = session.model_copy(
-                update={
-                    "session_id": existing_session.session_id,
-                    "created_at": existing_session.created_at,
-                    "updated_at": _utc_now(),
-                },
-            )
-        return self._onboarding_session_repository.upsert_session(session)
-
     def repair_active_domain_schedules(self, *, profile_id: str) -> int:
         if (
             self._domain_capability_repository is None
@@ -945,33 +899,110 @@ class BuddyOnboardingService:
             raise ValueError(f"Human profile '{profile_id}' not found")
         return profile
 
-    def _build_reasoned_turn_cache(
-        self,
-        reasoned_turn: BuddyOnboardingReasonedTurn | None,
-    ) -> dict[str, object]:
-        if reasoned_turn is None:
-            return {
-                "draft_direction": "",
-                "draft_final_goal": "",
-                "draft_why_it_matters": "",
-                "draft_backlog_items": [],
-            }
-        return {
-            "draft_direction": str(reasoned_turn.recommended_direction or "").strip(),
-            "draft_final_goal": str(reasoned_turn.final_goal or "").strip(),
-            "draft_why_it_matters": str(reasoned_turn.why_it_matters or "").strip(),
-            "draft_backlog_items": [
-                item.model_dump(mode="json")
-                for item in reasoned_turn.backlog_items
-                if item.title.strip() and item.summary.strip()
-            ][:3],
-        }
+    def _require_session_by_profile(self, profile_id: str) -> BuddyOnboardingSessionRecord:
+        session = self._onboarding_session_repository.get_latest_session_for_profile(profile_id)
+        if session is None:
+            raise ValueError(f"Buddy onboarding session for profile '{profile_id}' not found")
+        return session
 
-    def _build_growth_plan_cache(
+    def _derive_operating_mode(
+        self,
+        collaboration_contract: BuddyCollaborationContract,
+    ) -> str:
+        role = str(collaboration_contract.collaboration_role or "").strip().lower()
+        autonomy = str(collaboration_contract.autonomy_level or "").strip().lower()
+        if "guard" in autonomy or "confirm" in autonomy:
+            return "guarded-collaboration"
+        if role in {"operator", "assistant"}:
+            return "operator-guided"
+        return "collaboration-contract"
+
+    def _build_delegation_policy(
+        self,
+        collaboration_contract: BuddyCollaborationContract,
+    ) -> list[str]:
+        return _unique(
+            [
+                "Execution core coordinates direction, planning, supervision, and review instead of swallowing leaf execution.",
+                "Concrete execution should be delegated to the domain specialist lanes created from the collaboration contract backlog.",
+                f"Collaboration role: {collaboration_contract.collaboration_role or 'orchestrator'}.",
+            ],
+        )
+
+    def _build_direct_execution_policy(
+        self,
+        collaboration_contract: BuddyCollaborationContract,
+    ) -> list[str]:
+        return _unique(
+            [
+                "Main brain must not turn into the leaf executor for browser, desktop, or document work.",
+                "When execution capacity is missing, create or restore the right domain lane instead of letting the core execute directly.",
+                f"Autonomy level: {collaboration_contract.autonomy_level or 'proactive'}.",
+            ],
+        )
+
+    def _build_execution_core_identity_payload(
         self,
         *,
-        selected_direction: str,
-        growth_plan: BuddyOnboardingGrowthPlan | None,
+        profile: HumanProfile,
+        growth_target: GrowthTarget,
+        collaboration_contract: BuddyCollaborationContract,
+    ) -> dict[str, object]:
+        return {
+            "profile_id": profile.profile_id,
+            "primary_direction": growth_target.primary_direction,
+            "final_goal": growth_target.final_goal,
+            "operator_service_intent": collaboration_contract.service_intent,
+            "collaboration_role": collaboration_contract.collaboration_role,
+            "autonomy_level": collaboration_contract.autonomy_level,
+            "report_style": collaboration_contract.report_style,
+            "confirm_boundaries": list(collaboration_contract.confirm_boundaries or []),
+            "operating_mode": self._derive_operating_mode(collaboration_contract),
+            "delegation_policy": self._build_delegation_policy(collaboration_contract),
+            "direct_execution_policy": self._build_direct_execution_policy(collaboration_contract),
+        }
+
+    def _build_contract_draft_session(
+        self,
+        *,
+        profile: HumanProfile,
+        existing_session: BuddyOnboardingSessionRecord | None,
+        operation_id: str,
+        operation_kind: str,
+        operation_status: str,
+        operation_error: str,
+    ) -> BuddyOnboardingSessionRecord:
+        session = BuddyOnboardingSessionRecord(
+            profile_id=profile.profile_id,
+            status="contract-draft",
+            operation_id=operation_id,
+            operation_kind=operation_kind,
+            operation_status=operation_status,
+            operation_error=operation_error,
+            service_intent="",
+            collaboration_role="orchestrator",
+            autonomy_level="proactive",
+            confirm_boundaries=[],
+            report_style="result-first",
+            collaboration_notes="",
+            candidate_directions=[],
+            recommended_direction="",
+            selected_direction="",
+            **self._build_contract_compile_cache(None),
+        )
+        if existing_session is None:
+            return session
+        return session.model_copy(
+            update={
+                "session_id": existing_session.session_id,
+                "created_at": existing_session.created_at,
+                "updated_at": _utc_now(),
+            },
+        )
+
+    def _build_contract_compile_cache(
+        self,
+        growth_plan: BuddyOnboardingContractCompileResult | None,
     ) -> dict[str, object]:
         if growth_plan is None:
             return {
@@ -981,7 +1012,7 @@ class BuddyOnboardingService:
                 "draft_backlog_items": [],
             }
         return {
-            "draft_direction": selected_direction.strip(),
+            "draft_direction": str(growth_plan.recommended_direction or "").strip(),
             "draft_final_goal": str(growth_plan.final_goal or "").strip(),
             "draft_why_it_matters": str(growth_plan.why_it_matters or "").strip(),
             "draft_backlog_items": [
@@ -991,12 +1022,25 @@ class BuddyOnboardingService:
             ][:3],
         }
 
-    def _resolve_cached_growth_plan(
+    def _build_contract_from_session(
+        self,
+        session: BuddyOnboardingSessionRecord,
+    ) -> BuddyCollaborationContract:
+        return BuddyCollaborationContract(
+            service_intent=session.service_intent,
+            collaboration_role=session.collaboration_role,
+            autonomy_level=session.autonomy_level,
+            confirm_boundaries=list(session.confirm_boundaries or []),
+            report_style=session.report_style,
+            collaboration_notes=session.collaboration_notes,
+        )
+
+    def _resolve_cached_contract_compile(
         self,
         *,
         session: BuddyOnboardingSessionRecord,
         selected_direction: str,
-    ) -> BuddyOnboardingGrowthPlan | None:
+    ) -> BuddyOnboardingContractCompileResult | None:
         if str(session.draft_direction or "").strip() != selected_direction.strip():
             return None
         final_goal = str(session.draft_final_goal or "").strip()
@@ -1008,31 +1052,28 @@ class BuddyOnboardingService:
         ]
         if not final_goal and not why_it_matters and not backlog_items:
             return None
-        return BuddyOnboardingGrowthPlan(
-            primary_direction=selected_direction.strip(),
+        return BuddyOnboardingContractCompileResult(
+            candidate_directions=[selected_direction.strip()],
+            recommended_direction=selected_direction.strip(),
             final_goal=final_goal,
             why_it_matters=why_it_matters,
             backlog_items=backlog_items[:3],
         )
 
-    def _resolve_reasoned_turn(
+    def _resolve_contract_compile(
         self,
         *,
         profile: HumanProfile,
-        transcript: list[str],
-        question_count: int,
-        tightened: bool,
-    ) -> BuddyOnboardingReasonedTurn:
+        collaboration_contract: BuddyCollaborationContract,
+    ) -> BuddyOnboardingContractCompileResult:
         if self._onboarding_reasoner is None:
             raise BuddyOnboardingReasonerUnavailableError(
                 "Buddy onboarding model is not available.",
             )
         try:
-            reasoned_turn = self._onboarding_reasoner.plan_turn(
+            growth_plan = self._onboarding_reasoner.compile_contract(
                 profile=profile,
-                transcript=transcript,
-                question_count=question_count,
-                tightened=tightened,
+                collaboration_contract=collaboration_contract,
             )
         except BuddyOnboardingReasonerTimeoutError:
             raise
@@ -1041,65 +1082,21 @@ class BuddyOnboardingService:
         except BuddyOnboardingReasonerUnavailableError:
             raise
         except Exception:
-            logger.warning("Buddy onboarding reasoned turn failed.", exc_info=True)
+            logger.warning("Buddy onboarding contract compile failed.", exc_info=True)
             raise BuddyOnboardingReasonerUnavailableError(
                 "Buddy onboarding model failed to return a valid result.",
             ) from None
-        return self._validate_reasoned_turn_result(reasoned_turn)
+        return self._validate_contract_compile_result(growth_plan)
 
-    def _resolve_growth_plan(
+    def _validate_contract_compile_result(
         self,
-        *,
-        profile: HumanProfile,
-        transcript: list[str],
-        selected_direction: str,
-    ) -> BuddyOnboardingGrowthPlan:
-        if self._onboarding_reasoner is None:
-            raise BuddyOnboardingReasonerUnavailableError(
-                "Buddy onboarding model is not available.",
-            )
-        try:
-            growth_plan = self._onboarding_reasoner.build_growth_plan(
-                profile=profile,
-                transcript=transcript,
-                selected_direction=selected_direction,
-            )
-        except BuddyOnboardingReasonerTimeoutError:
-            raise
-        except TimeoutError:
-            raise
-        except BuddyOnboardingReasonerUnavailableError:
-            raise
-        except Exception:
-            logger.warning("Buddy onboarding growth plan failed.", exc_info=True)
-            raise BuddyOnboardingReasonerUnavailableError(
-                "Buddy onboarding model failed to return a valid result.",
-            ) from None
-        return self._validate_growth_plan_result(growth_plan)
-
-    def _validate_reasoned_turn_result(
-        self,
-        reasoned_turn: BuddyOnboardingReasonedTurn | None,
-    ) -> BuddyOnboardingReasonedTurn:
-        if reasoned_turn is None:
-            raise BuddyOnboardingReasonerUnavailableError(
-                "Buddy onboarding model failed to return a valid result.",
-            )
-        next_question = str(reasoned_turn.next_question or "").strip()
-        if not reasoned_turn.finished and not next_question:
-            raise BuddyOnboardingReasonerUnavailableError(
-                "Buddy onboarding model failed to return a valid result.",
-            )
-        return reasoned_turn
-
-    def _validate_growth_plan_result(
-        self,
-        growth_plan: BuddyOnboardingGrowthPlan | None,
-    ) -> BuddyOnboardingGrowthPlan:
+        growth_plan: BuddyOnboardingContractCompileResult | None,
+    ) -> BuddyOnboardingContractCompileResult:
         if growth_plan is None:
             raise BuddyOnboardingReasonerUnavailableError(
                 "Buddy onboarding model failed to return a valid result.",
             )
+        recommended_direction = str(growth_plan.recommended_direction or "").strip()
         final_goal = str(growth_plan.final_goal or "").strip()
         why_it_matters = str(growth_plan.why_it_matters or "").strip()
         backlog_items: list[BuddyOnboardingBacklogSeed] = []
@@ -1124,12 +1121,17 @@ class BuddyOnboardingService:
                 )
             )
         backlog_items = backlog_items[:3]
-        if not final_goal or not why_it_matters or not backlog_items:
+        candidate_directions = _unique(
+            [recommended_direction, *list(growth_plan.candidate_directions or [])],
+        )
+        if not recommended_direction or not final_goal or not why_it_matters or not backlog_items:
             raise BuddyOnboardingReasonerUnavailableError(
                 "Buddy onboarding model failed to return a valid result.",
             )
         return growth_plan.model_copy(
             update={
+                "candidate_directions": candidate_directions[:3],
+                "recommended_direction": recommended_direction,
                 "final_goal": final_goal,
                 "why_it_matters": why_it_matters,
                 "backlog_items": backlog_items,
@@ -1244,7 +1246,7 @@ class BuddyOnboardingService:
         growth_target: GrowthTarget,
         domain_capability: BuddyDomainCapabilityRecord,
         capability_action: str,
-        growth_plan: BuddyOnboardingGrowthPlan | None = None,
+        growth_plan: BuddyOnboardingContractCompileResult | None = None,
     ) -> tuple[
         GrowthTarget,
         BuddyDomainCapabilityRecord,
@@ -1300,11 +1302,13 @@ class BuddyOnboardingService:
                 summary=growth_target.final_goal,
                 agents=team_roles,
             ).model_dump(mode="json"),
-            execution_core_identity_payload={
-                "profile_id": profile.profile_id,
-                "primary_direction": growth_target.primary_direction,
-                "final_goal": growth_target.final_goal,
-            },
+            execution_core_identity_payload=self._build_execution_core_identity_payload(
+                profile=profile,
+                growth_target=growth_target,
+                collaboration_contract=self._build_contract_from_session(
+                    self._require_session_by_profile(profile.profile_id),
+                ),
+            ),
             agent_ids=[role.agent_id for role in team_roles],
             lifecycle_status="running",
             autonomy_status="coordinating",
@@ -1726,7 +1730,7 @@ class BuddyOnboardingService:
         instance_id: str,
         existing_instance: IndustryInstanceRecord | None,
         direction_text: str | None,
-        growth_plan: BuddyOnboardingGrowthPlan | None = None,
+        growth_plan: BuddyOnboardingContractCompileResult | None = None,
     ) -> list[IndustryRoleBlueprint]:
         existing_agents = (
             list((existing_instance.team_payload or {}).get("agents") or [])
@@ -1794,7 +1798,7 @@ class BuddyOnboardingService:
         profile: HumanProfile,
         growth_target: GrowthTarget,
         lanes: list[object],
-        growth_plan: BuddyOnboardingGrowthPlan | None = None,
+        growth_plan: BuddyOnboardingContractCompileResult | None = None,
     ) -> list[tuple[str | None, str, str, int, str]]:
         lane_ids = [getattr(lane, "id", None) for lane in lanes]
         primary_lane_id = lane_ids[0] if lane_ids else None
@@ -1837,10 +1841,10 @@ class BuddyOnboardingService:
         self,
         *,
         profile: HumanProfile,
-        transcript: list[str],
+        signals: list[str],
         existing: list[str] | None = None,
     ) -> list[str]:
-        source = _normalize_text(" ".join([profile.goal_intention, *profile.constraints, *transcript]))
+        source = _normalize_text(" ".join([profile.goal_intention, *profile.constraints, *signals]))
         patterns = list(existing or [])
         if _contains_any(source, ("拖延", "分心", "刷", "逃避", "不想做")):
             patterns.append("拖延回避")
@@ -1856,7 +1860,7 @@ def _utc_now() -> datetime:
 
 
 __all__ = [
-    "BuddyClarificationResult",
+    "BuddyContractCompileSubmitResult",
     "BuddyDirectionConfirmationResult",
     "BuddyDirectionTransitionPreviewResult",
     "BuddyIdentitySubmitResult",

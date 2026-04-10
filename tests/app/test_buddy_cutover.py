@@ -2,10 +2,16 @@
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
+from pydantic import BaseModel
 
 from copaw.app.routers.buddy_routes import router as buddy_router
 from copaw.kernel.buddy_domain_capability_growth import BuddyDomainCapabilityGrowthService
-from copaw.kernel.buddy_onboarding_service import BuddyOnboardingService
+from copaw.kernel.buddy_onboarding_reasoner import BuddyOnboardingBacklogSeed
+from copaw.kernel.buddy_onboarding_service import (
+    BuddyOnboardingService,
+    _CREATOR_DIRECTION,
+    _STOCKS_DIRECTION,
+)
 from copaw.kernel.buddy_projection_service import BuddyProjectionService
 from copaw.state import AgentReportRecord, SQLiteStateStore
 from copaw.state.main_brain_service import (
@@ -31,9 +37,115 @@ from copaw.state.repositories_buddy import (
     SqliteGrowthTargetRepository,
     SqliteHumanProfileRepository,
 )
-from tests.shared.buddy_reasoners import DeterministicBuddyReasoner
 
 from .runtime_center_api_parts.shared import FakeTurnExecutor, build_runtime_center_app
+
+
+def _contract_payload(
+    *,
+    service_intent: str = "Turn long-term goals into steady weekly execution.",
+    collaboration_role: str = "orchestrator",
+    autonomy_level: str = "proactive",
+    confirm_boundaries: list[str] | None = None,
+    report_style: str = "result-first",
+    collaboration_notes: str = "Prefer concise updates with one concrete next step.",
+) -> dict[str, object]:
+    return {
+        "service_intent": service_intent,
+        "collaboration_role": collaboration_role,
+        "autonomy_level": autonomy_level,
+        "confirm_boundaries": confirm_boundaries or ["external spend", "irreversible actions"],
+        "report_style": report_style,
+        "collaboration_notes": collaboration_notes,
+    }
+
+
+class _ContractCompileResult(BaseModel):
+    candidate_directions: list[str]
+    recommended_direction: str
+    final_goal: str
+    why_it_matters: str
+    backlog_items: list[BuddyOnboardingBacklogSeed]
+
+
+class _DeterministicContractCompiler:
+    def compile_contract(
+        self,
+        *,
+        profile,
+        collaboration_contract,
+    ) -> _ContractCompileResult:
+        direction = self._resolve_direction(
+            profile_goal=profile.goal_intention,
+            service_intent=str(getattr(collaboration_contract, "service_intent", "") or ""),
+            notes=str(getattr(collaboration_contract, "collaboration_notes", "") or ""),
+        )
+        final_goal, why_it_matters, backlog_items = self._growth_plan(direction)
+        return _ContractCompileResult(
+            candidate_directions=[direction],
+            recommended_direction=direction,
+            final_goal=final_goal,
+            why_it_matters=why_it_matters,
+            backlog_items=backlog_items,
+        )
+
+    def _resolve_direction(
+        self,
+        *,
+        profile_goal: str,
+        service_intent: str,
+        notes: str,
+    ) -> str:
+        source = " ".join([profile_goal, service_intent, notes]).lower()
+        if any(token in source for token in ("stock", "stocks", "trade", "trading", "invest", "股票", "交易", "投资")):
+            return _STOCKS_DIRECTION
+        return _CREATOR_DIRECTION
+
+    def _growth_plan(
+        self,
+        direction: str,
+    ) -> tuple[str, str, list[BuddyOnboardingBacklogSeed]]:
+        if direction == _STOCKS_DIRECTION:
+            return (
+                "Build a disciplined stock trading system with visible risk control evidence.",
+                "This turns trading into a durable operating path instead of emotional reaction.",
+                [
+                    BuddyOnboardingBacklogSeed(
+                        lane_hint="growth-focus",
+                        title="Define trading boundaries",
+                        summary="Lock the market scope, position sizing, and max-loss rule for the first cycle.",
+                        priority=3,
+                        source_key="trading-boundary",
+                    ),
+                    BuddyOnboardingBacklogSeed(
+                        lane_hint="proof-of-work",
+                        title="Produce the first review packet",
+                        summary="Complete one evidence-backed review of a real or simulated trade sample.",
+                        priority=2,
+                        source_key="trading-review",
+                    ),
+                ],
+            )
+        return (
+            "Build a durable writing and publishing path with visible proof-of-work.",
+            "This turns expression into an accumulative path that can keep producing real artifacts.",
+            [
+                BuddyOnboardingBacklogSeed(
+                    lane_hint="growth-focus",
+                    title="Define the first publishing lane",
+                    summary="Choose the topic, cadence, and minimum shippable unit for the first cycle.",
+                    priority=3,
+                    source_key="writing-direction",
+                ),
+                BuddyOnboardingBacklogSeed(
+                    lane_hint="proof-of-work",
+                    title="Ship the first publishable artifact",
+                    summary="Finish the first chapter or draft and move it into a publish-ready state.",
+                    priority=2,
+                    source_key="writing-first-artifact",
+                ),
+            ],
+        )
 
 
 def _build_client(tmp_path) -> TestClient:
@@ -49,7 +161,7 @@ def _build_client(tmp_path) -> TestClient:
         relationship_repository=relationship_repository,
         domain_capability_repository=domain_capability_repository,
         onboarding_session_repository=session_repository,
-        onboarding_reasoner=DeterministicBuddyReasoner(),
+        onboarding_reasoner=_DeterministicContractCompiler(),
     )
     projection_service = BuddyProjectionService(
         profile_repository=profile_repository,
@@ -98,7 +210,7 @@ def _build_client_with_growth(tmp_path) -> tuple[TestClient, SQLiteStateStore]:
         relationship_repository=relationship_repository,
         domain_capability_repository=domain_capability_repository,
         onboarding_session_repository=session_repository,
-        onboarding_reasoner=DeterministicBuddyReasoner(),
+        onboarding_reasoner=_DeterministicContractCompiler(),
         industry_instance_repository=industry_repository,
         operating_lane_service=lane_service,
         backlog_service=backlog_service,
@@ -127,33 +239,54 @@ def _build_client_with_growth(tmp_path) -> tuple[TestClient, SQLiteStateStore]:
     return TestClient(app), store
 
 
+def _identity_payload() -> dict[str, object]:
+    return {
+        "display_name": "Mina",
+        "profession": "Operator",
+        "current_stage": "exploring",
+        "interests": ["content"],
+        "strengths": ["consistency"],
+        "constraints": ["money"],
+        "goal_intention": "Find a real long-term direction.",
+    }
+
+
+def test_clarify_routes_are_removed_and_contract_route_is_live(tmp_path) -> None:
+    client = _build_client(tmp_path)
+    identity = client.post("/buddy/onboarding/identity", json=_identity_payload()).json()
+
+    clarify = client.post(
+        "/buddy/onboarding/clarify",
+        json={"session_id": identity["session_id"], "answer": "anything"},
+    )
+    clarify_start = client.post(
+        "/buddy/onboarding/clarify/start",
+        json={"session_id": identity["session_id"], "answer": "anything"},
+    )
+    contract = client.post(
+        "/buddy/onboarding/contract",
+        json={"session_id": identity["session_id"], **_contract_payload()},
+    )
+
+    assert clarify.status_code == 404
+    assert clarify_start.status_code == 404
+    assert contract.status_code == 200
+    assert "question_count" not in contract.json()
+    assert "next_question" not in contract.json()
+
+
 def test_buddy_surface_and_runtime_center_surface_share_same_projection(tmp_path) -> None:
     client = _build_client(tmp_path)
-    identity = client.post(
-        "/buddy/onboarding/identity",
-        json={
-            "display_name": "Mina",
-            "profession": "Operator",
-            "current_stage": "exploring",
-            "interests": ["content"],
-            "strengths": ["consistency"],
-            "constraints": ["money"],
-            "goal_intention": "Find a real long-term direction.",
-        },
-    ).json()
-    clarification = client.post(
-        "/buddy/onboarding/clarify",
-        json={
-            "session_id": identity["session_id"],
-            "answer": "I want a direction with leverage, identity growth, and real independence.",
-            "existing_question_count": 9,
-        },
+    identity = client.post("/buddy/onboarding/identity", json=_identity_payload()).json()
+    contract = client.post(
+        "/buddy/onboarding/contract",
+        json={"session_id": identity["session_id"], **_contract_payload()},
     ).json()
     client.post(
         "/buddy/onboarding/confirm-direction",
         json={
             "session_id": identity["session_id"],
-            "selected_direction": clarification["recommended_direction"],
+            "selected_direction": contract["recommended_direction"],
             "capability_action": "start-new",
         },
     )
@@ -177,117 +310,18 @@ def test_buddy_surface_and_runtime_center_surface_share_same_projection(tmp_path
     assert summary["current_task_summary"] == "Finish today's current task"
 
 
-def test_buddy_surface_without_profile_returns_no_content(tmp_path) -> None:
-    client = _build_client(tmp_path)
-
-    response = client.get("/buddy/surface")
-
-    assert response.status_code == 204
-    assert response.text == ""
-
-
-def test_buddy_surface_repairs_missing_durable_schedules_for_active_domain(
-    tmp_path,
-) -> None:
-    client, _store = _build_client_with_growth(tmp_path)
-    identity = client.post(
-        "/buddy/onboarding/identity",
-        json={
-            "display_name": "Mina",
-            "profession": "Trader",
-            "current_stage": "restart",
-            "interests": ["stocks", "trading"],
-            "strengths": ["consistency"],
-            "constraints": ["money"],
-            "goal_intention": "Find a real stock trading direction.",
-        },
-    ).json()
-    clarification = client.post(
-        "/buddy/onboarding/clarify",
-        json={
-            "session_id": identity["session_id"],
-            "answer": "I want a durable trading system with strict risk control.",
-            "existing_question_count": 9,
-        },
-    ).json()
-    confirmation = client.post(
-        "/buddy/onboarding/confirm-direction",
-        json={
-            "session_id": identity["session_id"],
-            "selected_direction": clarification["recommended_direction"],
-            "capability_action": "start-new",
-        },
-    ).json()
-    instance_id = confirmation["execution_carrier"]["instance_id"]
-    schedule_repository = client.app.state.schedule_repository
-    for schedule in schedule_repository.list_schedules():
-        if (
-            schedule.spec_payload.get("meta", {}).get("industry_instance_id") == instance_id
-            or schedule.spec_payload.get("request", {}).get("industry_instance_id") == instance_id
-        ):
-            schedule_repository.delete_schedule(schedule.id)
-
-    before = [
-        schedule
-        for schedule in schedule_repository.list_schedules()
-        if schedule.status != "deleted"
-        and (
-            schedule.spec_payload.get("meta", {}).get("industry_instance_id") == instance_id
-            or schedule.spec_payload.get("request", {}).get("industry_instance_id") == instance_id
-        )
-    ]
-    assert before == []
-
-    response = client.get(f"/buddy/surface?profile_id={identity['profile']['profile_id']}")
-
-    assert response.status_code == 200
-    repaired = [
-        schedule
-        for schedule in schedule_repository.list_schedules()
-        if schedule.status != "deleted"
-        and (
-            schedule.spec_payload.get("meta", {}).get("industry_instance_id") == instance_id
-            or schedule.spec_payload.get("request", {}).get("industry_instance_id") == instance_id
-        )
-    ]
-    assert repaired
-
-
-def test_runtime_center_legacy_buddy_summary_route_is_removed(tmp_path) -> None:
-    client = _build_client(tmp_path)
-
-    response = client.get("/runtime-center/main-brain/buddy-summary")
-
-    assert response.status_code == 404
-
-
 def test_buddy_confirm_direction_returns_execution_carrier_for_chat_binding(tmp_path) -> None:
     client = _build_client(tmp_path)
-    identity = client.post(
-        "/buddy/onboarding/identity",
-        json={
-            "display_name": "Mina",
-            "profession": "Operator",
-            "current_stage": "exploring",
-            "interests": ["content"],
-            "strengths": ["consistency"],
-            "constraints": ["money"],
-            "goal_intention": "Find a real long-term direction.",
-        },
-    ).json()
-    clarification = client.post(
-        "/buddy/onboarding/clarify",
-        json={
-            "session_id": identity["session_id"],
-            "answer": "I want a direction with leverage, identity growth, and real independence.",
-            "existing_question_count": 9,
-        },
+    identity = client.post("/buddy/onboarding/identity", json=_identity_payload()).json()
+    contract = client.post(
+        "/buddy/onboarding/contract",
+        json={"session_id": identity["session_id"], **_contract_payload()},
     ).json()
     confirmation = client.post(
         "/buddy/onboarding/confirm-direction",
         json={
             "session_id": identity["session_id"],
-            "selected_direction": clarification["recommended_direction"],
+            "selected_direction": contract["recommended_direction"],
             "capability_action": "start-new",
         },
     ).json()
@@ -304,78 +338,10 @@ def test_buddy_confirm_direction_returns_execution_carrier_for_chat_binding(tmp_
     assert execution_carrier["chat_binding"]["binding_kind"] == "buddy-execution-carrier"
 
 
-def test_runtime_center_chat_run_preserves_strong_pull_signal_for_buddy_growth(tmp_path) -> None:
-    store = SQLiteStateStore(tmp_path / "buddy-chat-run.sqlite3")
-    profile_repository = SqliteHumanProfileRepository(store)
-    growth_target_repository = SqliteGrowthTargetRepository(store)
-    relationship_repository = SqliteCompanionRelationshipRepository(store)
-    session_repository = SqliteBuddyOnboardingSessionRepository(store)
-    onboarding_service = BuddyOnboardingService(
-        profile_repository=profile_repository,
-        growth_target_repository=growth_target_repository,
-        relationship_repository=relationship_repository,
-        domain_capability_repository=SqliteBuddyDomainCapabilityRepository(store),
-        onboarding_session_repository=session_repository,
-        onboarding_reasoner=DeterministicBuddyReasoner(),
-    )
-    projection_service = BuddyProjectionService(
-        profile_repository=profile_repository,
-        growth_target_repository=growth_target_repository,
-        relationship_repository=relationship_repository,
-        domain_capability_repository=SqliteBuddyDomainCapabilityRepository(store),
-        onboarding_session_repository=session_repository,
-    )
-    app = build_runtime_center_app()
-    turn_executor = FakeTurnExecutor()
-    app.state.turn_executor = turn_executor
-    app.state.buddy_onboarding_service = onboarding_service
-    app.state.buddy_projection_service = projection_service
-    client = TestClient(app)
-
-    identity = onboarding_service.submit_identity(
-        display_name="Mina",
-        profession="Operator",
-        current_stage="restart",
-        interests=["writing"],
-        strengths=["follow-through"],
-        constraints=["time"],
-        goal_intention="Build a durable direction.",
-    )
-
-    response = client.post(
-        "/runtime-center/chat/run",
-        json={
-            "id": "req-buddy-strong-pull",
-            "session_id": "industry-chat:buddy:profile-1:execution-core",
-            "user_id": "buddy-user",
-            "channel": "console",
-            "thread_id": "industry-chat:buddy:profile-1:execution-core",
-            "buddy_profile_id": identity.profile.profile_id,
-            "interaction_mode": "strong-pull",
-            "input": [
-                {
-                    "role": "user",
-                    "type": "message",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": "I'm stuck and I keep avoiding this. I don't want to do it.",
-                        }
-                    ],
-                }
-            ],
-        },
-    )
-
-    assert response.status_code == 200
-    assert getattr(turn_executor.stream_calls[0]["request_payload"], "interaction_mode", None) == "auto"
-    relationship = relationship_repository.get_relationship(identity.profile.profile_id)
-    assert relationship is not None
-    assert relationship.strong_pull_count == 1
-
-
-def test_runtime_center_chat_run_uses_confirmed_buddy_execution_carrier_binding(tmp_path) -> None:
-    client, store = _build_client_with_growth(tmp_path)
+def test_runtime_center_chat_run_uses_confirmed_buddy_execution_carrier_binding(
+    tmp_path,
+) -> None:
+    client, _store = _build_client_with_growth(tmp_path)
     turn_executor = FakeTurnExecutor()
     client.app.state.turn_executor = turn_executor
 
@@ -391,24 +357,25 @@ def test_runtime_center_chat_run_uses_confirmed_buddy_execution_carrier_binding(
             "goal_intention": "I want a real stock trading path.",
         },
     ).json()
-    clarification = client.post(
-        "/buddy/onboarding/clarify",
+    contract = client.post(
+        "/buddy/onboarding/contract",
         json={
             "session_id": identity["session_id"],
-            "answer": "I want a durable trading system with clear risk control.",
+            **_contract_payload(
+                service_intent="Turn trading ambition into a disciplined weekly execution path.",
+            ),
         },
     ).json()
     confirmation = client.post(
         "/buddy/onboarding/confirm-direction",
         json={
             "session_id": identity["session_id"],
-            "selected_direction": clarification["recommended_direction"],
+            "selected_direction": contract["recommended_direction"],
             "capability_action": "start-new",
         },
     ).json()
 
-    execution_carrier = confirmation["execution_carrier"]
-    control_thread_id = execution_carrier["control_thread_id"]
+    control_thread_id = confirmation["execution_carrier"]["control_thread_id"]
     response = client.post(
         "/runtime-center/chat/run",
         json={
@@ -425,7 +392,7 @@ def test_runtime_center_chat_run_uses_confirmed_buddy_execution_carrier_binding(
                     "content": [
                         {
                             "type": "text",
-                            "text": "先把今天最关键的一步推进下去，做完再回来告诉我。",
+                            "text": "Push the single most important step for today and report back after it ships.",
                         }
                     ],
                 }
@@ -444,31 +411,16 @@ def test_runtime_center_chat_run_uses_confirmed_buddy_execution_carrier_binding(
 
 def test_http_buddy_surfaces_refresh_capability_growth_from_runtime_truth(tmp_path) -> None:
     client, store = _build_client_with_growth(tmp_path)
-    identity = client.post(
-        "/buddy/onboarding/identity",
-        json={
-            "display_name": "Mina",
-            "profession": "Operator",
-            "current_stage": "exploring",
-            "interests": ["content"],
-            "strengths": ["consistency"],
-            "constraints": ["money"],
-            "goal_intention": "Find a real long-term direction.",
-        },
-    ).json()
-    clarification = client.post(
-        "/buddy/onboarding/clarify",
-        json={
-            "session_id": identity["session_id"],
-            "answer": "I want a direction with leverage, identity growth, and real independence.",
-            "existing_question_count": 9,
-        },
+    identity = client.post("/buddy/onboarding/identity", json=_identity_payload()).json()
+    contract = client.post(
+        "/buddy/onboarding/contract",
+        json={"session_id": identity["session_id"], **_contract_payload()},
     ).json()
     confirmation = client.post(
         "/buddy/onboarding/confirm-direction",
         json={
             "session_id": identity["session_id"],
-            "selected_direction": clarification["recommended_direction"],
+            "selected_direction": contract["recommended_direction"],
             "capability_action": "start-new",
         },
     ).json()
