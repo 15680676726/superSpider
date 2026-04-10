@@ -179,10 +179,8 @@ describe("RightPanel", () => {
     });
   });
 
-  it("does not start the buddy tick timer on inactive routes", async () => {
-    const setIntervalSpy = vi
-      .spyOn(window, "setInterval")
-      .mockReturnValue(4242 as unknown as ReturnType<typeof setInterval>);
+  it("starts the buddy tick timer on non-chat routes when the panel is visible", async () => {
+    const setIntervalSpy = vi.spyOn(window, "setInterval");
 
     render(
       <MemoryRouter initialEntries={["/settings/system"]}>
@@ -191,9 +189,10 @@ describe("RightPanel", () => {
     );
 
     await waitFor(() => {
-      expect(apiMock.getBuddySurface).toHaveBeenCalled();
+      expect(
+        setIntervalSpy.mock.calls.some((call) => call[1] === 1000000),
+      ).toBe(true);
     });
-    expect(setIntervalSpy).not.toHaveBeenCalledWith(expect.any(Function), 1000000);
   });
 
   it("does not start the buddy tick timer when the document is hidden", async () => {
