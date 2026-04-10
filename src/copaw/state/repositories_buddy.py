@@ -21,6 +21,10 @@ class BuddyOnboardingSessionRecord(UpdatedRecord):
     session_id: str = Field(default_factory=_new_record_id, min_length=1)
     profile_id: str = Field(..., min_length=1)
     status: str = Field(default="clarifying", min_length=1)
+    operation_id: str = ""
+    operation_kind: str = ""
+    operation_status: str = "idle"
+    operation_error: str = ""
     question_count: int = Field(default=1, ge=1)
     tightened: bool = False
     next_question: str = ""
@@ -505,13 +509,17 @@ class SqliteBuddyOnboardingSessionRepository:
             conn.execute(
                 """
                 INSERT INTO buddy_onboarding_sessions (
-                    session_id, profile_id, status, question_count, tightened,
+                    session_id, profile_id, status,
+                    operation_id, operation_kind, operation_status, operation_error,
+                    question_count, tightened,
                     next_question, transcript_json, candidate_directions_json,
                     recommended_direction, selected_direction,
                     draft_direction, draft_final_goal, draft_why_it_matters, draft_backlog_items_json,
                     created_at, updated_at
                 ) VALUES (
-                    :session_id, :profile_id, :status, :question_count, :tightened,
+                    :session_id, :profile_id, :status,
+                    :operation_id, :operation_kind, :operation_status, :operation_error,
+                    :question_count, :tightened,
                     :next_question, :transcript_json, :candidate_directions_json,
                     :recommended_direction, :selected_direction,
                     :draft_direction, :draft_final_goal, :draft_why_it_matters, :draft_backlog_items_json,
@@ -520,6 +528,10 @@ class SqliteBuddyOnboardingSessionRepository:
                 ON CONFLICT(session_id) DO UPDATE SET
                     profile_id = excluded.profile_id,
                     status = excluded.status,
+                    operation_id = excluded.operation_id,
+                    operation_kind = excluded.operation_kind,
+                    operation_status = excluded.operation_status,
+                    operation_error = excluded.operation_error,
                     question_count = excluded.question_count,
                     tightened = excluded.tightened,
                     next_question = excluded.next_question,

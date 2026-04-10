@@ -48,6 +48,10 @@ CurrentFocusResolver = Callable[[str], dict[str, str] | None]
 class BuddyOnboardingProjection(BaseModel):
     session_id: str | None = None
     status: str = "unborn"
+    operation_id: str = ""
+    operation_kind: str = ""
+    operation_status: str = "idle"
+    operation_error: str = ""
     question_count: int = 0
     tightened: bool = False
     next_question: str = ""
@@ -357,6 +361,10 @@ class BuddyProjectionService:
             else ""
         )
         status = str(getattr(session, "status", "") or "").strip() or "unborn"
+        operation_id = str(getattr(session, "operation_id", "") or "").strip()
+        operation_kind = str(getattr(session, "operation_kind", "") or "").strip()
+        operation_status = str(getattr(session, "operation_status", "") or "").strip() or "idle"
+        operation_error = str(getattr(session, "operation_error", "") or "").strip()
         question_count = int(getattr(session, "question_count", 0) or 0)
         tightened = bool(getattr(session, "tightened", False))
         next_question = str(getattr(session, "next_question", "") or "").strip()
@@ -379,6 +387,10 @@ class BuddyProjectionService:
         return BuddyOnboardingProjection(
             session_id=str(getattr(session, "session_id", "") or "").strip() or None,
             status=status,
+            operation_id=operation_id,
+            operation_kind=operation_kind,
+            operation_status=operation_status,
+            operation_error=operation_error,
             question_count=question_count,
             tightened=tightened,
             next_question=next_question,

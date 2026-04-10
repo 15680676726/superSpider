@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import logging
 import unicodedata
 from typing import Any
+from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
@@ -100,6 +101,14 @@ class BuddyDirectionTransitionPreviewResult(BaseModel):
     archived_matches: list[dict[str, object]] = Field(default_factory=list)
 
 
+class BuddyOnboardingOperationHandle(BaseModel):
+    session_id: str
+    profile_id: str
+    operation_id: str
+    operation_kind: str
+    operation_status: str = "running"
+
+
 @dataclass(slots=True)
 class BuddyDirectionConfirmationResult:
     session: BuddyOnboardingSessionRecord
@@ -136,6 +145,10 @@ def _unique(items: list[str]) -> list[str]:
 def _normalize_text(value: str | None) -> str:
     text = unicodedata.normalize("NFKC", str(value or ""))
     return text.lower().strip()
+
+
+def _new_buddy_operation_id() -> str:
+    return str(uuid4())
 
 
 def _normalize_buddy_lane_hint(value: str | None) -> str:
@@ -383,6 +396,74 @@ class BuddyOnboardingService:
             finished=False,
         )
 
+    def start_identity_operation(
+        self,
+        *,
+        display_name: str,
+        profession: str,
+        current_stage: str,
+        interests: list[str] | None = None,
+        strengths: list[str] | None = None,
+        constraints: list[str] | None = None,
+        goal_intention: str,
+    ) -> BuddyOnboardingOperationHandle:
+        existing_profile = self._profile_repository.get_latest_profile()
+        profile = HumanProfile(
+            display_name=display_name,
+            profession=profession,
+            current_stage=current_stage,
+            interests=interests or [],
+            strengths=strengths or [],
+            constraints=constraints or [],
+            goal_intention=goal_intention,
+        )
+        if existing_profile is not None:
+            profile = profile.model_copy(
+                update={
+                    "profile_id": existing_profile.profile_id,
+                    "created_at": existing_profile.created_at,
+                    "updated_at": _utc_now(),
+                },
+            )
+        profile = self._profile_repository.upsert_profile(profile)
+        existing_session = self._onboarding_session_repository.get_latest_session_for_profile(
+            profile.profile_id,
+        )
+        if existing_session is not None and existing_session.operation_status == "running":
+            raise ValueError("Buddy onboarding is already processing.")
+        operation_id = _new_buddy_operation_id()
+        session = BuddyOnboardingSessionRecord(
+            profile_id=profile.profile_id,
+            status="clarifying",
+            operation_id=operation_id,
+            operation_kind="identity",
+            operation_status="running",
+            operation_error="",
+            question_count=1,
+            tightened=False,
+            next_question="",
+            transcript=[profile.goal_intention],
+            candidate_directions=[],
+            recommended_direction="",
+            selected_direction="",
+            **self._build_reasoned_turn_cache(None),
+        )
+        if existing_session is not None:
+            session = session.model_copy(
+                update={
+                    "session_id": existing_session.session_id,
+                    "created_at": existing_session.created_at,
+                    "updated_at": _utc_now(),
+                },
+            )
+        session = self._onboarding_session_repository.upsert_session(session)
+        return BuddyOnboardingOperationHandle(
+            session_id=session.session_id,
+            profile_id=profile.profile_id,
+            operation_id=operation_id,
+            operation_kind="identity",
+        )
+
     def answer_clarification_turn(
         self,
         *,
@@ -450,6 +531,33 @@ class BuddyOnboardingService:
             next_question=updated.next_question,
             candidate_directions=updated.candidate_directions,
             recommended_direction=updated.recommended_direction,
+        )
+
+    def start_clarification_operation(
+        self,
+        *,
+        session_id: str,
+    ) -> BuddyOnboardingOperationHandle:
+        session = self._require_session(session_id)
+        if session.operation_status == "running":
+            raise ValueError("Buddy onboarding is already processing.")
+        operation_id = _new_buddy_operation_id()
+        updated = self._onboarding_session_repository.upsert_session(
+            session.model_copy(
+                update={
+                    "operation_id": operation_id,
+                    "operation_kind": "clarify",
+                    "operation_status": "running",
+                    "operation_error": "",
+                    "updated_at": _utc_now(),
+                },
+            ),
+        )
+        return BuddyOnboardingOperationHandle(
+            session_id=updated.session_id,
+            profile_id=updated.profile_id,
+            operation_id=operation_id,
+            operation_kind="clarify",
         )
 
     def get_candidate_directions(self, *, session_id: str) -> BuddyClarificationResult:
@@ -616,6 +724,72 @@ class BuddyOnboardingService:
             execution_carrier=execution_carrier,
             schedule_specs=schedule_specs,
         )
+
+    def start_confirm_direction_operation(
+        self,
+        *,
+        session_id: str,
+    ) -> BuddyOnboardingOperationHandle:
+        session = self._require_session(session_id)
+        if session.operation_status == "running":
+            raise ValueError("Buddy onboarding is already processing.")
+        operation_id = _new_buddy_operation_id()
+        updated = self._onboarding_session_repository.upsert_session(
+            session.model_copy(
+                update={
+                    "operation_id": operation_id,
+                    "operation_kind": "confirm",
+                    "operation_status": "running",
+                    "operation_error": "",
+                    "updated_at": _utc_now(),
+                },
+            ),
+        )
+        return BuddyOnboardingOperationHandle(
+            session_id=updated.session_id,
+            profile_id=updated.profile_id,
+            operation_id=operation_id,
+            operation_kind="confirm",
+        )
+
+    def mark_operation_succeeded(
+        self,
+        *,
+        session_id: str,
+        operation_id: str,
+        operation_kind: str,
+    ) -> BuddyOnboardingSessionRecord:
+        session = self._require_session(session_id)
+        updated = session.model_copy(
+            update={
+                "operation_id": operation_id,
+                "operation_kind": operation_kind,
+                "operation_status": "succeeded",
+                "operation_error": "",
+                "updated_at": _utc_now(),
+            },
+        )
+        return self._onboarding_session_repository.upsert_session(updated)
+
+    def mark_operation_failed(
+        self,
+        *,
+        session_id: str,
+        operation_id: str,
+        operation_kind: str,
+        error_message: str,
+    ) -> BuddyOnboardingSessionRecord:
+        session = self._require_session(session_id)
+        updated = session.model_copy(
+            update={
+                "operation_id": operation_id,
+                "operation_kind": operation_kind,
+                "operation_status": "failed",
+                "operation_error": str(error_message or "").strip(),
+                "updated_at": _utc_now(),
+            },
+        )
+        return self._onboarding_session_repository.upsert_session(updated)
 
     def record_chat_interaction(
         self,

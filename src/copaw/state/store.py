@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-STATE_SCHEMA_VERSION = 35
+STATE_SCHEMA_VERSION = 36
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS human_profiles (
@@ -63,6 +63,10 @@ CREATE TABLE IF NOT EXISTS buddy_onboarding_sessions (
     session_id TEXT PRIMARY KEY,
     profile_id TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'clarifying',
+    operation_id TEXT NOT NULL DEFAULT '',
+    operation_kind TEXT NOT NULL DEFAULT '',
+    operation_status TEXT NOT NULL DEFAULT 'idle',
+    operation_error TEXT NOT NULL DEFAULT '',
     question_count INTEGER NOT NULL DEFAULT 1,
     tightened INTEGER NOT NULL DEFAULT 0,
     next_question TEXT NOT NULL DEFAULT '',
@@ -2069,6 +2073,15 @@ _ADDITIVE_SCHEMA_COLUMNS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = 
             ("status", "TEXT NOT NULL DEFAULT 'active'"),
             ("created_at", "TEXT"),
             ("updated_at", "TEXT"),
+        ),
+    ),
+    (
+        "buddy_onboarding_sessions",
+        (
+            ("operation_id", "TEXT NOT NULL DEFAULT ''"),
+            ("operation_kind", "TEXT NOT NULL DEFAULT ''"),
+            ("operation_status", "TEXT NOT NULL DEFAULT 'idle'"),
+            ("operation_error", "TEXT NOT NULL DEFAULT ''"),
         ),
     ),
     (

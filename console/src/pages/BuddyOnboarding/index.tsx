@@ -19,6 +19,8 @@ import type {
   BuddyConfirmDirectionResponse,
   BuddyDirectionTransitionPreviewResponse,
   BuddyIdentityResponse,
+  BuddyOnboardingOperationResponse,
+  BuddySurfaceResponse,
 } from "../../api/modules/buddy";
 import { resolveBuddyEntryDecision } from "../../runtime/buddyFlow";
 import {
@@ -43,11 +45,85 @@ type IdentityFormValues = {
   goal_intention: string;
 };
 
+type PendingBuddyOperation = BuddyOnboardingOperationResponse;
+
 function parseLines(value?: string | null): string[] {
   return (value || "")
     .split(/[\n,，、]/)
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function buildIdentityFromSurface(
+  surface: BuddySurfaceResponse,
+): BuddyIdentityResponse | null {
+  if (!surface.profile?.profile_id || !surface.onboarding?.session_id) {
+    return null;
+  }
+  return {
+    session_id: surface.onboarding.session_id,
+    profile: surface.profile,
+    question_count: Math.max(1, surface.onboarding.question_count || 1),
+    next_question: surface.onboarding.next_question || "",
+    finished: Boolean(surface.onboarding.completed),
+  };
+}
+
+function buildClarificationFromSurface(
+  surface: BuddySurfaceResponse,
+): BuddyClarificationResponse | null {
+  if (!surface.onboarding?.session_id) {
+    return null;
+  }
+  return {
+    session_id: surface.onboarding.session_id,
+    question_count: Math.max(1, surface.onboarding.question_count || 1),
+    tightened: Boolean(surface.onboarding.tightened),
+    finished: Boolean(
+      surface.onboarding.requires_direction_confirmation ||
+        surface.onboarding.completed,
+    ),
+    next_question: surface.onboarding.next_question || "",
+    candidate_directions: surface.onboarding.candidate_directions || [],
+    recommended_direction: surface.onboarding.recommended_direction || "",
+  };
+}
+
+function buildConfirmPayloadFromSurface(
+  surface: BuddySurfaceResponse,
+): BuddyConfirmDirectionResponse | null {
+  if (
+    !surface.profile?.profile_id ||
+    !surface.onboarding?.session_id ||
+    !surface.growth_target ||
+    !surface.execution_carrier
+  ) {
+    return null;
+  }
+  return {
+    session: {
+      session_id: surface.onboarding.session_id,
+      profile_id: surface.profile.profile_id,
+      status: surface.onboarding.status,
+      question_count: Math.max(1, surface.onboarding.question_count || 1),
+      candidate_directions: surface.onboarding.candidate_directions || [],
+      recommended_direction: surface.onboarding.recommended_direction || "",
+      selected_direction:
+        surface.onboarding.selected_direction ||
+        surface.growth_target.primary_direction ||
+        "",
+    },
+    growth_target: surface.growth_target,
+    relationship:
+      surface.relationship || {
+        relationship_id: "",
+        profile_id: surface.profile.profile_id,
+        buddy_name: "",
+        encouragement_style: "old-friend",
+      },
+    domain_capability: null,
+    execution_carrier: surface.execution_carrier,
+  };
 }
 
 export default function BuddyOnboardingPage() {
@@ -62,6 +138,8 @@ export default function BuddyOnboardingPage() {
   const [questionAnswer, setQuestionAnswer] = useState("");
   const [confirmPayload, setConfirmPayload] =
     useState<BuddyConfirmDirectionResponse | null>(null);
+  const [pendingOperation, setPendingOperation] =
+    useState<PendingBuddyOperation | null>(null);
   const [selectedDirection, setSelectedDirection] = useState("");
   const [transitionPreview, setTransitionPreview] =
     useState<BuddyDirectionTransitionPreviewResponse | null>(null);
@@ -69,6 +147,27 @@ export default function BuddyOnboardingPage() {
     "keep-active" | "restore-archived" | "start-new" | null
   >(null);
   const [selectedTargetDomainId, setSelectedTargetDomainId] = useState<string | undefined>();
+
+  const applyBuddySurface = (surface: BuddySurfaceResponse) => {
+    const nextIdentity = buildIdentityFromSurface(surface);
+    const nextClarification = buildClarificationFromSurface(surface);
+    const nextConfirmPayload = buildConfirmPayloadFromSurface(surface);
+    if (surface.profile?.profile_id) {
+      writeBuddyProfileId(surface.profile.profile_id);
+    }
+    setIdentity(nextIdentity);
+    setClarification(nextClarification);
+    if (surface.onboarding?.recommended_direction) {
+      setSelectedDirection(
+        surface.onboarding.selected_direction ||
+          surface.onboarding.recommended_direction ||
+          "",
+      );
+    }
+    if (nextConfirmPayload) {
+      setConfirmPayload(nextConfirmPayload);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -122,29 +221,19 @@ export default function BuddyOnboardingPage() {
           surface?.profile?.profile_id &&
           surface.onboarding
         ) {
-          setIdentity({
-            session_id: surface.onboarding.session_id ?? "",
-            profile: surface.profile,
-            question_count: surface.onboarding.question_count,
-            next_question: surface.onboarding.next_question,
-            finished: surface.onboarding.completed,
-          });
-          setClarification({
-            session_id: surface.onboarding.session_id ?? "",
-            question_count: surface.onboarding.question_count,
-            tightened: surface.onboarding.tightened,
-            finished:
-              surface.onboarding.requires_direction_confirmation ||
-              surface.onboarding.completed,
-            next_question: surface.onboarding.next_question,
-            candidate_directions: surface.onboarding.candidate_directions,
-            recommended_direction: surface.onboarding.recommended_direction,
-          });
-          setSelectedDirection(
-            surface.onboarding.selected_direction ||
-              surface.onboarding.recommended_direction ||
-              "",
-          );
+          applyBuddySurface(surface);
+          if (
+            surface.onboarding.operation_status === "running" &&
+            surface.onboarding.operation_id
+          ) {
+            setPendingOperation({
+              session_id: surface.onboarding.session_id ?? "",
+              profile_id: surface.profile.profile_id,
+              operation_id: surface.onboarding.operation_id,
+              operation_kind: surface.onboarding.operation_kind,
+              operation_status: surface.onboarding.operation_status,
+            });
+          }
         }
       } catch (rawError) {
         if (cancelled) return;
@@ -162,11 +251,63 @@ export default function BuddyOnboardingPage() {
     };
   }, [navigate]);
 
+  useEffect(() => {
+    if (!pendingOperation) {
+      return;
+    }
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const poll = async () => {
+      try {
+        const surface = await api.getBuddySurface(pendingOperation.profile_id);
+        if (cancelled || !surface) {
+          return;
+        }
+        const onboarding = surface.onboarding;
+        if (
+          onboarding.session_id !== pendingOperation.session_id ||
+          onboarding.operation_id !== pendingOperation.operation_id
+        ) {
+          timer = setTimeout(() => {
+            void poll();
+          }, 1500);
+          return;
+        }
+        if (onboarding.operation_status === "running") {
+          timer = setTimeout(() => {
+            void poll();
+          }, 1500);
+          return;
+        }
+        applyBuddySurface(surface);
+        if (onboarding.operation_status === "failed") {
+          setError(onboarding.operation_error || "Buddy 建档失败");
+        }
+        setPendingOperation(null);
+      } catch (rawError) {
+        if (!cancelled) {
+          setError(rawError instanceof Error ? rawError.message : "Buddy 建档失败");
+          setPendingOperation(null);
+        }
+      }
+    };
+
+    void poll();
+
+    return () => {
+      cancelled = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
+    };
+  }, [pendingOperation]);
+
   const handleSubmitIdentity = async (values: IdentityFormValues) => {
     setSubmitting(true);
     setError(null);
     try {
-      const result = await api.submitBuddyIdentity({
+      const payload = {
         display_name: values.display_name,
         profession: values.profession,
         current_stage: values.current_stage,
@@ -174,14 +315,32 @@ export default function BuddyOnboardingPage() {
         strengths: parseLines(values.strengths),
         constraints: parseLines(values.constraints),
         goal_intention: values.goal_intention,
+      };
+      const operation = await api.startBuddyIdentity(payload);
+      writeBuddyProfileId(operation.profile_id);
+      setIdentity({
+        session_id: operation.session_id,
+        profile: {
+          profile_id: operation.profile_id,
+          display_name: payload.display_name,
+          profession: payload.profession,
+          current_stage: payload.current_stage,
+          interests: payload.interests,
+          strengths: payload.strengths,
+          constraints: payload.constraints,
+          goal_intention: payload.goal_intention,
+        },
+        question_count: 1,
+        next_question: "",
+        finished: false,
       });
-      writeBuddyProfileId(result.profile.profile_id);
-      setIdentity(result);
       setClarification(null);
+      setConfirmPayload(null);
       setSelectedDirection("");
       setTransitionPreview(null);
       setSelectedCapabilityAction(null);
       setSelectedTargetDomainId(undefined);
+      setPendingOperation(operation);
     } catch (rawError) {
       setError(rawError instanceof Error ? rawError.message : "身份建档失败");
     } finally {
@@ -194,19 +353,16 @@ export default function BuddyOnboardingPage() {
     setSubmitting(true);
     setError(null);
     try {
-      const result = await api.answerBuddyClarification({
+      const operation = await api.startBuddyClarification({
         session_id: identity.session_id,
         answer: questionAnswer.trim(),
         existing_question_count: clarification?.question_count,
       });
-      setClarification(result);
       setQuestionAnswer("");
-      if (result.finished && result.recommended_direction) {
-        setSelectedDirection(result.recommended_direction);
-      }
       setTransitionPreview(null);
       setSelectedCapabilityAction(null);
       setSelectedTargetDomainId(undefined);
+      setPendingOperation(operation);
     } catch (rawError) {
       setError(rawError instanceof Error ? rawError.message : "方向澄清失败");
     } finally {
@@ -248,7 +404,7 @@ export default function BuddyOnboardingPage() {
     setSubmitting(true);
     setError(null);
     try {
-      const result = await api.confirmBuddyDirection({
+      const operation = await api.startBuddyConfirmDirection({
         session_id: identity.session_id,
         selected_direction: selectedDirection,
         capability_action: selectedCapabilityAction,
@@ -257,8 +413,7 @@ export default function BuddyOnboardingPage() {
             ? selectedTargetDomainId
             : undefined,
       });
-      writeBuddyProfileId(result.session.profile_id);
-      setConfirmPayload(result);
+      setPendingOperation(operation);
     } catch (rawError) {
       setError(rawError instanceof Error ? rawError.message : "主方向确认失败");
     } finally {
@@ -321,6 +476,13 @@ export default function BuddyOnboardingPage() {
       </Card>
 
       {error ? <Alert type="error" showIcon message={error} /> : null}
+      {pendingOperation ? (
+        <Alert
+          type="info"
+          showIcon
+          message="我在后台认真分析你的情况，模型慢时会继续处理中，不用重复点击。"
+        />
+      ) : null}
 
       {!identity ? (
         <Card title="先告诉我你是谁">
@@ -364,7 +526,7 @@ export default function BuddyOnboardingPage() {
                 data-testid="buddy-identity-goal-intention"
               />
             </Form.Item>
-            <Button type="primary" htmlType="submit" loading={submitting}>
+            <Button type="primary" htmlType="submit" loading={submitting || Boolean(pendingOperation)}>
               开始建立伙伴关系
             </Button>
           </Form>
@@ -398,7 +560,7 @@ export default function BuddyOnboardingPage() {
               <Button
                 type="primary"
                 onClick={() => void handleClarify()}
-                loading={submitting}
+                loading={submitting || Boolean(pendingOperation)}
                 data-testid="buddy-clarification-submit"
               >
                 继续
@@ -443,7 +605,7 @@ export default function BuddyOnboardingPage() {
               <Button
                 type="primary"
                 disabled={!selectedDirection}
-                loading={submitting}
+                loading={submitting || Boolean(pendingOperation)}
                 onClick={() => void handlePreviewDirectionTransition()}
                 data-testid="buddy-direction-confirm"
               >
@@ -534,7 +696,7 @@ export default function BuddyOnboardingPage() {
                     </Button>
                     <Button
                       type="primary"
-                      loading={submitting}
+                      loading={submitting || Boolean(pendingOperation)}
                       disabled={
                         !selectedCapabilityAction ||
                         (selectedCapabilityAction === "restore-archived" &&

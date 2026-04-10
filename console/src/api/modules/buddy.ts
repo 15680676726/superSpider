@@ -37,6 +37,14 @@ export interface BuddyClarificationResponse {
   recommended_direction: string;
 }
 
+export interface BuddyOnboardingOperationResponse {
+  session_id: string;
+  profile_id: string;
+  operation_id: string;
+  operation_kind: string;
+  operation_status: string;
+}
+
 export interface BuddyExecutionCarrierChatBinding {
   thread_id?: string | null;
   control_thread_id?: string | null;
@@ -203,6 +211,10 @@ export interface BuddySurfaceResponse {
   onboarding: {
     session_id: string | null;
     status: string;
+    operation_id: string;
+    operation_kind: string;
+    operation_status: string;
+    operation_error: string;
     question_count: number;
     tightened: boolean;
     next_question: string;
@@ -216,8 +228,24 @@ export interface BuddySurfaceResponse {
 }
 
 export const buddyApi = {
+  startBuddyIdentity(payload: BuddyIdentityRequest) {
+    return request<BuddyOnboardingOperationResponse>("/buddy/onboarding/identity/start", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
   submitBuddyIdentity(payload: BuddyIdentityRequest) {
     return request<BuddyIdentityResponse>("/buddy/onboarding/identity", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  startBuddyClarification(payload: {
+    session_id: string;
+    answer: string;
+    existing_question_count?: number;
+  }) {
+    return request<BuddyOnboardingOperationResponse>("/buddy/onboarding/clarify/start", {
       method: "POST",
       body: JSON.stringify(payload),
     });
@@ -248,6 +276,17 @@ export const buddyApi = {
         body: JSON.stringify(payload),
       },
     );
+  },
+  startBuddyConfirmDirection(payload: {
+    session_id: string;
+    selected_direction: string;
+    capability_action: "keep-active" | "restore-archived" | "start-new";
+    target_domain_id?: string;
+  }) {
+    return request<BuddyOnboardingOperationResponse>("/buddy/onboarding/confirm-direction/start", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
   },
   confirmBuddyDirection(payload: {
     session_id: string;
