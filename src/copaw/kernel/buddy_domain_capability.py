@@ -74,59 +74,6 @@ _EVOLUTION_STAGE_ORDER: tuple[BuddyEvolutionStage, ...] = (
     "signature",
 )
 
-_DOMAIN_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    (
-        "stocks",
-        (
-            "股票",
-            "炒股",
-            "证券",
-            "基金",
-            "投资",
-            "交易",
-            "quant",
-            "trading",
-            "trade",
-            "stock",
-            "stocks",
-            "invest",
-            "investing",
-        ),
-    ),
-    (
-        "writing",
-        (
-            "写作",
-            "写文",
-            "文章",
-            "内容",
-            "创作",
-            "作者",
-            "文稿",
-            "writer",
-            "writing",
-            "content",
-            "creator",
-        ),
-    ),
-    (
-        "fitness",
-        (
-            "健身",
-            "运动",
-            "锻炼",
-            "健康",
-            "减脂",
-            "体能",
-            "fitness",
-            "health",
-            "exercise",
-            "training",
-            "workout",
-        ),
-    ),
-)
-
 _BUDDY_SPECIALIST_BASE_ALLOWED_CAPABILITIES: tuple[str, ...] = (
     "system:dispatch_query",
     "tool:get_current_time",
@@ -423,9 +370,6 @@ def derive_capability_metrics(
 
 def derive_buddy_domain_key(direction: str) -> str:
     normalized = _normalize_domain_text(direction)
-    for key, tokens in _DOMAIN_RULES:
-        if any(token in normalized for token in tokens):
-            return key
     collapsed = re.sub(r"[^0-9a-z\u4e00-\u9fff]+", "-", normalized)
     collapsed = collapsed.strip("-")
     return collapsed or "general"

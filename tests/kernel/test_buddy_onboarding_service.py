@@ -9,6 +9,7 @@ from copaw.kernel.buddy_onboarding_service import (
     _HEALTH_DIRECTION,
     _STOCKS_DIRECTION,
 )
+from copaw.kernel.buddy_domain_capability import derive_buddy_domain_key
 from copaw.state import SQLiteStateStore
 from copaw.state.main_brain_service import (
     AssignmentService,
@@ -216,7 +217,9 @@ def test_buddy_onboarding_requires_exactly_one_primary_direction(tmp_path) -> No
 
     assert result.growth_target.primary_direction == clarification.recommended_direction
     assert result.relationship.encouragement_style == "old-friend"
-    assert result.domain_capability.domain_key == "writing"
+    assert result.domain_capability.domain_key == derive_buddy_domain_key(
+        clarification.recommended_direction,
+    )
     assert result.domain_capability.status == "active"
 
 
@@ -246,7 +249,9 @@ def test_buddy_confirm_primary_direction_accepts_free_text_direction_override(tm
     assert result.growth_target.primary_direction == (
         "Build a disciplined stock trading path with real risk control."
     )
-    assert result.domain_capability.domain_key == "stocks"
+    assert result.domain_capability.domain_key == derive_buddy_domain_key(
+        result.growth_target.primary_direction,
+    )
 
 
 def test_buddy_naming_updates_relationship(tmp_path) -> None:
@@ -690,11 +695,17 @@ def test_confirm_primary_direction_archives_old_domain_and_starts_new_one(tmp_pa
     records = service._domain_capability_repository.list_domain_capabilities(  # pylint: disable=protected-access
         creator_identity.profile.profile_id,
     )
-    creator_record = next(record for record in records if record.domain_key == "writing")
+    creator_record = next(
+        record
+        for record in records
+        if record.domain_key == derive_buddy_domain_key(creator_result.growth_target.primary_direction)
+    )
 
     assert health_clarification.recommended_direction == _HEALTH_DIRECTION
     assert preview.suggestion_kind == "start-new-domain"
-    assert result.domain_capability.domain_key == "fitness"
+    assert result.domain_capability.domain_key == derive_buddy_domain_key(
+        result.growth_target.primary_direction,
+    )
     assert result.domain_capability.capability_score == 0
     assert result.domain_capability.evolution_stage == "seed"
     assert creator_record.status == "archived"
@@ -779,8 +790,12 @@ def test_confirm_primary_direction_restores_matching_archived_domain(tmp_path) -
 
     assert preview.suggestion_kind == "switch-to-archived-domain"
     assert preview.recommended_action == "restore-archived"
-    assert restored.domain_capability.domain_key == "writing"
+    assert restored.domain_capability.domain_key == derive_buddy_domain_key(
+        creator_result.growth_target.primary_direction,
+    )
     assert restored.domain_capability.capability_score == 68
     assert restored.domain_capability.evolution_stage == "seasoned"
     assert active is not None
-    assert active.domain_key == "writing"
+    assert active.domain_key == derive_buddy_domain_key(
+        creator_result.growth_target.primary_direction,
+    )

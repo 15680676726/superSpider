@@ -204,24 +204,35 @@ def test_derive_capability_metrics_caps_each_component_and_maps_stage() -> None:
     assert metrics.evolution_stage == "signature"
 
 
-def test_derive_buddy_domain_key_normalizes_same_domain_variants() -> None:
-    assert derive_buddy_domain_key("炒股赚 10 万") == derive_buddy_domain_key("股票赚 100 万")
-    assert derive_buddy_domain_key("建立写作收入") == derive_buddy_domain_key("写作副业变现")
-    assert derive_buddy_domain_key("炒股赚 10 万") != derive_buddy_domain_key("写作副业变现")
+def test_derive_buddy_domain_key_uses_normalized_direction_text_instead_of_fixed_buckets() -> None:
+    stock_key = derive_buddy_domain_key("Build a disciplined stock trading path with real risk control.")
+    writing_key = derive_buddy_domain_key("Build a durable writing and publishing path with visible proof-of-work.")
+    health_key = derive_buddy_domain_key("Build a repeatable health routine with visible weekly evidence.")
+
+    assert stock_key == "build-a-disciplined-stock-trading-path-with-real-risk-control"
+    assert writing_key == "build-a-durable-writing-and-publishing-path-with-visible-proof-of-work"
+    assert health_key == "build-a-repeatable-health-routine-with-visible-weekly-evidence"
+    assert stock_key != "stocks"
+    assert writing_key != "writing"
+    assert health_key != "fitness"
 
 
 def test_derive_buddy_domain_key_does_not_fold_design_into_writing() -> None:
-    assert derive_buddy_domain_key("建立写作收入") == "writing"
-    assert derive_buddy_domain_key("建立设计系统与品牌能力") != "writing"
+    writing_key = derive_buddy_domain_key("Build a durable writing income path.")
+    design_key = derive_buddy_domain_key("Build a durable design systems and brand capability path.")
+
+    assert writing_key != "writing"
+    assert design_key != writing_key
 
 
 def test_preview_domain_transition_prefers_same_domain_extension() -> None:
+    stock_direction = "Build a disciplined stock trading path with real risk control."
     preview = preview_domain_transition(
-        selected_direction="股票赚 100 万",
+        selected_direction=stock_direction,
         active_record=_record(
             domain_id="domain-stock",
-            domain_key=derive_buddy_domain_key("炒股赚 10 万"),
-            domain_label="股票",
+            domain_key=derive_buddy_domain_key(stock_direction),
+            domain_label="Stocks",
             status="active",
             capability_score=68,
             evolution_stage="seasoned",
@@ -229,8 +240,8 @@ def test_preview_domain_transition_prefers_same_domain_extension() -> None:
         archived_records=[
             _record(
                 domain_id="domain-writing",
-                domain_key=derive_buddy_domain_key("写作副业变现"),
-                domain_label="写作",
+                domain_key=derive_buddy_domain_key("Build a durable writing income path."),
+                domain_label="Writing",
                 status="archived",
                 capability_score=35,
                 evolution_stage="bonded",
@@ -240,19 +251,21 @@ def test_preview_domain_transition_prefers_same_domain_extension() -> None:
 
     assert preview.suggestion_kind == "same-domain"
     assert preview.recommended_action == "keep-active"
-    assert preview.selected_domain_key == derive_buddy_domain_key("股票赚 100 万")
+    assert preview.selected_domain_key == derive_buddy_domain_key(stock_direction)
     assert preview.current_domain is not None
     assert preview.current_domain["domain_id"] == "domain-stock"
     assert preview.archived_matches == []
 
 
 def test_preview_domain_transition_restores_matching_archived_domain() -> None:
+    stock_direction = "Build a disciplined stock trading path with real risk control."
+    writing_direction = "Build a durable writing and publishing path with visible proof-of-work."
     preview = preview_domain_transition(
-        selected_direction="写作副业变现",
+        selected_direction=writing_direction,
         active_record=_record(
             domain_id="domain-stock",
-            domain_key=derive_buddy_domain_key("炒股赚 10 万"),
-            domain_label="股票",
+            domain_key=derive_buddy_domain_key(stock_direction),
+            domain_label="Stocks",
             status="active",
             capability_score=68,
             evolution_stage="seasoned",
@@ -260,17 +273,21 @@ def test_preview_domain_transition_restores_matching_archived_domain() -> None:
         archived_records=[
             _record(
                 domain_id="domain-writing",
-                domain_key=derive_buddy_domain_key("建立写作收入"),
-                domain_label="写作",
+                domain_key=derive_buddy_domain_key(writing_direction),
+                domain_label="Writing",
                 status="archived",
-                capability_score=48,
-                evolution_stage="capable",
+                capability_score=35,
+                evolution_stage="bonded",
             )
         ],
     )
 
     assert preview.suggestion_kind == "switch-to-archived-domain"
     assert preview.recommended_action == "restore-archived"
+    assert preview.selected_domain_key == derive_buddy_domain_key(writing_direction)
+    assert preview.current_domain is not None
+    assert preview.current_domain["domain_id"] == "domain-stock"
+    assert preview.archived_matches is not None
     assert preview.archived_matches[0]["domain_id"] == "domain-writing"
 
 
