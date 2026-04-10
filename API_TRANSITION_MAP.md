@@ -28,6 +28,18 @@
   - `GET /buddy/surface` 与 `Runtime Center` 的 `buddy_summary` 已改为读取 active domain capability truth；`companion_experience` 只保留关系层展示，不再主导成长阶段
   - `POST /buddy/onboarding/confirm-direction` 现在还会切换 active domain 绑定的 execution carrier continuity；确认结果中的 `execution_carrier` 必须与 active `BuddyDomainCapabilityRecord.industry_instance_id / control_thread_id` 对齐
   - `GET /buddy/surface` 不再从 `profile_id` 推导共享 `buddy:{profile_id}` carrier；Buddy surface、Runtime Center summary、chat-ready resume 统一读取当前 active domain 绑定 carrier
+- `2026-04-11` Buddy onboarding contract 补充：
+  - `POST /buddy/onboarding/contract` 与 `POST /buddy/onboarding/contract/start` 已成为正式 compile 前门，替代旧 `clarify` 路由
+  - 旧 `POST /buddy/onboarding/clarify` / `POST /buddy/onboarding/clarify/start` 已退役，不再作为活代码迁移目标
+  - onboarding 正式会话/API 合同已从问答字段切到协作合同字段：
+    - `service_intent`
+    - `collaboration_role`
+    - `autonomy_level`
+    - `confirm_boundaries`
+    - `report_style`
+    - `collaboration_notes`
+  - `question_count / tightened / next_question / existing_question_count` 只允许出现在删旧审计、迁移测试或历史兼容说明里，不再属于正式 live API contract
+  - Buddy onboarding entry 决策也已同步改成 contract-era 规则：只有当 direction confirmed、carrier continuity ready、命名阶段完成后，入口才直接放行到 chat-ready；否则继续回到 `/buddy-onboarding`
 
 ---
 

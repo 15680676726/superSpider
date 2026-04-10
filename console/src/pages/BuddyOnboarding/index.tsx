@@ -3,6 +3,7 @@ import {
   Alert,
   Button,
   Card,
+  Checkbox,
   Form,
   Input,
   Radio,
@@ -15,8 +16,8 @@ import { useNavigate } from "react-router-dom";
 
 import api, { isApiError } from "../../api";
 import type {
-  BuddyClarificationResponse,
   BuddyConfirmDirectionResponse,
+  BuddyContractCompileResponse,
   BuddyDirectionTransitionPreviewResponse,
   BuddyIdentityResponse,
   BuddySurfaceResponse,
@@ -36,7 +37,7 @@ import {
   saveBuddyOnboardingDraft,
 } from "./draftState";
 
-const { Paragraph, Title } = Typography;
+const { Paragraph, Text, Title } = Typography;
 const { TextArea } = Input;
 
 type IdentityFormValues = {
@@ -49,18 +50,32 @@ type IdentityFormValues = {
   goal_intention: string;
 };
 
+type ContractFormValues = {
+  service_intent: string;
+  collaboration_role: string;
+  autonomy_level: string;
+  confirm_boundaries: string[];
+  report_style: string;
+  collaboration_notes: string;
+};
+
 type BuddyOnboardingDraft = {
   identity?: Partial<IdentityFormValues>;
-  clarification?: {
-    answer?: string;
-    selected_direction?: string;
-    capability_action?: "keep-active" | "restore-archived" | "start-new" | null;
-    target_domain_id?: string;
-  };
-  naming?: {
-    buddy_name?: string;
-  };
+  contract?: Partial<ContractFormValues>;
+  selected_direction?: string;
+  capability_action?: "keep-active" | "restore-archived" | "start-new" | null;
+  target_domain_id?: string;
+  buddy_name?: string;
   step?: number;
+};
+
+const DEFAULT_CONTRACT_VALUES: ContractFormValues = {
+  service_intent: "",
+  collaboration_role: "orchestrator",
+  autonomy_level: "proactive",
+  confirm_boundaries: [],
+  report_style: "result-first",
+  collaboration_notes: "",
 };
 
 function parseLines(value?: string | null): string[] {
@@ -104,30 +119,21 @@ function buildIdentityFromSurface(
   return {
     session_id: surface.onboarding.session_id,
     profile: surface.profile,
-    question_count: Math.max(1, surface.onboarding.question_count || 1),
-    next_question: surface.onboarding.next_question || "",
-    finished: Boolean(surface.onboarding.completed),
+    status: surface.onboarding.status,
   };
 }
 
-function buildClarificationFromSurface(
+function buildContractValuesFromSurface(
   surface: BuddySurfaceResponse,
-): BuddyClarificationResponse | null {
-  if (!surface.onboarding?.session_id) {
-    return null;
-  }
+): ContractFormValues {
+  const source = surface.relationship ?? surface.onboarding;
   return {
-    session_id: surface.onboarding.session_id,
-    question_count: Math.max(1, surface.onboarding.question_count || 1),
-    tightened: Boolean(surface.onboarding.tightened),
-    finished: Boolean(
-      surface.onboarding.requires_direction_confirmation ||
-        surface.onboarding.requires_naming ||
-        surface.onboarding.completed,
-    ),
-    next_question: surface.onboarding.next_question || "",
-    candidate_directions: surface.onboarding.candidate_directions || [],
-    recommended_direction: surface.onboarding.recommended_direction || "",
+    service_intent: source?.service_intent || "",
+    collaboration_role: source?.collaboration_role || "orchestrator",
+    autonomy_level: source?.autonomy_level || "proactive",
+    confirm_boundaries: source?.confirm_boundaries || [],
+    report_style: source?.report_style || "result-first",
+    collaboration_notes: source?.collaboration_notes || "",
   };
 }
 
@@ -148,7 +154,12 @@ function buildConfirmPayloadFromSurface(
       session_id: surface.onboarding.session_id,
       profile_id: surface.profile.profile_id,
       status: surface.onboarding.status,
-      question_count: Math.max(1, surface.onboarding.question_count || 1),
+      service_intent: surface.onboarding.service_intent || "",
+      collaboration_role: surface.onboarding.collaboration_role || "orchestrator",
+      autonomy_level: surface.onboarding.autonomy_level || "proactive",
+      confirm_boundaries: surface.onboarding.confirm_boundaries || [],
+      report_style: surface.onboarding.report_style || "result-first",
+      collaboration_notes: surface.onboarding.collaboration_notes || "",
       candidate_directions: surface.onboarding.candidate_directions || [],
       recommended_direction: surface.onboarding.recommended_direction || "",
       selected_direction:
@@ -163,6 +174,12 @@ function buildConfirmPayloadFromSurface(
         profile_id: surface.profile.profile_id,
         buddy_name: "",
         encouragement_style: "old-friend",
+        service_intent: surface.onboarding.service_intent || "",
+        collaboration_role: surface.onboarding.collaboration_role || "orchestrator",
+        autonomy_level: surface.onboarding.autonomy_level || "proactive",
+        confirm_boundaries: surface.onboarding.confirm_boundaries || [],
+        report_style: surface.onboarding.report_style || "result-first",
+        collaboration_notes: surface.onboarding.collaboration_notes || "",
       },
     domain_capability: null,
     execution_carrier: surface.execution_carrier,
@@ -171,8 +188,10 @@ function buildConfirmPayloadFromSurface(
 
 export default function BuddyOnboardingPage() {
   const navigate = useNavigate();
-  const [form] = Form.useForm<IdentityFormValues>();
-  const watchedIdentityValues = Form.useWatch([], form);
+  const [identityForm] = Form.useForm<IdentityFormValues>();
+  const [contractForm] = Form.useForm<ContractFormValues>();
+  const watchedIdentityValues = Form.useWatch([], identityForm);
+  const watchedContractValues = Form.useWatch([], contractForm);
   const [initialDraft] = useState<BuddyOnboardingDraft | null>(() =>
     sanitizeDraft(loadBuddyOnboardingDraft()),
   );
@@ -180,71 +199,38 @@ export default function BuddyOnboardingPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [identity, setIdentity] = useState<BuddyIdentityResponse | null>(null);
-  const [clarification, setClarification] =
-    useState<BuddyClarificationResponse | null>(null);
-  const [questionAnswer, setQuestionAnswer] = useState(
-    () => initialDraft?.clarification?.answer || "",
-  );
+  const [contractDraft, setContractDraft] =
+    useState<BuddyContractCompileResponse | null>(null);
   const [confirmPayload, setConfirmPayload] =
     useState<BuddyConfirmDirectionResponse | null>(null);
   const [currentStep, setCurrentStep] = useState<number>(
     () => initialDraft?.step ?? 0,
   );
   const [selectedDirection, setSelectedDirection] = useState(
-    () => initialDraft?.clarification?.selected_direction || "",
+    () => initialDraft?.selected_direction || "",
   );
   const [transitionPreview, setTransitionPreview] =
     useState<BuddyDirectionTransitionPreviewResponse | null>(null);
   const [selectedCapabilityAction, setSelectedCapabilityAction] = useState<
     "keep-active" | "restore-archived" | "start-new" | null
-  >(() => initialDraft?.clarification?.capability_action ?? null);
-  const [selectedTargetDomainId, setSelectedTargetDomainId] = useState<string | undefined>(
-    () => initialDraft?.clarification?.target_domain_id,
-  );
+  >(() => initialDraft?.capability_action ?? null);
+  const [selectedTargetDomainId, setSelectedTargetDomainId] = useState<
+    string | undefined
+  >(() => initialDraft?.target_domain_id);
   const [buddyNameDraft, setBuddyNameDraft] = useState(
-    () => initialDraft?.naming?.buddy_name || "",
+    () => initialDraft?.buddy_name || "",
   );
   const [draftEnabled, setDraftEnabled] = useState(true);
 
-  const applyBuddySurface = (surface: BuddySurfaceResponse) => {
-    const nextIdentity = buildIdentityFromSurface(surface);
-    const nextClarification = buildClarificationFromSurface(surface);
-    const nextConfirmPayload = buildConfirmPayloadFromSurface(surface);
-    if (surface.profile?.profile_id) {
-      writeBuddyProfileId(surface.profile.profile_id);
-    }
-    setIdentity(nextIdentity);
-    setClarification(nextClarification);
-    if (nextIdentity?.profile) {
-      form.setFieldsValue(buildIdentityFormValues(nextIdentity.profile));
-    }
-    if (surface.onboarding?.recommended_direction) {
-      setSelectedDirection(
-        surface.onboarding.selected_direction ||
-          surface.onboarding.recommended_direction ||
-          "",
-      );
-    }
-    if (surface.relationship?.buddy_name?.trim()) {
-      setBuddyNameDraft(surface.relationship.buddy_name.trim());
-    }
-    if (nextConfirmPayload) {
-      setConfirmPayload(nextConfirmPayload);
-      setCurrentStep(2);
-      return;
-    }
-    if (nextIdentity) {
-      setCurrentStep(1);
-      return;
-    }
-    setCurrentStep(0);
-  };
-
   useEffect(() => {
     if (initialDraft?.identity) {
-      form.setFieldsValue(initialDraft.identity);
+      identityForm.setFieldsValue(initialDraft.identity);
     }
-  }, [form, initialDraft]);
+    contractForm.setFieldsValue({
+      ...DEFAULT_CONTRACT_VALUES,
+      ...(initialDraft?.contract || {}),
+    });
+  }, [contractForm, identityForm, initialDraft]);
 
   useEffect(() => {
     if (!draftEnabled) {
@@ -255,30 +241,58 @@ export default function BuddyOnboardingPage() {
         watchedIdentityValues && typeof watchedIdentityValues === "object"
           ? watchedIdentityValues
           : undefined,
-      clarification: {
-        answer: questionAnswer,
-        selected_direction: selectedDirection,
-        capability_action: selectedCapabilityAction,
-        target_domain_id: selectedTargetDomainId,
-      },
-      naming: {
-        buddy_name: buddyNameDraft,
-      },
+      contract:
+        watchedContractValues && typeof watchedContractValues === "object"
+          ? {
+              ...DEFAULT_CONTRACT_VALUES,
+              ...watchedContractValues,
+            }
+          : undefined,
+      selected_direction: selectedDirection,
+      capability_action: selectedCapabilityAction,
+      target_domain_id: selectedTargetDomainId,
+      buddy_name: buddyNameDraft,
       step: currentStep,
     } satisfies BuddyOnboardingDraft);
   }, [
     buddyNameDraft,
     currentStep,
     draftEnabled,
-    questionAnswer,
     selectedCapabilityAction,
     selectedDirection,
     selectedTargetDomainId,
+    watchedContractValues,
     watchedIdentityValues,
   ]);
 
   useEffect(() => {
     let cancelled = false;
+
+    const hydrateContractDraft = async (
+      sessionId: string | null | undefined,
+    ): Promise<void> => {
+      if (!sessionId) {
+        return;
+      }
+      const draft = await api.getBuddyContractDraft(sessionId);
+      if (cancelled) {
+        return;
+      }
+      setContractDraft(draft);
+      setSelectedDirection(
+        draft.recommended_direction || draft.candidate_directions[0] || "",
+      );
+      contractForm.setFieldsValue({
+        service_intent: draft.service_intent,
+        collaboration_role: draft.collaboration_role,
+        autonomy_level: draft.autonomy_level,
+        confirm_boundaries: draft.confirm_boundaries,
+        report_style: draft.report_style,
+        collaboration_notes: draft.collaboration_notes,
+      });
+      setCurrentStep(2);
+    };
+
     void (async () => {
       try {
         const surface = await api.getBuddySurface(readBuddyProfileId());
@@ -289,7 +303,7 @@ export default function BuddyOnboardingPage() {
         const decision = resolveBuddyEntryDecision(surface);
         if (decision.mode === "chat-ready" && surface?.profile?.profile_id) {
           if (!surface.execution_carrier) {
-            setError("伙伴聊天页还没准备好，请刷新后重试。");
+            setError("伙伴聊天主场还没准备好，请刷新后重试。");
             return;
           }
           const binding = buildBuddyExecutionCarrierChatBinding({
@@ -309,7 +323,30 @@ export default function BuddyOnboardingPage() {
           surface?.profile?.profile_id &&
           surface.onboarding
         ) {
-          applyBuddySurface(surface);
+          const nextIdentity = buildIdentityFromSurface(surface);
+          const nextConfirmPayload = buildConfirmPayloadFromSurface(surface);
+          if (nextIdentity) {
+            setIdentity(nextIdentity);
+            identityForm.setFieldsValue(buildIdentityFormValues(nextIdentity.profile));
+          }
+          contractForm.setFieldsValue(buildContractValuesFromSurface(surface));
+          if (surface.onboarding.recommended_direction) {
+            setSelectedDirection(
+              surface.onboarding.selected_direction ||
+                surface.onboarding.recommended_direction,
+            );
+          }
+          if (surface.relationship?.buddy_name?.trim()) {
+            setBuddyNameDraft(surface.relationship.buddy_name.trim());
+          }
+          if (nextConfirmPayload) {
+            setConfirmPayload(nextConfirmPayload);
+            setCurrentStep(2);
+          } else if (surface.onboarding.requires_direction_confirmation) {
+            await hydrateContractDraft(surface.onboarding.session_id);
+          } else if (nextIdentity) {
+            setCurrentStep(1);
+          }
         }
       } catch (rawError) {
         if (cancelled) return;
@@ -322,16 +359,17 @@ export default function BuddyOnboardingPage() {
         }
       }
     })();
+
     return () => {
       cancelled = true;
     };
-  }, [navigate]);
+  }, [contractForm, identityForm, navigate]);
 
   const handleSubmitIdentity = async (values: IdentityFormValues) => {
     setSubmitting(true);
     setError(null);
     try {
-      const payload = {
+      const result = await api.submitBuddyIdentity({
         display_name: values.display_name,
         profession: values.profession,
         current_stage: values.current_stage,
@@ -339,62 +377,59 @@ export default function BuddyOnboardingPage() {
         strengths: parseLines(values.strengths),
         constraints: parseLines(values.constraints),
         goal_intention: values.goal_intention,
-      };
-      const result = await api.submitBuddyIdentity(payload);
+      });
       writeBuddyProfileId(result.profile.profile_id);
       setIdentity(result);
-      setClarification({
-        session_id: result.session_id,
-        question_count: result.question_count,
-        tightened: false,
-        finished: false,
-        next_question: result.next_question,
-        candidate_directions: [],
-        recommended_direction: "",
-      });
+      setContractDraft(null);
       setConfirmPayload(null);
-      setSelectedDirection("");
       setTransitionPreview(null);
       setSelectedCapabilityAction(null);
       setSelectedTargetDomainId(undefined);
-      setBuddyNameDraft("");
+      setSelectedDirection("");
+      contractForm.setFieldsValue(DEFAULT_CONTRACT_VALUES);
       setCurrentStep(1);
-    } catch (rawError) {
-      void rawError;
+    } catch {
       setError("身份信息提交失败，请稍后重试。");
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleClarify = async () => {
-    if (!identity || !questionAnswer.trim()) return;
+  const handleSubmitContract = async (values: ContractFormValues) => {
+    if (!identity) {
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
-      const result = await api.answerBuddyClarification({
+      const result = await api.submitBuddyContract({
         session_id: identity.session_id,
-        answer: questionAnswer.trim(),
-        existing_question_count: clarification?.question_count,
+        service_intent: values.service_intent.trim(),
+        collaboration_role: values.collaboration_role,
+        autonomy_level: values.autonomy_level,
+        confirm_boundaries: values.confirm_boundaries || [],
+        report_style: values.report_style,
+        collaboration_notes: values.collaboration_notes.trim(),
       });
-      setClarification(result);
-      setQuestionAnswer("");
+      setContractDraft(result);
+      setSelectedDirection(
+        result.recommended_direction || result.candidate_directions[0] || "",
+      );
       setTransitionPreview(null);
       setSelectedCapabilityAction(null);
       setSelectedTargetDomainId(undefined);
-      if (result.finished && result.recommended_direction) {
-        setSelectedDirection(result.recommended_direction);
-      }
-    } catch (rawError) {
-      void rawError;
-      setError("方向澄清失败，请稍后重试。");
+      setCurrentStep(2);
+    } catch {
+      setError("合作方式提交失败，请稍后重试。");
     } finally {
       setSubmitting(false);
     }
   };
 
   const handlePreviewDirectionTransition = async () => {
-    if (!identity || !selectedDirection.trim()) return;
+    if (!identity || !selectedDirection.trim()) {
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -409,16 +444,15 @@ export default function BuddyOnboardingPage() {
           ? preview.archived_matches[0]?.domain_id
           : undefined,
       );
-    } catch (rawError) {
-      void rawError;
-      setError("方向确认失败，请稍后重试。");
+    } catch {
+      setError("主方向预览失败，请稍后重试。");
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleConfirmDirection = async () => {
-    if (!identity || !selectedDirection.trim() || !transitionPreview || !selectedCapabilityAction) {
+    if (!identity || !selectedDirection.trim() || !selectedCapabilityAction) {
       return;
     }
     if (selectedCapabilityAction === "restore-archived" && !selectedTargetDomainId) {
@@ -440,53 +474,43 @@ export default function BuddyOnboardingPage() {
       writeBuddyProfileId(result.session.profile_id);
       setConfirmPayload(result);
       setCurrentStep(2);
-    } catch (rawError) {
-      void rawError;
-      setError("方向确认失败，请稍后重试。");
+    } catch {
+      setError("主方向确认失败，请稍后重试。");
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleStartChat = async () => {
-    if (
-      !identity ||
-      !confirmPayload?.session?.session_id ||
-      !buddyNameDraft.trim()
-    ) {
-      return;
-    }
-    const executionCarrier = confirmPayload.execution_carrier;
-    if (!executionCarrier) {
-      setError("伙伴聊天页还没准备好，请刷新后重试。");
+    if (!identity || !confirmPayload?.execution_carrier || !buddyNameDraft.trim()) {
       return;
     }
     try {
-      setSubmitting(true);
-      setError(null);
-      const named = await api.nameBuddy({
+      await api.nameBuddy({
         session_id: confirmPayload.session.session_id,
         buddy_name: buddyNameDraft.trim(),
       });
-      writeBuddyProfileId(named.profile_id);
       setDraftEnabled(false);
       clearBuddyOnboardingDraft();
       const binding = buildBuddyExecutionCarrierChatBinding({
         sessionId: confirmPayload.session.session_id,
         profileId: identity.profile.profile_id,
         profileDisplayName: identity.profile.display_name,
-        executionCarrier,
+        executionCarrier: confirmPayload.execution_carrier,
       });
       await openRuntimeChat(binding, navigate);
-    } catch (rawError) {
-      void rawError;
-      setError("进入聊天失败，请稍后重试。");
-    } finally {
-      setSubmitting(false);
+    } catch {
+      setError("进入聊天前命名失败，请稍后重试。");
     }
   };
 
-  const stepIndex = currentStep;
+  const stepIndex = confirmPayload
+    ? 2
+    : contractDraft
+      ? 2
+      : identity
+        ? 1
+        : 0;
 
   if (loading) {
     return (
@@ -501,28 +525,28 @@ export default function BuddyOnboardingPage() {
       <Card>
         <Space direction="vertical" size={8} style={{ width: "100%" }}>
           <Title level={2} style={{ margin: 0 }}>
-            首次创建伙伴档案
+            超级伙伴初次建档
           </Title>
           <Paragraph style={{ margin: 0 }}>
-            先让我认真了解你，再一起把长期方向收口成一个足够大的主方向。
-            默认不会把整棵计划树都压给你，只会先让你看清最终目标和当前这一步。
+            先确认你是谁、你希望我怎么和你协作，再把长期主方向落成正式执行主链。
           </Paragraph>
           <Steps
             current={stepIndex}
             items={[
-              { title: "身份资料" },
-              { title: "方向确认" },
-              { title: "伙伴名称" },
+              { title: "身份建档" },
+              { title: "合作方式" },
+              { title: "确认主方向" },
             ]}
           />
         </Space>
       </Card>
 
       {error ? <Alert type="error" showIcon message={error} /> : null}
-      {(!identity || currentStep === 0) ? (
+
+      {!identity ? (
         <Card title="先告诉我你是谁">
           <Form
-            form={form}
+            form={identityForm}
             layout="vertical"
             onFinish={(values) => void handleSubmitIdentity(values)}
             data-testid="buddy-identity-form"
@@ -541,79 +565,121 @@ export default function BuddyOnboardingPage() {
             </Form.Item>
             <Form.Item label="当前阶段" name="current_stage" rules={[{ required: true }]}>
               <Input
-                placeholder="例如：探索期、转型期、重建期、稳定增长期"
+                placeholder="例如：探索期、转型期、重建期"
                 data-testid="buddy-identity-current-stage"
               />
             </Form.Item>
-            <Form.Item label="爱好" name="interests">
+            <Form.Item label="兴趣" name="interests">
               <TextArea rows={2} placeholder="可用逗号、顿号或换行分隔" />
             </Form.Item>
-            <Form.Item label="特长" name="strengths">
-              <TextArea rows={2} placeholder="你做得比大多数人更稳的事情" />
+            <Form.Item label="优势" name="strengths">
+              <TextArea rows={2} placeholder="你比大多数人更稳的地方" />
             </Form.Item>
-            <Form.Item label="限制 / 困境" name="constraints">
-              <TextArea rows={2} placeholder="时间、金钱、精力、环境约束等" />
+            <Form.Item label="限制 / 约束" name="constraints">
+              <TextArea rows={2} placeholder="时间、资金、精力、环境约束等" />
             </Form.Item>
             <Form.Item label="目标意向" name="goal_intention" rules={[{ required: true }]}>
               <TextArea
                 rows={3}
-                placeholder="先说你隐约想改变什么，模糊也没有关系。"
+                placeholder="你想长期改变什么，先模糊地说也可以。"
                 data-testid="buddy-identity-goal-intention"
               />
             </Form.Item>
             <Button type="primary" htmlType="submit" loading={submitting}>
-              开始创建伙伴档案
+              开始建档
             </Button>
           </Form>
         </Card>
       ) : null}
 
-      {currentStep === 1 && identity && !clarification?.finished ? (
-        <Card title="再回答我几句，我帮你把方向收得更准">
-          <Space direction="vertical" size={16} style={{ width: "100%" }}>
-            <Alert
-              type="info"
-              showIcon
-              message={`第 ${clarification?.question_count ?? identity.question_count} / 9 问`}
-              description={
-                clarification?.tightened
-                  ? "我会开始收紧追问，避免一直聊天却得不到真正可执行的方向。"
-                  : "现在模糊没有关系，我会陪你慢慢把方向收口。"
-              }
-            />
-            <Card size="small">
-              <strong>{clarification?.next_question || identity.next_question}</strong>
-            </Card>
-            <TextArea
-              rows={4}
-              value={questionAnswer}
-              onChange={(event) => setQuestionAnswer(event.target.value)}
-              placeholder="用最真实的话回答我，不用写得很工整。"
-              data-testid="buddy-clarification-answer"
-            />
-            <Space>
-              <Button onClick={() => setCurrentStep(0)} data-testid="buddy-step-back">
-                返回上一步
-              </Button>
-              <Button
-                type="primary"
-                onClick={() => void handleClarify()}
-                loading={submitting}
-                data-testid="buddy-clarification-submit"
-              >
-                继续
-              </Button>
-            </Space>
-          </Space>
+      {identity && !contractDraft && !confirmPayload ? (
+        <Card title="先约定我们的合作方式">
+          <Form
+            form={contractForm}
+            layout="vertical"
+            initialValues={DEFAULT_CONTRACT_VALUES}
+            onFinish={(values) => void handleSubmitContract(values)}
+            data-testid="buddy-contract-form"
+          >
+            <Form.Item
+              label="你希望我为你做什么"
+              name="service_intent"
+              rules={[{ required: true, message: "请先告诉我你希望我为你做什么。" }]}
+            >
+              <TextArea
+                rows={4}
+                placeholder="例如：帮我把写作从想法变成稳定发布节奏。"
+                data-testid="buddy-contract-service-intent"
+              />
+            </Form.Item>
+            <Form.Item label="我主要扮演什么角色" name="collaboration_role">
+              <Radio.Group>
+                <Space direction="vertical">
+                  <Radio value="orchestrator">统筹推进</Radio>
+                  <Radio value="executor">执行推进</Radio>
+                  <Radio value="advisor">顾问辅助</Radio>
+                  <Radio value="companion">陪跑伙伴</Radio>
+                </Space>
+              </Radio.Group>
+            </Form.Item>
+            <Form.Item label="我可以主动到什么程度" name="autonomy_level">
+              <Radio.Group>
+                <Space direction="vertical">
+                  <Radio value="reactive">你说一步我做一步</Radio>
+                  <Radio value="proactive">默认主动推进</Radio>
+                  <Radio value="guarded-proactive">主动推进，但关键边界先确认</Radio>
+                </Space>
+              </Radio.Group>
+            </Form.Item>
+            <Form.Item label="哪些动作必须先确认" name="confirm_boundaries">
+              <Checkbox.Group
+                options={[
+                  { label: "外部花费", value: "external spend" },
+                  { label: "公开发布", value: "public publishing" },
+                  { label: "破坏性改动", value: "destructive change" },
+                ]}
+              />
+            </Form.Item>
+            <Form.Item label="默认汇报风格" name="report_style">
+              <Radio.Group>
+                <Space direction="vertical">
+                  <Radio value="result-first">结果优先</Radio>
+                  <Radio value="decision-first">决策优先</Radio>
+                  <Radio value="milestone-summary">里程碑汇报</Radio>
+                </Space>
+              </Radio.Group>
+            </Form.Item>
+            <Form.Item label="还有什么合作偏好" name="collaboration_notes">
+              <TextArea rows={3} placeholder="可选，告诉我你希望我记住的协作习惯。" />
+            </Form.Item>
+            <Button
+              type="primary"
+              htmlType="submit"
+              loading={submitting}
+              data-testid="buddy-contract-submit"
+            >
+              生成合作合同
+            </Button>
+          </Form>
         </Card>
       ) : null}
 
-      {currentStep === 1 && identity && clarification?.finished && !confirmPayload ? (
-        <Card title="我先给你 2-3 个候选大方向，但你只确认 1 个主方向">
+      {identity && contractDraft && !confirmPayload ? (
+        <Card title="确认这次长期主方向">
           <Space direction="vertical" size={16} style={{ width: "100%" }}>
-            <Paragraph style={{ marginBottom: 0 }}>
-              主方向必须足够大，不能是零碎愿望。后面的阶段目标和当前任务，都会从这个方向里拆出来。
-            </Paragraph>
+            <Card size="small" data-testid="buddy-contract-summary">
+              <Space direction="vertical" size={8} style={{ width: "100%" }}>
+                <Text strong>合作目标</Text>
+                <Text>{contractDraft.service_intent}</Text>
+                <Text strong>推荐长期方向</Text>
+                <Text>{contractDraft.recommended_direction}</Text>
+                <Text strong>最终目标</Text>
+                <Text>{contractDraft.final_goal}</Text>
+                <Text strong>为什么现在值得做</Text>
+                <Text>{contractDraft.why_it_matters}</Text>
+              </Space>
+            </Card>
+
             <Radio.Group
               value={selectedDirection}
               onChange={(event) => {
@@ -625,20 +691,14 @@ export default function BuddyOnboardingPage() {
               style={{ width: "100%" }}
             >
               <Space direction="vertical" size={12} style={{ width: "100%" }}>
-                {clarification.candidate_directions.map((direction) => (
+                {contractDraft.candidate_directions.map((direction) => (
                   <Radio key={direction} value={direction}>
                     {direction}
                   </Radio>
                 ))}
               </Space>
             </Radio.Group>
-            <Alert
-              type="success"
-              showIcon
-              message="推荐主方向"
-              description={clarification.recommended_direction}
-              data-testid="buddy-direction-recommendation"
-            />
+
             {!transitionPreview ? (
               <Button
                 type="primary"
@@ -647,14 +707,10 @@ export default function BuddyOnboardingPage() {
                 onClick={() => void handlePreviewDirectionTransition()}
                 data-testid="buddy-direction-confirm"
               >
-                先预览能力继承方式
+                预览能力继承方式
               </Button>
             ) : (
-              <Card
-                size="small"
-                title="确认这次目标切换怎么处理超级伙伴的能力积累"
-                data-testid="buddy-transition-choice-panel"
-              >
+              <Card size="small" title="确认这次方向切换的能力处理方式">
                 <Space direction="vertical" size={16} style={{ width: "100%" }}>
                   <Alert
                     type="info"
@@ -662,25 +718,6 @@ export default function BuddyOnboardingPage() {
                     message="系统建议"
                     description={transitionPreview.reason_summary}
                   />
-                  <Paragraph
-                    type="secondary"
-                    style={{ marginBottom: 0 }}
-                    data-testid="buddy-transition-scope-note"
-                  >
-                    普通领域扩展继续在聊天里推进；这里只用于切换当前主领域。
-                  </Paragraph>
-                  {transitionPreview.current_domain ? (
-                    <Paragraph style={{ marginBottom: 0 }}>
-                      <strong>当前活跃领域：</strong>
-                      {` ${transitionPreview.current_domain.domain_label} · 积分 ${transitionPreview.current_domain.capability_points ?? 0}`}
-                    </Paragraph>
-                  ) : null}
-                  {transitionPreview.archived_matches.length ? (
-                    <Paragraph style={{ marginBottom: 0 }}>
-                      <strong>可恢复历史领域：</strong>
-                      {` ${transitionPreview.archived_matches.map((item) => `${item.domain_label}(积分 ${item.capability_points ?? 0})`).join(" / ")}`}
-                    </Paragraph>
-                  ) : null}
                   <Radio.Group
                     value={selectedCapabilityAction}
                     onChange={(event) =>
@@ -693,7 +730,7 @@ export default function BuddyOnboardingPage() {
                         value="keep-active"
                         disabled={!transitionPreview.current_domain}
                       >
-                        继续当前领域能力
+                        继续沿用当前领域能力
                       </Radio>
                       <Radio
                         value="restore-archived"
@@ -716,36 +753,25 @@ export default function BuddyOnboardingPage() {
                       <Space direction="vertical" size={8} style={{ width: "100%" }}>
                         {transitionPreview.archived_matches.map((item) => (
                           <Radio key={item.domain_id} value={item.domain_id}>
-                            {`${item.domain_label} · 积分 ${item.capability_points ?? 0}`}
+                            {item.domain_label}
                           </Radio>
                         ))}
                       </Space>
                     </Radio.Group>
                   ) : null}
-                  <Space>
-                    <Button
-                      onClick={() => {
-                        setTransitionPreview(null);
-                        setSelectedCapabilityAction(null);
-                        setSelectedTargetDomainId(undefined);
-                      }}
-                    >
-                      重新选择方向
-                    </Button>
-                    <Button
-                      type="primary"
-                      loading={submitting}
-                      disabled={
-                        !selectedCapabilityAction ||
-                        (selectedCapabilityAction === "restore-archived" &&
-                          !selectedTargetDomainId)
-                      }
-                      onClick={() => void handleConfirmDirection()}
-                      data-testid="buddy-transition-confirm"
-                    >
-                      确认切换方式，填写伙伴名称
-                    </Button>
-                  </Space>
+                  <Button
+                    type="primary"
+                    loading={submitting}
+                    disabled={
+                      !selectedCapabilityAction ||
+                      (selectedCapabilityAction === "restore-archived" &&
+                        !selectedTargetDomainId)
+                    }
+                    onClick={() => void handleConfirmDirection()}
+                    data-testid="buddy-transition-confirm"
+                  >
+                    确认并进入伙伴主场
+                  </Button>
                 </Space>
               </Card>
             )}
@@ -753,50 +779,28 @@ export default function BuddyOnboardingPage() {
         </Card>
       ) : null}
 
-      {currentStep === 2 && identity && confirmPayload ? (
-        <Card
-          title="已确认方向，填写伙伴名称"
-          data-testid="buddy-direction-confirmed"
-        >
+      {identity && confirmPayload ? (
+        <Card title="给伙伴起名，然后进入聊天主场" data-testid="buddy-direction-confirmed">
           <Space direction="vertical" size={16} style={{ width: "100%" }}>
             <Alert
               type="success"
               showIcon
-              message="你的长期方向已经生成好了"
-              description="下一步先给伙伴取名，确认后再进入聊天页。"
+              message="长期方向已经确认"
+              description={confirmPayload.growth_target.final_goal}
             />
-            <Paragraph style={{ marginBottom: 0 }}>
-              <strong>已确认方向：</strong>{" "}
-              {confirmPayload.growth_target?.primary_direction || selectedDirection}
-            </Paragraph>
-            {confirmPayload.execution_carrier?.label ? (
-              <Paragraph style={{ marginBottom: 0 }}>
-                <strong>已生成载体：</strong> {confirmPayload.execution_carrier.label}
-              </Paragraph>
-            ) : null}
             <Input
               value={buddyNameDraft}
               onChange={(event) => setBuddyNameDraft(event.target.value)}
-              placeholder="给伙伴起个名字"
+              placeholder="给你的伙伴起一个名字"
               data-testid="buddy-name-input"
             />
             <Button
-              onClick={() => {
-                setConfirmPayload(null);
-                setCurrentStep(1);
-              }}
-              data-testid="buddy-step-back"
-            >
-              返回上一步
-            </Button>
-            <Button
               type="primary"
-              loading={submitting}
-              disabled={!buddyNameDraft.trim()}
               onClick={() => void handleStartChat()}
+              disabled={!buddyNameDraft.trim()}
               data-testid="buddy-start-chat"
             >
-              开始聊天
+              进入聊天主场
             </Button>
           </Space>
         </Card>

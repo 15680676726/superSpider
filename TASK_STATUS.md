@@ -107,6 +107,51 @@
     - `npm --prefix console run build`
     - 结果：通过
 
+## 1.1.3 `2026-04-11` Buddy onboarding collaboration contract hard-cut
+
+- Buddy onboarding 前门已从“澄清问答回合”正式切到“协作合同直填 + compile”。
+- 当前正式主链固定为：
+  - `POST /buddy/onboarding/identity`
+  - `POST /buddy/onboarding/contract`
+  - `GET /buddy/onboarding/{session_id}/candidates`
+  - `POST /buddy/onboarding/direction-transition-preview`
+  - `POST /buddy/onboarding/confirm-direction`
+  - `POST /buddy/name`
+  - `GET /buddy/surface`
+- 如需异步 UI，不再走 `clarify`，而是走：
+  - `POST /buddy/onboarding/identity/start`
+  - `POST /buddy/onboarding/contract/start`
+  - `POST /buddy/onboarding/confirm-direction/start`
+- `Buddy surface.onboarding` 的正式合同已收口为：
+  - `service_intent`
+  - `collaboration_role`
+  - `autonomy_level`
+  - `confirm_boundaries`
+  - `report_style`
+  - `collaboration_notes`
+  - `candidate_directions`
+  - `recommended_direction`
+  - `selected_direction`
+  - `requires_direction_confirmation`
+  - `requires_naming`
+  - `completed`
+- 旧澄清问答字段已从活代码前后端合同退役，不应再被当成正式 onboarding 真相：
+  - `question_count`
+  - `tightened`
+  - `next_question`
+  - `existing_question_count`
+- `2026-04-05` 那条“最多 9 问澄清对话”的历史设计口径已被本条 supersede；当前正式方向是“身份建档 -> 协作合同 compile -> 方向确认 -> 首次命名/进入聊天”，不是继续维护问答机。
+- 当前 fresh verification：
+  - backend：
+    - `PYTHONPATH=src python -m pytest tests/kernel/test_buddy_projection_service.py tests/kernel/test_main_brain_runtime_context_buddy_prompt.py tests/kernel/test_main_brain_chat_service.py tests/app/test_buddy_onboarding_activation.py tests/kernel/test_buddy_onboarding_latency.py tests/kernel/test_buddy_projection_capability.py -q`
+    - 结果：`70 passed`
+  - console：
+    - `npm --prefix console run test -- src/api/modules/buddy.test.ts src/runtime/buddyFlow.test.ts src/pages/BuddyOnboarding/index.test.tsx src/routes/entryRedirect.test.tsx`
+    - 结果：`14 passed`
+  - console build：
+    - `npm --prefix console run build`
+    - 结果：通过
+
 ## 1.2 `2026-04-05` donor-first 开源项目能力落位补充
 
 - GitHub open-source donor 不再只以 `SKILL.md` bundle 形式落地。

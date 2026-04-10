@@ -39,19 +39,23 @@ describe("buddyApi", () => {
     });
   });
 
-  it("posts clarification, confirmation, and naming mutations to buddy routes", async () => {
-    await buddyApi.answerBuddyClarification({
+  it("posts contract, confirmation, and naming mutations to buddy routes", async () => {
+    await buddyApi.submitBuddyContract({
       session_id: "session-1",
-      answer: "I want more autonomy",
-      existing_question_count: 5,
+      service_intent: "Help me build a durable writing rhythm.",
+      collaboration_role: "orchestrator",
+      autonomy_level: "guarded-proactive",
+      confirm_boundaries: ["external spend"],
+      report_style: "decision-first",
+      collaboration_notes: "Keep reports concise.",
     });
     await buddyApi.previewBuddyDirectionTransition({
       session_id: "session-1",
-      selected_direction: "Build an independent creator-business growth path",
+      selected_direction: "Build a durable writing lane.",
     });
     await buddyApi.confirmBuddyDirection({
       session_id: "session-1",
-      selected_direction: "Build an independent creator-business growth path",
+      selected_direction: "Build a durable writing lane.",
       capability_action: "start-new",
     });
     await buddyApi.nameBuddy({
@@ -59,12 +63,16 @@ describe("buddyApi", () => {
       buddy_name: "Nova",
     });
 
-    expect(requestMock).toHaveBeenNthCalledWith(1, "/buddy/onboarding/clarify", {
+    expect(requestMock).toHaveBeenNthCalledWith(1, "/buddy/onboarding/contract", {
       method: "POST",
       body: JSON.stringify({
         session_id: "session-1",
-        answer: "I want more autonomy",
-        existing_question_count: 5,
+        service_intent: "Help me build a durable writing rhythm.",
+        collaboration_role: "orchestrator",
+        autonomy_level: "guarded-proactive",
+        confirm_boundaries: ["external spend"],
+        report_style: "decision-first",
+        collaboration_notes: "Keep reports concise.",
       }),
     });
     expect(requestMock).toHaveBeenNthCalledWith(
@@ -74,7 +82,7 @@ describe("buddyApi", () => {
         method: "POST",
         body: JSON.stringify({
           session_id: "session-1",
-          selected_direction: "Build an independent creator-business growth path",
+          selected_direction: "Build a durable writing lane.",
         }),
       },
     );
@@ -85,7 +93,7 @@ describe("buddyApi", () => {
         method: "POST",
         body: JSON.stringify({
           session_id: "session-1",
-          selected_direction: "Build an independent creator-business growth path",
+          selected_direction: "Build a durable writing lane.",
           capability_action: "start-new",
         }),
       },
@@ -99,8 +107,8 @@ describe("buddyApi", () => {
     });
   });
 
-  it("reads candidate directions and buddy surface through query endpoints", async () => {
-    await buddyApi.listBuddyCandidateDirections("session-1");
+  it("reads contract draft and buddy surface through query endpoints", async () => {
+    await buddyApi.getBuddyContractDraft("session-1");
     await buddyApi.getBuddySurface();
     await buddyApi.getBuddySurface("profile-1");
 

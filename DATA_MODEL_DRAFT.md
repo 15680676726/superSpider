@@ -33,6 +33,28 @@
     - `signature`: `capability_points >= 200`, `independent_outcome_count >= 10`, `recent_completion_rate >= 0.92`, `recent_execution_error_rate <= 0.03`
   - Canonical stage demotion may drop at most one level per refresh; Buddy stage truth must not oscillate across multiple levels in a single growth pass.
   - Active Buddy growth read models must now project `capability_points / settled_closure_count / independent_outcome_count / recent_completion_rate / recent_execution_error_rate / distinct_settled_cycle_count / demotion_cooldown_until` from the same active domain record.
+- `2026-04-11` supplement:
+  - Buddy onboarding no longer uses a clarification interview loop as canonical state.
+  - Canonical onboarding session fields now include:
+    - `service_intent`
+    - `collaboration_role`
+    - `autonomy_level`
+    - `confirm_boundaries`
+    - `report_style`
+    - `collaboration_notes`
+  - Canonical onboarding progression is:
+    - `identity submitted`
+    - `contract compiled`
+    - `direction confirmed`
+    - `naming pending / completed`
+  - Contract compile output is formal session truth and must preserve:
+    - `candidate_directions`
+    - `recommended_direction`
+    - `selected_direction`
+    - `final_goal`
+    - `why_it_matters`
+    - `backlog_items`
+  - `question_count / tightened / next_question / existing_question_count` are retired from the active Buddy onboarding data model and may remain only in explicit migration cleanup logic or migration tests.
 - `2026-04-07` supplement:
   - Buddy 的成长阶段正式拆成“关系层”和“领域能力层”两条链路，禁止再把 `CompanionRelationship.companion_experience` 直接投影成 stage
   - active `BuddyDomainCapabilityRecord` 是 Buddy 当前领域能力的唯一正式对象，承载 `domain_key / domain_label / capability_score / evolution_stage / strategy_score / execution_score / evidence_score / stability_score`

@@ -22,19 +22,34 @@ export interface BuddyIdentityResponse {
     constraints: string[];
     goal_intention: string;
   };
-  question_count: number;
-  next_question: string;
-  finished: boolean;
+  status: string;
 }
 
-export interface BuddyClarificationResponse {
+export interface BuddyBacklogSeed {
+  lane_hint: string;
+  title: string;
+  summary: string;
+  priority: number;
+  source_key: string;
+}
+
+export interface BuddyContractRequest {
   session_id: string;
-  question_count: number;
-  tightened: boolean;
-  finished: boolean;
-  next_question: string;
+  service_intent: string;
+  collaboration_role: string;
+  autonomy_level: string;
+  confirm_boundaries: string[];
+  report_style: string;
+  collaboration_notes: string;
+}
+
+export interface BuddyContractCompileResponse extends BuddyContractRequest {
+  status: string;
   candidate_directions: string[];
   recommended_direction: string;
+  final_goal: string;
+  why_it_matters: string;
+  backlog_items: BuddyBacklogSeed[];
 }
 
 export interface BuddyOnboardingOperationResponse {
@@ -71,7 +86,12 @@ export interface BuddyConfirmDirectionResponse {
     session_id: string;
     profile_id: string;
     status: string;
-    question_count: number;
+    service_intent: string;
+    collaboration_role: string;
+    autonomy_level: string;
+    confirm_boundaries: string[];
+    report_style: string;
+    collaboration_notes: string;
     candidate_directions: string[];
     recommended_direction: string;
     selected_direction: string;
@@ -89,6 +109,12 @@ export interface BuddyConfirmDirectionResponse {
     profile_id: string;
     buddy_name: string;
     encouragement_style: string;
+    service_intent: string;
+    collaboration_role: string;
+    autonomy_level: string;
+    confirm_boundaries: string[];
+    report_style: string;
+    collaboration_notes: string;
   };
   domain_capability?: {
     domain_id: string;
@@ -163,6 +189,12 @@ export interface BuddySurfaceResponse {
     profile_id: string;
     buddy_name: string;
     encouragement_style: string;
+    service_intent: string;
+    collaboration_role: string;
+    autonomy_level: string;
+    confirm_boundaries: string[];
+    report_style: string;
+    collaboration_notes: string;
   } | null;
   execution_carrier?: BuddyExecutionCarrier | null;
   presentation: {
@@ -215,9 +247,12 @@ export interface BuddySurfaceResponse {
     operation_kind: string;
     operation_status: string;
     operation_error: string;
-    question_count: number;
-    tightened: boolean;
-    next_question: string;
+    service_intent: string;
+    collaboration_role: string;
+    autonomy_level: string;
+    confirm_boundaries: string[];
+    report_style: string;
+    collaboration_notes: string;
     candidate_directions: string[];
     recommended_direction: string;
     selected_direction: string;
@@ -240,28 +275,20 @@ export const buddyApi = {
       body: JSON.stringify(payload),
     });
   },
-  startBuddyClarification(payload: {
-    session_id: string;
-    answer: string;
-    existing_question_count?: number;
-  }) {
-    return request<BuddyOnboardingOperationResponse>("/buddy/onboarding/clarify/start", {
+  startBuddyContractCompile(payload: BuddyContractRequest) {
+    return request<BuddyOnboardingOperationResponse>("/buddy/onboarding/contract/start", {
       method: "POST",
       body: JSON.stringify(payload),
     });
   },
-  answerBuddyClarification(payload: {
-    session_id: string;
-    answer: string;
-    existing_question_count?: number;
-  }) {
-    return request<BuddyClarificationResponse>("/buddy/onboarding/clarify", {
+  submitBuddyContract(payload: BuddyContractRequest) {
+    return request<BuddyContractCompileResponse>("/buddy/onboarding/contract", {
       method: "POST",
       body: JSON.stringify(payload),
     });
   },
-  listBuddyCandidateDirections(sessionId: string) {
-    return request<BuddyClarificationResponse>(
+  getBuddyContractDraft(sessionId: string) {
+    return request<BuddyContractCompileResponse>(
       `/buddy/onboarding/${encodeURIComponent(sessionId)}/candidates`,
     );
   },
@@ -316,3 +343,4 @@ export const buddyApi = {
   },
 };
 
+export default buddyApi;
