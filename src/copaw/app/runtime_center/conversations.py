@@ -72,12 +72,19 @@ class RuntimeConversationFacade:
             session_id=thread_spec.session_id,
             user_id=thread_spec.user_id,
             channel=thread_spec.channel,
-            meta=self._build_conversation_meta(thread_spec),
+            meta=self._build_conversation_meta(thread_spec, include_optional_meta=False),
             messages=history.messages,
         )
 
-    def _build_conversation_meta(self, thread_spec: RuntimeThreadSpec) -> dict[str, object]:
+    def _build_conversation_meta(
+        self,
+        thread_spec: RuntimeThreadSpec,
+        *,
+        include_optional_meta: bool = False,
+    ) -> dict[str, object]:
         meta = _compact_mapping(thread_spec.meta)
+        if not include_optional_meta:
+            return meta
         main_brain_commit = self._get_persisted_main_brain_commit(thread_spec)
         if main_brain_commit is not None:
             meta["main_brain_commit"] = main_brain_commit

@@ -262,6 +262,12 @@ export interface BuddySurfaceResponse {
   };
 }
 
+export interface BuddyEntryResponse {
+  mode: "start-onboarding" | "resume-onboarding" | "chat-ready";
+  profile_id: string | null;
+  session_id: string | null;
+}
+
 export const buddyApi = {
   startBuddyIdentity(payload: BuddyIdentityRequest) {
     return request<BuddyOnboardingOperationResponse>("/buddy/onboarding/identity/start", {
@@ -340,6 +346,12 @@ export const buddyApi = {
       `/buddy/surface${suffix}`,
     );
     return response ?? null;
+  },
+  getBuddyEntry(profileId?: string | null) {
+    const suffix = profileId
+      ? `?profile_id=${encodeURIComponent(profileId)}`
+      : "";
+    return request<BuddyEntryResponse>(`/buddy/entry${suffix}`);
   },
 };
 

@@ -134,7 +134,7 @@ describe("useRuntimeCenter", () => {
     requestRuntimeBusinessAgentsMock.mockResolvedValue([]);
   });
 
-  it("loads canonical surface once and derives business agents from the canonical surface", async () => {
+  it("loads cards first and hydrates main-brain in a follow-up request", async () => {
     let resolveSurface!: (value: RuntimeCenterSurfaceResponse) => void;
     requestRuntimeSurfaceMock.mockReturnValue(
       new Promise<RuntimeCenterSurfaceResponse>((resolve) => {
@@ -144,7 +144,9 @@ describe("useRuntimeCenter", () => {
     const { result } = renderHook(() => useRuntimeCenter());
 
     expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(1);
-    expect(requestRuntimeSurfaceMock).toHaveBeenCalledWith();
+    expect(requestRuntimeSurfaceMock).toHaveBeenCalledWith({
+      sections: ["cards"],
+    });
     expect(requestRuntimeBusinessAgentsMock).not.toHaveBeenCalled();
 
     await act(async () => {
@@ -183,11 +185,19 @@ describe("useRuntimeCenter", () => {
       await Promise.resolve();
     });
 
-    await waitFor(() => !result.current.loading);
+    await waitFor(
+      () =>
+        !result.current.loading &&
+        !result.current.mainBrainLoading &&
+        !result.current.businessAgentsLoading,
+    );
 
     expect(result.current.data).toEqual(
       expect.objectContaining({ surface: mockOverview.surface }),
     );
+    expect(requestRuntimeSurfaceMock).toHaveBeenNthCalledWith(2, {
+      sections: ["main_brain"],
+    });
     expect(result.current.mainBrainData).toEqual(mockMainBrain);
     expect(result.current.buddySummary).toEqual(mockBuddySummary);
     expect(result.current.mainBrainUnavailable).toBe(false);
@@ -220,6 +230,12 @@ describe("useRuntimeCenter", () => {
     expect(result.current.buddySummary).toBeNull();
     expect(result.current.mainBrainUnavailable).toBe(true);
     expect(result.current.mainBrainError).toBeNull();
+    expect(requestRuntimeSurfaceMock).toHaveBeenNthCalledWith(1, {
+      sections: ["cards"],
+    });
+    expect(requestRuntimeSurfaceMock).toHaveBeenNthCalledWith(2, {
+      sections: ["main_brain"],
+    });
   });
 
   it("filters retired goals, schedules, and main-brain overview cards while returning business agents from the canonical surface", async () => {
@@ -295,7 +311,7 @@ describe("useRuntimeCenter", () => {
 
     expect(result.current.data?.cards.map((card) => card.key)).toEqual(["agents", "tasks"]);
     expect(result.current.businessAgents.map((agent) => agent.agent_id)).toEqual(["agent-ops-2"]);
-    expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(1);
+    expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(2);
     expect(requestRuntimeBusinessAgentsMock).not.toHaveBeenCalled();
   });
 
@@ -311,7 +327,12 @@ describe("useRuntimeCenter", () => {
         !result.current.businessAgentsLoading,
     );
 
-    expect(requestRuntimeSurfaceMock).toHaveBeenCalledWith();
+    expect(requestRuntimeSurfaceMock).toHaveBeenNthCalledWith(1, {
+      sections: ["cards"],
+    });
+    expect(requestRuntimeSurfaceMock).toHaveBeenNthCalledWith(2, {
+      sections: ["main_brain"],
+    });
     expect(readBuddyProfileIdMock).not.toHaveBeenCalled();
   });
 
@@ -325,7 +346,7 @@ describe("useRuntimeCenter", () => {
         !result.current.businessAgentsLoading,
     );
 
-    expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(1);
+    expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(2);
 
     vi.useFakeTimers();
     await act(async () => {
@@ -336,7 +357,7 @@ describe("useRuntimeCenter", () => {
       await vi.advanceTimersByTimeAsync(300);
     });
 
-    expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(2);
+    expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(3);
     expect(requestRuntimeSurfaceMock).toHaveBeenLastCalledWith({
       sections: ["main_brain"],
     });
@@ -362,7 +383,7 @@ describe("useRuntimeCenter", () => {
       await vi.advanceTimersByTimeAsync(300);
     });
 
-    expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(1);
+    expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(2);
     vi.useRealTimers();
   });
 
@@ -376,7 +397,7 @@ describe("useRuntimeCenter", () => {
         !result.current.businessAgentsLoading,
     );
 
-    expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(1);
+    expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(2);
 
     vi.useFakeTimers();
     await act(async () => {
@@ -387,7 +408,7 @@ describe("useRuntimeCenter", () => {
       await vi.advanceTimersByTimeAsync(300);
     });
 
-    expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(2);
+    expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(3);
     expect(requestRuntimeSurfaceMock).toHaveBeenLastCalledWith({
       sections: ["cards"],
     });
@@ -404,7 +425,7 @@ describe("useRuntimeCenter", () => {
         !result.current.businessAgentsLoading,
     );
 
-    expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(1);
+    expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(2);
 
     vi.useFakeTimers();
     await act(async () => {
@@ -419,7 +440,7 @@ describe("useRuntimeCenter", () => {
       await vi.advanceTimersByTimeAsync(300);
     });
 
-    expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(2);
+    expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(3);
     expect(requestRuntimeSurfaceMock).toHaveBeenLastCalledWith({
       sections: ["cards", "main_brain"],
     });
@@ -445,7 +466,7 @@ describe("useRuntimeCenter", () => {
       await vi.advanceTimersByTimeAsync(300);
     });
 
-    expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(1);
+    expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(2);
     vi.useRealTimers();
   });
 

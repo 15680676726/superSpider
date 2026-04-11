@@ -1,39 +1,34 @@
-import type { BuddySurfaceResponse } from "../api/modules/buddy";
+import type { BuddyEntryResponse } from "../api/modules/buddy";
 
 export const BUDDY_IDENTITY_CENTER_ROUTE = "/buddy-onboarding";
 
 export type BuddyEntryDecision =
-  | { mode: "start-onboarding"; sessionId: null }
-  | { mode: "resume-onboarding"; sessionId: string | null }
-  | { mode: "chat-ready"; sessionId: null };
+  | { mode: "start-onboarding"; sessionId: null; profileId: null }
+  | { mode: "resume-onboarding"; sessionId: string | null; profileId: string | null }
+  | { mode: "chat-ready"; sessionId: null; profileId: string | null };
 
-function hasProfile(surface: BuddySurfaceResponse | null | undefined): boolean {
-  return Boolean(surface?.profile?.profile_id);
-}
-
-function hasExecutionCarrier(
-  surface: BuddySurfaceResponse | null | undefined,
-): boolean {
-  if (!surface?.execution_carrier) {
-    return false;
+function normalizeId(value: string | null | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
   }
-  const instanceId = surface.execution_carrier.instance_id;
-  return typeof instanceId === "string" && instanceId.trim().length > 0;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 export function resolveBuddyEntryDecision(
-  surface: BuddySurfaceResponse | null | undefined,
+  entry: BuddyEntryResponse | null | undefined,
 ): BuddyEntryDecision {
-  if (!hasProfile(surface)) {
-    return { mode: "start-onboarding", sessionId: null };
+  if (!entry) {
+    return { mode: "start-onboarding", sessionId: null, profileId: null };
   }
-  const onboarding = surface?.onboarding;
-  const sessionId = onboarding?.session_id ?? null;
-  if (!onboarding) {
-    return { mode: "resume-onboarding", sessionId };
+  const mode = String(entry.mode || "").trim();
+  const profileId = normalizeId(entry.profile_id);
+  const sessionId = normalizeId(entry.session_id);
+  if (mode === "chat-ready") {
+    return { mode: "chat-ready", sessionId: null, profileId };
   }
-  if (onboarding.completed && hasExecutionCarrier(surface)) {
-    return { mode: "chat-ready", sessionId: null };
+  if (mode === "resume-onboarding") {
+    return { mode: "resume-onboarding", sessionId, profileId };
   }
-  return { mode: "resume-onboarding", sessionId };
+  return { mode: "start-onboarding", sessionId: null, profileId: null };
 }

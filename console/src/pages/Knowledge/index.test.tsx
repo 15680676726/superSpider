@@ -129,6 +129,87 @@ function mockKnowledgePageRequests() {
 }
 
 describe("KnowledgePage", () => {
+  it("does not request memory workspace before the main page payload resolves", async () => {
+    let resolveStrategies!: (value: unknown) => void;
+    let resolveDocuments!: (value: unknown) => void;
+    let resolveChunks!: (value: unknown) => void;
+    let resolveKnowledgeMemory!: (value: unknown) => void;
+    let resolveAgents!: (value: unknown) => void;
+
+    requestMock.mockImplementation((url: string) => {
+      if (url === "/runtime-center/strategy-memory?status=active&limit=20") {
+        return new Promise((resolve) => {
+          resolveStrategies = resolve;
+        });
+      }
+      if (url === "/runtime-center/knowledge/documents") {
+        return new Promise((resolve) => {
+          resolveDocuments = resolve;
+        });
+      }
+      if (url === "/runtime-center/knowledge") {
+        return new Promise((resolve) => {
+          resolveChunks = resolve;
+        });
+      }
+      if (url === "/runtime-center/knowledge/memory") {
+        return new Promise((resolve) => {
+          resolveKnowledgeMemory = resolve;
+        });
+      }
+      if (url === "/runtime-center/agents?view=business") {
+        return new Promise((resolve) => {
+          resolveAgents = resolve;
+        });
+      }
+      if (url.startsWith("/runtime-center/memory/")) {
+        return Promise.resolve([]);
+      }
+      if (url === "/runtime-center/agents/agent-1") {
+        return Promise.resolve({
+          agent: {
+            agent_id: "agent-1",
+            name: "执行位甲",
+          },
+          mailbox: [],
+          checkpoints: [],
+          leases: [],
+          growth: [],
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    render(<KnowledgePage />);
+
+    expect(requestMock).toHaveBeenCalledWith(
+      "/runtime-center/strategy-memory?status=active&limit=20",
+    );
+    expect(requestMock).not.toHaveBeenCalledWith("/runtime-center/memory/backends");
+
+    resolveStrategies([
+      {
+        strategy_id: "strategy-1",
+        scope_type: "global",
+        title: "正式战略",
+        summary: "统一主链",
+        mission: "维持运行一致性",
+        north_star: "单一运行真相",
+        thinking_axes: ["strategy"],
+        delegation_policy: ["lane-first"],
+        evidence_requirements: ["evidence"],
+        status: "active",
+      },
+    ]);
+    resolveDocuments([]);
+    resolveChunks([]);
+    resolveKnowledgeMemory([]);
+    resolveAgents([createAgentProfile()]);
+
+    expect(await screen.findByText("正式战略")).toBeTruthy();
+    expect(requestMock).toHaveBeenCalledWith("/runtime-center/memory/backends");
+  });
+
   it("does not render legacy active goal titles in strategy cards", async () => {
     mockKnowledgePageRequests();
 

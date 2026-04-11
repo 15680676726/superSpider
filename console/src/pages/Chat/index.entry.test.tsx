@@ -30,6 +30,10 @@ const buddyChatEntryMock = vi.hoisted(() => ({
   resumeBuddyChatFromProfile: vi.fn(),
 }));
 
+const runtimeBindingHookMock = vi.hoisted(() => ({
+  useRuntimeBinding: vi.fn(),
+}));
+
 vi.mock("react-router-dom", async () => {
   const actual = await vi.importActual<typeof import("react-router-dom")>(
     "react-router-dom",
@@ -58,13 +62,7 @@ vi.mock("../../runtime/buddyProfileBinding", async () => {
 vi.mock("../../runtime/buddyChatEntry", () => buddyChatEntryMock);
 
 vi.mock("./useRuntimeBinding", () => ({
-  useRuntimeBinding: vi.fn(() => ({
-    activeAgentId: null,
-    activeChatThreadId: null,
-    activeIndustryId: null,
-    activeIndustryRoleId: null,
-    requestedThreadLooksBound: false,
-  })),
+  useRuntimeBinding: runtimeBindingHookMock.useRuntimeBinding,
 }));
 
 vi.mock("./useChatRuntimeState", () => ({
@@ -119,6 +117,7 @@ import ChatPage from "./index";
 describe("ChatPage entry routing", () => {
   beforeEach(() => {
     routerMocks.navigate.mockReset();
+    routerMocks.location.search = "";
     sessionApiMock.getActiveThreadId.mockReset();
     sessionApiMock.setPreferredThreadId.mockReset();
     sessionApiMock.clearBoundThreadContext.mockReset();
@@ -129,6 +128,13 @@ describe("ChatPage entry routing", () => {
     sessionApiMock.getActiveThreadId.mockReturnValue(null);
     buddyProfileBindingMock.readBuddyProfileId.mockReturnValue("profile-1");
     buddyChatEntryMock.resumeBuddyChatFromProfile.mockResolvedValue("opened");
+    runtimeBindingHookMock.useRuntimeBinding.mockReturnValue({
+      activeAgentId: null,
+      activeChatThreadId: null,
+      activeIndustryId: null,
+      activeIndustryRoleId: null,
+      requestedThreadLooksBound: false,
+    });
   });
 
   it("opens buddy chat directly from /chat when a buddy profile already exists", async () => {
@@ -148,5 +154,30 @@ describe("ChatPage entry routing", () => {
     expect(routerMocks.navigate).not.toHaveBeenCalledWith("/", {
       replace: true,
     });
+  });
+
+  it("does not clear bound thread context on a temporary session bootstrap miss", async () => {
+    routerMocks.location.search =
+      "?threadId=industry-chat%3Aindustry-v1-acme%3Aexecution-core";
+    buddyProfileBindingMock.readBuddyProfileId.mockReturnValue(null);
+    sessionApiMock.getSession.mockRejectedValue(new Error("temporary miss"));
+    runtimeBindingHookMock.useRuntimeBinding.mockReturnValue({
+      activeAgentId: "copaw-agent-runner",
+      activeChatThreadId: "industry-chat:industry-v1-acme:execution-core",
+      activeIndustryId: "industry-v1-acme",
+      activeIndustryRoleId: "execution-core",
+      requestedThreadLooksBound: true,
+    });
+
+    render(<ChatPage />);
+
+    await waitFor(() => {
+      expect(sessionApiMock.getSession).toHaveBeenCalledWith(
+        "industry-chat:industry-v1-acme:execution-core",
+      );
+    });
+    expect(sessionApiMock.clearBoundThreadContext).not.toHaveBeenCalledWith(
+      "industry-chat:industry-v1-acme:execution-core",
+    );
   });
 });

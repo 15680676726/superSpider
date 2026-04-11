@@ -68,6 +68,12 @@ class BuddyOnboardingOperationResponse(BaseModel):
     operation_status: str
 
 
+class BuddyEntryResponse(BaseModel):
+    mode: str
+    profile_id: str | None = None
+    session_id: str | None = None
+
+
 def _get_buddy_onboarding_service(request: Request) -> BuddyOnboardingService:
     service = getattr(request.app.state, "buddy_onboarding_service", None)
     if isinstance(service, BuddyOnboardingService):
@@ -555,27 +561,6 @@ async def get_buddy_surface(
     request: Request,
     profile_id: str | None = None,
 ):
-    onboarding_service = getattr(request.app.state, "buddy_onboarding_service", None)
-    if isinstance(onboarding_service, BuddyOnboardingService) and profile_id:
-        try:
-            onboarding_service.repair_active_domain_schedules(profile_id=profile_id)
-        except Exception:
-            logger.debug("伙伴读面日程修复失败。", exc_info=True)
-        try:
-            retry_target = onboarding_service.repair_failed_activation(profile_id=profile_id)
-            if retry_target is not None:
-                _maybe_activate_buddy_execution(
-                    request,
-                    session_id=retry_target.session_id,
-                    execution_carrier={"instance_id": retry_target.industry_instance_id},
-                    domain_capability=type(
-                        "_BuddyActivationCarrier",
-                        (),
-                        {"industry_instance_id": retry_target.industry_instance_id},
-                    )(),
-                )
-        except Exception:
-            logger.debug("伙伴读面激活修复失败。", exc_info=True)
     service = _get_buddy_projection_service(request)
     try:
         surface = service.build_optional_chat_surface(profile_id=profile_id)
@@ -584,6 +569,44 @@ async def get_buddy_surface(
     if surface is None:
         return Response(status_code=204)
     return surface.model_dump(mode="json")
+
+
+def _resolve_buddy_entry_mode(*, surface) -> BuddyEntryResponse:
+    onboarding = getattr(surface, "onboarding", None)
+    execution_carrier = getattr(surface, "execution_carrier", None)
+    profile = getattr(surface, "profile", None)
+    profile_id = str(getattr(profile, "profile_id", "") or "").strip() or None
+    session_id = str(getattr(onboarding, "session_id", "") or "").strip() or None
+    onboarding_completed = bool(getattr(onboarding, "completed", False))
+    carrier_instance_id = ""
+    if isinstance(execution_carrier, dict):
+        carrier_instance_id = str(execution_carrier.get("instance_id") or "").strip()
+    if onboarding_completed and carrier_instance_id:
+        return BuddyEntryResponse(
+            mode="chat-ready",
+            profile_id=profile_id,
+            session_id=None,
+        )
+    return BuddyEntryResponse(
+        mode="resume-onboarding",
+        profile_id=profile_id,
+        session_id=session_id,
+    )
+
+
+@router.get("/entry", response_model=BuddyEntryResponse)
+async def get_buddy_entry(
+    request: Request,
+    profile_id: str | None = None,
+) -> BuddyEntryResponse:
+    service = _get_buddy_projection_service(request)
+    try:
+        surface = service.build_optional_chat_surface(profile_id=profile_id)
+    except ValueError as exc:
+        raise HTTPException(404, detail=str(exc)) from exc
+    if surface is None:
+        return BuddyEntryResponse(mode="start-onboarding", profile_id=None, session_id=None)
+    return _resolve_buddy_entry_mode(surface=surface)
 
 
 __all__ = ["router"]

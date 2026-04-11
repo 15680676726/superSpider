@@ -180,6 +180,7 @@ export default function SystemSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [runningSelfCheck, setRunningSelfCheck] = useState(false);
+  const [, setSelfCheckLoading] = useState(true);
   const [savingFallback, setSavingFallback] = useState(false);
   const [restoringBackup, setRestoringBackup] = useState(false);
   const [restoreFiles, setRestoreFiles] = useState<UploadFile[]>([]);
@@ -205,6 +206,19 @@ export default function SystemSettingsPage() {
     [maintenanceChecks],
   );
 
+  const loadSelfCheck = async () => {
+    setSelfCheckLoading(true);
+    try {
+      const payload = await api.runSystemSelfCheck();
+      setSelfCheck(payload);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSelfCheckLoading(false);
+    }
+  };
+
   const loadAll = async (mode: "initial" | "refresh" = "refresh") => {
     if (mode === "initial") {
       setLoading(true);
@@ -212,15 +226,12 @@ export default function SystemSettingsPage() {
       setRefreshing(true);
     }
     try {
-      const [overviewPayload, selfCheckPayload, fallbackPayload, providerPayload] =
-        await Promise.all([
-          api.getSystemOverview(),
-          api.runSystemSelfCheck(),
-          api.getProviderFallback(),
-          api.listProviders(),
-        ]);
+      const [overviewPayload, fallbackPayload, providerPayload] = await Promise.all([
+        api.getSystemOverview(),
+        api.getProviderFallback(),
+        api.listProviders(),
+      ]);
       setOverview(overviewPayload);
-      setSelfCheck(selfCheckPayload);
       setFallbackConfig(fallbackPayload);
       setProviders(providerPayload);
       setError(null);
@@ -230,6 +241,7 @@ export default function SystemSettingsPage() {
       setLoading(false);
       setRefreshing(false);
     }
+    void loadSelfCheck();
   };
 
   useEffect(() => {

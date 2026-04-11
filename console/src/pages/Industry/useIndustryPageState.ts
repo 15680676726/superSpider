@@ -233,10 +233,9 @@ export function useIndustryPageState({
         const buddySurfacePromise = Promise.resolve(api.getBuddySurface()).catch(
           () => null,
         );
-        const [buddySurface, activePayload, retiredPayload] = await Promise.all([
+        const [buddySurface, activePayload] = await Promise.all([
           buddySurfacePromise,
           api.listIndustryInstances({ status: "active" }),
-          api.listIndustryInstances({ status: "retired" }),
         ]);
         const resolvedBuddyProfileId = resolveCanonicalBuddyProfileId(
           buddySurface?.profile?.profile_id,
@@ -248,57 +247,96 @@ export function useIndustryPageState({
         setCurrentBuddyProfileId(resolvedBuddyProfileId || null);
         setCurrentBuddyCarrierInstanceId(resolvedBuddyCarrierInstanceId);
         const nextInstances = Array.isArray(activePayload) ? activePayload : [];
-        const nextRetiredInstances = Array.isArray(retiredPayload)
-          ? retiredPayload
-          : [];
-        const knownInstanceIds = new Set(
-          [...nextInstances, ...nextRetiredInstances].map((item) => item.instance_id),
-        );
-        let hydratedCurrentCarrier: IndustryInstanceDetail | null = null;
-        if (
-          resolvedBuddyCarrierInstanceId
-          && !knownInstanceIds.has(resolvedBuddyCarrierInstanceId)
-        ) {
-          try {
-            hydratedCurrentCarrier = await api.getRuntimeIndustryDetail(
-              resolvedBuddyCarrierInstanceId,
-            );
-          } catch {
-            hydratedCurrentCarrier = null;
-          }
-          if (hydratedCurrentCarrier) {
-            const targetBucket =
-              hydratedCurrentCarrier.status === "retired"
-                ? nextRetiredInstances
-                : nextInstances;
-            targetBucket.unshift(hydratedCurrentCarrier);
-          }
-        }
         setInstances(nextInstances);
-        setRetiredInstances(nextRetiredInstances);
         const candidateId = preferredInstanceId ?? selectedInstanceIdRef.current;
         const nextSelected = resolvePreferredIndustryInstanceId({
-          instances: [...nextInstances, ...nextRetiredInstances],
+          instances: nextInstances,
           preferredInstanceId: candidateId,
           buddyCarrierInstanceId: resolvedBuddyCarrierInstanceId,
           buddyProfileId: resolvedBuddyProfileId,
         });
         setSelectedInstanceId(nextSelected);
-        const nextDetailByInstanceId = hydratedCurrentCarrier
-          ? {
-              ...industryPageStateCache.detailByInstanceId,
-              [hydratedCurrentCarrier.instance_id]: hydratedCurrentCarrier,
-            }
-          : industryPageStateCache.detailByInstanceId;
         industryPageStateCache = {
           ...industryPageStateCache,
           instances: nextInstances,
-          retiredInstances: nextRetiredInstances,
+          retiredInstances: industryPageStateCache.retiredInstances,
           selectedInstanceId: nextSelected,
           currentBuddyProfileId: resolvedBuddyProfileId || null,
           currentBuddyCarrierInstanceId: resolvedBuddyCarrierInstanceId,
-          detailByInstanceId: nextDetailByInstanceId,
         };
+        void (async () => {
+          try {
+            const retiredPayload = await api.listIndustryInstances({ status: "retired" });
+            const nextRetiredInstances = Array.isArray(retiredPayload)
+              ? retiredPayload
+              : [];
+            let nextActiveInstances = nextInstances;
+            let hydratedCurrentCarrier: IndustryInstanceDetail | null = null;
+            const knownInstanceIds = new Set(
+              [...nextInstances, ...nextRetiredInstances].map((item) => item.instance_id),
+            );
+            if (
+              resolvedBuddyCarrierInstanceId &&
+              !knownInstanceIds.has(resolvedBuddyCarrierInstanceId)
+            ) {
+              try {
+                hydratedCurrentCarrier = await api.getRuntimeIndustryDetail(
+                  resolvedBuddyCarrierInstanceId,
+                );
+              } catch {
+                hydratedCurrentCarrier = null;
+              }
+              if (hydratedCurrentCarrier) {
+                if (hydratedCurrentCarrier.status === "retired") {
+                  nextRetiredInstances.unshift(hydratedCurrentCarrier);
+                } else {
+                  nextActiveInstances = [hydratedCurrentCarrier, ...nextInstances];
+                }
+              }
+            }
+
+            setInstances(nextActiveInstances);
+            setRetiredInstances(nextRetiredInstances);
+
+            const nextResolvedSelected = resolvePreferredIndustryInstanceId({
+              instances: [...nextActiveInstances, ...nextRetiredInstances],
+              preferredInstanceId: preferredInstanceId ?? selectedInstanceIdRef.current,
+              buddyCarrierInstanceId: resolvedBuddyCarrierInstanceId,
+              buddyProfileId: resolvedBuddyProfileId,
+            });
+            if (
+              !preferredInstanceId &&
+              (selectedInstanceIdRef.current == null ||
+                selectedInstanceIdRef.current === nextSelected)
+            ) {
+              setSelectedInstanceId(nextResolvedSelected);
+            }
+
+            industryPageStateCache = {
+              ...industryPageStateCache,
+              instances: nextActiveInstances,
+              retiredInstances: nextRetiredInstances,
+              selectedInstanceId:
+                !preferredInstanceId &&
+                (selectedInstanceIdRef.current == null ||
+                  selectedInstanceIdRef.current === nextSelected)
+                  ? nextResolvedSelected
+                  : industryPageStateCache.selectedInstanceId,
+              currentBuddyProfileId: resolvedBuddyProfileId || null,
+              currentBuddyCarrierInstanceId: resolvedBuddyCarrierInstanceId,
+              detailByInstanceId: hydratedCurrentCarrier
+                ? {
+                    ...industryPageStateCache.detailByInstanceId,
+                    [hydratedCurrentCarrier.instance_id]: hydratedCurrentCarrier,
+                  }
+                : industryPageStateCache.detailByInstanceId,
+            };
+          } catch (fetchError) {
+            setError(
+              fetchError instanceof Error ? fetchError.message : String(fetchError),
+            );
+          }
+        })();
       } catch (fetchError) {
         setError(
           fetchError instanceof Error ? fetchError.message : String(fetchError),

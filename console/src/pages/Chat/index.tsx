@@ -371,9 +371,7 @@ export default function ChatPage() {
       })
       .catch((err) => {
         if (!cancelled) {
-          sessionApi.clearBoundThreadContext(activeRequestedThreadId);
           setThreadBootstrapError(err instanceof Error ? err.message : String(err));
-          setThreadMeta({});
         }
       })
       .finally(() => { if (!cancelled) setThreadBootstrapPending(false); });

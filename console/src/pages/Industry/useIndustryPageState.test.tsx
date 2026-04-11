@@ -120,6 +120,61 @@ describe("useIndustryPageState", () => {
     );
   });
 
+  it("shows the active list before retired carriers finish loading", async () => {
+    let resolveRetired!: (value: unknown) => void;
+    mockedListIndustryInstances.mockImplementation((options) => {
+      const status =
+        typeof options === "object" && options ? options.status : undefined;
+      if (status === "retired") {
+        return new Promise((resolve) => {
+          resolveRetired = resolve;
+        }) as never;
+      }
+      return Promise.resolve([
+        {
+          instance_id: "industry-active",
+          label: "Active Team",
+          owner_scope: "industry-active",
+          team: { agents: [] },
+        },
+      ]) as never;
+    });
+    mockedGetRuntimeIndustryDetail.mockResolvedValue({
+      instance_id: "industry-active",
+      label: "Active Team",
+      owner_scope: "industry-active",
+      profile: { industry: "Retail" },
+      team: { agents: [] },
+      media_analyses: [],
+    } as never);
+
+    const { result } = renderHook(() => {
+      const [briefForm] = Form.useForm();
+      const [draftForm] = Form.useForm();
+      return useIndustryPageState({
+        briefForm,
+        draftForm,
+        navigate: vi.fn() as never,
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.instances).toHaveLength(1);
+    });
+
+    expect(result.current.loadingInstances).toBe(false);
+    expect(result.current.retiredInstances).toHaveLength(0);
+
+    await act(async () => {
+      resolveRetired([]);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(result.current.retiredInstances).toHaveLength(0);
+    });
+  });
+
   it("prefers the buddy-generated execution carrier over unrelated active instances", async () => {
     mockedGetBuddySurface.mockResolvedValue({
       profile: {

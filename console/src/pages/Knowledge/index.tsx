@@ -491,8 +491,17 @@ export default function KnowledgePage() {
   }, [memoryBackend, memoryRole, memoryScopeId, memoryScopeType, recallQuery]);
 
   useEffect(() => {
-    void loadPage();
-    void loadMemoryWorkspace();
+    let disposed = false;
+    void (async () => {
+      await loadPage();
+      if (disposed) {
+        return;
+      }
+      await loadMemoryWorkspace();
+    })();
+    return () => {
+      disposed = true;
+    };
   }, [loadMemoryWorkspace, loadPage]);
 
   useEffect(() => {
@@ -536,7 +545,8 @@ export default function KnowledgePage() {
       });
       message.success("持久事实已保存至核心记忆。");
       memoryForm.resetFields();
-      await Promise.all([loadPage(), loadMemoryWorkspace()]);
+      await loadPage();
+      await loadMemoryWorkspace();
     } catch (saveError) {
       message.error(saveError instanceof Error ? saveError.message : String(saveError));
     }

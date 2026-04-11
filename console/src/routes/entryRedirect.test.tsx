@@ -9,6 +9,7 @@ import { resetBuddyProfileBindingForTests } from "../runtime/buddyProfileBinding
 const { navigateMock, apiMock } = vi.hoisted(() => ({
   navigateMock: vi.fn(),
   apiMock: {
+    getBuddyEntry: vi.fn(),
     getBuddySurface: vi.fn(),
   },
 }));
@@ -118,6 +119,7 @@ describe("EntryRedirect", () => {
     resetBuddyProfileBindingForTests();
     (window as RuntimeWindow).currentThreadMeta = undefined;
     navigateMock.mockReset();
+    apiMock.getBuddyEntry.mockReset();
     apiMock.getBuddySurface.mockReset();
     runtimeChatMock.buildBuddyExecutionCarrierChatBinding.mockReset();
     runtimeChatMock.openRuntimeChat.mockReset();
@@ -135,56 +137,32 @@ describe("EntryRedirect", () => {
 
   it("keeps unfinished buddy onboarding on the onboarding page", async () => {
     window.localStorage.setItem("copaw.buddy_profile_id", "profile-1");
-    apiMock.getBuddySurface.mockResolvedValue(
-      buildSurface({
-        onboarding: {
-          session_id: "session-1",
-          status: "confirmed",
-          operation_id: "",
-          operation_kind: "",
-          operation_status: "idle",
-          operation_error: "",
-          service_intent: "Help me build a durable writing lane.",
-          collaboration_role: "orchestrator",
-          autonomy_level: "guarded-proactive",
-          confirm_boundaries: ["external spend"],
-          report_style: "decision-first",
-          collaboration_notes: "Keep it concise.",
-          candidate_directions: ["Build a durable writing lane."],
-          recommended_direction: "Build a durable writing lane.",
-          selected_direction: "Build a durable writing lane.",
-          requires_direction_confirmation: false,
-          requires_naming: true,
-          completed: false,
-        },
-        execution_carrier: {
-          instance_id: "buddy:profile-1:domain-writing",
-          label: "Writing carrier",
-          owner_scope: "profile-1",
-          current_cycle_id: "cycle-1",
-          team_generated: true,
-          thread_id:
-            "industry-chat:buddy:profile-1:domain-writing:execution-core",
-          control_thread_id:
-            "industry-chat:buddy:profile-1:domain-writing:execution-core",
-        },
-      }),
-    );
+    apiMock.getBuddyEntry.mockResolvedValue({
+      mode: "resume-onboarding",
+      profile_id: "profile-1",
+      session_id: "session-1",
+    });
 
     render(<EntryRedirect />);
 
     await waitFor(() => {
-      expect(apiMock.getBuddySurface).toHaveBeenCalledWith("profile-1");
+      expect(apiMock.getBuddyEntry).toHaveBeenCalledWith("profile-1");
       expect(navigateMock).toHaveBeenCalledWith("/buddy-onboarding", {
         replace: true,
       });
     });
+    expect(apiMock.getBuddySurface).not.toHaveBeenCalled();
   });
 
   it("falls back to the active thread buddy profile when storage is empty", async () => {
     (window as RuntimeWindow).currentThreadMeta = {
       buddy_profile_id: "profile-1",
     };
+    apiMock.getBuddyEntry.mockResolvedValue({
+      mode: "chat-ready",
+      profile_id: "profile-1",
+      session_id: null,
+    });
     apiMock.getBuddySurface.mockResolvedValue(
       buildSurface({
         growth_target: {
@@ -247,12 +225,41 @@ describe("EntryRedirect", () => {
     render(<EntryRedirect />);
 
     await waitFor(() => {
+      expect(apiMock.getBuddyEntry).toHaveBeenCalledWith("profile-1");
       expect(apiMock.getBuddySurface).toHaveBeenCalledWith("profile-1");
     });
   });
 
+  it("persists the thread buddy profile before returning to onboarding", async () => {
+    (window as RuntimeWindow).currentThreadMeta = {
+      buddy_profile_id: "profile-1",
+    };
+    apiMock.getBuddyEntry.mockResolvedValue({
+      mode: "resume-onboarding",
+      profile_id: "profile-1",
+      session_id: "session-1",
+    });
+
+    render(<EntryRedirect />);
+
+    await waitFor(() => {
+      expect(apiMock.getBuddyEntry).toHaveBeenCalledWith("profile-1");
+      expect(navigateMock).toHaveBeenCalledWith("/buddy-onboarding", {
+        replace: true,
+      });
+    });
+
+    expect(window.localStorage.getItem("copaw.buddy_profile_id")).toBe("profile-1");
+    expect(apiMock.getBuddySurface).not.toHaveBeenCalled();
+  });
+
   it("opens chat directly when the buddy is already ready", async () => {
     window.localStorage.setItem("copaw.buddy_profile_id", "profile-1");
+    apiMock.getBuddyEntry.mockResolvedValue({
+      mode: "chat-ready",
+      profile_id: "profile-1",
+      session_id: null,
+    });
     apiMock.getBuddySurface.mockResolvedValue(
       buildSurface({
         growth_target: {
@@ -320,8 +327,9 @@ describe("EntryRedirect", () => {
     expect(screen.getByText("正在为你打开伙伴主场…")).toBeInTheDocument();
 
     await waitFor(() => {
+      expect(apiMock.getBuddyEntry).toHaveBeenCalledWith("profile-1");
       expect(runtimeChatMock.buildBuddyExecutionCarrierChatBinding).toHaveBeenCalledWith({
-        sessionId: "session-1",
+        sessionId: null,
         profileId: "profile-1",
         profileDisplayName: "Alex",
         executionCarrier: expect.objectContaining({

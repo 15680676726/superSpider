@@ -27,6 +27,7 @@ import {
   readBuddyProfileId,
   writeBuddyProfileId,
 } from "../../runtime/buddyProfileBinding";
+import { seedBuddySummary } from "../../runtime/buddySummaryStore";
 import {
   buildBuddyExecutionCarrierChatBinding,
   openRuntimeChat,
@@ -295,12 +296,20 @@ export default function BuddyOnboardingPage() {
 
     void (async () => {
       try {
-        const surface = await api.getBuddySurface(readBuddyProfileId());
+        const requestedProfileId = readBuddyProfileId();
+        const entry = await api.getBuddyEntry(requestedProfileId);
+        if (cancelled) return;
+        const decision = resolveBuddyEntryDecision(entry);
+        const profileIdFromEntry = decision.profileId ?? requestedProfileId ?? undefined;
+        if (decision.mode === "start-onboarding") {
+          return;
+        }
+        const surface = await api.getBuddySurface(profileIdFromEntry);
         if (cancelled) return;
         if (surface?.profile?.profile_id) {
           writeBuddyProfileId(surface.profile.profile_id);
+          seedBuddySummary(surface.profile.profile_id, surface);
         }
-        const decision = resolveBuddyEntryDecision(surface);
         if (decision.mode === "chat-ready" && surface?.profile?.profile_id) {
           if (!surface.execution_carrier) {
             setError("伙伴聊天主场还没准备好，请刷新后重试。");

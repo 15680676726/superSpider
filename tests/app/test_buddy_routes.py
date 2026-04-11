@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 import copaw.app.routers.buddy_routes as buddy_routes_module
 from copaw.app.routers.buddy_routes import router as buddy_router
+from copaw.kernel.buddy_projection_service import BuddyProjectionService
 from copaw.kernel.buddy_domain_capability_growth import BuddyDomainCapabilityGrowthService
 from copaw.kernel.buddy_onboarding_reasoner import BuddyOnboardingBacklogSeed
 from copaw.kernel.buddy_onboarding_service import (
@@ -180,16 +181,21 @@ class _FakeCronManager:
 def _build_client(tmp_path) -> tuple[TestClient, SQLiteStateStore]:
     store = SQLiteStateStore(tmp_path / "buddy-routes.sqlite3")
     industry_repository = SqliteIndustryInstanceRepository(store)
+    profile_repository = SqliteHumanProfileRepository(store)
+    growth_target_repository = SqliteGrowthTargetRepository(store)
+    relationship_repository = SqliteCompanionRelationshipRepository(store)
+    domain_capability_repository = SqliteBuddyDomainCapabilityRepository(store)
+    onboarding_session_repository = SqliteBuddyOnboardingSessionRepository(store)
     lane_service = OperatingLaneService(repository=SqliteOperatingLaneRepository(store))
     backlog_service = BacklogService(repository=SqliteBacklogItemRepository(store))
     cycle_service = OperatingCycleService(repository=SqliteOperatingCycleRepository(store))
     assignment_service = AssignmentService(repository=SqliteAssignmentRepository(store))
     service = BuddyOnboardingService(
-        profile_repository=SqliteHumanProfileRepository(store),
-        growth_target_repository=SqliteGrowthTargetRepository(store),
-        relationship_repository=SqliteCompanionRelationshipRepository(store),
-        domain_capability_repository=SqliteBuddyDomainCapabilityRepository(store),
-        onboarding_session_repository=SqliteBuddyOnboardingSessionRepository(store),
+        profile_repository=profile_repository,
+        growth_target_repository=growth_target_repository,
+        relationship_repository=relationship_repository,
+        domain_capability_repository=domain_capability_repository,
+        onboarding_session_repository=onboarding_session_repository,
         onboarding_reasoner=_DeterministicContractCompiler(),
         industry_instance_repository=industry_repository,
         operating_lane_service=lane_service,
@@ -198,7 +204,7 @@ def _build_client(tmp_path) -> tuple[TestClient, SQLiteStateStore]:
         assignment_service=assignment_service,
         schedule_repository=SqliteScheduleRepository(store),
         domain_capability_growth_service=BuddyDomainCapabilityGrowthService(
-            domain_capability_repository=SqliteBuddyDomainCapabilityRepository(store),
+            domain_capability_repository=domain_capability_repository,
             industry_instance_repository=industry_repository,
             operating_lane_service=lane_service,
             backlog_service=backlog_service,
@@ -206,8 +212,16 @@ def _build_client(tmp_path) -> tuple[TestClient, SQLiteStateStore]:
             assignment_service=assignment_service,
         ),
     )
+    projection_service = BuddyProjectionService(
+        profile_repository=profile_repository,
+        growth_target_repository=growth_target_repository,
+        relationship_repository=relationship_repository,
+        onboarding_session_repository=onboarding_session_repository,
+        domain_capability_repository=domain_capability_repository,
+    )
     app = FastAPI()
     app.state.buddy_onboarding_service = service
+    app.state.buddy_projection_service = projection_service
     app.state.cron_manager = _FakeCronManager()
     app.include_router(buddy_router)
     return TestClient(app), store
@@ -427,3 +441,128 @@ def test_direction_transition_preview_suggests_keep_active_for_same_domain(tmp_p
     assert preview.status_code == 200
     assert preview.json()["suggestion_kind"] == "same-domain"
     assert preview.json()["recommended_action"] == "keep-active"
+
+
+def test_buddy_surface_is_pure_read_without_repair_side_effects(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    client, _store = _build_client(tmp_path)
+    identity = client.post(
+        "/buddy/onboarding/identity",
+        json={
+            "display_name": "Mina",
+            "profession": "Writer",
+            "current_stage": "restart",
+            "interests": ["writing"],
+            "strengths": ["consistency"],
+            "constraints": ["time"],
+            "goal_intention": "Build a durable writing direction.",
+        },
+    ).json()
+    profile_id = identity["profile"]["profile_id"]
+
+    calls = {
+        "repair_active_domain_schedules": 0,
+        "repair_failed_activation": 0,
+    }
+
+    def _repair_active_domain_schedules(*, profile_id: str) -> None:
+        _ = profile_id
+        calls["repair_active_domain_schedules"] += 1
+
+    def _repair_failed_activation(*, profile_id: str):
+        _ = profile_id
+        calls["repair_failed_activation"] += 1
+        return None
+
+    monkeypatch.setattr(
+        client.app.state.buddy_onboarding_service,
+        "repair_active_domain_schedules",
+        _repair_active_domain_schedules,
+    )
+    monkeypatch.setattr(
+        client.app.state.buddy_onboarding_service,
+        "repair_failed_activation",
+        _repair_failed_activation,
+    )
+
+    response = client.get("/buddy/surface", params={"profile_id": profile_id})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["profile"]["profile_id"] == profile_id
+    assert calls["repair_active_domain_schedules"] == 0
+    assert calls["repair_failed_activation"] == 0
+
+
+def test_buddy_entry_returns_resume_onboarding_for_existing_profile(tmp_path) -> None:
+    client, _store = _build_client(tmp_path)
+    identity = client.post(
+        "/buddy/onboarding/identity",
+        json={
+            "display_name": "Mina",
+            "profession": "Writer",
+            "current_stage": "restart",
+            "interests": ["writing"],
+            "strengths": ["consistency"],
+            "constraints": ["time"],
+            "goal_intention": "Build a durable writing direction.",
+        },
+    ).json()
+    profile_id = identity["profile"]["profile_id"]
+
+    response = client.get("/buddy/entry", params={"profile_id": profile_id})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["mode"] == "resume-onboarding"
+    assert payload["profile_id"] == profile_id
+    assert payload["session_id"] == identity["session_id"]
+
+
+def test_buddy_entry_returns_chat_ready_for_completed_onboarding(tmp_path) -> None:
+    client, _store = _build_client(tmp_path)
+    identity = client.post(
+        "/buddy/onboarding/identity",
+        json={
+            "display_name": "Mina",
+            "profession": "Writer",
+            "current_stage": "restart",
+            "interests": ["writing", "content"],
+            "strengths": ["consistency"],
+            "constraints": ["time"],
+            "goal_intention": "Build a creator direction.",
+        },
+    ).json()
+    contract = client.post(
+        "/buddy/onboarding/contract",
+        json={"session_id": identity["session_id"], **_contract_payload()},
+    ).json()
+    confirm = client.post(
+        "/buddy/onboarding/confirm-direction",
+        json={
+            "session_id": identity["session_id"],
+            "selected_direction": contract["recommended_direction"],
+            "capability_action": "start-new",
+        },
+    ).json()
+    name_response = client.post(
+        "/buddy/name",
+        json={
+            "session_id": identity["session_id"],
+            "buddy_name": "Nova",
+        },
+    )
+    assert name_response.status_code == 200
+
+    response = client.get(
+        "/buddy/entry",
+        params={"profile_id": confirm["session"]["profile_id"]},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["mode"] == "chat-ready"
+    assert payload["profile_id"] == confirm["session"]["profile_id"]
+    assert payload["session_id"] is None

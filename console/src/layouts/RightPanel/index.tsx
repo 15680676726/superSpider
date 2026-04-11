@@ -4,7 +4,6 @@ import { Col, Progress, Row, Spin, Statistic, Tag, Typography } from "antd";
 import { useLocation } from "react-router-dom";
 
 import type { BuddySurfaceResponse } from "../../api/modules/buddy";
-import { api } from "../../api";
 import {
   BUDDY_ANIMATION_INTERVAL_MS,
   buildBuddyAvatarView,
@@ -16,10 +15,14 @@ import {
   BUDDY_PROFILE_CHANGED_EVENT,
   readActiveBuddyProfileId,
 } from "../../runtime/buddyProfileBinding";
+import {
+  getBuddySummarySnapshot,
+  subscribeBuddySummary,
+  type BuddySummarySnapshot,
+} from "../../runtime/buddySummaryStore";
 import styles from "./index.module.less";
 
 const { Text } = Typography;
-const BUDDY_PANEL_REFRESH_MS = 5 * 60 * 1000;
 
 interface CustomWindow extends Window {
   currentThreadMeta?: Record<string, unknown>;
@@ -47,15 +50,21 @@ export default function RightPanel() {
   const [boundProfileId, setBoundProfileId] = useState<string | null>(() =>
     readActiveBuddyProfileId(window.currentThreadMeta),
   );
-  const [surface, setSurface] = useState<BuddySurfaceResponse | null>(null);
-  const [loading, setLoading] = useState(() =>
-    Boolean(readActiveBuddyProfileId(window.currentThreadMeta)),
-  );
+  const initialSnapshot = (() => {
+    const profileId = readActiveBuddyProfileId(window.currentThreadMeta);
+    return profileId
+      ? getBuddySummarySnapshot(profileId)
+      : { loading: false, error: null, surface: null };
+  })();
+  const [summarySnapshot, setSummarySnapshot] =
+    useState<BuddySummarySnapshot>(initialSnapshot);
   const [tick, setTick] = useState(0);
   const [documentVisible, setDocumentVisible] = useState(
     () => typeof document === "undefined" || document.visibilityState !== "hidden",
   );
   const shouldShowPanel = Boolean(boundProfileId);
+  const surface: BuddySurfaceResponse | null = summarySnapshot.surface;
+  const loading = summarySnapshot.loading;
   const shouldAnimateAvatar =
     shouldShowPanel &&
     !collapsed &&
@@ -94,37 +103,16 @@ export default function RightPanel() {
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
     if (!boundProfileId) {
-      setSurface(null);
-      setLoading(false);
-      return () => { cancelled = true; };
-    }
-
-    setLoading(true);
-    void api.getBuddySurface(boundProfileId).then((s) => {
-      if (!cancelled) { setSurface(s); setLoading(false); }
-    }).catch(() => {
-      if (!cancelled) setLoading(false);
-    });
-    return () => { cancelled = true; };
-  }, [boundProfileId]);
-
-  useEffect(() => {
-    if (!boundProfileId) {
+      setSummarySnapshot({
+        loading: false,
+        error: null,
+        surface: null,
+      });
       return undefined;
     }
-    const timer = window.setInterval(() => {
-      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
-        return;
-      }
-      void api.getBuddySurface(boundProfileId).then((s) => {
-        setSurface(s);
-      }).catch(() => {
-        /* keep current sidebar snapshot when refresh fails */
-      });
-    }, BUDDY_PANEL_REFRESH_MS);
-    return () => window.clearInterval(timer);
+    setSummarySnapshot(getBuddySummarySnapshot(boundProfileId));
+    return subscribeBuddySummary(boundProfileId, setSummarySnapshot);
   }, [boundProfileId]);
 
   useEffect(() => {

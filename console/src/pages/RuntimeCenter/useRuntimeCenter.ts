@@ -27,6 +27,7 @@ import {
 
 let runtimeCenterSurfaceCache: RuntimeCenterSurfaceResponse | null = null;
 let runtimeCenterBuddySummaryCache: RuntimeMainBrainBuddySummary | null = null;
+let runtimeCenterMainBrainHydratedCache = false;
 
 export type RuntimeCardStatus = "state-service" | "degraded" | "unavailable";
 
@@ -228,6 +229,11 @@ export function useRuntimeCenter() {
   const [loading, setLoading] = useState(() => runtimeCenterSurfaceCache == null);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mainBrainHydrated, setMainBrainHydrated] = useState(
+    () => runtimeCenterMainBrainHydratedCache,
+  );
+  const [mainBrainLoading, setMainBrainLoading] = useState(false);
+  const [mainBrainError, setMainBrainError] = useState<string | null>(null);
   const [busyActionId, setBusyActionId] = useState<string | null>(null);
   const [detail, setDetail] = useState<RuntimeCenterDetailState | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -253,10 +259,12 @@ export function useRuntimeCenter() {
     () => (data ? deriveBusinessAgents(data) : []),
     [data],
   );
-  const mainBrainUnavailable = surfaceData !== null && surfaceData.main_brain == null;
-  const mainBrainLoading = loading;
+  const mainBrainUnavailable =
+    mainBrainHydrated &&
+    surfaceData !== null &&
+    surfaceData.main_brain == null &&
+    mainBrainError == null;
   const businessAgentsLoading = loading;
-  const mainBrainError = mainBrainUnavailable ? null : error;
   const businessAgentsError = data ? null : error;
 
   const loadSurface = useCallback(
@@ -265,15 +273,22 @@ export function useRuntimeCenter() {
       options?: { sections?: RuntimeSurfaceSection[] },
     ) => {
       const hasCachedSurface = runtimeCenterSurfaceCache !== null;
-      if (mode === "initial" && !hasCachedSurface) {
+      const requestedSections = new Set<RuntimeSurfaceSection>(
+        options?.sections ?? ["cards", "main_brain"],
+      );
+      const requestsCards = requestedSections.has("cards");
+      const requestsMainBrain = requestedSections.has("main_brain");
+
+      if (requestsCards && mode === "initial" && !hasCachedSurface) {
         setLoading(true);
-      } else {
+      } else if (requestsCards) {
         setRefreshing(true);
       }
+      if (requestsMainBrain) {
+        setMainBrainLoading(true);
+        setMainBrainError(null);
+      }
       try {
-        const requestedSections = new Set<RuntimeSurfaceSection>(
-          options?.sections ?? ["cards", "main_brain"],
-        );
         const requestOptions = options?.sections?.length
           ? { sections: options.sections }
           : undefined;
@@ -306,26 +321,48 @@ export function useRuntimeCenter() {
           const nextBuddySummary = payload.main_brain?.buddy_summary ?? null;
           setBuddySummary(nextBuddySummary);
           runtimeCenterBuddySummaryCache = nextBuddySummary;
+          setMainBrainHydrated(true);
+          runtimeCenterMainBrainHydratedCache = true;
         }
-        setError(null);
+        if (requestsCards) {
+          setError(null);
+        }
+        if (
+          requestsCards &&
+          !requestsMainBrain &&
+          !runtimeCenterMainBrainHydratedCache &&
+          payload.surface
+        ) {
+          void loadSurface("refresh", { sections: ["main_brain"] });
+        }
       } catch (err) {
         const detail = localizeRuntimeText(
           err instanceof Error ? err.message : String(err),
         );
-        setError(detail);
-        if (mode === "initial") {
+        if (requestsCards) {
+          setError(detail);
+        }
+        if (requestsMainBrain) {
+          setMainBrainError(detail);
+        }
+        if (mode === "initial" && requestsCards) {
           setSurfaceData(null);
         }
       } finally {
-        setLoading(false);
-        setRefreshing(false);
+        if (requestsCards) {
+          setLoading(false);
+          setRefreshing(false);
+        }
+        if (requestsMainBrain) {
+          setMainBrainLoading(false);
+        }
       }
     },
     [],
   );
 
   useEffect(() => {
-    void loadSurface("initial");
+    void loadSurface("initial", { sections: ["cards"] });
   }, [loadSurface]);
 
   // Subscribe to the global event bus instead of opening a dedicated SSE
@@ -500,4 +537,5 @@ export function useRuntimeCenter() {
 export function resetRuntimeCenterSurfaceCache(): void {
   runtimeCenterSurfaceCache = null;
   runtimeCenterBuddySummaryCache = null;
+  runtimeCenterMainBrainHydratedCache = false;
 }

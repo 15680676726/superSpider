@@ -100,14 +100,15 @@ describe("SystemSettingsPage", () => {
     ]);
   });
 
-  it("keeps the page focused on maintenance and redirects runtime facts to the main-brain cockpit", async () => {
+  it("keeps the page focused on maintenance and redirects runtime facts to runtime center", async () => {
     render(<SystemSettingsPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("系统维护")).toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { name: "系统维护" }),
+      ).toBeInTheDocument();
     });
 
-    expect(screen.getAllByText(/主脑驾驶舱/).length).toBeGreaterThan(0);
     expect(screen.getByText("备份与恢复")).toBeInTheDocument();
     expect(screen.getByText("健康自检与维护")).toBeInTheDocument();
     expect(screen.getAllByText("提供商回退").length).toBeGreaterThan(0);
@@ -118,5 +119,41 @@ describe("SystemSettingsPage", () => {
     expect(screen.queryByText("Recovered cleanly")).toBeNull();
     expect(screen.queryByText("Runtime event bus is wired")).toBeNull();
     expect(requestMock).not.toHaveBeenCalled();
+  });
+
+  it("renders the maintenance shell before self-check finishes", async () => {
+    let resolveSelfCheck!: (value: unknown) => void;
+    apiMock.runSystemSelfCheck.mockReturnValue(
+      new Promise((resolve) => {
+        resolveSelfCheck = resolve;
+      }),
+    );
+
+    render(<SystemSettingsPage />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("heading", { name: "系统维护" }),
+      ).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("备份与恢复")).toBeInTheDocument();
+    expect(screen.queryByText("工作目录")).toBeNull();
+
+    resolveSelfCheck({
+      overall_status: "pass",
+      checks: [
+        {
+          name: "working_dir",
+          status: "pass",
+          summary: "Working directory available",
+          meta: {},
+        },
+      ],
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("工作目录")).toBeInTheDocument();
+    });
   });
 });

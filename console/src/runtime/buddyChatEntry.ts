@@ -6,6 +6,7 @@ import {
   openRuntimeChat,
 } from "../utils/runtimeChat";
 import { writeBuddyProfileId } from "./buddyProfileBinding";
+import { seedBuddySummary } from "./buddySummaryStore";
 import { resolveBuddyEntryDecision } from "./buddyFlow";
 
 const BUDDY_ONBOARDING_ROUTE = "/buddy-onboarding";
@@ -24,28 +25,31 @@ export async function resumeBuddyChatFromProfile(params: {
     return "onboarding";
   }
 
-  const surface = await api.getBuddySurface(profileId);
-  const resolvedProfileId = surface?.profile?.profile_id;
-  if (!resolvedProfileId) {
+  const entry = await api.getBuddyEntry(profileId);
+  const decision = resolveBuddyEntryDecision(entry);
+  if (decision.mode !== "chat-ready") {
     if (!params.shouldNavigate || params.shouldNavigate()) {
       params.navigate(BUDDY_ONBOARDING_ROUTE, { replace: true });
     }
     return "onboarding";
   }
 
-  writeBuddyProfileId(resolvedProfileId);
-
-  const decision = resolveBuddyEntryDecision(surface);
-  if (decision.mode !== "chat-ready" || !surface.execution_carrier) {
+  const resolvedProfileId = decision.profileId ?? profileId;
+  const surface = await api.getBuddySurface(resolvedProfileId);
+  const resolvedSurfaceProfileId = surface?.profile?.profile_id;
+  if (!resolvedSurfaceProfileId || !surface.execution_carrier) {
     if (!params.shouldNavigate || params.shouldNavigate()) {
       params.navigate(BUDDY_ONBOARDING_ROUTE, { replace: true });
     }
     return "onboarding";
   }
+
+  writeBuddyProfileId(resolvedSurfaceProfileId);
+  seedBuddySummary(resolvedSurfaceProfileId, surface);
 
   const binding = buildBuddyExecutionCarrierChatBinding({
-    sessionId: surface.onboarding?.session_id ?? null,
-    profileId: resolvedProfileId,
+    sessionId: null,
+    profileId: resolvedSurfaceProfileId,
     profileDisplayName: surface.profile.display_name,
     executionCarrier: surface.execution_carrier,
     entrySource: params.entrySource,

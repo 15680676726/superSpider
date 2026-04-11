@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { apiMock, navigateMock } = vi.hoisted(() => ({
   apiMock: {
+    getBuddyEntry: vi.fn(),
     getBuddySurface: vi.fn(),
   },
   navigateMock: vi.fn(),
@@ -12,10 +13,6 @@ const { apiMock, navigateMock } = vi.hoisted(() => ({
 const runtimeChatMock = vi.hoisted(() => ({
   buildBuddyExecutionCarrierChatBinding: vi.fn(),
   openRuntimeChat: vi.fn(),
-}));
-
-const buddyFlowMock = vi.hoisted(() => ({
-  resolveBuddyEntryDecision: vi.fn(),
 }));
 
 const buddyProfileBindingMock = vi.hoisted(() => ({
@@ -28,23 +25,26 @@ vi.mock("../api", () => ({
 
 vi.mock("../utils/runtimeChat", () => runtimeChatMock);
 
-vi.mock("./buddyFlow", () => buddyFlowMock);
-
 vi.mock("./buddyProfileBinding", () => buddyProfileBindingMock);
 
 import { resumeBuddyChatFromProfile } from "./buddyChatEntry";
 
 describe("resumeBuddyChatFromProfile", () => {
   beforeEach(() => {
+    apiMock.getBuddyEntry.mockReset();
     apiMock.getBuddySurface.mockReset();
     navigateMock.mockReset();
     runtimeChatMock.buildBuddyExecutionCarrierChatBinding.mockReset();
     runtimeChatMock.openRuntimeChat.mockReset();
-    buddyFlowMock.resolveBuddyEntryDecision.mockReset();
     buddyProfileBindingMock.writeBuddyProfileId.mockReset();
   });
 
   it("opens the buddy chat directly when the profile is ready", async () => {
+    apiMock.getBuddyEntry.mockResolvedValue({
+      mode: "chat-ready",
+      profile_id: "profile-1",
+      session_id: null,
+    });
     apiMock.getBuddySurface.mockResolvedValue({
       profile: {
         profile_id: "profile-1",
@@ -56,9 +56,6 @@ describe("resumeBuddyChatFromProfile", () => {
       execution_carrier: {
         instance_id: "carrier-1",
       },
-    });
-    buddyFlowMock.resolveBuddyEntryDecision.mockReturnValue({
-      mode: "chat-ready",
     });
     runtimeChatMock.buildBuddyExecutionCarrierChatBinding.mockReturnValue({
       name: "Nova",
@@ -73,6 +70,7 @@ describe("resumeBuddyChatFromProfile", () => {
       entrySource: "chat-page",
     });
 
+    expect(apiMock.getBuddyEntry).toHaveBeenCalledWith("profile-1");
     expect(apiMock.getBuddySurface).toHaveBeenCalledWith("profile-1");
     expect(buddyProfileBindingMock.writeBuddyProfileId).toHaveBeenCalledWith(
       "profile-1",
@@ -80,7 +78,7 @@ describe("resumeBuddyChatFromProfile", () => {
     expect(
       runtimeChatMock.buildBuddyExecutionCarrierChatBinding,
     ).toHaveBeenCalledWith({
-      sessionId: "session-1",
+      sessionId: null,
       profileId: "profile-1",
       profileDisplayName: "Alex",
       executionCarrier: {
@@ -104,18 +102,10 @@ describe("resumeBuddyChatFromProfile", () => {
   });
 
   it("sends the user to onboarding when the profile is not chat-ready", async () => {
-    apiMock.getBuddySurface.mockResolvedValue({
-      profile: {
-        profile_id: "profile-1",
-        display_name: "Alex",
-      },
-      onboarding: {
-        session_id: "session-1",
-      },
-      execution_carrier: null,
-    });
-    buddyFlowMock.resolveBuddyEntryDecision.mockReturnValue({
-      mode: "onboarding",
+    apiMock.getBuddyEntry.mockResolvedValue({
+      mode: "resume-onboarding",
+      profile_id: "profile-1",
+      session_id: "session-1",
     });
 
     await resumeBuddyChatFromProfile({
@@ -127,6 +117,7 @@ describe("resumeBuddyChatFromProfile", () => {
     expect(navigateMock).toHaveBeenCalledWith("/buddy-onboarding", {
       replace: true,
     });
+    expect(apiMock.getBuddySurface).not.toHaveBeenCalled();
     expect(runtimeChatMock.openRuntimeChat).not.toHaveBeenCalled();
   });
 });
