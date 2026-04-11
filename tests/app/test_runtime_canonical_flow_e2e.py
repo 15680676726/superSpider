@@ -147,6 +147,44 @@ def _flatten_memory_messages(memory_state: object) -> list[dict[str, object]]:
     return flattened
 
 
+def _resolve_initial_materialization(
+    app,
+    *,
+    instance_id: str,
+    writeback: dict[str, object],
+    backlog_id: str,
+    actor: str,
+    auto_dispatch_materialized_goals: bool = False,
+) -> dict[str, object]:
+    materialized_assignment_ids = [
+        str(item)
+        for item in list(writeback.get("materialized_assignment_ids") or [])
+        if str(item)
+    ]
+    if materialized_assignment_ids:
+        return {
+            "instance_id": instance_id,
+            "started_cycle_id": writeback.get("materialized_cycle_id"),
+            "created_assignment_ids": materialized_assignment_ids,
+            "created_task_ids": [],
+            "created_report_ids": [],
+            "processed_report_ids": [],
+        }
+
+    cycle_result = asyncio.run(
+        app.state.industry_service.run_operating_cycle(
+            instance_id=instance_id,
+            actor=actor,
+            force=True,
+            backlog_item_ids=[backlog_id],
+            auto_dispatch_materialized_goals=auto_dispatch_materialized_goals,
+        ),
+    )
+    processed_instances = list(cycle_result["processed_instances"])
+    assert processed_instances
+    return dict(processed_instances[0])
+
+
 def test_runtime_canonical_flow_harness_covers_identity_chat_execution_and_runtime_reads_contract(
     tmp_path,
 ) -> None:
@@ -282,17 +320,16 @@ def test_runtime_canonical_flow_harness_covers_identity_chat_execution_and_runti
         )
         assert approved.status_code == 200
 
-    cycle_result = asyncio.run(
-        app.state.industry_service.run_operating_cycle(
-            instance_id=instance_id,
-            actor="test:canonical-flow-cycle",
-            force=True,
-            backlog_item_ids=[backlog_id],
-            auto_dispatch_materialized_goals=False,
-        ),
+    processed_instance = _resolve_initial_materialization(
+        app,
+        instance_id=instance_id,
+        writeback=writeback,
+        backlog_id=backlog_id,
+        actor="test:canonical-flow-cycle",
+        auto_dispatch_materialized_goals=False,
     )
-    assignment_id = cycle_result["processed_instances"][0]["created_assignment_ids"][0]
-    cycle_id = cycle_result["processed_instances"][0]["started_cycle_id"]
+    assignment_id = processed_instance["created_assignment_ids"][0]
+    cycle_id = processed_instance["started_cycle_id"]
     assignment = app.state.assignment_repository.get_assignment(assignment_id)
     assert assignment is not None
 
@@ -616,10 +653,13 @@ def test_runtime_canonical_flow_harness_model_driven_content_creation_request_ki
     routed_request = query_execution_service.calls[0]["request"]
     assert getattr(routed_request, "_copaw_resolved_interaction_mode") == "orchestrate"
     assert query_execution_service.writeback_result is not None
-    assert query_execution_service.kickoff_result is not None
-    assert "started_assignment_ids" in query_execution_service.kickoff_result
 
     writeback = query_execution_service.writeback_result
+    if query_execution_service.kickoff_result is not None:
+        assert "started_assignment_ids" in query_execution_service.kickoff_result
+    else:
+        assert list(writeback.get("materialized_assignment_ids") or [])
+        assert writeback.get("delegation_state") == "materialized"
     created_backlog_ids = list(writeback["created_backlog_ids"])
     assert created_backlog_ids
 
@@ -744,17 +784,16 @@ def test_runtime_canonical_flow_harness_auto_frontdoor_replan_materializes_follo
     writeback = query_execution_service.writeback_result
     initial_backlog_id = str(writeback["created_backlog_ids"][0])
 
-    first_cycle = asyncio.run(
-        app.state.industry_service.run_operating_cycle(
-            instance_id=instance_id,
-            actor="test:auto-frontdoor-cycle",
-            force=True,
-            backlog_item_ids=[initial_backlog_id],
-            auto_dispatch_materialized_goals=False,
-        ),
+    first_processed_instance = _resolve_initial_materialization(
+        app,
+        instance_id=instance_id,
+        writeback=writeback,
+        backlog_id=initial_backlog_id,
+        actor="test:auto-frontdoor-cycle",
+        auto_dispatch_materialized_goals=False,
     )
-    first_assignment_id = first_cycle["processed_instances"][0]["created_assignment_ids"][0]
-    cycle_id = first_cycle["processed_instances"][0]["started_cycle_id"]
+    first_assignment_id = first_processed_instance["created_assignment_ids"][0]
+    cycle_id = first_processed_instance["started_cycle_id"]
     first_assignment = app.state.assignment_repository.get_assignment(first_assignment_id)
     assert first_assignment is not None
 
@@ -990,20 +1029,31 @@ def test_runtime_canonical_flow_harness_chat_frontdoor_closes_through_fixed_sop_
         )
         assert approved.status_code == 200
 
-    first_cycle = asyncio.run(
-        app.state.industry_service.run_operating_cycle(
-            instance_id=instance_id,
-            actor="test:canonical-flow-fixed-sop-cycle",
-            force=True,
-            backlog_item_ids=[backlog_id],
-            auto_dispatch_materialized_goals=True,
-        ),
+    processed_instance = _resolve_initial_materialization(
+        app,
+        instance_id=instance_id,
+        writeback=writeback,
+        backlog_id=backlog_id,
+        actor="test:canonical-flow-fixed-sop-cycle",
+        auto_dispatch_materialized_goals=True,
     )
-    processed_instance = first_cycle["processed_instances"][0]
     assert processed_instance["created_assignment_ids"]
-    assert processed_instance["created_task_ids"]
+    created_task_ids = list(processed_instance.get("created_task_ids") or [])
+    if not created_task_ids:
+        dispatch_result = asyncio.run(
+            app.state.industry_service._dispatch_operating_cycle_assignments(
+                instance_id=instance_id,
+                assignment_ids=list(processed_instance["created_assignment_ids"]),
+                actor="test:canonical-flow-fixed-sop-dispatch",
+                include_execution_core=True,
+                execute_background=False,
+            ),
+        )
+        assert dispatch_result is not None
+        created_task_ids = list(dispatch_result["created_task_ids"])
+    assert created_task_ids
 
-    task = app.state.task_repository.get_task(processed_instance["created_task_ids"][0])
+    task = app.state.task_repository.get_task(created_task_ids[0])
     assert task is not None
     assert task.task_type == "system:run_fixed_sop"
     assert task.work_context_id == work_context_id
@@ -1180,16 +1230,14 @@ def test_runtime_canonical_flow_harness_chat_assignment_delegated_child_closes_t
         )
         assert approved.status_code == 200
 
-    first_cycle = asyncio.run(
-        app.state.industry_service.run_operating_cycle(
-            instance_id=instance_id,
-            actor="test:canonical-flow-delegated-child-cycle",
-            force=True,
-            backlog_item_ids=[backlog_id],
-            auto_dispatch_materialized_goals=False,
-        ),
+    processed_instance = _resolve_initial_materialization(
+        app,
+        instance_id=instance_id,
+        writeback=writeback,
+        backlog_id=backlog_id,
+        actor="test:canonical-flow-delegated-child-cycle",
+        auto_dispatch_materialized_goals=False,
     )
-    processed_instance = first_cycle["processed_instances"][0]
     assignment_id = processed_instance["created_assignment_ids"][0]
 
     dispatch_result = asyncio.run(

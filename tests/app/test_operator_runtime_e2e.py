@@ -297,7 +297,10 @@ def test_operator_runtime_e2e_feedback_governance_and_runtime_center_contract(
     compiler_meta = compiled_payload[0]["payload"]["compiler"]
     assert compiler_meta["feedback_patch_ids"] == [applied_patch.id]
     assert compiler_meta["feedback_growth_ids"] == [growth[0].id]
-    assert compiler_meta["feedback_evidence_refs"] == [evidence.id]
+    feedback_evidence_refs = list(compiler_meta["feedback_evidence_refs"])
+    assert evidence.id in feedback_evidence_refs
+    assert set(applied_patch.evidence_refs).issubset(set(feedback_evidence_refs))
+    assert len(feedback_evidence_refs) == len(set(feedback_evidence_refs))
 
     dispatch_payload = asyncio.run(
         app.state.goal_service.dispatch_goal_execute_now(

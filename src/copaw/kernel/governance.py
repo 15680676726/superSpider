@@ -196,8 +196,8 @@ def _canonical_host_twin_summary(
         preferred_summary = dict(existing_summary)
         fallback_summary = dict(derived_summary)
     else:
-        preferred_summary = dict(existing_summary)
-        fallback_summary = dict(derived_summary)
+        preferred_summary = dict(derived_summary)
+        fallback_summary = dict(existing_summary)
     merged_summary = dict(fallback_summary)
     merged_summary.update(preferred_summary)
     merged_summary["continuity_state"] = _first_non_empty(
@@ -918,6 +918,11 @@ class GovernanceService:
             payload = _mapping_value(task_record)
             status = _first_non_empty(payload.get("status")) or "unknown"
             if status in {"closed", "cancelled", "expired", "resume_queued"}:
+                continue
+            if self._maybe_close_stale_host_handoff_task(
+                task_record=task_record,
+                payload_record=payload,
+            ):
                 continue
             summary["open_count"] = int(summary["open_count"]) + 1
             if status in {"handoff_blocked", "blocked"}:

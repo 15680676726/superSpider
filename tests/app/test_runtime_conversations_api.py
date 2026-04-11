@@ -921,6 +921,42 @@ def test_runtime_conversation_detail_commit_path_reload_surfaces_query_runtime_c
     assert payload["meta"]["main_brain_commit"]["record_id"] == "assignment-query-runtime-1"
 
 
+def test_runtime_conversation_detail_surfaces_accepted_persistence_when_commit_not_ready() -> None:
+    control_thread_id = "industry-chat:industry-v1-acme:execution-core"
+    session_backend = _FakeSessionBackend()
+    session_backend.save_session_snapshot(
+        session_id=control_thread_id,
+        user_id="copaw-agent-runner",
+        payload={
+            "agent": {"memory": []},
+            "query_runtime_state": {
+                "accepted_persistence": {
+                    "status": "accepted",
+                    "source": "query_execution_runtime",
+                    "boundary": "execution_runtime_intake",
+                    "control_thread_id": control_thread_id,
+                    "session_id": control_thread_id,
+                    "work_context_id": "wc-accepted-1",
+                },
+            },
+        },
+        source_ref="test:/query-runtime-accepted-only",
+    )
+    app, _history_reader = _build_app(
+        history_reader=SessionRuntimeThreadHistoryReader(session_backend=session_backend),
+        session_backend=session_backend,
+    )
+    client = TestClient(app)
+
+    response = client.get(f"/runtime-center/conversations/{control_thread_id}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["meta"]["main_brain_commit"]["status"] == "accepted"
+    assert payload["meta"]["main_brain_commit"]["boundary"] == "execution_runtime_intake"
+    assert payload["meta"]["main_brain_commit"]["work_context_id"] == "wc-accepted-1"
+
+
 def test_runtime_conversation_detail_accepts_legacy_snapshot_messages_missing_name(
     tmp_path,
 ) -> None:

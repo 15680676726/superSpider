@@ -105,6 +105,11 @@ class _QueryExecutionResidentRuntimeMixin:
         task_id: str | None,
         conversation_thread_id: str | None,
     ) -> Any | None:
+        if self._should_bypass_actor_runtime_lease(
+            agent_id=agent_id,
+            task_id=task_id,
+        ):
+            return None
         if self._environment_service is None:
             return None
         acquire = getattr(self._environment_service, "acquire_actor_lease", None)
@@ -134,6 +139,31 @@ class _QueryExecutionResidentRuntimeMixin:
         except Exception:
             logger.exception("Actor runtime lease acquisition failed")
             return None
+
+    def _should_bypass_actor_runtime_lease(
+        self,
+        *,
+        agent_id: str,
+        task_id: str | None,
+    ) -> bool:
+        if not task_id:
+            return False
+        runtime_repository = getattr(self, "_agent_runtime_repository", None)
+        if runtime_repository is None:
+            return False
+        get_runtime = getattr(runtime_repository, "get_runtime", None)
+        if not callable(get_runtime):
+            return False
+        try:
+            runtime = get_runtime(agent_id)
+        except Exception:
+            logger.debug("Failed to resolve runtime before actor lease acquisition.", exc_info=True)
+            return False
+        if runtime is None:
+            return False
+        current_task_id = _first_non_empty(getattr(runtime, "current_task_id", None))
+        current_mailbox_id = _first_non_empty(getattr(runtime, "current_mailbox_id", None))
+        return current_task_id == task_id and current_mailbox_id is not None
 
     def _heartbeat_actor_runtime_lease(self, lease: Any | None) -> None:
         if lease is None or self._environment_service is None:

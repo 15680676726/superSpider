@@ -396,6 +396,8 @@ def _looks_like_human_assist_submission(
     ]
     if any(anchor and anchor in normalized_text for anchor in anchors):
         return True
+    if _looks_like_new_execution_instruction_text(normalized_text):
+        return False
     completion_markers = (
         "i finished",
         "i'm done",
@@ -416,6 +418,48 @@ def _looks_like_human_assist_submission(
         "清除了",
     )
     return any(marker in normalized_text for marker in completion_markers)
+
+
+def _looks_like_new_execution_instruction_text(normalized_text: str) -> bool:
+    if not normalized_text:
+        return False
+    request_prefixes = (
+        "please ",
+        "please",
+        "can you ",
+        "could you ",
+        "use ",
+        "open ",
+        "create ",
+        "write ",
+        "save ",
+        "assign ",
+        "go ",
+        "help me ",
+        "请",
+        "帮我",
+        "安排",
+        "创建",
+        "打开",
+        "写",
+        "保存",
+        "去",
+        "先",
+        "现在",
+    )
+    if normalized_text.startswith(request_prefixes):
+        return True
+    future_markers = (
+        "when it is done",
+        "after it is done",
+        "after you finish",
+        "完成后",
+        "做完后",
+        "然后告诉我",
+        "再告诉我",
+        "完成后告诉我",
+    )
+    return any(marker in normalized_text for marker in future_markers)
 
 
 def _human_assist_task_is_submission_open(task: object) -> bool:

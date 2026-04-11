@@ -22,6 +22,17 @@ def _string(value: object | None) -> str | None:
     return text or None
 
 
+def _agent_report_route(instance_id: object | None, report_id: object | None) -> str | None:
+    normalized_instance_id = _string(instance_id)
+    normalized_report_id = _string(report_id)
+    if normalized_instance_id is None or normalized_report_id is None:
+        return None
+    return (
+        f"/api/runtime-center/industry/{normalized_instance_id}"
+        f"?report_id={normalized_report_id}"
+    )
+
+
 def _unique_strings(*values: object) -> list[str]:
     seen: set[str] = set()
     items: list[str] = []
@@ -528,6 +539,10 @@ def write_agent_report_back_to_control_thread(
         messages = []
         agent_state["memory"] = messages
     message_id = f"agent-report:{report.id}"
+    requested_surfaces = _unique_strings(
+        continuity.get("chat_writeback_requested_surfaces"),
+        continuity.get("seat_requested_surfaces"),
+    )
     if any(
         isinstance(item, dict) and _string(item.get("id")) == message_id
         for item in messages
@@ -568,8 +583,20 @@ def write_agent_report_back_to_control_thread(
                     "owner_agent_id": report.owner_agent_id,
                     "owner_role_id": report.owner_role_id,
                     "result": report.result,
+                    "report_route": _agent_report_route(record.instance_id, report.id),
                     "evidence_count": len(report.evidence_ids or []),
                     "decision_count": len(report.decision_ids or []),
+                    "requested_surfaces": list(requested_surfaces) if requested_surfaces else None,
+                    "knowledge_writeback_topic_keys": (
+                        list(continuity.get("knowledge_writeback_topic_keys") or [])
+                        or None
+                    ),
+                    "knowledge_writeback_scope_type": _string(
+                        continuity.get("knowledge_writeback_scope_type"),
+                    ),
+                    "knowledge_writeback_scope_id": _string(
+                        continuity.get("knowledge_writeback_scope_id"),
+                    ),
                 }.items()
                 if value is not None and (not isinstance(value, str) or value.strip())
             },
@@ -587,7 +614,7 @@ def write_agent_report_back_to_control_thread(
 
         append_now(
             session_id,
-            f"Main brain received agent report: {_string(report.headline) or report.id}",
+            f"我刚完成一项任务：{_string(report.headline) or report.id}",
         )
     except Exception:
         pass

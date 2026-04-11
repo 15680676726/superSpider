@@ -1088,10 +1088,20 @@ def test_query_execution_service_resumes_human_assist_with_seeded_work_context_a
         == "session:console:industry:industry-v1-ops"
     )
     assert (
+        kernel_meta["payload"]["request_context"]["main_brain_runtime"]["environment"][
+            "resume_ready"
+        ]
+        is True
+    )
+    assert (
         kernel_meta["payload"]["request_context"]["main_brain_runtime"]["recovery"][
             "checkpoint_id"
         ]
         == "checkpoint:host-handoff-1"
+    )
+    assert (
+        kernel_meta["payload"]["request_context"]["main_brain_runtime"]["recovery"]["mode"]
+        == "resume-environment"
     )
 
 

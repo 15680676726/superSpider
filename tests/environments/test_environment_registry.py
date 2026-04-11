@@ -3153,6 +3153,122 @@ def test_detached_session_without_explicit_handoff_does_not_require_human_return
     assert detail["host_twin"]["coordination"]["recommended_scheduler_action"] == "proceed"
 
 
+def test_released_session_is_not_cross_process_blocked_after_restart(
+    tmp_path,
+):
+    store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    env_repo = EnvironmentRepository(store)
+    session_repo = SessionMountRepository(store)
+    registry = EnvironmentRegistry(
+        repository=env_repo,
+        session_repository=session_repo,
+        host_id="windows-host",
+        process_id=4242,
+    )
+    service = EnvironmentService(registry=registry, lease_ttl_seconds=120)
+    service.set_session_repository(session_repo)
+
+    lease = service.acquire_session_lease(
+        channel="console",
+        session_id="industry-chat:buddy:profile-1:domain-stock:execution-core",
+        user_id="buddy:profile-1",
+        owner="copaw-agent-runner",
+        ttl_seconds=60,
+        handle={"browser": "tab-1"},
+        metadata={"channel": "console"},
+    )
+    released = service.release_session_lease(
+        lease.id,
+        lease_token=lease.lease_token,
+        reason="query turn completed",
+    )
+
+    restarted_registry = EnvironmentRegistry(
+        repository=env_repo,
+        session_repository=session_repo,
+        host_id="windows-host",
+        process_id=5252,
+    )
+    restarted_service = EnvironmentService(
+        registry=restarted_registry,
+        lease_ttl_seconds=120,
+    )
+    restarted_service.set_session_repository(session_repo)
+
+    detail = restarted_service.get_session_detail(released.id, limit=10)
+
+    assert detail is not None
+    assert detail["recovery"]["status"] == "detached"
+    assert detail["recovery"]["resume_kind"] == "fresh"
+    assert detail["recovery"]["startup_recovery_required"] is False
+    assert detail["host_twin"]["continuity"]["requires_human_return"] is False
+    assert detail["host_twin"]["coordination"]["recommended_scheduler_action"] != "handoff"
+    assert detail["host_twin_summary"]["recommended_scheduler_action"] != "handoff"
+
+
+def test_released_session_does_not_turn_generic_recovery_event_into_handoff(
+    tmp_path,
+):
+    store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    env_repo = EnvironmentRepository(store)
+    session_repo = SessionMountRepository(store)
+    registry = EnvironmentRegistry(
+        repository=env_repo,
+        session_repository=session_repo,
+        host_id="windows-host",
+        process_id=4242,
+    )
+    service = EnvironmentService(registry=registry, lease_ttl_seconds=120)
+    service.set_session_repository(session_repo)
+    event_bus = RuntimeEventBus(max_events=50)
+    service.set_runtime_event_bus(event_bus)
+
+    lease = service.acquire_session_lease(
+        channel="console",
+        session_id="industry-chat:buddy:profile-1:domain-stock:execution-core",
+        user_id="buddy:profile-1",
+        owner="copaw-agent-runner",
+        ttl_seconds=60,
+        handle={},
+        metadata={"channel": "console"},
+    )
+    released = service.release_session_lease(
+        lease.id,
+        lease_token=lease.lease_token,
+        reason="query turn completed",
+    )
+    event_bus.publish(
+        topic="system",
+        action="recovery",
+        payload={
+            "environment_id": released.environment_id,
+            "session_mount_id": released.id,
+            "summary": "recovery still pending",
+        },
+    )
+
+    restarted_registry = EnvironmentRegistry(
+        repository=env_repo,
+        session_repository=session_repo,
+        host_id="windows-host",
+        process_id=5252,
+    )
+    restarted_service = EnvironmentService(
+        registry=restarted_registry,
+        lease_ttl_seconds=120,
+    )
+    restarted_service.set_session_repository(session_repo)
+    restarted_service.set_runtime_event_bus(event_bus)
+
+    detail = restarted_service.get_session_detail(released.id, limit=10)
+
+    assert detail is not None
+    assert detail["host_event_summary"]["latest_event"]["event_name"] == "system.recovery"
+    assert detail["host_twin"]["coordination"]["recommended_scheduler_action"] == "proceed"
+    assert detail["host_twin_summary"]["recommended_scheduler_action"] == "proceed"
+    assert detail["host_twin"]["latest_blocking_event"]["event_family"] is None
+
+
 def test_host_twin_multi_seat_selects_alternate_ready_seat_for_same_owner(tmp_path):
     store = SQLiteStateStore(tmp_path / "state.sqlite3")
     env_repo = EnvironmentRepository(store)

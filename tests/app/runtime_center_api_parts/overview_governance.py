@@ -905,7 +905,6 @@ def test_runtime_center_industry_detail_rejects_unsupported_focus_queries():
 
     client = TestClient(app)
     unsupported_routes = [
-        "/runtime-center/industry/industry-v1-ops?report_id=report-1",
         "/runtime-center/industry/industry-v1-ops?lane_id=lane-growth",
         "/runtime-center/industry/industry-v1-ops?cycle_id=cycle-1",
         "/runtime-center/industry/industry-v1-ops?focus_kind=agent_report&focus_id=report-1",
@@ -939,6 +938,76 @@ def test_runtime_center_industry_detail_rejects_unsupported_focus_queries():
     assert focus_kind_only.json() == {
         "detail": "focus_id is required when focus_kind is provided."
     }
+
+
+def test_runtime_center_industry_detail_accepts_report_focus_and_maps_it_to_assignment():
+    fake_industry_service = FakeIndustryService()
+
+    class _ReportFocusIndustryService(IndustryService):
+        def __init__(self) -> None:
+            self.calls: list[dict[str, str | None]] = []
+
+        def list_instances(self, limit: int = 20):
+            return fake_industry_service.list_instances(limit=limit)
+
+        def get_instance_detail(
+            self,
+            instance_id: str,
+            *,
+            assignment_id: str | None = None,
+            backlog_item_id: str | None = None,
+        ):
+            self.calls.append(
+                {
+                    "instance_id": instance_id,
+                    "assignment_id": assignment_id,
+                    "backlog_item_id": backlog_item_id,
+                },
+            )
+            detail = fake_industry_service.get_instance_detail(instance_id)
+            if detail is None:
+                return None
+            payload = detail.model_dump(mode="json")
+            payload["agent_reports"][0]["assignment_id"] = "assignment-1"
+            return type(
+                "IndustryDetail",
+                (),
+                {
+                    "model_dump": lambda self, mode="json": payload,
+                },
+            )()
+
+    industry_service = _ReportFocusIndustryService()
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = industry_service
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/industry/industry-v1-ops?report_id=report-1")
+
+    assert response.status_code == 200
+    assert industry_service.calls[0] == {
+        "instance_id": "industry-v1-ops",
+        "assignment_id": None,
+        "backlog_item_id": None,
+    }
+    assert industry_service.calls[1] == {
+        "instance_id": "industry-v1-ops",
+        "assignment_id": "assignment-1",
+        "backlog_item_id": None,
+    }
+
+    focus_response = client.get(
+        "/runtime-center/industry/industry-v1-ops?focus_kind=report&focus_id=report-1"
+    )
+    assert focus_response.status_code == 200
 
 
 def test_runtime_center_main_brain_route_exposes_unified_operator_sections():
@@ -1684,6 +1753,136 @@ def test_runtime_center_main_brain_route_exposes_automation_loop_snapshots():
     assert operating_cycle["last_error_summary"] == "planner timeout"
     assert operating_cycle["submit_count"] == 3
     assert operating_cycle["consecutive_failures"] == 2
+
+
+def test_runtime_center_main_brain_route_exposes_automation_loop_result_anchors():
+    class _FakeLoopTask:
+        def __init__(
+            self,
+            *,
+            name: str,
+            done: bool = False,
+            cancelled: bool = False,
+        ) -> None:
+            self._name = name
+            self._done = done
+            self._cancelled = cancelled
+
+        def get_name(self) -> str:
+            return self._name
+
+        def done(self) -> bool:
+            return self._done
+
+        def cancelled(self) -> bool:
+            return self._cancelled
+
+    class _FakeAutomationTasks(list):
+        def loop_snapshots(self) -> dict[str, dict[str, object]]:
+            return {
+                "operating-cycle": {
+                    "task_name": "operating-cycle",
+                    "capability_ref": "system:run_operating_cycle",
+                    "owner_agent_id": "copaw-main-brain",
+                    "interval_seconds": 180,
+                    "automation_task_id": (
+                        "copaw-main-brain:operating-cycle:system:run_operating_cycle"
+                    ),
+                    "coordinator_contract": "automation-coordinator/v1",
+                    "loop_phase": "completed",
+                    "health_status": "healthy",
+                    "last_gate_reason": "active-industry",
+                    "last_result_phase": "completed",
+                    "last_result_summary": "Operating cycle completed with fresh evidence.",
+                    "last_task_id": "task-auto-1",
+                    "last_evidence_id": "evidence-auto-1",
+                    "submit_count": 2,
+                    "consecutive_failures": 0,
+                },
+            }
+
+    class _FakeAgentReportRepository:
+        def list_reports(
+            self,
+            *,
+            industry_instance_id=None,
+            cycle_id=None,
+            assignment_id=None,
+            task_id=None,
+            work_context_id=None,
+            owner_agent_id=None,
+            status=None,
+            processed=None,
+            limit=None,
+        ):
+            del (
+                industry_instance_id,
+                cycle_id,
+                assignment_id,
+                work_context_id,
+                owner_agent_id,
+                status,
+                processed,
+                limit,
+            )
+            if task_id != "task-auto-1":
+                return []
+            return [
+                SimpleNamespace(
+                    id="report-auto-1",
+                    industry_instance_id="industry-v1-ops",
+                    task_id="task-auto-1",
+                    headline="Automation completed",
+                    summary="Recorded",
+                ),
+            ]
+
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = FakeIndustryService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+    app.state.cron_manager = FakeCronManager([make_job("sched-1")])
+    app.state.agent_report_repository = _FakeAgentReportRepository()
+    app.state.automation_tasks = _FakeAutomationTasks(
+        [
+            _FakeLoopTask(name="copaw-automation-operating-cycle", done=False),
+        ],
+    )
+
+    client = TestClient(app)
+    with patch(
+        "copaw.app.runtime_center.overview_cards.get_heartbeat_config",
+        return_value=HeartbeatConfig(enabled=True, every="6h", target="main"),
+        create=True,
+    ):
+        response = client.get("/runtime-center/surface?sections=main_brain")
+
+    assert response.status_code == 200
+    payload = response.json()["main_brain"]
+    operating_cycle = payload["automation"]["loops"][0]
+
+    assert operating_cycle["last_task_id"] == "task-auto-1"
+    assert operating_cycle["task_route"] == "/api/runtime-center/tasks/task-auto-1"
+    assert operating_cycle["last_evidence_id"] == "evidence-auto-1"
+    assert (
+        operating_cycle["evidence_route"]
+        == "/api/runtime-center/evidence/evidence-auto-1"
+    )
+    assert operating_cycle["last_report_id"] == "report-auto-1"
+    assert (
+        operating_cycle["report_route"]
+        == "/api/runtime-center/industry/industry-v1-ops?report_id=report-auto-1"
+    )
+    assert (
+        operating_cycle["last_result_summary"]
+        == "Operating cycle completed with fresh evidence."
+    )
 
 
 def test_runtime_center_main_brain_route_prefers_public_runtime_snapshots():

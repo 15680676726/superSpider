@@ -1001,7 +1001,10 @@ CREATE TABLE IF NOT EXISTS automation_loop_runtimes (
     health_status TEXT NOT NULL DEFAULT 'idle',
     last_gate_reason TEXT,
     last_result_phase TEXT,
+    last_result_summary TEXT,
     last_error_summary TEXT,
+    last_task_id TEXT,
+    last_evidence_id TEXT,
     submit_count INTEGER NOT NULL DEFAULT 0,
     consecutive_failures INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
@@ -2110,6 +2113,14 @@ _ADDITIVE_SCHEMA_COLUMNS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = 
             ("activation_status", "TEXT NOT NULL DEFAULT 'idle'"),
             ("activation_error", "TEXT NOT NULL DEFAULT ''"),
             ("activation_attempt_count", "INTEGER NOT NULL DEFAULT 0"),
+        ),
+    ),
+    (
+        "automation_loop_runtimes",
+        (
+            ("last_result_summary", "TEXT"),
+            ("last_task_id", "TEXT"),
+            ("last_evidence_id", "TEXT"),
         ),
     ),
     (

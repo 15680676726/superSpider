@@ -178,6 +178,45 @@ class _FakeStaleTopLevelSummaryEnvironmentService:
         }
 
 
+class _FakeStaleDetachedFreshSummaryEnvironmentService:
+    def list_sessions(self, **kwargs):
+        _ = kwargs
+        return [SimpleNamespace(id="session:web:stale-detached-fresh")]
+
+    def get_session_detail(self, session_mount_id: str, *, limit: int = 20):
+        _ = limit
+        if session_mount_id != "session:web:stale-detached-fresh":
+            return None
+        return {
+            "session_mount_id": session_mount_id,
+            "host_companion_session": {
+                "continuity_status": "detached",
+                "session_mount_id": session_mount_id,
+            },
+            "host_twin_summary": {
+                "recommended_scheduler_action": "handoff",
+                "blocked_surface_count": 0,
+                "legal_recovery_mode": "handoff",
+                "continuity_state": "blocked",
+            },
+            "host_twin": {
+                "continuity": {
+                    "status": "blocked",
+                    "valid": False,
+                    "requires_human_return": False,
+                },
+                "coordination": {
+                    "recommended_scheduler_action": "proceed",
+                },
+                "legal_recovery": {
+                    "path": "fresh",
+                    "resume_kind": "fresh",
+                },
+                "blocked_surfaces": [],
+            },
+        }
+
+
 class _FakeFreshDetachedEnvironmentService:
     def list_sessions(self, **kwargs):
         _ = kwargs
@@ -501,6 +540,24 @@ def test_governance_admission_prefers_derived_live_host_twin_over_stale_top_leve
     assert reason is None
 
 
+def test_governance_status_prefers_derived_detached_fresh_summary_over_stale_handoff_top_level(
+    tmp_path,
+) -> None:
+    repository = SqliteGovernanceControlRepository(
+        SQLiteStateStore(tmp_path / "governance.sqlite3"),
+    )
+    service = GovernanceService(
+        control_repository=repository,
+        environment_service=_FakeStaleDetachedFreshSummaryEnvironmentService(),
+        human_assist_task_service=_FakeHumanAssistTaskService(),
+        industry_service=_FakeIndustryService(),
+    )
+
+    status = service.get_status()
+
+    assert status.handoff["active"] is False
+
+
 def test_governance_admission_allows_writeback_only_query_through_handoff_gate(
     tmp_path,
 ) -> None:
@@ -588,6 +645,64 @@ def test_governance_admission_closes_stale_host_handoff_task_when_environment_no
     reason = service.admission_block_reason(task)
 
     assert reason is None
+    assert (
+        human_assist_service.get_current_task(
+            chat_thread_id="industry-chat:buddy:profile-1:domain-stock:execution-core",
+        )
+        is None
+    )
+    tasks = human_assist_service.list_tasks(
+        chat_thread_id="industry-chat:buddy:profile-1:domain-stock:execution-core",
+    )
+    assert tasks[0].status == "closed"
+
+
+def test_governance_status_closes_stale_host_handoff_task_when_environment_no_longer_requires_return(
+    tmp_path,
+) -> None:
+    repository = SqliteGovernanceControlRepository(
+        SQLiteStateStore(tmp_path / "governance.sqlite3"),
+    )
+    human_assist_store = SQLiteStateStore(tmp_path / "human_assist.sqlite3")
+    human_assist_service = HumanAssistTaskService(
+        repository=SqliteHumanAssistTaskRepository(human_assist_store),
+    )
+    human_assist_service.ensure_host_handoff_task(
+        chat_thread_id="industry-chat:buddy:profile-1:domain-stock:execution-core",
+        title="Return host handoff",
+        summary="Runtime handoff is active for the buddy execution thread.",
+        required_action='Return after "fresh".',
+        resume_checkpoint_ref="fresh",
+        verification_anchor="fresh",
+        block_evidence_refs=[
+            "session:console:industry-chat:buddy:profile-1:domain-stock:execution-core",
+        ],
+        continuation_context={
+            "session_id": "industry-chat:buddy:profile-1:domain-stock:execution-core",
+            "control_thread_id": "industry-chat:buddy:profile-1:domain-stock:execution-core",
+            "environment_ref": (
+                "session:console:industry-chat:buddy:profile-1:domain-stock:execution-core"
+            ),
+            "recommended_scheduler_action": "handoff",
+            "main_brain_runtime": {
+                "environment_ref": (
+                    "session:console:industry-chat:buddy:profile-1:domain-stock:execution-core"
+                ),
+                "recovery_mode": "fresh",
+            },
+        },
+    )
+    service = GovernanceService(
+        control_repository=repository,
+        environment_service=_FakeFreshDetachedEnvironmentService(),
+        human_assist_task_service=human_assist_service,
+        industry_service=_FakeIndustryService(),
+    )
+
+    status = service.get_status()
+
+    assert status.handoff["active"] is False
+    assert status.human_assist["open_count"] == 0
     assert (
         human_assist_service.get_current_task(
             chat_thread_id="industry-chat:buddy:profile-1:domain-stock:execution-core",

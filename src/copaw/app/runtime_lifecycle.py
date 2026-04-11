@@ -45,7 +45,10 @@ class _AutomationLoopState:
     health_status: str = "idle"
     last_gate_reason: str = "not-yet-evaluated"
     last_result_phase: str | None = None
+    last_result_summary: str | None = None
     last_error_summary: str | None = None
+    last_task_id: str | None = None
+    last_evidence_id: str | None = None
     submit_count: int = 0
     consecutive_failures: int = 0
     automation_loop_runtime_repository: object | None = None
@@ -87,7 +90,10 @@ class _AutomationLoopState:
             health_status=record.health_status,
             last_gate_reason=record.last_gate_reason or "not-yet-evaluated",
             last_result_phase=record.last_result_phase,
+            last_result_summary=record.last_result_summary,
             last_error_summary=record.last_error_summary,
+            last_task_id=record.last_task_id,
+            last_evidence_id=record.last_evidence_id,
             submit_count=record.submit_count,
             consecutive_failures=record.consecutive_failures,
             automation_loop_runtime_repository=automation_loop_runtime_repository,
@@ -106,7 +112,10 @@ class _AutomationLoopState:
             "health_status": self.health_status,
             "last_gate_reason": self.last_gate_reason,
             "last_result_phase": self.last_result_phase,
+            "last_result_summary": self.last_result_summary,
             "last_error_summary": self.last_error_summary,
+            "last_task_id": self.last_task_id,
+            "last_evidence_id": self.last_evidence_id,
             "submit_count": self.submit_count,
             "consecutive_failures": self.consecutive_failures,
         }
@@ -130,6 +139,7 @@ class _AutomationLoopState:
         self.loop_phase = "blocked"
         self.health_status = "idle"
         self.last_gate_reason = reason
+        self.last_result_summary = None
         self.last_error_summary = None
         self.persist()
 
@@ -137,6 +147,7 @@ class _AutomationLoopState:
         self.loop_phase = "submitting"
         self.health_status = "active"
         self.last_gate_reason = reason
+        self.last_result_summary = None
         self.last_error_summary = None
         self.submit_count += 1
         self.persist()
@@ -144,7 +155,12 @@ class _AutomationLoopState:
     def record_result(self, result: object) -> None:
         phase = str(getattr(result, "phase", "") or "").strip() or "unknown"
         self.last_result_phase = phase
+        self.last_result_summary = str(getattr(result, "summary", "") or "").strip() or None
         self.last_error_summary = None
+        self.last_task_id = str(getattr(result, "task_id", "") or "").strip() or None
+        self.last_evidence_id = (
+            str(getattr(result, "evidence_id", "") or "").strip() or None
+        )
         if phase == "completed":
             self.loop_phase = "completed"
             self.health_status = "healthy"
@@ -164,6 +180,7 @@ class _AutomationLoopState:
         self.loop_phase = "failed"
         self.health_status = "degraded"
         self.last_result_phase = "failed"
+        self.last_result_summary = None
         summary = str(exc).strip()
         self.last_error_summary = summary or exc.__class__.__name__
         self.consecutive_failures += 1
@@ -186,7 +203,10 @@ class _AutomationLoopState:
             "health_status": self.health_status,
             "last_gate_reason": self.last_gate_reason,
             "last_result_phase": self.last_result_phase,
+            "last_result_summary": self.last_result_summary,
             "last_error_summary": self.last_error_summary,
+            "last_task_id": self.last_task_id,
+            "last_evidence_id": self.last_evidence_id,
             "submit_count": self.submit_count,
             "consecutive_failures": self.consecutive_failures,
         }

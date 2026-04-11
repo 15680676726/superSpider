@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Literal
+from urllib.parse import quote
 
 from pydantic import BaseModel, ConfigDict, Field, model_serializer
 
@@ -83,6 +84,35 @@ def _runtime_task_status(task: object) -> str:
     return "running"
 
 
+def _automation_task_route(task_id: str | None) -> str | None:
+    normalized = _string(task_id)
+    if normalized is None:
+        return None
+    return f"/api/runtime-center/tasks/{normalized}"
+
+
+def _automation_evidence_route(evidence_id: str | None) -> str | None:
+    normalized = _string(evidence_id)
+    if normalized is None:
+        return None
+    return f"/api/runtime-center/evidence/{normalized}"
+
+
+def _automation_report_route(
+    *,
+    industry_instance_id: str | None,
+    report_id: str | None,
+) -> str | None:
+    normalized_instance = _string(industry_instance_id)
+    normalized_report = _string(report_id)
+    if normalized_instance is None or normalized_report is None:
+        return None
+    return (
+        f"/api/runtime-center/industry/{quote(normalized_instance)}"
+        f"?report_id={quote(normalized_report)}"
+    )
+
+
 def _normalize_recovery_payload(
     app_state: Any,
 ) -> tuple[dict[str, Any] | None, str]:
@@ -95,12 +125,20 @@ def _normalize_automation_overview_payload(
     *,
     automation_tasks: object | None,
     automation_loop_runtime_repository: object | None,
+    agent_report_repository: object | None,
 ) -> list[dict[str, Any]]:
     getter = getattr(automation_tasks, "overview_snapshot", None)
     if callable(getter):
         payload = getter()
         if isinstance(payload, list):
-            return [dict(item) for item in payload if isinstance(item, dict)]
+            return [
+                _enrich_automation_snapshot(
+                    dict(item),
+                    agent_report_repository=agent_report_repository,
+                )
+                for item in payload
+                if isinstance(item, dict)
+            ]
 
     snapshot_map: dict[str, dict[str, Any]] = {}
     list_loops = getattr(automation_loop_runtime_repository, "list_loops", None)
@@ -152,13 +190,16 @@ def _normalize_automation_overview_payload(
                 continue
             seen_snapshot_ids.add(snapshot_id)
             payloads.append(
-                {
-                    "name": task_name,
-                    "status": _string(snapshot.get("health_status"))
-                    or _string(snapshot.get("loop_phase"))
-                    or "idle",
-                    **snapshot,
-                }
+                _enrich_automation_snapshot(
+                    {
+                        "name": task_name,
+                        "status": _string(snapshot.get("health_status"))
+                        or _string(snapshot.get("loop_phase"))
+                        or "idle",
+                        **snapshot,
+                    },
+                    agent_report_repository=agent_report_repository,
+                )
             )
         return payloads
 
@@ -181,11 +222,14 @@ def _normalize_automation_overview_payload(
         if status == "completed" and _string(snapshot.get("health_status")) == "degraded":
             status = "degraded"
         payloads.append(
-            {
-                "name": name,
-                "status": status,
-                **snapshot,
-            }
+            _enrich_automation_snapshot(
+                {
+                    "name": name,
+                    "status": status,
+                    **snapshot,
+                },
+                agent_report_repository=agent_report_repository,
+            )
         )
     live_names = {_runtime_task_name(task, fallback="") for task in tasks}
     seen_snapshot_ids: set[str] = set()
@@ -198,15 +242,72 @@ def _normalize_automation_overview_payload(
         if task_name is None or f"copaw-automation-{task_name}" in live_names:
             continue
         payloads.append(
-            {
-                "name": task_name,
-                "status": _string(snapshot.get("health_status"))
-                or _string(snapshot.get("loop_phase"))
-                or "idle",
-                **snapshot,
-            }
+            _enrich_automation_snapshot(
+                {
+                    "name": task_name,
+                    "status": _string(snapshot.get("health_status"))
+                    or _string(snapshot.get("loop_phase"))
+                    or "idle",
+                    **snapshot,
+                },
+                agent_report_repository=agent_report_repository,
+            )
         )
     return payloads
+
+
+def _enrich_automation_snapshot(
+    payload: dict[str, Any],
+    *,
+    agent_report_repository: object | None,
+) -> dict[str, Any]:
+    enriched = dict(payload)
+    last_task_id = _string(enriched.get("last_task_id"))
+    last_evidence_id = _string(enriched.get("last_evidence_id"))
+    if last_task_id is not None:
+        enriched["task_route"] = _automation_task_route(last_task_id)
+    if last_evidence_id is not None:
+        enriched["evidence_route"] = _automation_evidence_route(last_evidence_id)
+    report_payload = _resolve_automation_report_anchor(
+        agent_report_repository=agent_report_repository,
+        task_id=last_task_id,
+    )
+    if report_payload:
+        enriched.update(report_payload)
+    return enriched
+
+
+def _resolve_automation_report_anchor(
+    *,
+    agent_report_repository: object | None,
+    task_id: str | None,
+) -> dict[str, Any]:
+    normalized_task_id = _string(task_id)
+    if normalized_task_id is None or agent_report_repository is None:
+        return {}
+    list_reports = getattr(agent_report_repository, "list_reports", None)
+    if not callable(list_reports):
+        return {}
+    try:
+        reports = list_reports(task_id=normalized_task_id, limit=1)
+    except Exception:
+        return {}
+    if not isinstance(reports, list) or not reports:
+        return {}
+    report_payload = _mapping(reports[0])
+    if not report_payload:
+        return {}
+    report_id = _string(report_payload.get("id"))
+    industry_instance_id = _string(report_payload.get("industry_instance_id"))
+    if report_id is None:
+        return {}
+    return {
+        "last_report_id": report_id,
+        "report_route": _automation_report_route(
+            industry_instance_id=industry_instance_id,
+            report_id=report_id,
+        ),
+    }
 
 
 def _normalize_supervisor_snapshot(
@@ -382,6 +483,7 @@ class RuntimeCenterAppStateView:
     routine_service: Any = None
     query_execution_service: Any = None
     buddy_projection_service: Any = None
+    agent_report_repository: Any = None
     cron_manager: Any = None
     automation_overview: list[dict[str, Any]] = field(default_factory=list)
     actor_supervisor_overview: dict[str, Any] | None = None
@@ -435,10 +537,12 @@ class RuntimeCenterAppStateView:
             routine_service=getattr(app_state, "routine_service", None),
             query_execution_service=getattr(app_state, "query_execution_service", None),
             buddy_projection_service=getattr(app_state, "buddy_projection_service", None),
+            agent_report_repository=getattr(app_state, "agent_report_repository", None),
             cron_manager=getattr(app_state, "cron_manager", None),
             automation_overview=_normalize_automation_overview_payload(
                 automation_tasks=automation_tasks,
                 automation_loop_runtime_repository=automation_loop_runtime_repository,
+                agent_report_repository=getattr(app_state, "agent_report_repository", None),
             ),
             actor_supervisor_overview=_normalize_supervisor_snapshot(actor_supervisor),
             actor_worker_runtime_contract=_normalize_runtime_contract(actor_worker),

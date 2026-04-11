@@ -45,6 +45,40 @@ def test_automation_interval_seconds_enforces_minimum(
     assert value == 30
 
 
+def test_automation_loop_state_persists_formal_result_anchors(tmp_path) -> None:
+    repositories = build_runtime_repositories(SQLiteStateStore(tmp_path / "state.db"))
+    loop_state = runtime_lifecycle_module._AutomationLoopState(
+        task_name="operating-cycle",
+        capability_ref="system:run_operating_cycle",
+        owner_agent_id="copaw-main-brain",
+        interval_seconds=180,
+        automation_task_id="copaw-main-brain:operating-cycle:system:run_operating_cycle",
+        automation_loop_runtime_repository=repositories.automation_loop_runtime_repository,
+    )
+    loop_state.persist()
+
+    loop_state.record_result(
+        SimpleNamespace(
+            phase="completed",
+            summary="Operating cycle completed with fresh evidence.",
+            task_id="task-auto-1",
+            evidence_id="evidence-auto-1",
+        ),
+    )
+
+    record = repositories.automation_loop_runtime_repository.get_loop(
+        "copaw-main-brain:operating-cycle:system:run_operating_cycle",
+    )
+
+    assert record is not None
+    assert record.last_task_id == "task-auto-1"
+    assert record.last_evidence_id == "evidence-auto-1"
+    assert (
+        record.last_result_summary
+        == "Operating cycle completed with fresh evidence."
+    )
+
+
 @pytest.mark.asyncio
 async def test_start_automation_tasks_creates_named_tasks() -> None:
     tasks = start_automation_tasks(
@@ -95,7 +129,10 @@ async def test_start_automation_tasks_exposes_durable_loop_contract_snapshots() 
         "health_status": "idle",
         "last_gate_reason": "not-yet-evaluated",
         "last_result_phase": None,
+        "last_result_summary": None,
         "last_error_summary": None,
+        "last_task_id": None,
+        "last_evidence_id": None,
         "submit_count": 0,
         "consecutive_failures": 0,
     }

@@ -3423,6 +3423,9 @@ class EnvironmentHealthService:
             if live_handle is not None:
                 status = "attached"
                 note = "Live handle is mounted in the current runtime host."
+            elif session.lease_status != "leased":
+                status = "detached"
+                note = "No live handle is currently mounted for this released session."
             elif not locality["host_known"]:
                 status = "ownership-unknown"
                 startup_recovery_required = True
@@ -3807,7 +3810,13 @@ class EnvironmentHealthService:
             if latest is not None:
                 return latest
         latest_event = self._mapping(host_event_summary.get("latest_event"))
-        return latest_event or None
+        if not latest_event:
+            return None
+        if self._first_string(
+            latest_event.get("recommended_runtime_response"),
+        ) not in {"handoff", "recover", "retry"}:
+            return None
+        return latest_event
 
     def _host_event_gap_or_blocker(
         self,

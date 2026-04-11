@@ -21,8 +21,12 @@ from ...utils.runtime_routes import (
     human_assist_task_list_route,
     human_assist_task_route,
     schedule_route,
+    task_route,
 )
 from ...state.repositories import (
+    SqliteAgentReportRepository,
+    SqliteAssignmentRepository,
+    SqliteBacklogItemRepository,
     SqliteDecisionRequestRepository,
     SqliteGoalRepository,
     SqliteRuntimeFrameRepository,
@@ -34,6 +38,7 @@ from ...state.repositories import (
 from .environment_feedback_projection import RuntimeCenterEnvironmentFeedbackProjector
 from .execution_runtime_projection import summarize_execution_knowledge_writeback
 from .goal_decision_projection import RuntimeCenterGoalDecisionProjector
+from .task_review_projection import serialize_evidence_record
 from .task_detail_projection import RuntimeCenterTaskDetailProjector
 from .task_list_projection import RuntimeCenterTaskListProjector
 from .projection_utils import first_non_empty, string_list_from_values
@@ -54,6 +59,9 @@ class RuntimeCenterStateQueryService:
         task_runtime_repository: SqliteTaskRuntimeRepository,
         runtime_frame_repository: SqliteRuntimeFrameRepository | None = None,
         schedule_repository: SqliteScheduleRepository,
+        backlog_item_repository: SqliteBacklogItemRepository | None = None,
+        assignment_repository: SqliteAssignmentRepository | None = None,
+        agent_report_repository: SqliteAgentReportRepository | None = None,
         goal_repository: SqliteGoalRepository | None = None,
         work_context_repository: SqliteWorkContextRepository | None = None,
         goal_service: object | None = None,
@@ -80,6 +88,9 @@ class RuntimeCenterStateQueryService:
         self._task_runtime_repository = task_runtime_repository
         self._runtime_frame_repository = runtime_frame_repository
         self._schedule_repository = schedule_repository
+        self._backlog_item_repository = backlog_item_repository
+        self._assignment_repository = assignment_repository
+        self._agent_report_repository = agent_report_repository
         self._goal_repository = goal_repository
         self._work_context_repository = work_context_repository
         self._goal_service = goal_service
@@ -875,6 +886,7 @@ class RuntimeCenterStateQueryService:
             actions["resume"] = f"{route}/resume"
         else:
             actions["pause"] = f"{route}/pause"
+        schedule_reconciliation = self._build_schedule_reconciliation(schedule)
 
         return {
             "schedule": schedule.model_dump(mode="json"),
@@ -886,9 +898,384 @@ class RuntimeCenterStateQueryService:
                 "next_run_at": schedule.next_run_at,
                 "last_error": schedule.last_error,
             },
+            "reconciliation": schedule_reconciliation["reconciliation"],
+            "backlog_items": schedule_reconciliation["backlog_items"],
+            "assignments": schedule_reconciliation["assignments"],
+            "reports": schedule_reconciliation["reports"],
+            "evidence": schedule_reconciliation["evidence"],
             "route": route,
             "actions": actions,
         }
+
+    def _build_schedule_reconciliation(self, schedule: object) -> dict[str, object]:
+        schedule_id = first_non_empty(getattr(schedule, "id", None))
+        empty_payload = {
+            "reconciliation": {
+                "backlog_item_ids": [],
+                "assignment_ids": [],
+                "task_ids": [],
+                "report_ids": [],
+                "evidence_ids": [],
+            },
+            "backlog_items": [],
+            "assignments": [],
+            "reports": [],
+            "evidence": [],
+        }
+        if schedule_id is None:
+            return empty_payload
+
+        industry_instance_id = self._resolve_schedule_industry_instance_id(schedule)
+        backlog_items = self._list_schedule_backlog_items(
+            schedule_id=schedule_id,
+            industry_instance_id=industry_instance_id,
+        )
+        backlog_item_ids = self._unique_ids(getattr(item, "id", None) for item in backlog_items)
+        assignments = self._list_schedule_assignments(
+            backlog_item_ids=backlog_item_ids,
+            industry_instance_id=industry_instance_id,
+        )
+        assignment_ids = self._unique_ids(
+            getattr(assignment, "id", None)
+            for assignment in assignments
+        )
+        assignment_task_ids = self._unique_ids(
+            getattr(assignment, "task_id", None)
+            for assignment in assignments
+        )
+        direct_tasks = self._list_schedule_direct_tasks(
+            schedule=schedule,
+            schedule_id=schedule_id,
+        )
+        direct_task_ids = self._unique_ids(
+            getattr(task, "id", None)
+            for task in direct_tasks
+        )
+        task_ids = self._unique_ids([*assignment_task_ids, *direct_task_ids])
+        reports = self._list_schedule_reports(
+            assignment_ids=assignment_ids,
+            task_ids=task_ids,
+            industry_instance_id=industry_instance_id,
+        )
+        report_ids = self._unique_ids(getattr(report, "id", None) for report in reports)
+        task_ids = self._unique_ids(
+            [
+                *task_ids,
+                *[
+                    getattr(report, "task_id", None)
+                    for report in reports
+                ],
+            ],
+        )
+        evidence = self._list_schedule_evidence(
+            task_ids=task_ids,
+            assignments=assignments,
+            reports=reports,
+        )
+        evidence_ids = self._unique_ids(
+            getattr(record, "id", None)
+            for record in evidence
+        )
+        return {
+            "reconciliation": {
+                "backlog_item_ids": backlog_item_ids,
+                "assignment_ids": assignment_ids,
+                "task_ids": task_ids,
+                "report_ids": report_ids,
+                "evidence_ids": evidence_ids,
+            },
+            "backlog_items": [item.model_dump(mode="json") for item in backlog_items],
+            "assignments": [
+                self._serialize_schedule_assignment(assignment)
+                for assignment in assignments
+            ],
+            "reports": [
+                self._serialize_schedule_report(report)
+                for report in reports
+            ],
+            "evidence": [serialize_evidence_record(record) for record in evidence],
+        }
+
+    def _resolve_schedule_industry_instance_id(self, schedule: object) -> str | None:
+        spec_payload = getattr(schedule, "spec_payload", {}) or {}
+        payload = dict(spec_payload) if isinstance(spec_payload, Mapping) else {}
+        meta = payload.get("meta")
+        if isinstance(meta, Mapping):
+            resolved = first_non_empty(
+                meta.get("industry_instance_id"),
+                meta.get("instance_id"),
+            )
+            if resolved is not None:
+                return resolved
+        source_ref = first_non_empty(getattr(schedule, "source_ref", None))
+        if source_ref is not None and source_ref.startswith("industry:"):
+            _, _, tail = source_ref.partition(":")
+            return tail or None
+        return None
+
+    def _list_schedule_backlog_items(
+        self,
+        *,
+        schedule_id: str,
+        industry_instance_id: str | None,
+    ) -> list[object]:
+        repository = self._backlog_item_repository
+        if repository is None:
+            return []
+        items = repository.list_items(
+            industry_instance_id=industry_instance_id,
+            limit=None,
+        )
+        expected_source_ref = f"schedule:{schedule_id}"
+        return [
+            item
+            for item in items
+            if first_non_empty(getattr(item, "source_ref", None)) == expected_source_ref
+            or first_non_empty(
+                getattr(item, "metadata", {}).get("schedule_id")
+                if isinstance(getattr(item, "metadata", {}), Mapping)
+                else None,
+            )
+            == schedule_id
+        ]
+
+    def _list_schedule_direct_tasks(
+        self,
+        *,
+        schedule: object,
+        schedule_id: str,
+    ) -> list[object]:
+        repository = self._task_repository
+        if repository is None:
+            return []
+        anchor_terms = self._schedule_task_anchor_terms(
+            schedule=schedule,
+            schedule_id=schedule_id,
+        )
+        if not anchor_terms:
+            return []
+        candidates: dict[str, object] = {}
+        for term in anchor_terms:
+            for task in repository.list_tasks(
+                acceptance_criteria_like=term,
+                limit=None,
+            ):
+                task_id = first_non_empty(getattr(task, "id", None))
+                if task_id is None:
+                    continue
+                if not self._task_matches_schedule(
+                    task=task,
+                    schedule=schedule,
+                    schedule_id=schedule_id,
+                ):
+                    continue
+                candidates[task_id] = task
+        return list(candidates.values())
+
+    def _schedule_task_anchor_terms(
+        self,
+        *,
+        schedule: object,
+        schedule_id: str,
+    ) -> list[str]:
+        spec_payload = getattr(schedule, "spec_payload", {}) or {}
+        payload = dict(spec_payload) if isinstance(spec_payload, Mapping) else {}
+        meta = dict(payload.get("meta")) if isinstance(payload.get("meta"), Mapping) else {}
+        source_ref = first_non_empty(getattr(schedule, "source_ref", None))
+        workflow_run_id = first_non_empty(meta.get("workflow_run_id"))
+        workflow_step_id = first_non_empty(meta.get("workflow_step_id"))
+        source_tail = source_ref.split(":", 1)[1].strip() if source_ref and ":" in source_ref else None
+        return self._unique_ids(
+            [
+                schedule_id,
+                workflow_run_id,
+                workflow_step_id,
+                source_tail,
+            ],
+        )
+
+    def _task_matches_schedule(
+        self,
+        *,
+        task: object,
+        schedule: object,
+        schedule_id: str,
+    ) -> bool:
+        metadata = decode_kernel_task_metadata(getattr(task, "acceptance_criteria", None)) or {}
+        payload = dict(metadata.get("payload")) if isinstance(metadata.get("payload"), Mapping) else {}
+        request = dict(payload.get("request")) if isinstance(payload.get("request"), Mapping) else {}
+        request_meta = dict(request.get("meta")) if isinstance(request.get("meta"), Mapping) else {}
+        dispatch = dict(payload.get("dispatch")) if isinstance(payload.get("dispatch"), Mapping) else {}
+        dispatch_meta = dict(dispatch.get("meta")) if isinstance(dispatch.get("meta"), Mapping) else {}
+        schedule_kind = first_non_empty(getattr(schedule, "schedule_kind", None))
+        spec_payload = getattr(schedule, "spec_payload", {}) or {}
+        schedule_payload = dict(spec_payload) if isinstance(spec_payload, Mapping) else {}
+        schedule_meta = (
+            dict(schedule_payload.get("meta"))
+            if isinstance(schedule_payload.get("meta"), Mapping)
+            else {}
+        )
+        source_ref = first_non_empty(getattr(schedule, "source_ref", None))
+        workflow_run_id = first_non_empty(
+            schedule_meta.get("workflow_run_id"),
+            source_ref.split(":", 1)[1].strip() if source_ref and source_ref.startswith("workflow:") else None,
+        )
+        workflow_step_id = first_non_empty(schedule_meta.get("workflow_step_id"))
+
+        if schedule_kind == "workflow" or workflow_run_id is not None or workflow_step_id is not None:
+            return (
+                first_non_empty(
+                    request_meta.get("workflow_run_id"),
+                    request.get("workflow_run_id"),
+                    payload.get("workflow_run_id"),
+                )
+                == workflow_run_id
+                and first_non_empty(
+                    request_meta.get("workflow_step_id"),
+                    request.get("workflow_step_id"),
+                    payload.get("workflow_step_id"),
+                )
+                == workflow_step_id
+            )
+
+        return first_non_empty(
+            payload.get("job_id"),
+            payload.get("schedule_id"),
+            dispatch_meta.get("schedule_id"),
+            dispatch_meta.get("coordinator_id"),
+            request_meta.get("schedule_id"),
+            request_meta.get("coordinator_id"),
+        ) == schedule_id
+
+    def _list_schedule_assignments(
+        self,
+        *,
+        backlog_item_ids: list[str],
+        industry_instance_id: str | None,
+    ) -> list[object]:
+        repository = self._assignment_repository
+        if repository is None or not backlog_item_ids:
+            return []
+        assignments = repository.list_assignments(
+            industry_instance_id=industry_instance_id,
+            limit=None,
+        )
+        backlog_item_id_set = set(backlog_item_ids)
+        return [
+            assignment
+            for assignment in assignments
+            if first_non_empty(getattr(assignment, "backlog_item_id", None))
+            in backlog_item_id_set
+        ]
+
+    def _list_schedule_reports(
+        self,
+        *,
+        assignment_ids: list[str],
+        task_ids: list[str],
+        industry_instance_id: str | None,
+    ) -> list[object]:
+        repository = self._agent_report_repository
+        if repository is None or (not assignment_ids and not task_ids):
+            return []
+        reports = repository.list_reports(
+            industry_instance_id=industry_instance_id,
+            limit=None,
+        )
+        assignment_id_set = set(assignment_ids)
+        task_id_set = set(task_ids)
+        return [
+            report
+            for report in reports
+            if first_non_empty(getattr(report, "assignment_id", None)) in assignment_id_set
+            or first_non_empty(getattr(report, "task_id", None)) in task_id_set
+        ]
+
+    def _list_schedule_evidence(
+        self,
+        *,
+        task_ids: list[str],
+        assignments: list[object],
+        reports: list[object],
+    ) -> list[object]:
+        if self._evidence_ledger is None:
+            return []
+        records = list(
+            self._evidence_ledger.list_records(task_ids=task_ids)
+            if task_ids
+            else []
+        )
+        seen_ids = {
+            evidence_id
+            for evidence_id in self._unique_ids(getattr(record, "id", None) for record in records)
+        }
+        referenced_ids = self._unique_ids(
+            [
+                *[
+                    evidence_id
+                    for assignment in assignments
+                    for evidence_id in list(getattr(assignment, "evidence_ids", []) or [])
+                ],
+                *[
+                    evidence_id
+                    for report in reports
+                    for evidence_id in list(getattr(report, "evidence_ids", []) or [])
+                ],
+            ],
+        )
+        for evidence_id in referenced_ids:
+            if evidence_id in seen_ids:
+                continue
+            record = self._evidence_ledger.get_record(evidence_id)
+            if record is None:
+                continue
+            records.append(record)
+            seen_ids.add(evidence_id)
+        records.sort(
+            key=lambda record: (
+                getattr(record, "created_at", None) or datetime.min.replace(tzinfo=timezone.utc),
+                first_non_empty(getattr(record, "id", None)) or "",
+            ),
+            reverse=True,
+        )
+        return records
+
+    def _serialize_schedule_assignment(self, assignment: object) -> dict[str, object]:
+        payload = (
+            assignment.model_dump(mode="json")
+            if hasattr(assignment, "model_dump")
+            else dict(assignment)
+            if isinstance(assignment, Mapping)
+            else {}
+        )
+        task_id = first_non_empty(payload.get("task_id"))
+        if task_id is not None:
+            payload["task_route"] = task_route(task_id)
+        return payload
+
+    def _serialize_schedule_report(self, report: object) -> dict[str, object]:
+        payload = (
+            report.model_dump(mode="json")
+            if hasattr(report, "model_dump")
+            else dict(report)
+            if isinstance(report, Mapping)
+            else {}
+        )
+        task_id = first_non_empty(payload.get("task_id"))
+        if task_id is not None:
+            payload["task_route"] = task_route(task_id)
+        return payload
+
+    def _unique_ids(self, values: Any) -> list[str]:
+        seen: set[str] = set()
+        payload: list[str] = []
+        for value in values:
+            text = first_non_empty(value)
+            if text is None or text in seen:
+                continue
+            seen.add(text)
+            payload.append(text)
+        return payload
 
     def list_goals(self, limit: int | None = 5) -> list[dict[str, object]]:
         return self._goal_decision_projector.list_goals(limit=limit)

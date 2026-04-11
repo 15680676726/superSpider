@@ -145,7 +145,10 @@ class AutomationLoopRuntimeRecord(UpdatedRecord):
     health_status: str = Field(default="idle", min_length=1)
     last_gate_reason: str | None = None
     last_result_phase: str | None = None
+    last_result_summary: str | None = None
     last_error_summary: str | None = None
+    last_task_id: str | None = None
+    last_evidence_id: str | None = None
     submit_count: int = Field(default=0, ge=0)
     consecutive_failures: int = Field(default=0, ge=0)
 

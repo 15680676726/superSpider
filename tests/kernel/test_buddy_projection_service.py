@@ -60,6 +60,11 @@ def _build_services(tmp_path):
     return onboarding, projection
 
 
+class _FailingAfterTargetOnboardingService(BuddyOnboardingService):
+    def _ensure_growth_scaffold(self, *args, **kwargs):
+        raise RuntimeError("boom after target")
+
+
 def test_buddy_projection_derives_growth_from_formal_truth(tmp_path) -> None:
     onboarding, projection = _build_services(tmp_path)
     identity = onboarding.submit_identity(
@@ -332,7 +337,6 @@ def test_buddy_projection_honestly_degrades_when_runtime_focus_is_missing(tmp_pa
     assert payload.presentation.why_now_summary == ""
     assert payload.presentation.single_next_action_summary == ""
 
-
 def test_buddy_runtime_focus_only_reads_active_domain_execution_carrier(tmp_path) -> None:
     onboarding, projection = _build_services(tmp_path)
     identity = onboarding.submit_identity(
@@ -389,6 +393,71 @@ def test_buddy_runtime_focus_only_reads_active_domain_execution_carrier(tmp_path
         "why_now_summary": draft.why_it_matters,
     }
     assert requested_instance_ids == []
+
+
+def test_buddy_projection_does_not_fake_chat_ready_state_without_active_domain(
+    tmp_path,
+) -> None:
+    store = SQLiteStateStore(tmp_path / "buddy-projection-partial.sqlite3")
+    profile_repository = SqliteHumanProfileRepository(store)
+    growth_target_repository = SqliteGrowthTargetRepository(store)
+    relationship_repository = SqliteCompanionRelationshipRepository(store)
+    domain_capability_repository = SqliteBuddyDomainCapabilityRepository(store)
+    session_repository = SqliteBuddyOnboardingSessionRepository(store)
+    onboarding = _FailingAfterTargetOnboardingService(
+        profile_repository=profile_repository,
+        growth_target_repository=growth_target_repository,
+        relationship_repository=relationship_repository,
+        domain_capability_repository=domain_capability_repository,
+        onboarding_session_repository=session_repository,
+        onboarding_reasoner=DeterministicBuddyReasoner(),
+    )
+    projection = BuddyProjectionService(
+        profile_repository=profile_repository,
+        growth_target_repository=growth_target_repository,
+        relationship_repository=relationship_repository,
+        domain_capability_repository=domain_capability_repository,
+        onboarding_session_repository=session_repository,
+        current_focus_resolver=lambda _profile_id: {},
+    )
+
+    identity = onboarding.submit_identity(
+        display_name="Mina",
+        profession="Operator",
+        current_stage="restart",
+        interests=["content"],
+        strengths=["consistency"],
+        constraints=["money"],
+        goal_intention="I want one real long-term direction.",
+    )
+    contract = onboarding.submit_contract(
+        session_id=identity.session_id,
+        **_contract_payload(),
+    )
+    operation = onboarding.start_confirm_direction_operation(session_id=identity.session_id)
+    try:
+        onboarding.confirm_primary_direction(
+            session_id=identity.session_id,
+            selected_direction=contract.recommended_direction,
+            capability_action="start-new",
+        )
+    except RuntimeError as exc:
+        onboarding.mark_operation_failed(
+            session_id=identity.session_id,
+            operation_id=operation.operation_id,
+            operation_kind=operation.operation_kind,
+            error_message=str(exc),
+        )
+
+    payload = projection.build_chat_surface(profile_id=identity.profile.profile_id)
+
+    assert payload.growth_target is not None
+    assert payload.growth.domain_id != ""
+    assert payload.execution_carrier is None
+    assert payload.onboarding.status == "contract-ready"
+    assert payload.onboarding.requires_direction_confirmation is False
+    assert payload.onboarding.requires_naming is False
+    assert payload.onboarding.completed is False
 
 
 def test_buddy_projection_turns_relationship_memory_into_companion_strategy(tmp_path) -> None:

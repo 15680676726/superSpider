@@ -26,19 +26,30 @@ from copaw.industry.models import IndustrySeatCapabilityLayers
 from copaw.kernel.models import KernelTask
 from copaw.kernel.persistence import KernelTaskStore
 from copaw.state import (
+    AgentReportRecord,
+    AssignmentRecord,
+    BacklogItemRecord,
     DecisionRequestRecord,
     GoalRecord,
     HumanAssistTaskRecord,
+    IndustryInstanceRecord,
+    OperatingLaneRecord,
     SQLiteStateStore,
+    ScheduleRecord,
     TaskRecord,
     TaskRuntimeRecord,
     WorkContextRecord,
 )
 from copaw.state.human_assist_task_service import HumanAssistTaskService
 from copaw.state.repositories import (
+    SqliteAgentReportRepository,
+    SqliteAssignmentRepository,
+    SqliteBacklogItemRepository,
     SqliteDecisionRequestRepository,
     SqliteGoalRepository,
     SqliteHumanAssistTaskRepository,
+    SqliteIndustryInstanceRepository,
+    SqliteOperatingLaneRepository,
     SqliteScheduleRepository,
     SqliteTaskRepository,
     SqliteTaskRuntimeRepository,
@@ -815,6 +826,398 @@ def test_runtime_query_services_read_state_backed_surfaces(tmp_path) -> None:
         task_thread_failed_a.id,
         task_thread_failed_b.id,
     }
+
+
+def test_runtime_query_services_schedule_detail_exposes_formal_reconciliation_bundle(
+    tmp_path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    task_repository = SqliteTaskRepository(state_store)
+    task_runtime_repository = SqliteTaskRuntimeRepository(state_store)
+    schedule_repository = SqliteScheduleRepository(state_store)
+    decision_request_repository = SqliteDecisionRequestRepository(state_store)
+    backlog_repository = SqliteBacklogItemRepository(state_store)
+    assignment_repository = SqliteAssignmentRepository(state_store)
+    agent_report_repository = SqliteAgentReportRepository(state_store)
+    industry_instance_repository = SqliteIndustryInstanceRepository(state_store)
+    operating_lane_repository = SqliteOperatingLaneRepository(state_store)
+    evidence_ledger = EvidenceLedger(database_path=tmp_path / "evidence.sqlite3")
+
+    timestamp = datetime(2026, 4, 10, 9, 0, tzinfo=timezone.utc)
+    industry_instance_repository.upsert_instance(
+        IndustryInstanceRecord(
+            instance_id="industry-1",
+            label="Trading buddy",
+            summary="Acceptance test instance.",
+            owner_scope="buddy:founder",
+            status="active",
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+    )
+    operating_lane_repository.upsert_lane(
+        OperatingLaneRecord(
+            id="lane-1",
+            industry_instance_id="industry-1",
+            lane_key="execution-core",
+            title="Execution core",
+            summary="Primary execution lane.",
+            status="active",
+            owner_agent_id="execution-seat-1",
+            owner_role_id="execution-core",
+            priority=10,
+            health_status="healthy",
+            source_ref="industry-role:execution-core",
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+    )
+    schedule_repository.upsert_schedule(
+        ScheduleRecord(
+            id="sched-acceptance",
+            title="Execution core morning review",
+            cron="0 9 * * 1",
+            timezone="UTC",
+            status="scheduled",
+            enabled=True,
+            task_type="agent",
+            source_ref="industry:industry-1",
+            spec_payload={
+                "meta": {
+                    "summary": "Review and launch the next formal execution turn.",
+                    "industry_instance_id": "industry-1",
+                },
+            },
+            schedule_kind="cadence",
+            trigger_target="main-brain",
+            lane_id="lane-1",
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+    )
+    backlog_repository.upsert_item(
+        BacklogItemRecord(
+            id="backlog-schedule-1",
+            industry_instance_id="industry-1",
+            lane_id="lane-1",
+            title="Morning review backlog",
+            summary="Materialized from the cadence schedule.",
+            status="materialized",
+            priority=2,
+            source_kind="schedule",
+            source_ref="schedule:sched-acceptance",
+            metadata={"schedule_id": "sched-acceptance"},
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+    )
+    task_repository.upsert_task(
+        TaskRecord(
+            id="task-schedule-1",
+            title="Run morning execution review",
+            summary="Collect evidence and write back the next actions.",
+            task_type="system:dispatch_query",
+            status="completed",
+            priority=2,
+            owner_agent_id="execution-seat-1",
+            assignment_id="assignment-1",
+            industry_instance_id="industry-1",
+            lane_id="lane-1",
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+    )
+    assignment_repository.upsert_assignment(
+        AssignmentRecord(
+            id="assignment-1",
+            industry_instance_id="industry-1",
+            lane_id="lane-1",
+            backlog_item_id="backlog-schedule-1",
+            task_id="task-schedule-1",
+            owner_agent_id="execution-seat-1",
+            owner_role_id="execution-core",
+            title="Morning execution review assignment",
+            summary="Formal assignment created from the schedule backlog item.",
+            status="completed",
+            report_back_mode="summary",
+            evidence_ids=["ev-schedule-1"],
+            last_report_id="report-1",
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+    )
+    backlog_repository.upsert_item(
+        BacklogItemRecord(
+            id="backlog-schedule-1",
+            industry_instance_id="industry-1",
+            lane_id="lane-1",
+            assignment_id="assignment-1",
+            title="Morning review backlog",
+            summary="Materialized from the cadence schedule.",
+            status="materialized",
+            priority=2,
+            source_kind="schedule",
+            source_ref="schedule:sched-acceptance",
+            metadata={"schedule_id": "sched-acceptance"},
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+    )
+    agent_report_repository.upsert_report(
+        AgentReportRecord(
+            id="report-1",
+            industry_instance_id="industry-1",
+            assignment_id="assignment-1",
+            task_id="task-schedule-1",
+            lane_id="lane-1",
+            owner_agent_id="execution-seat-1",
+            owner_role_id="execution-core",
+            report_kind="task-terminal",
+            headline="Morning review completed",
+            summary="Execution seat finished the schedule-driven review.",
+            status="recorded",
+            result="completed",
+            risk_level="auto",
+            evidence_ids=["ev-schedule-1"],
+            processed=True,
+            processed_at=timestamp,
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+    )
+    evidence_ledger.append(
+        EvidenceRecord(
+            id="ev-schedule-1",
+            task_id="task-schedule-1",
+            actor_ref="execution-seat-1",
+            environment_ref="session:console:industry-chat:industry-1:execution-core",
+            capability_ref="system:dispatch_query",
+            risk_level="auto",
+            action_summary="Completed the schedule-driven morning review.",
+            result_summary="Formal follow-up recorded.",
+            created_at=timestamp,
+            status="completed",
+            input_digest="input",
+            output_digest="output",
+            metadata={"trace_id": "trace:task-schedule-1"},
+        ),
+    )
+
+    state_query = RuntimeCenterStateQueryService(
+        task_repository=task_repository,
+        task_runtime_repository=task_runtime_repository,
+        schedule_repository=schedule_repository,
+        decision_request_repository=decision_request_repository,
+        backlog_item_repository=backlog_repository,
+        assignment_repository=assignment_repository,
+        agent_report_repository=agent_report_repository,
+        evidence_ledger=evidence_ledger,
+    )
+
+    detail = state_query.get_schedule_detail("sched-acceptance")
+
+    assert detail is not None
+    assert detail["reconciliation"] == {
+        "backlog_item_ids": ["backlog-schedule-1"],
+        "assignment_ids": ["assignment-1"],
+        "task_ids": ["task-schedule-1"],
+        "report_ids": ["report-1"],
+        "evidence_ids": ["ev-schedule-1"],
+    }
+    assert detail["backlog_items"][0]["id"] == "backlog-schedule-1"
+    assert detail["assignments"][0]["id"] == "assignment-1"
+    assert detail["assignments"][0]["task_id"] == "task-schedule-1"
+    assert detail["reports"][0]["id"] == "report-1"
+    assert detail["evidence"][0]["id"] == "ev-schedule-1"
+
+
+def test_runtime_query_services_schedule_detail_falls_back_to_direct_cron_task_anchors(
+    tmp_path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    task_repository = SqliteTaskRepository(state_store)
+    task_runtime_repository = SqliteTaskRuntimeRepository(state_store)
+    schedule_repository = SqliteScheduleRepository(state_store)
+    decision_request_repository = SqliteDecisionRequestRepository(state_store)
+    evidence_ledger = EvidenceLedger(database_path=tmp_path / "evidence.sqlite3")
+
+    timestamp = datetime(2026, 4, 10, 10, 0, tzinfo=timezone.utc)
+    schedule_repository.upsert_schedule(
+        ScheduleRecord(
+            id="cron-1",
+            title="Cron dispatch",
+            cron="*/10 * * * *",
+            timezone="UTC",
+            status="scheduled",
+            enabled=True,
+            task_type="capability",
+            source_ref="cron:cron-1",
+            spec_payload={"meta": {"summary": "Run the recurring cron task."}},
+            schedule_kind="automation",
+            trigger_target="cron",
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+    )
+    task_repository.upsert_task(
+        TaskRecord(
+            id="task-cron-1",
+            title="Cron capability dispatch",
+            summary="Dispatch the recurring cron capability.",
+            task_type="system:dispatch_query",
+            status="completed",
+            owner_agent_id="copaw-cron",
+            acceptance_criteria=json.dumps(
+                {
+                    "kind": "kernel-task-meta-v1",
+                    "payload": {
+                        "job_id": "cron-1",
+                        "dispatch": {
+                            "meta": {
+                                "schedule_id": "cron-1",
+                                "coordinator_id": "cron-1",
+                            },
+                        },
+                    },
+                },
+            ),
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+    )
+    evidence_ledger.append(
+        EvidenceRecord(
+            id="ev-cron-1",
+            task_id="task-cron-1",
+            actor_ref="copaw-cron",
+            environment_ref="session:console:cron:cron-1",
+            capability_ref="system:dispatch_query",
+            risk_level="auto",
+            action_summary="Cron dispatch completed.",
+            result_summary="Cron evidence recorded.",
+            created_at=timestamp,
+            status="completed",
+            input_digest="input",
+            output_digest="output",
+        ),
+    )
+
+    state_query = RuntimeCenterStateQueryService(
+        task_repository=task_repository,
+        task_runtime_repository=task_runtime_repository,
+        schedule_repository=schedule_repository,
+        decision_request_repository=decision_request_repository,
+        evidence_ledger=evidence_ledger,
+    )
+
+    detail = state_query.get_schedule_detail("cron-1")
+
+    assert detail is not None
+    assert detail["reconciliation"] == {
+        "backlog_item_ids": [],
+        "assignment_ids": [],
+        "task_ids": ["task-cron-1"],
+        "report_ids": [],
+        "evidence_ids": ["ev-cron-1"],
+    }
+    assert detail["evidence"][0]["id"] == "ev-cron-1"
+
+
+def test_runtime_query_services_schedule_detail_falls_back_to_workflow_task_anchors(
+    tmp_path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    task_repository = SqliteTaskRepository(state_store)
+    task_runtime_repository = SqliteTaskRuntimeRepository(state_store)
+    schedule_repository = SqliteScheduleRepository(state_store)
+    decision_request_repository = SqliteDecisionRequestRepository(state_store)
+    evidence_ledger = EvidenceLedger(database_path=tmp_path / "evidence.sqlite3")
+
+    timestamp = datetime(2026, 4, 10, 11, 0, tzinfo=timezone.utc)
+    schedule_repository.upsert_schedule(
+        ScheduleRecord(
+            id="sched-workflow-1",
+            title="Workflow step schedule",
+            cron="0 * * * *",
+            timezone="UTC",
+            status="scheduled",
+            enabled=True,
+            task_type="workflow",
+            source_ref="workflow:run-1",
+            spec_payload={
+                "meta": {
+                    "summary": "Resume workflow step dispatch.",
+                    "workflow_run_id": "run-1",
+                    "workflow_step_id": "step-1",
+                },
+            },
+            schedule_kind="workflow",
+            trigger_target="workflow",
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+    )
+    task_repository.upsert_task(
+        TaskRecord(
+            id="task-workflow-1",
+            title="Workflow scheduled task",
+            summary="Execute the workflow-owned scheduled step.",
+            task_type="system:dispatch_query",
+            status="completed",
+            owner_agent_id="workflow-seat",
+            acceptance_criteria=json.dumps(
+                {
+                    "kind": "kernel-task-meta-v1",
+                    "payload": {
+                        "request": {
+                            "meta": {
+                                "workflow_run_id": "run-1",
+                                "workflow_step_id": "step-1",
+                            },
+                        },
+                    },
+                },
+            ),
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+    )
+    evidence_ledger.append(
+        EvidenceRecord(
+            id="ev-workflow-1",
+            task_id="task-workflow-1",
+            actor_ref="workflow-seat",
+            environment_ref="session:console:workflow:run-1",
+            capability_ref="system:dispatch_query",
+            risk_level="auto",
+            action_summary="Workflow schedule completed.",
+            result_summary="Workflow evidence recorded.",
+            created_at=timestamp,
+            status="completed",
+            input_digest="input",
+            output_digest="output",
+        ),
+    )
+
+    state_query = RuntimeCenterStateQueryService(
+        task_repository=task_repository,
+        task_runtime_repository=task_runtime_repository,
+        schedule_repository=schedule_repository,
+        decision_request_repository=decision_request_repository,
+        evidence_ledger=evidence_ledger,
+    )
+
+    detail = state_query.get_schedule_detail("sched-workflow-1")
+
+    assert detail is not None
+    assert detail["reconciliation"] == {
+        "backlog_item_ids": [],
+        "assignment_ids": [],
+        "task_ids": ["task-workflow-1"],
+        "report_ids": [],
+        "evidence_ids": ["ev-workflow-1"],
+    }
+    assert detail["evidence"][0]["id"] == "ev-workflow-1"
 
 
 def test_runtime_query_services_canonical_host_twin_summary_ignores_stale_nested_summary(

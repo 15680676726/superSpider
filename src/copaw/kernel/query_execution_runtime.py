@@ -1623,12 +1623,42 @@ class _QueryExecutionRuntimeMixin(
             getattr(request, "_copaw_main_brain_runtime_context", None)
             or getattr(request, "main_brain_runtime", None),
         )
+        resume_checkpoint_ref = _first_non_empty(task_payload.get("resume_checkpoint_ref"))
         if normalized_main_brain_runtime:
+            environment_payload = dict(
+                _mapping_value(normalized_main_brain_runtime.get("environment")),
+            )
+            recovery_payload = dict(
+                _mapping_value(normalized_main_brain_runtime.get("recovery")),
+            )
+            if environment_ref is not None:
+                environment_payload["ref"] = _first_non_empty(
+                    environment_payload.get("ref"),
+                    environment_ref,
+                )
+            environment_payload["resume_ready"] = True
+            recovery_payload["mode"] = "resume-environment"
+            recovery_payload["reason"] = _first_non_empty(
+                recovery_payload.get("reason"),
+                "human-assist-resume",
+            )
+            if resume_checkpoint_ref is not None:
+                recovery_payload["checkpoint_id"] = _first_non_empty(
+                    recovery_payload.get("checkpoint_id"),
+                    resume_checkpoint_ref,
+                )
+            normalized_main_brain_runtime["environment"] = environment_payload
+            normalized_main_brain_runtime["recovery"] = recovery_payload
             request_context["main_brain_runtime"] = normalized_main_brain_runtime
+            setattr(request, "main_brain_runtime", normalized_main_brain_runtime)
+            setattr(
+                request,
+                "_copaw_main_brain_runtime_context",
+                normalized_main_brain_runtime,
+            )
         control_thread_id = _first_non_empty(request_context.get("control_thread_id"))
         if control_thread_id is not None:
             setattr(request, "control_thread_id", control_thread_id)
-        resume_checkpoint_ref = _first_non_empty(task_payload.get("resume_checkpoint_ref"))
         if resume_checkpoint_ref is not None:
             setattr(request, "resume_checkpoint_id", resume_checkpoint_ref)
             setattr(request, "checkpoint_id", resume_checkpoint_ref)

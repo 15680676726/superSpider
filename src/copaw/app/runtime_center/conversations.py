@@ -124,6 +124,12 @@ class RuntimeConversationFacade:
                 commit_payload = _compact_mapping(query_runtime_state.get("commit_outcome"))
                 if commit_payload:
                     commit_payload.setdefault("state_channel", "query_runtime_state")
+                else:
+                    commit_payload = _compact_mapping(
+                        query_runtime_state.get("accepted_persistence"),
+                    )
+                    if commit_payload:
+                        commit_payload.setdefault("state_channel", "query_runtime_state")
         if not commit_payload:
             return None
         control_thread_id = _first_non_empty(
@@ -786,7 +792,9 @@ def _build_synthetic_assistant_message(
     )
 
 
-def _compact_mapping(values: dict[str, object | None]) -> dict[str, object]:
+def _compact_mapping(values: object | None) -> dict[str, object]:
+    if not isinstance(values, dict):
+        return {}
     return {
         key: value
         for key, value in values.items()
