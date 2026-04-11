@@ -226,8 +226,6 @@ export default function RightPanel() {
               {/* ── 状态信息 ── */}
               <div className={styles.infoSection}>
                 <div className={styles.infoRow}><span className={styles.infoLabel}>心情</span><span className={styles.infoValue}>{snapshot.moodLabel}</span></div>
-                <div className={styles.infoRow}><span className={styles.infoLabel}>陪伴状态</span><span className={styles.infoValue}>{snapshot.presenceLabel}</span></div>
-                <div className={styles.infoRow}><span className={styles.infoLabel}>鼓励风格</span><span className={styles.infoValue}>{snapshot.encouragementStyleLabel}</span></div>
               </div>
 
               {/* ── 关系数值 ── */}
