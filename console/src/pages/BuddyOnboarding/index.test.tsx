@@ -14,6 +14,7 @@ const { navigateMock, apiMock } = vi.hoisted(() => ({
     submitBuddyIdentity: vi.fn(),
     submitBuddyContract: vi.fn(),
     previewBuddyDirectionTransition: vi.fn(),
+    startBuddyConfirmDirection: vi.fn(),
     confirmBuddyDirection: vi.fn(),
     nameBuddy: vi.fn(),
   },
@@ -168,53 +169,104 @@ describe("BuddyOnboardingPage", () => {
         },
       ],
     });
-    apiMock.confirmBuddyDirection.mockResolvedValue({
-      session: {
-        session_id: "session-1",
-        profile_id: "profile-1",
-        status: "confirmed",
-        service_intent: "Help me build a durable writing rhythm.",
-        collaboration_role: "orchestrator",
-        autonomy_level: "guarded-proactive",
-        confirm_boundaries: ["external spend"],
-        report_style: "decision-first",
-        collaboration_notes: "Keep reports concise.",
-        candidate_directions: ["Build a durable writing lane."],
-        recommended_direction: "Build a durable writing lane.",
-        selected_direction: "Build a durable writing lane.",
-      },
-      growth_target: {
-        target_id: "target-1",
-        profile_id: "profile-1",
-        primary_direction: "Build a durable writing lane.",
-        final_goal: "Publish the first real novel.",
-        why_it_matters: "Turn writing into real proof-of-work.",
-        current_cycle_label: "First publishing cycle",
-      },
-      relationship: {
-        relationship_id: "rel-1",
-        profile_id: "profile-1",
-        buddy_name: "",
-        encouragement_style: "old-friend",
-        service_intent: "Help me build a durable writing rhythm.",
-        collaboration_role: "orchestrator",
-        autonomy_level: "guarded-proactive",
-        confirm_boundaries: ["external spend"],
-        report_style: "decision-first",
-        collaboration_notes: "Keep reports concise.",
-      },
-      domain_capability: null,
-      execution_carrier: {
-        instance_id: "buddy:profile-1:domain-writing",
-        label: "Alex writing carrier",
-        owner_scope: "profile-1",
-        current_cycle_id: "cycle-1",
-        team_generated: true,
-        thread_id: "industry-chat:buddy:profile-1:domain-writing:execution-core",
-        control_thread_id:
-          "industry-chat:buddy:profile-1:domain-writing:execution-core",
-      },
+    apiMock.startBuddyConfirmDirection.mockResolvedValue({
+      session_id: "session-1",
+      profile_id: "profile-1",
+      operation_id: "op-confirm-1",
+      operation_kind: "confirm",
+      operation_status: "running",
     });
+    apiMock.getBuddySurface.mockResolvedValue({
+        profile: {
+          profile_id: "profile-1",
+          display_name: "Alex",
+          profession: "Writer",
+          current_stage: "restart",
+          interests: [],
+          strengths: [],
+          constraints: [],
+          goal_intention: "Write and publish a real novel.",
+        },
+        growth_target: {
+          target_id: "target-1",
+          profile_id: "profile-1",
+          primary_direction: "Build a durable writing lane.",
+          final_goal: "Publish the first real novel.",
+          why_it_matters: "Turn writing into real proof-of-work.",
+          current_cycle_label: "First publishing cycle",
+        },
+        relationship: {
+          relationship_id: "rel-1",
+          profile_id: "profile-1",
+          buddy_name: "",
+          encouragement_style: "old-friend",
+          service_intent: "Help me build a durable writing rhythm.",
+          collaboration_role: "orchestrator",
+          autonomy_level: "guarded-proactive",
+          confirm_boundaries: ["external spend"],
+          report_style: "decision-first",
+          collaboration_notes: "Keep reports concise.",
+        },
+        execution_carrier: {
+          instance_id: "buddy:profile-1:domain-writing",
+          label: "Alex writing carrier",
+          owner_scope: "profile-1",
+          current_cycle_id: "cycle-1",
+          team_generated: true,
+          thread_id: "industry-chat:buddy:profile-1:domain-writing:execution-core",
+          control_thread_id:
+            "industry-chat:buddy:profile-1:domain-writing:execution-core",
+        },
+        presentation: {
+          profile_id: "profile-1",
+          buddy_name: "",
+          lifecycle_state: "active",
+          presence_state: "present",
+          mood_state: "focused",
+          current_form: "carrier",
+          rarity: "common",
+          current_goal_summary: "Publish the first real novel.",
+          current_task_summary: "Lock the first publishing rhythm.",
+          why_now_summary: "Turn writing into real proof-of-work.",
+          single_next_action_summary: "Choose the first cadence.",
+          companion_strategy_summary: "Push one durable writing lane.",
+        },
+        growth: {
+          profile_id: "profile-1",
+          intimacy: 0,
+          affinity: 0,
+          growth_level: 1,
+          companion_experience: 0,
+          knowledge_value: 0,
+          skill_value: 0,
+          pleasant_interaction_score: 0,
+          communication_count: 0,
+          completed_support_runs: 0,
+          completed_assisted_closures: 0,
+          evolution_stage: "seed",
+          progress_to_next_stage: 0,
+        },
+        onboarding: {
+          session_id: "session-1",
+          status: "confirmed",
+          operation_id: "op-confirm-1",
+          operation_kind: "confirm",
+          operation_status: "succeeded",
+          operation_error: "",
+          service_intent: "Help me build a durable writing rhythm.",
+          collaboration_role: "orchestrator",
+          autonomy_level: "guarded-proactive",
+          confirm_boundaries: ["external spend"],
+          report_style: "decision-first",
+          collaboration_notes: "Keep reports concise.",
+          candidate_directions: ["Build a durable writing lane."],
+          recommended_direction: "Build a durable writing lane.",
+          selected_direction: "Build a durable writing lane.",
+          requires_direction_confirmation: false,
+          requires_naming: true,
+          completed: false,
+        },
+      });
     apiMock.nameBuddy.mockResolvedValue({
       buddy_name: "Nova",
       profile_id: "profile-1",
@@ -269,12 +321,15 @@ describe("BuddyOnboardingPage", () => {
     fireEvent.click(screen.getByTestId("buddy-transition-confirm"));
 
     await waitFor(() => {
-      expect(apiMock.confirmBuddyDirection).toHaveBeenCalledWith({
+      expect(apiMock.startBuddyConfirmDirection).toHaveBeenCalledWith({
         session_id: "session-1",
         selected_direction: "Build a durable writing lane.",
         capability_action: "start-new",
         target_domain_id: undefined,
       });
+    });
+    await waitFor(() => {
+      expect(apiMock.getBuddySurface).toHaveBeenCalledWith("profile-1");
     });
     expect(await screen.findByTestId("buddy-name-input")).toBeInTheDocument();
 

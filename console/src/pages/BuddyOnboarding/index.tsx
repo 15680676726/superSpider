@@ -40,6 +40,8 @@ import {
 
 const { Paragraph, Text, Title } = Typography;
 const { TextArea } = Input;
+const BUDDY_CONFIRM_POLL_INTERVAL_MS = 400;
+const BUDDY_CONFIRM_TIMEOUT_MS = 20_000;
 
 type IdentityFormValues = {
   display_name: string;
@@ -95,6 +97,29 @@ function sanitizeDraft(value: unknown): BuddyOnboardingDraft | null {
     return null;
   }
   return value as BuddyOnboardingDraft;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function resolveApiErrorMessage(
+  rawError: unknown,
+  fallback: string,
+): string {
+  if (isApiError(rawError)) {
+    const detail = String(rawError.detail || "").trim();
+    if (detail) {
+      return detail;
+    }
+  }
+  if (rawError instanceof Error) {
+    const message = String(rawError.message || "").trim();
+    if (message) {
+      return message;
+    }
+  }
+  return fallback;
 }
 
 function buildIdentityFormValues(
@@ -185,6 +210,34 @@ function buildConfirmPayloadFromSurface(
     domain_capability: null,
     execution_carrier: surface.execution_carrier,
   };
+}
+
+async function waitForBuddyDirectionConfirmation(
+  profileId: string,
+  operationId: string,
+): Promise<BuddySurfaceResponse> {
+  const deadline = Date.now() + BUDDY_CONFIRM_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const surface = await api.getBuddySurface(profileId);
+    if (surface) {
+      const confirmPayload = buildConfirmPayloadFromSurface(surface);
+      if (confirmPayload) {
+        return surface;
+      }
+      const onboarding = surface.onboarding;
+      if (
+        onboarding?.operation_status === "failed" &&
+        (!operationId || onboarding.operation_id === operationId)
+      ) {
+        throw new Error(
+          String(onboarding.operation_error || "").trim() ||
+            "主方向确认失败，请稍后重试。",
+        );
+      }
+    }
+    await sleep(BUDDY_CONFIRM_POLL_INTERVAL_MS);
+  }
+  throw new Error("主方向确认超时，请稍后重试。");
 }
 
 export default function BuddyOnboardingPage() {
@@ -470,7 +523,7 @@ export default function BuddyOnboardingPage() {
     setSubmitting(true);
     setError(null);
     try {
-      const result = await api.confirmBuddyDirection({
+      const handle = await api.startBuddyConfirmDirection({
         session_id: identity.session_id,
         selected_direction: selectedDirection,
         capability_action: selectedCapabilityAction,
@@ -479,11 +532,27 @@ export default function BuddyOnboardingPage() {
             ? selectedTargetDomainId
             : undefined,
       });
-      writeBuddyProfileId(result.session.profile_id);
-      setConfirmPayload(result);
+      const surface = await waitForBuddyDirectionConfirmation(
+        handle.profile_id,
+        handle.operation_id,
+      );
+      if (surface.profile?.profile_id) {
+        writeBuddyProfileId(surface.profile.profile_id);
+        seedBuddySummary(surface.profile.profile_id, surface);
+      }
+      if (surface.relationship?.buddy_name?.trim()) {
+        setBuddyNameDraft(surface.relationship.buddy_name.trim());
+      }
+      const nextConfirmPayload = buildConfirmPayloadFromSurface(surface);
+      if (!nextConfirmPayload) {
+        throw new Error("主方向已确认，但进入聊天前的数据还没准备好。");
+      }
+      setConfirmPayload(nextConfirmPayload);
       setCurrentStep(2);
-    } catch {
-      setError("主方向确认失败，请稍后重试。");
+    } catch (rawError) {
+      setError(
+        resolveApiErrorMessage(rawError, "主方向确认失败，请稍后重试。"),
+      );
     } finally {
       setSubmitting(false);
     }
