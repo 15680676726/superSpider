@@ -50,14 +50,56 @@ describe("EntryRedirect", () => {
     runtimeChatMock.openRuntimeChat.mockReset();
   });
 
-  it("sends users without a saved buddy profile straight to onboarding", async () => {
+  it("asks the backend entry route before sending users without a saved buddy profile to onboarding", async () => {
+    apiMock.getBuddyEntry.mockResolvedValue({
+      mode: "start-onboarding",
+      profile_id: null,
+      session_id: null,
+    });
+
     render(<EntryRedirect />);
 
     await waitFor(() => {
+      expect(apiMock.getBuddyEntry).toHaveBeenCalledWith(undefined);
       expect(navigateMock).toHaveBeenCalledWith("/buddy-onboarding", {
         replace: true,
       });
     });
+  });
+
+  it("opens chat even when storage is empty if the backend resolves a singleton buddy", async () => {
+    apiMock.getBuddyEntry.mockResolvedValue({
+      mode: "chat-ready",
+      profile_id: "profile-1",
+      session_id: null,
+      profile_display_name: "Alex",
+      execution_carrier: {
+        instance_id: "buddy:profile-1:domain-writing",
+        label: "Writing carrier",
+        owner_scope: "profile-1",
+        current_cycle_id: "cycle-1",
+        team_generated: true,
+        thread_id:
+          "industry-chat:buddy:profile-1:domain-writing:execution-core",
+        control_thread_id:
+          "industry-chat:buddy:profile-1:domain-writing:execution-core",
+      },
+    });
+    runtimeChatMock.buildBuddyExecutionCarrierChatBinding.mockReturnValue({
+      name: "Nova",
+      threadId: "industry-chat:buddy:profile-1:domain-writing:execution-core",
+      userId: "buddy:profile-1",
+    });
+    runtimeChatMock.openRuntimeChat.mockResolvedValue(undefined);
+
+    render(<EntryRedirect />);
+
+    await waitFor(() => {
+      expect(apiMock.getBuddyEntry).toHaveBeenCalledWith(undefined);
+      expect(runtimeChatMock.openRuntimeChat).toHaveBeenCalled();
+    });
+
+    expect(window.localStorage.getItem("copaw.buddy_profile_id")).toBe("profile-1");
   });
 
   it("keeps unfinished buddy onboarding on the onboarding page", async () => {

@@ -15,6 +15,7 @@ vi.mock("../../api", async () => {
       ...actual.default,
       listIndustryInstances: vi.fn(),
       getRuntimeIndustryDetail: vi.fn(),
+      getBuddyEntry: vi.fn(),
       previewIndustry: vi.fn(),
       bootstrapIndustry: vi.fn(),
       updateIndustryTeam: vi.fn(),
@@ -68,6 +69,7 @@ import {
 
 const mockedListIndustryInstances = vi.mocked(api.listIndustryInstances);
 const mockedGetRuntimeIndustryDetail = vi.mocked(api.getRuntimeIndustryDetail);
+const mockedGetBuddyEntry = vi.mocked(api.getBuddyEntry);
 const mockedPreviewIndustry = vi.mocked(api.previewIndustry);
 const mockedBootstrapIndustry = vi.mocked(api.bootstrapIndustry);
 const mockedUpdateIndustryTeam = vi.mocked(api.updateIndustryTeam);
@@ -89,6 +91,7 @@ describe("useIndustryPageState", () => {
     resetIndustryPageStateCache();
     mockedListIndustryInstances.mockReset();
     mockedGetRuntimeIndustryDetail.mockReset();
+    mockedGetBuddyEntry.mockReset();
     mockedPreviewIndustry.mockReset();
     mockedBootstrapIndustry.mockReset();
     mockedUpdateIndustryTeam.mockReset();
@@ -104,6 +107,11 @@ describe("useIndustryPageState", () => {
     });
     mockedRefreshBuddySummary.mockResolvedValue(null);
     mockedReadBuddyProfileId.mockReturnValue(null);
+    mockedGetBuddyEntry.mockResolvedValue({
+      mode: "start-onboarding",
+      profile_id: null,
+      session_id: null,
+    } as never);
   });
 
   it("loads active and retired teams through the extracted page-state hook", async () => {
@@ -276,6 +284,82 @@ describe("useIndustryPageState", () => {
         ([instanceId]) => instanceId === "buddy:profile-1:stocks",
       ),
     ).toBe(true);
+    expect(mockedRefreshBuddySummary).not.toHaveBeenCalled();
+  });
+
+  it("recovers the buddy carrier through backend entry even when local storage is empty", async () => {
+    mockedGetBuddyEntry.mockResolvedValue({
+      mode: "chat-ready",
+      profile_id: "profile-1",
+      session_id: null,
+      profile_display_name: "Alex",
+      execution_carrier: {
+        instance_id: "buddy:profile-1:stocks",
+      },
+    } as never);
+    mockedGetBuddySummarySnapshot.mockReturnValue({
+      loading: false,
+      error: null,
+      surface: null,
+    });
+    mockedRefreshBuddySummary.mockResolvedValue({
+      profile: {
+        profile_id: "profile-1",
+      },
+      execution_carrier: {
+        instance_id: "buddy:profile-1:stocks",
+      },
+    } as never);
+    mockedListIndustryInstances.mockImplementation(async (options) => {
+      const status =
+        typeof options === "object" && options ? options.status : undefined;
+      if (status === "retired") {
+        return [] as never;
+      }
+      return [
+        {
+          instance_id: "industry-other",
+          label: "Other Team",
+          owner_scope: "industry-other",
+          team: { agents: [] },
+        },
+      ] as never;
+    });
+    mockedGetRuntimeIndustryDetail.mockImplementation(async (instanceId) => ({
+      instance_id: instanceId,
+      label:
+        instanceId === "buddy:profile-1:stocks" ? "Buddy Carrier" : "Other Team",
+      owner_scope:
+        instanceId === "buddy:profile-1:stocks" ? "profile-1" : "industry-other",
+      profile: { industry: "Retail" },
+      team: { agents: [] },
+      media_analyses: [],
+    } as never));
+
+    const { result } = renderHook(() => {
+      const [briefForm] = Form.useForm();
+      const [draftForm] = Form.useForm();
+      return useIndustryPageState({
+        briefForm,
+        draftForm,
+        navigate: vi.fn() as never,
+      });
+    });
+
+    await waitFor(() => {
+      expect(mockedGetBuddyEntry).toHaveBeenCalledTimes(1);
+    });
+    await waitFor(() => {
+      expect(mockedGetRuntimeIndustryDetail).toHaveBeenCalledWith(
+        "buddy:profile-1:stocks",
+        undefined,
+      );
+    });
+    await waitFor(() => {
+      expect(result.current.selectedInstanceId).toBe("buddy:profile-1:stocks");
+    });
+
+    expect(mockedGetBuddyEntry).toHaveBeenCalledTimes(1);
     expect(mockedRefreshBuddySummary).not.toHaveBeenCalled();
   });
 

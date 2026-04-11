@@ -107,6 +107,28 @@ def _spawn_buddy_activation_job(
         )
 
     def _runner() -> None:
+        def _schedule_retry() -> bool:
+            if (
+                onboarding_service is None
+                or session_id is None
+                or activation_id is None
+            ):
+                return False
+            retry_target = onboarding_service.requeue_failed_activation(
+                session_id=session_id,
+                activation_id=activation_id,
+            )
+            if retry_target is None:
+                return False
+            _spawn_buddy_activation_job(
+                kickoff=kickoff,
+                onboarding_service=onboarding_service,
+                session_id=retry_target.session_id,
+                activation_id=retry_target.activation_id,
+                instance_id=retry_target.industry_instance_id,
+            )
+            return True
+
         try:
             import asyncio
 
@@ -125,11 +147,13 @@ def _spawn_buddy_activation_job(
                 and session_id is not None
                 and activation_id is not None
             ):
-                onboarding_service.complete_activation_from_result(
+                updated_session = onboarding_service.complete_activation_from_result(
                     session_id=session_id,
                     activation_id=activation_id,
                     result=result,
                 )
+                if str(updated_session.activation_status or "").strip().lower() == "failed":
+                    _schedule_retry()
         except Exception as exc:
             if (
                 onboarding_service is not None
@@ -141,6 +165,7 @@ def _spawn_buddy_activation_job(
                     activation_id=activation_id,
                     error_message=str(exc).strip() or "伙伴激活启动失败。",
                 )
+                _schedule_retry()
             logger.warning("伙伴建档激活任务执行失败。", exc_info=True)
 
     threading.Thread(
@@ -606,12 +631,13 @@ async def get_buddy_entry(
 ) -> BuddyEntryResponse:
     service = _get_buddy_projection_service(request)
     try:
-        surface = service.build_optional_chat_surface(profile_id=profile_id)
+        entry = service.build_optional_entry_payload(profile_id=profile_id)
     except ValueError as exc:
         raise HTTPException(404, detail=str(exc)) from exc
-    if surface is None:
+    if entry is None:
         return BuddyEntryResponse(mode="start-onboarding", profile_id=None, session_id=None)
-    return _resolve_buddy_entry_mode(surface=surface)
+    payload = entry.model_dump(mode="json") if hasattr(entry, "model_dump") else dict(entry)
+    return BuddyEntryResponse(**payload)
 
 
 __all__ = ["router"]

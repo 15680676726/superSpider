@@ -241,7 +241,7 @@ def test_invalid_closure_without_report_or_evidence_does_not_add_points(tmp_path
     assert payload.growth.evolution_stage == "seed"
 
 
-def test_buddy_projection_preserves_explicit_legacy_control_thread_after_binding_backfill(
+def test_buddy_projection_preserves_explicit_legacy_control_thread_without_persisting_read_side_backfill(
     tmp_path,
 ) -> None:
     _onboarding, projection, store = _build_services(tmp_path)
@@ -301,7 +301,7 @@ def test_buddy_projection_preserves_explicit_legacy_control_thread_after_binding
     active = domain_repository.get_active_domain_capability(profile.profile_id)
 
     assert active is not None
-    assert active.industry_instance_id == legacy_instance_id
+    assert active.industry_instance_id == ""
     assert active.control_thread_id == historical_thread_id
     assert payload.execution_carrier is not None
     assert payload.execution_carrier["instance_id"] == legacy_instance_id

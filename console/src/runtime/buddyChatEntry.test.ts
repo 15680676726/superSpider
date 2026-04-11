@@ -108,4 +108,34 @@ describe("resumeBuddyChatFromProfile", () => {
     });
     expect(runtimeChatMock.openRuntimeChat).not.toHaveBeenCalled();
   });
+
+  it("can recover chat-ready entry without a preloaded local profile id", async () => {
+    apiMock.getBuddyEntry.mockResolvedValue({
+      mode: "chat-ready",
+      profile_id: "profile-1",
+      session_id: null,
+      profile_display_name: "Alex",
+      execution_carrier: {
+        instance_id: "carrier-1",
+      },
+    });
+    runtimeChatMock.buildBuddyExecutionCarrierChatBinding.mockReturnValue({
+      name: "Nova",
+      threadId: "industry-chat:carrier-1:execution-core",
+      userId: "buddy:profile-1",
+    });
+    runtimeChatMock.openRuntimeChat.mockResolvedValue(undefined);
+
+    await resumeBuddyChatFromProfile({
+      profileId: null,
+      navigate: navigateMock,
+      entrySource: "chat-page",
+    });
+
+    expect(apiMock.getBuddyEntry).toHaveBeenCalledWith(undefined);
+    expect(buddyProfileBindingMock.writeBuddyProfileId).toHaveBeenCalledWith(
+      "profile-1",
+    );
+    expect(runtimeChatMock.openRuntimeChat).toHaveBeenCalled();
+  });
 });

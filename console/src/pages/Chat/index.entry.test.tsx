@@ -156,6 +156,23 @@ describe("ChatPage entry routing", () => {
     });
   });
 
+  it("still asks the buddy entry flow when /chat has no local profile id", async () => {
+    buddyProfileBindingMock.readBuddyProfileId.mockReturnValue(null);
+
+    render(<ChatPage />);
+
+    await waitFor(() => {
+      expect(
+        buddyChatEntryMock.resumeBuddyChatFromProfile,
+      ).toHaveBeenCalledWith({
+        profileId: null,
+        navigate: routerMocks.navigate,
+        entrySource: "chat-page",
+        shouldNavigate: expect.any(Function),
+      });
+    });
+  });
+
   it("does not clear bound thread context on a temporary session bootstrap miss", async () => {
     routerMocks.location.search =
       "?threadId=industry-chat%3Aindustry-v1-acme%3Aexecution-core";

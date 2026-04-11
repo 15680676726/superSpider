@@ -56,19 +56,50 @@ class BuddyDomainCapabilityGrowthService:
         *,
         profile_id: str,
     ) -> BuddyDomainCapabilityRecord | None:
+        return self._resolve_active_domain_capability(
+            profile_id=profile_id,
+            persist=True,
+            repair_bindings=True,
+        )
+
+    def project_active_domain_capability(
+        self,
+        *,
+        profile_id: str,
+    ) -> BuddyDomainCapabilityRecord | None:
+        return self._resolve_active_domain_capability(
+            profile_id=profile_id,
+            persist=False,
+            repair_bindings=False,
+        )
+
+    def _resolve_active_domain_capability(
+        self,
+        *,
+        profile_id: str,
+        persist: bool,
+        repair_bindings: bool,
+    ) -> BuddyDomainCapabilityRecord | None:
         active = self._domain_capability_repository.get_active_domain_capability(profile_id)
         if active is None:
             return None
-        active = self._backfill_legacy_binding(profile_id=profile_id, active=active)
-        self._repair_legacy_execution_binding(active=active)
+        active = self._backfill_legacy_binding(
+            profile_id=profile_id,
+            active=active,
+            persist=persist,
+        )
+        if repair_bindings:
+            self._repair_legacy_execution_binding(active=active)
         facts = self._collect_growth_facts(active=active)
         if facts is None:
             return active
-        if self._should_refresh_progress(active=active, facts=facts):
+        if persist and self._should_refresh_progress(active=active, facts=facts):
             facts["last_progress_at"] = _utc_now().isoformat()
         else:
             facts["last_progress_at"] = active.last_progress_at
         updated = active.model_copy(update=facts)
+        if not persist:
+            return updated
         return self._domain_capability_repository.upsert_domain_capability(updated)
 
     def _collect_growth_facts(
@@ -275,6 +306,7 @@ class BuddyDomainCapabilityGrowthService:
         *,
         profile_id: str,
         active: BuddyDomainCapabilityRecord,
+        persist: bool = True,
     ) -> BuddyDomainCapabilityRecord:
         if str(active.industry_instance_id or "").strip():
             return active
@@ -291,6 +323,8 @@ class BuddyDomainCapabilityGrowthService:
                 or build_buddy_domain_control_thread_id(instance_id=legacy_instance_id),
             },
         )
+        if not persist:
+            return updated
         return self._domain_capability_repository.upsert_domain_capability(updated)
 
     def _repair_legacy_execution_binding(

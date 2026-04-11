@@ -252,7 +252,9 @@ def test_buddy_confirm_direction_auto_activates_execution_when_industry_service_
     }
 
 
-def test_buddy_confirm_direction_persists_activation_failure_before_surface_retry(tmp_path) -> None:
+def test_buddy_confirm_direction_auto_retries_activation_after_transient_failure(
+    tmp_path,
+) -> None:
     store = SQLiteStateStore(tmp_path / "buddy-onboarding-activation-failure.sqlite3")
     profile_repository = SqliteHumanProfileRepository(store)
     growth_target_repository = SqliteGrowthTargetRepository(store)
@@ -339,14 +341,17 @@ def test_buddy_confirm_direction_persists_activation_failure_before_surface_retr
         )
         if (
             session_payload is not None
-            and session_payload.activation_status == "failed"
+            and session_payload.activation_status == "succeeded"
+            and int(session_payload.activation_attempt_count or 0) >= 2
         ):
             break
         time.sleep(0.02)
 
     assert session_payload is not None
-    assert session_payload.activation_status == "failed"
-    assert "kickoff exploded" in session_payload.activation_error
+    assert session_payload.activation_status == "succeeded"
+    assert int(session_payload.activation_attempt_count or 0) >= 2
+    assert len(fake_industry_service.calls) >= 2
+    assert not str(session_payload.activation_error or "").strip()
 
 
 def test_buddy_surface_requeues_failed_activation_and_marks_it_succeeded(tmp_path) -> None:
@@ -986,6 +991,11 @@ def test_buddy_surface_repairs_legacy_buddy_execution_binding_before_chat(
                 },
             ),
         )
+
+    refreshed = growth_service.refresh_active_domain_capability(
+        profile_id=identity["profile"]["profile_id"],
+    )
+    assert refreshed is not None
 
     response = client.get(
         f"/buddy/surface?profile_id={identity['profile']['profile_id']}",

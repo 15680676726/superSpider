@@ -69,6 +69,14 @@ class BuddyOnboardingProjection(BaseModel):
     completed: bool = False
 
 
+class BuddyEntryPayload(BaseModel):
+    mode: str
+    profile_id: str | None = None
+    session_id: str | None = None
+    profile_display_name: str | None = None
+    execution_carrier: dict[str, object] | None = None
+
+
 class BuddyProjectionService:
     def __init__(
         self,
@@ -97,14 +105,15 @@ class BuddyProjectionService:
         self,
         *,
         profile_id: str | None = None,
+        refresh_truth: bool = False,
     ) -> BuddySurfacePayload | None:
-        profile = self._resolve_profile(profile_id)
-        if profile is None:
+        loaded = self._load_projection_inputs(
+            profile_id=profile_id,
+            refresh_truth=refresh_truth,
+        )
+        if loaded is None:
             return None
-        target = self._growth_target_repository.get_active_target(profile.profile_id)
-        relationship = self._relationship_repository.get_relationship(profile.profile_id)
-        session = self._onboarding_session_repository.get_latest_session_for_profile(profile.profile_id)
-        active_domain = self._resolve_active_domain_capability(profile.profile_id)
+        profile, target, relationship, session, active_domain = loaded
         execution_carrier = self._build_execution_carrier(
             profile=profile,
             growth_target=target,
@@ -230,6 +239,43 @@ class BuddyProjectionService:
             growth=growth,
         )
 
+    def build_optional_entry_payload(
+        self,
+        *,
+        profile_id: str | None = None,
+        refresh_truth: bool = False,
+    ) -> BuddyEntryPayload | None:
+        loaded = self._load_projection_inputs(
+            profile_id=profile_id,
+            refresh_truth=refresh_truth,
+        )
+        if loaded is None:
+            return None
+        profile, target, relationship, session, active_domain = loaded
+        execution_carrier = self._build_execution_carrier(
+            profile=profile,
+            growth_target=target,
+            active_domain=active_domain,
+        )
+        onboarding = self._build_onboarding_projection(
+            session=session,
+            target=target,
+            relationship=relationship,
+            active_domain=active_domain,
+        )
+        mode = (
+            "chat-ready"
+            if execution_carrier is not None and onboarding.completed
+            else "resume-onboarding"
+        )
+        return BuddyEntryPayload(
+            mode=mode,
+            profile_id=profile.profile_id,
+            session_id=None if mode == "chat-ready" else onboarding.session_id,
+            profile_display_name=profile.display_name if mode == "chat-ready" else None,
+            execution_carrier=execution_carrier if mode == "chat-ready" else None,
+        )
+
     def build_chat_surface(self, *, profile_id: str | None = None) -> BuddySurfacePayload:
         surface = self.build_optional_chat_surface(profile_id=profile_id)
         if surface is None:
@@ -271,16 +317,50 @@ class BuddyProjectionService:
             raise ValueError("当前存在多个伙伴档案，请明确指定 profile_id。")
         return self._profile_repository.get_latest_profile()
 
+    def _load_projection_inputs(
+        self,
+        *,
+        profile_id: str | None,
+        refresh_truth: bool,
+    ) -> tuple[
+        HumanProfile,
+        GrowthTarget | None,
+        CompanionRelationship | None,
+        Any | None,
+        BuddyDomainCapabilityRecord | None,
+    ] | None:
+        profile = self._resolve_profile(profile_id)
+        if profile is None:
+            return None
+        target = self._growth_target_repository.get_active_target(profile.profile_id)
+        relationship = self._relationship_repository.get_relationship(profile.profile_id)
+        session = self._onboarding_session_repository.get_latest_session_for_profile(
+            profile.profile_id,
+        )
+        active_domain = self._resolve_active_domain_capability(
+            profile.profile_id,
+            refresh_truth=refresh_truth,
+        )
+        return profile, target, relationship, session, active_domain
+
     def _resolve_active_domain_capability(
         self,
         profile_id: str,
+        *,
+        refresh_truth: bool = False,
     ) -> BuddyDomainCapabilityRecord | None:
         if self._domain_capability_growth_service is not None:
-            refreshed = self._domain_capability_growth_service.refresh_active_domain_capability(
+            if refresh_truth:
+                refreshed = self._domain_capability_growth_service.refresh_active_domain_capability(
+                    profile_id=profile_id,
+                )
+                if refreshed is not None:
+                    return refreshed
+            projected = self._domain_capability_growth_service.project_active_domain_capability(
                 profile_id=profile_id,
             )
-            if refreshed is not None:
-                return refreshed
+            if projected is not None:
+                return projected
         if self._domain_capability_repository is None:
             return None
         return self._domain_capability_repository.get_active_domain_capability(profile_id)

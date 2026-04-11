@@ -127,6 +127,7 @@ class BuddyActivationRepairTarget(BaseModel):
     session_id: str
     profile_id: str
     industry_instance_id: str
+    activation_id: str | None = None
 
 
 _DEFAULT_DIRECTION = "建立稳定、自主、长期向上的人生主方向"
@@ -963,6 +964,35 @@ class BuddyOnboardingService:
             session_id=session.session_id,
             profile_id=profile_id,
             industry_instance_id=instance_id,
+        )
+
+    def requeue_failed_activation(
+        self,
+        *,
+        session_id: str,
+        activation_id: str | None = None,
+    ) -> BuddyActivationRepairTarget | None:
+        if self._domain_capability_repository is None:
+            return None
+        session = self._require_session(session_id)
+        if activation_id and str(session.activation_id or "").strip() != str(activation_id).strip():
+            return None
+        if str(session.activation_status or "").strip().lower() != "failed":
+            return None
+        if int(session.activation_attempt_count or 0) >= 3:
+            return None
+        active_domain = self._domain_capability_repository.get_active_domain_capability(
+            session.profile_id,
+        )
+        instance_id = str(getattr(active_domain, "industry_instance_id", "") or "").strip()
+        if not instance_id:
+            return None
+        updated_session = self.queue_activation(session_id=session_id)
+        return BuddyActivationRepairTarget(
+            session_id=updated_session.session_id,
+            profile_id=updated_session.profile_id,
+            industry_instance_id=instance_id,
+            activation_id=str(updated_session.activation_id or "").strip() or None,
         )
 
     def record_chat_interaction(

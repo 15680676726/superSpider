@@ -11,20 +11,15 @@ import { resolveBuddyEntryDecision } from "./buddyFlow";
 const BUDDY_ONBOARDING_ROUTE = "/buddy-onboarding";
 
 export async function resumeBuddyChatFromProfile(params: {
-  profileId: string;
+  profileId?: string | null;
   navigate: NavigateFunction;
   entrySource: string;
   shouldNavigate?: () => boolean;
 }): Promise<"opened" | "onboarding"> {
-  const profileId = params.profileId.trim();
-  if (!profileId) {
-    if (!params.shouldNavigate || params.shouldNavigate()) {
-      params.navigate(BUDDY_ONBOARDING_ROUTE, { replace: true });
-    }
-    return "onboarding";
-  }
+  const profileId =
+    typeof params.profileId === "string" ? params.profileId.trim() : "";
 
-  const entry = await api.getBuddyEntry(profileId);
+  const entry = await api.getBuddyEntry(profileId || undefined);
   const decision = resolveBuddyEntryDecision(entry);
   if (decision.mode !== "chat-ready") {
     if (!params.shouldNavigate || params.shouldNavigate()) {

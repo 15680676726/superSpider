@@ -316,38 +316,28 @@ export default function ChatPage() {
         return;
       }
       const storedBuddyProfileId = readBuddyProfileId();
-      if (storedBuddyProfileId) {
-        let cancelled = false;
-        setThreadBootstrapError(null);
-        setAutoBindingPending(true);
-        void resumeBuddyChatFromProfile({
-          profileId: storedBuddyProfileId,
-          navigate,
-          entrySource: "chat-page",
-          shouldNavigate: () => !cancelled,
-        })
-          .catch(() => {
-            if (!cancelled) {
-              navigate(BUDDY_IDENTITY_CENTER_ROUTE, { replace: true });
-            }
-          })
-          .finally(() => {
-            if (!cancelled) {
-              setAutoBindingPending(false);
-            }
-          });
-        return () => {
-          cancelled = true;
-        };
-      }
-      sessionApi.setPreferredThreadId(null);
-      sessionApi.clearBoundThreadContext();
-      setThreadBootstrapPending(false);
+      let cancelled = false;
       setThreadBootstrapError(null);
-      setThreadMeta({});
-      setAutoBindingPending(false);
-      navigate(BUDDY_IDENTITY_CENTER_ROUTE, { replace: true });
-      return;
+      setAutoBindingPending(true);
+      void resumeBuddyChatFromProfile({
+        profileId: storedBuddyProfileId,
+        navigate,
+        entrySource: "chat-page",
+        shouldNavigate: () => !cancelled,
+      })
+        .catch(() => {
+          if (!cancelled) {
+            navigate(BUDDY_IDENTITY_CENTER_ROUTE, { replace: true });
+          }
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setAutoBindingPending(false);
+          }
+        });
+      return () => {
+        cancelled = true;
+      };
     }
     if (!requestedThreadLooksBound || !requestedThreadId) {
       sessionApi.setPreferredThreadId(null);

@@ -30,11 +30,7 @@ export default function EntryRedirect() {
     };
 
     void (async () => {
-      const profileId = readActiveBuddyProfileId(window.currentThreadMeta);
-      if (!profileId) {
-        redirectToOnboarding();
-        return;
-      }
+      const profileId = readActiveBuddyProfileId(window.currentThreadMeta) ?? undefined;
 
       try {
         const entry = await api.getBuddyEntry(profileId);

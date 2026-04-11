@@ -570,3 +570,61 @@ def test_buddy_entry_returns_chat_ready_for_completed_onboarding(tmp_path) -> No
     assert payload["profile_display_name"] == "Mina"
     assert payload["execution_carrier"]["instance_id"] == confirm["execution_carrier"]["instance_id"]
     assert payload["execution_carrier"]["current_cycle_id"] == confirm["execution_carrier"]["current_cycle_id"]
+
+
+def test_buddy_entry_uses_lightweight_entry_projection_instead_of_full_surface(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    client, _store = _build_client(tmp_path)
+    identity = client.post(
+        "/buddy/onboarding/identity",
+        json={
+            "display_name": "Mina",
+            "profession": "Writer",
+            "current_stage": "restart",
+            "interests": ["writing"],
+            "strengths": ["consistency"],
+            "constraints": ["time"],
+            "goal_intention": "Build a durable writing direction.",
+        },
+    ).json()
+    profile_id = identity["profile"]["profile_id"]
+
+    calls = {"entry": 0}
+
+    def _build_optional_entry_payload(*, profile_id: str | None = None):
+        calls["entry"] += 1
+        assert profile_id == identity["profile"]["profile_id"]
+        return {
+            "mode": "resume-onboarding",
+            "profile_id": identity["profile"]["profile_id"],
+            "session_id": identity["session_id"],
+            "profile_display_name": None,
+            "execution_carrier": None,
+        }
+
+    def _build_optional_chat_surface(*, profile_id: str | None = None):
+        raise AssertionError(
+            f"full buddy surface should not be built for /buddy/entry (profile_id={profile_id})"
+        )
+
+    monkeypatch.setattr(
+        client.app.state.buddy_projection_service,
+        "build_optional_entry_payload",
+        _build_optional_entry_payload,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        client.app.state.buddy_projection_service,
+        "build_optional_chat_surface",
+        _build_optional_chat_surface,
+    )
+
+    response = client.get("/buddy/entry", params={"profile_id": profile_id})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["mode"] == "resume-onboarding"
+    assert payload["profile_id"] == profile_id
+    assert calls["entry"] == 1
