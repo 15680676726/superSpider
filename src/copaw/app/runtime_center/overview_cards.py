@@ -572,7 +572,7 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
         self,
         app_state: RuntimeCenterAppStateView,
     ) -> RuntimeOverviewCard:
-        return await self._state_card(
+        card = await self._state_card(
             app_state=app_state,
             key="decisions",
             title="决策",
@@ -580,6 +580,9 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             methods=("list_decision_requests", "list_decisions", "get_decision_requests"),
             mapper=self._map_decision_entries,
         )
+        meta = dict(card.meta or {})
+        meta.setdefault("route", "/api/runtime-center/decisions")
+        return card.model_copy(update={"meta": meta})
 
     async def _build_patches_card(
         self,

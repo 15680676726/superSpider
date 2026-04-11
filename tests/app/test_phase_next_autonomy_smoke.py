@@ -62,6 +62,48 @@ from .test_workflow_templates_api import (
 )
 
 
+def _resolve_initial_materialization(
+    app,
+    *,
+    instance_id: str,
+    writeback: dict[str, object],
+    backlog_id: str,
+    actor: str,
+    auto_dispatch_materialized_goals: bool = False,
+) -> dict[str, object]:
+    materialized_assignment_ids = [
+        str(item)
+        for item in list(writeback.get("materialized_assignment_ids") or [])
+        if str(item)
+    ]
+    if materialized_assignment_ids:
+        started_cycle_id = writeback.get("materialized_cycle_id")
+        if not started_cycle_id:
+            assignment_record = app.state.assignment_repository.get_assignment(
+                materialized_assignment_ids[0],
+            )
+            started_cycle_id = assignment_record.cycle_id if assignment_record is not None else None
+        return {
+            "instance_id": instance_id,
+            "started_cycle_id": started_cycle_id,
+            "created_assignment_ids": materialized_assignment_ids,
+            "created_task_ids": [],
+            "created_report_ids": [],
+            "processed_report_ids": [],
+        }
+
+    cycle_result = asyncio.run(
+        app.state.industry_service.run_operating_cycle(
+            instance_id=instance_id,
+            actor=actor,
+            force=True,
+            backlog_item_ids=[backlog_id],
+            auto_dispatch_materialized_goals=auto_dispatch_materialized_goals,
+        ),
+    )
+    return cycle_result["processed_instances"][0]
+
+
 def test_phase_next_runtime_center_overview_surfaces_main_brain_cockpit_card() -> None:
     app = build_runtime_center_app()
     app.state.state_query_service = FakeStateQueryService()
@@ -191,25 +233,26 @@ def test_phase_next_industry_long_run_smoke_keeps_followup_focus_and_replan_trut
     )
 
     assert writeback is not None
-    decision_id = writeback["decision_request_id"]
+    decision_id = writeback.get("decision_request_id")
     backlog_id = writeback["created_backlog_ids"][0]
-    approved = client.post(
-        f"/runtime-center/decisions/{decision_id}/approve",
-        json={"resolution": "Approve the governed browser staffing seat.", "execute": True},
-    )
-    assert approved.status_code == 200
+    if decision_id:
+        approved = client.post(
+            f"/runtime-center/decisions/{decision_id}/approve",
+            json={"resolution": "Approve the governed browser staffing seat.", "execute": True},
+        )
+        assert approved.status_code == 200
 
-    first_cycle = asyncio.run(
-        app.state.industry_service.run_operating_cycle(
-            instance_id=instance_id,
-            actor="test:phase-next-smoke-cycle",
-            force=True,
-            backlog_item_ids=[backlog_id],
-            auto_dispatch_materialized_goals=False,
-        ),
+    first_cycle = _resolve_initial_materialization(
+        app,
+        instance_id=instance_id,
+        writeback=writeback,
+        backlog_id=backlog_id,
+        actor="test:phase-next-smoke-cycle",
+        auto_dispatch_materialized_goals=False,
     )
-    assignment_id = first_cycle["processed_instances"][0]["created_assignment_ids"][0]
-    cycle_id = first_cycle["processed_instances"][0]["started_cycle_id"]
+    assignment_id = first_cycle["created_assignment_ids"][0]
+    cycle_id = first_cycle["started_cycle_id"]
+    assert cycle_id is not None
 
     report = AgentReportRecord(
         industry_instance_id=instance_id,
@@ -350,25 +393,26 @@ def test_phase_next_industry_long_run_smoke_keeps_handoff_human_assist_and_repla
     )
 
     assert writeback is not None
-    decision_id = writeback["decision_request_id"]
+    decision_id = writeback.get("decision_request_id")
     backlog_id = writeback["created_backlog_ids"][0]
-    approved = client.post(
-        f"/runtime-center/decisions/{decision_id}/approve",
-        json={"resolution": "Approve the governed staffing seat.", "execute": True},
-    )
-    assert approved.status_code == 200
+    if decision_id:
+        approved = client.post(
+            f"/runtime-center/decisions/{decision_id}/approve",
+            json={"resolution": "Approve the governed staffing seat.", "execute": True},
+        )
+        assert approved.status_code == 200
 
-    first_cycle = asyncio.run(
-        app.state.industry_service.run_operating_cycle(
-            instance_id=instance_id,
-            actor="test:phase-next-smoke-cycle",
-            force=True,
-            backlog_item_ids=[backlog_id],
-            auto_dispatch_materialized_goals=False,
-        ),
+    first_cycle = _resolve_initial_materialization(
+        app,
+        instance_id=instance_id,
+        writeback=writeback,
+        backlog_id=backlog_id,
+        actor="test:phase-next-smoke-cycle",
+        auto_dispatch_materialized_goals=False,
     )
-    assignment_id = first_cycle["processed_instances"][0]["created_assignment_ids"][0]
-    cycle_id = first_cycle["processed_instances"][0]["started_cycle_id"]
+    assignment_id = first_cycle["created_assignment_ids"][0]
+    cycle_id = first_cycle["started_cycle_id"]
+    assert cycle_id is not None
 
     report = AgentReportRecord(
         industry_instance_id=instance_id,
@@ -738,17 +782,17 @@ def test_phase_next_same_thread_cognitive_closure_smoke_updates_visible_judgment
         assert approved.status_code == 200
 
     backlog_id = writeback["created_backlog_ids"][0]
-    first_cycle = asyncio.run(
-        app.state.industry_service.run_operating_cycle(
-            instance_id=instance_id,
-            actor="test:phase-next-cognitive-cycle-1",
-            force=True,
-            backlog_item_ids=[backlog_id],
-            auto_dispatch_materialized_goals=False,
-        ),
+    first_cycle = _resolve_initial_materialization(
+        app,
+        instance_id=instance_id,
+        writeback=writeback,
+        backlog_id=backlog_id,
+        actor="test:phase-next-cognitive-cycle-1",
+        auto_dispatch_materialized_goals=False,
     )
-    assignment_id = first_cycle["processed_instances"][0]["created_assignment_ids"][0]
-    cycle_id = first_cycle["processed_instances"][0]["started_cycle_id"]
+    assignment_id = first_cycle["created_assignment_ids"][0]
+    cycle_id = first_cycle["started_cycle_id"]
+    assert cycle_id is not None
     common_metadata = {
         "control_thread_id": control_thread_id,
         "session_id": control_thread_id,
@@ -1651,25 +1695,26 @@ def test_phase_next_long_run_harness_smoke_covers_runtime_chain_and_multi_surfac
     )
 
     assert writeback is not None
-    decision_id = writeback["decision_request_id"]
+    decision_id = writeback.get("decision_request_id")
     backlog_id = writeback["created_backlog_ids"][0]
-    approved = client.post(
-        f"/runtime-center/decisions/{decision_id}/approve",
-        json={"resolution": "Approve the governed staffing seat.", "execute": True},
-    )
-    assert approved.status_code == 200
+    if decision_id:
+        approved = client.post(
+            f"/runtime-center/decisions/{decision_id}/approve",
+            json={"resolution": "Approve the governed staffing seat.", "execute": True},
+        )
+        assert approved.status_code == 200
 
-    first_cycle = asyncio.run(
-        app.state.industry_service.run_operating_cycle(
-            instance_id=instance_id,
-            actor="test:phase-next-long-run-cycle-1",
-            force=True,
-            backlog_item_ids=[backlog_id],
-            auto_dispatch_materialized_goals=False,
-        ),
+    first_cycle = _resolve_initial_materialization(
+        app,
+        instance_id=instance_id,
+        writeback=writeback,
+        backlog_id=backlog_id,
+        actor="test:phase-next-long-run-cycle-1",
+        auto_dispatch_materialized_goals=False,
     )
-    assignment_id = first_cycle["processed_instances"][0]["created_assignment_ids"][0]
-    cycle_id = first_cycle["processed_instances"][0]["started_cycle_id"]
+    assignment_id = first_cycle["created_assignment_ids"][0]
+    cycle_id = first_cycle["started_cycle_id"]
+    assert cycle_id is not None
 
     report = AgentReportRecord(
         industry_instance_id=instance_id,

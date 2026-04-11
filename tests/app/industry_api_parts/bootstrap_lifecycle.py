@@ -30,6 +30,15 @@ from copaw.state import (
 )
 
 
+def _wait_until(predicate, *, timeout_seconds: float = 1.5, interval_seconds: float = 0.01) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(interval_seconds)
+    return bool(predicate())
+
+
 def test_industry_service_facade_delegates_bootstrap_to_bootstrap_service() -> None:
     service = IndustryService.__new__(IndustryService)
     calls: list[object] = []
@@ -2127,18 +2136,16 @@ def test_kickoff_execution_from_chat_does_not_block_on_learning_acquisition_cycl
         "run_industry_acquisition_cycle",
         side_effect=_record_acquisition_cycle,
     ):
-        async def _run_kickoff():
-            result = await app.state.industry_service.kickoff_execution_from_chat(
+        kickoff = asyncio.run(
+            app.state.industry_service.kickoff_execution_from_chat(
                 industry_instance_id=instance_id,
                 message_text="Start the first execution cycle for today.",
                 owner_agent_id="copaw-agent-runner",
                 session_id=f"industry:{instance_id}",
                 channel="console",
-            )
-            await asyncio.sleep(0)
-            return result
-
-        kickoff = asyncio.run(_run_kickoff())
+            ),
+        )
+        assert _wait_until(lambda: len(captured_calls) == 1)
 
     assert kickoff is not None
     assert kickoff["kickoff_stage"] == "learning"
@@ -2216,19 +2223,22 @@ def test_kickoff_execution_from_chat_publishes_background_acquisition_failure_ev
         "_publish_runtime_event",
         side_effect=_capture_event,
     ):
-        async def _run_kickoff():
-            result = await app.state.industry_service.kickoff_execution_from_chat(
+        kickoff = asyncio.run(
+            app.state.industry_service.kickoff_execution_from_chat(
                 industry_instance_id=instance_id,
                 message_text="Start the first execution cycle for today.",
                 owner_agent_id="copaw-agent-runner",
                 session_id=f"industry:{instance_id}",
                 channel="console",
-            )
-            await asyncio.sleep(0)
-            await asyncio.sleep(0)
-            return result
-
-        kickoff = asyncio.run(_run_kickoff())
+            ),
+        )
+        assert _wait_until(
+            lambda: any(
+                event["action"] == "background-cycle-failed"
+                and event["payload"]["industry_instance_id"] == instance_id
+                for event in captured_events
+            ),
+        )
 
     assert kickoff is not None
     assert kickoff["kickoff_stage"] == "learning"

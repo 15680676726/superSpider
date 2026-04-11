@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import threading
 from collections.abc import Mapping
 from hashlib import sha1
+from time import perf_counter
 from .service_context import *  # noqa: F401,F403
 from .service_recommendation_search import *  # noqa: F401,F403
 from .service_recommendation_pack import *  # noqa: F401,F403
@@ -1652,6 +1654,8 @@ class _IndustryLifecycleMixin:
                 "instance_id": record.instance_id,
                 "role": role.model_dump(mode="json"),
                 "seed_default_goal": False,
+                "auto_dispatch": False,
+                "execute": False,
                 "control_thread_id": control_thread_id,
                 "session_id": control_thread_id,
                 "human_confirmation_required": human_confirmation_required,
@@ -2874,7 +2878,14 @@ class _IndustryLifecycleMixin:
                         record.instance_id,
                     )
 
-            asyncio.create_task(_run_background())
+            def _runner() -> None:
+                asyncio.run(_run_background())
+
+            threading.Thread(
+                target=_runner,
+                daemon=True,
+                name=f"copaw-learning-acquisition:{record.instance_id}",
+            ).start()
         pending_assignments = self._list_pending_kickoff_assignments(record)
         pending_assignment_entries = [
             (
@@ -3086,6 +3097,12 @@ class _IndustryLifecycleMixin:
         channel: str | None = None,
         writeback_plan: ChatWritebackPlan | None = None,
     ) -> dict[str, Any] | None:
+        started_at = perf_counter()
+        logger.info(
+            "Industry chat writeback enter: instance=%s owner=%s",
+            industry_instance_id,
+            owner_agent_id,
+        )
         record = self._industry_instance_repository.get_instance(industry_instance_id)
         if record is None:
             return None
@@ -3114,7 +3131,16 @@ class _IndustryLifecycleMixin:
             team_surface_capability_ids,
             team_surface_capability_mounts,
             team_surface_environment_texts,
+            role_surface_context,
         ) = self._collect_team_surface_context(team=team)
+        logger.info(
+            "Industry chat writeback team surface collected: instance=%s elapsed=%.2fs capability_ids=%d mounts=%d env_texts=%d",
+            record.instance_id,
+            perf_counter() - started_at,
+            len(team_surface_capability_ids),
+            len(team_surface_capability_mounts),
+            len(team_surface_environment_texts),
+        )
         requested_surfaces = self._list_chat_writeback_requested_surfaces(
             message_text=plan.normalized_text,
             plan=plan,
@@ -3122,11 +3148,25 @@ class _IndustryLifecycleMixin:
             capability_mounts=team_surface_capability_mounts,
             environment_texts=team_surface_environment_texts,
         )
+        logger.info(
+            "Industry chat writeback requested surfaces resolved: instance=%s elapsed=%.2fs requested_surfaces=%s",
+            record.instance_id,
+            perf_counter() - started_at,
+            ",".join(requested_surfaces),
+        )
         matched_role, target_match_signals = self._resolve_chat_writeback_target_role(
             record=record,
             team=team,
             message_text=plan.normalized_text,
             requested_surfaces=requested_surfaces,
+            role_surface_context=role_surface_context,
+        )
+        logger.info(
+            "Industry chat writeback target role resolved: instance=%s elapsed=%.2fs matched_role=%s signals=%s",
+            record.instance_id,
+            perf_counter() - started_at,
+            _string(getattr(matched_role, "role_id", None)) if matched_role is not None else None,
+            ",".join(target_match_signals),
         )
         seat_resolution = resolve_chat_writeback_seat_gap(
             message_text=plan.normalized_text,
@@ -3137,6 +3177,13 @@ class _IndustryLifecycleMixin:
         seat_resolution_kind = seat_resolution.kind
         seat_resolution_reason = _string(seat_resolution.reason) or ""
         requested_surfaces = list(seat_resolution.requested_surfaces or requested_surfaces)
+        logger.info(
+            "Industry chat writeback seat resolution: instance=%s kind=%s matched_role=%s requested_surfaces=%s",
+            record.instance_id,
+            seat_resolution_kind,
+            _string(getattr(matched_role, "role_id", None)) if matched_role is not None else None,
+            ",".join(requested_surfaces),
+        )
         control_thread_id = self._chat_writeback_control_thread_id(
             instance_id=record.instance_id,
             session_id=session_id,
@@ -3166,6 +3213,12 @@ class _IndustryLifecycleMixin:
             and matched_role_surface_gap
             and seat_resolution_kind != "existing-role"
         ):
+            capability_gap_started_at = perf_counter()
+            logger.info(
+                "Industry chat writeback capability-gap auto-close start: instance=%s role=%s",
+                record.instance_id,
+                matched_role.role_id,
+            )
             capability_gap_closure_results = (
                 await self._auto_close_existing_role_capability_gap(
                     record=record,
@@ -3173,6 +3226,13 @@ class _IndustryLifecycleMixin:
                     role=matched_role,
                     plan=plan,
                 )
+            )
+            logger.info(
+                "Industry chat writeback capability-gap auto-close finish: instance=%s role=%s elapsed=%.2fs results=%s",
+                record.instance_id,
+                matched_role.role_id,
+                perf_counter() - capability_gap_started_at,
+                ",".join(item.status for item in capability_gap_closure_results),
             )
             successful_closure = any(
                 item.status in {"installed", "satisfied"}
@@ -3266,6 +3326,12 @@ class _IndustryLifecycleMixin:
                 ) or seat_resolution.role
                 dispatch_role = target_role
                 if target_role is not None:
+                    temp_gap_started_at = perf_counter()
+                    logger.info(
+                        "Industry chat writeback temporary-seat capability-gap auto-close start: instance=%s role=%s",
+                        record.instance_id,
+                        target_role.role_id,
+                    )
                     capability_gap_closure_results = (
                         await self._auto_close_temporary_seat_capability_gap(
                             record=record,
@@ -3273,6 +3339,13 @@ class _IndustryLifecycleMixin:
                             role=target_role,
                             plan=plan,
                         )
+                    )
+                    logger.info(
+                        "Industry chat writeback temporary-seat capability-gap auto-close finish: instance=%s role=%s elapsed=%.2fs results=%s",
+                        record.instance_id,
+                        target_role.role_id,
+                        perf_counter() - temp_gap_started_at,
+                        ",".join(item.status for item in capability_gap_closure_results),
                     )
                 failed_capability_result = next(
                     (

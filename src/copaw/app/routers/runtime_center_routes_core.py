@@ -210,7 +210,77 @@ def _resolve_runtime_chat_thread_id(request_payload: AgentRequest) -> str | None
     )
 
 
-def _normalize_runtime_chat_thread_binding(request_payload: AgentRequest) -> AgentRequest:
+def _resolve_buddy_profile_id_from_industry_instance(
+    industry_instance_id: str | None,
+    *,
+    owner_scope: str | None = None,
+) -> str | None:
+    owner_scope_text = _first_non_empty_text(owner_scope)
+    instance_text = _first_non_empty_text(industry_instance_id)
+    if instance_text is None or not instance_text.startswith("buddy:"):
+        return None
+    if owner_scope_text:
+        return owner_scope_text
+    _, _, remainder = instance_text.partition("buddy:")
+    profile_id, separator, _domain_id = remainder.partition(":")
+    if not separator:
+        return None
+    return _first_non_empty_text(profile_id)
+
+
+def _resolve_runtime_chat_thread_metadata(
+    *,
+    request: Request,
+    control_thread_id: str,
+) -> dict[str, object]:
+    metadata: dict[str, object] = {}
+    repository = getattr(request.app.state, "agent_thread_binding_repository", None)
+    binding = None
+    getter = getattr(repository, "get_binding", None)
+    if callable(getter):
+        try:
+            binding = getter(control_thread_id)
+        except Exception:
+            binding = None
+    if binding is not None:
+        metadata["industry_instance_id"] = _first_non_empty_text(
+            getattr(binding, "industry_instance_id", None),
+        )
+        metadata["industry_role_id"] = _first_non_empty_text(
+            getattr(binding, "industry_role_id", None),
+        )
+        metadata["owner_scope"] = _first_non_empty_text(
+            getattr(binding, "owner_scope", None),
+        )
+        metadata["work_context_id"] = _first_non_empty_text(
+            getattr(binding, "work_context_id", None),
+        )
+    if not metadata.get("industry_instance_id") and control_thread_id.startswith("industry-chat:"):
+        _, _, remainder = control_thread_id.partition("industry-chat:")
+        instance_id, separator, role_id = remainder.rpartition(":")
+        if instance_id and separator and role_id:
+            metadata["industry_instance_id"] = _first_non_empty_text(instance_id)
+            metadata["industry_role_id"] = _first_non_empty_text(role_id)
+    industry_instance_id = _first_non_empty_text(metadata.get("industry_instance_id"))
+    owner_scope = _first_non_empty_text(metadata.get("owner_scope"))
+    buddy_profile_id = _resolve_buddy_profile_id_from_industry_instance(
+        industry_instance_id,
+        owner_scope=owner_scope,
+    )
+    if buddy_profile_id:
+        metadata["buddy_profile_id"] = buddy_profile_id
+    return {
+        key: value
+        for key, value in metadata.items()
+        if value not in (None, "")
+    }
+
+
+def _normalize_runtime_chat_thread_binding(
+    request_payload: AgentRequest,
+    *,
+    request: Request,
+) -> AgentRequest:
     control_thread_id = _first_non_empty_text(
         getattr(request_payload, "control_thread_id", None),
         getattr(request_payload, "thread_id", None),
@@ -233,6 +303,14 @@ def _normalize_runtime_chat_thread_binding(request_payload: AgentRequest) -> Age
         and control_thread_id.startswith("industry-chat:")
     ):
         updates["session_kind"] = "industry-control-thread"
+    if control_thread_id:
+        hydrated = _resolve_runtime_chat_thread_metadata(
+            request=request,
+            control_thread_id=control_thread_id,
+        )
+        for field_name, field_value in hydrated.items():
+            if not _first_non_empty_text(getattr(request_payload, field_name, None)):
+                updates[field_name] = field_value
     if not updates:
         return request_payload
     return request_payload.model_copy(update=updates)
@@ -471,6 +549,33 @@ def _human_assist_task_is_submission_open(task: object) -> bool:
         "need_more_evidence",
         "rejected",
     }
+
+
+def _merge_human_assist_submission_mapping(
+    existing: object | None,
+    incoming: object | None,
+) -> dict[str, object]:
+    merged = _as_mapping(existing)
+    payload = _as_mapping(incoming)
+    for key, value in payload.items():
+        if value is None:
+            continue
+        if isinstance(value, str):
+            normalized = value.strip()
+            if normalized:
+                merged[key] = normalized
+            continue
+        if isinstance(value, dict):
+            nested = _merge_human_assist_submission_mapping(merged.get(key), value)
+            if nested:
+                merged[key] = nested
+            continue
+        if isinstance(value, (list, tuple, set)):
+            if value:
+                merged[key] = list(value)
+            continue
+        merged[key] = value
+    return merged
 
 
 def _format_human_assist_reward(reward_payload: object) -> str | None:
@@ -793,13 +898,50 @@ async def _maybe_intercept_human_assist_chat_turn(
     requested_actions = _normalize_requested_actions(
         getattr(request_payload, "requested_actions", None),
     )
+    existing_submission_payload = _as_mapping(
+        getattr(current_task, "submission_payload", None),
+    )
+    existing_runtime_context = _as_mapping(
+        existing_submission_payload.get("main_brain_runtime"),
+    )
+    incoming_runtime_context = (
+        getattr(request_payload, "_copaw_main_brain_runtime_context", None)
+        or getattr(request_payload, "main_brain_runtime", None)
+    )
+    merged_runtime_context = _merge_human_assist_submission_mapping(
+        existing_runtime_context,
+        incoming_runtime_context,
+    )
+    for continuity_key in (
+        "work_context_id",
+        "control_thread_id",
+        "environment_ref",
+        "recommended_scheduler_action",
+        "resume_checkpoint_id",
+    ):
+        continuity_value = _first_non_empty_text(
+            existing_runtime_context.get(continuity_key),
+            merged_runtime_context.get(continuity_key),
+            getattr(request_payload, continuity_key, None),
+        )
+        if continuity_value is not None:
+            merged_runtime_context[continuity_key] = continuity_value
     submission_payload = {
         "chat_thread_id": chat_thread_id,
         "request_id": getattr(request_payload, "id", None),
         "session_id": getattr(request_payload, "session_id", None),
-        "control_thread_id": getattr(request_payload, "control_thread_id", None),
-        "environment_ref": getattr(request_payload, "environment_ref", None),
-        "work_context_id": getattr(request_payload, "work_context_id", None),
+        "control_thread_id": _first_non_empty_text(
+            existing_submission_payload.get("control_thread_id"),
+            getattr(request_payload, "control_thread_id", None),
+        ),
+        "environment_ref": _first_non_empty_text(
+            existing_submission_payload.get("environment_ref"),
+            getattr(request_payload, "environment_ref", None),
+        ),
+        "work_context_id": _first_non_empty_text(
+            existing_submission_payload.get("work_context_id"),
+            getattr(request_payload, "work_context_id", None),
+        ),
         "user_id": getattr(request_payload, "user_id", None),
         "channel": getattr(request_payload, "channel", None),
         "industry_instance_id": getattr(request_payload, "industry_instance_id", None),
@@ -809,10 +951,7 @@ async def _maybe_intercept_human_assist_chat_turn(
         "entry_source": getattr(request_payload, "entry_source", None),
         "owner_scope": getattr(request_payload, "owner_scope", None),
         "session_kind": getattr(request_payload, "session_kind", None),
-        "main_brain_runtime": (
-            getattr(request_payload, "_copaw_main_brain_runtime_context", None)
-            or getattr(request_payload, "main_brain_runtime", None)
-        ),
+        "main_brain_runtime": merged_runtime_context,
         "media_analysis_ids": media_analysis_ids,
         "requested_actions": requested_actions,
         "interaction_mode": getattr(request_payload, "interaction_mode", None),
@@ -1375,7 +1514,10 @@ async def _run_runtime_chat_turn(
     default_mode: str,
 ) -> StreamingResponse:
     turn_executor = _get_turn_executor(request)
-    request_payload = _normalize_runtime_chat_thread_binding(request_payload)
+    request_payload = _normalize_runtime_chat_thread_binding(
+        request_payload,
+        request=request,
+    )
     request_payload = _merge_runtime_chat_requested_actions(request_payload)
     raw_interaction_mode = getattr(request_payload, "interaction_mode", None)
     interaction_mode = _resolve_runtime_chat_interaction_mode(
