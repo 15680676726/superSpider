@@ -59,7 +59,12 @@ class RuntimeConversationFacade:
         self._human_assist_task_service = human_assist_task_service
         self._work_context_repository = work_context_repository
 
-    async def get_conversation(self, conversation_id: str) -> RuntimeConversationPayload:
+    async def get_conversation(
+        self,
+        conversation_id: str,
+        *,
+        optional_meta_keys: set[str] | None = None,
+    ) -> RuntimeConversationPayload:
         thread_spec = await self._resolve_thread_spec(conversation_id)
         history = await self._history_reader.get_thread_history(thread_spec)
         if not history.messages:
@@ -72,7 +77,10 @@ class RuntimeConversationFacade:
             session_id=thread_spec.session_id,
             user_id=thread_spec.user_id,
             channel=thread_spec.channel,
-            meta=self._build_conversation_meta(thread_spec, include_optional_meta=False),
+            meta=self._build_conversation_meta(
+                thread_spec,
+                optional_meta_keys=optional_meta_keys,
+            ),
             messages=history.messages,
         )
 
@@ -80,20 +88,25 @@ class RuntimeConversationFacade:
         self,
         thread_spec: RuntimeThreadSpec,
         *,
-        include_optional_meta: bool = False,
+        optional_meta_keys: set[str] | None = None,
     ) -> dict[str, object]:
         meta = _compact_mapping(thread_spec.meta)
-        if not include_optional_meta:
-            return meta
-        main_brain_commit = self._get_persisted_main_brain_commit(thread_spec)
-        if main_brain_commit is not None:
-            meta["main_brain_commit"] = main_brain_commit
-        human_assist_task = self._get_current_human_assist_task(thread_spec.id)
-        if human_assist_task is not None:
-            meta["human_assist_task"] = human_assist_task
-            meta["human_assist_tasks_route"] = human_assist_task.get(
-                "tasks_route",
-            ) or human_assist_task_list_route(chat_thread_id=thread_spec.id)
+        requested_optional_meta = {
+            item.strip()
+            for item in (optional_meta_keys or set())
+            if isinstance(item, str) and item.strip()
+        }
+        if "main_brain_commit" in requested_optional_meta:
+            main_brain_commit = self._get_persisted_main_brain_commit(thread_spec)
+            if main_brain_commit is not None:
+                meta["main_brain_commit"] = main_brain_commit
+        if "human_assist_task" in requested_optional_meta:
+            human_assist_task = self._get_current_human_assist_task(thread_spec.id)
+            if human_assist_task is not None:
+                meta["human_assist_task"] = human_assist_task
+                meta["human_assist_tasks_route"] = human_assist_task.get(
+                    "tasks_route",
+                ) or human_assist_task_list_route(chat_thread_id=thread_spec.id)
         return meta
 
     def _get_persisted_main_brain_commit(

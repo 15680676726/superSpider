@@ -6,8 +6,13 @@ import type { NavigateFunction } from "react-router-dom";
 import api from "../../api";
 import type { AnalysisMode } from "../../api/modules/media";
 import {
+  readBuddyProfileId,
   resolveCanonicalBuddyProfileId,
 } from "../../runtime/buddyProfileBinding";
+import {
+  getBuddySummarySnapshot,
+  refreshBuddySummary,
+} from "../../runtime/buddySummaryStore";
 import type {
   IndustryBootstrapResponse,
   IndustryCapabilityRecommendation,
@@ -129,6 +134,34 @@ function readCachedIndustryDetail(
   return industryPageStateCache.detailByInstanceId[instanceId] ?? null;
 }
 
+async function resolveIndustryBuddyContext(): Promise<{
+  buddyProfileId: string | null;
+  buddyCarrierInstanceId: string | null;
+}> {
+  const storedProfileId = readBuddyProfileId();
+  const resolvedStoredProfileId = resolveCanonicalBuddyProfileId(storedProfileId);
+  if (!resolvedStoredProfileId) {
+    return {
+      buddyProfileId: null,
+      buddyCarrierInstanceId: null,
+    };
+  }
+  const cachedSurface = getBuddySummarySnapshot(resolvedStoredProfileId).surface;
+  const surface = cachedSurface ?? (await refreshBuddySummary(resolvedStoredProfileId));
+  const resolvedBuddyProfileId = resolveCanonicalBuddyProfileId(
+    surface?.profile?.profile_id,
+    resolvedStoredProfileId,
+  );
+  const resolvedBuddyCarrierInstanceId =
+    typeof surface?.execution_carrier?.instance_id === "string"
+      ? surface.execution_carrier.instance_id.trim() || null
+      : null;
+  return {
+    buddyProfileId: resolvedBuddyProfileId || null,
+    buddyCarrierInstanceId: resolvedBuddyCarrierInstanceId,
+  };
+}
+
 export function useIndustryPageState({
   briefForm,
   draftForm,
@@ -230,20 +263,15 @@ export function useIndustryPageState({
       }
       try {
         setError(null);
-        const buddySurfacePromise = Promise.resolve(api.getBuddySurface()).catch(
-          () => null,
-        );
-        const [buddySurface, activePayload] = await Promise.all([
-          buddySurfacePromise,
+        const [buddyContext, activePayload] = await Promise.all([
+          resolveIndustryBuddyContext().catch(() => ({
+            buddyProfileId: null,
+            buddyCarrierInstanceId: null,
+          })),
           api.listIndustryInstances({ status: "active" }),
         ]);
-        const resolvedBuddyProfileId = resolveCanonicalBuddyProfileId(
-          buddySurface?.profile?.profile_id,
-        );
-        const resolvedBuddyCarrierInstanceId =
-          typeof buddySurface?.execution_carrier?.instance_id === "string"
-            ? buddySurface.execution_carrier.instance_id.trim() || null
-            : null;
+        const resolvedBuddyProfileId = buddyContext.buddyProfileId;
+        const resolvedBuddyCarrierInstanceId = buddyContext.buddyCarrierInstanceId;
         setCurrentBuddyProfileId(resolvedBuddyProfileId || null);
         setCurrentBuddyCarrierInstanceId(resolvedBuddyCarrierInstanceId);
         const nextInstances = Array.isArray(activePayload) ? activePayload : [];

@@ -10,7 +10,6 @@ const { navigateMock, apiMock } = vi.hoisted(() => ({
   navigateMock: vi.fn(),
   apiMock: {
     getBuddyEntry: vi.fn(),
-    getBuddySurface: vi.fn(),
   },
 }));
 
@@ -41,86 +40,12 @@ type RuntimeWindow = Window & {
   currentThreadMeta?: Record<string, unknown>;
 };
 
-function buildSurface(
-  overrides: Partial<Record<string, unknown>> = {},
-): Record<string, unknown> {
-  return {
-    profile: {
-      profile_id: "profile-1",
-      display_name: "Alex",
-      profession: "Writer",
-      current_stage: "restart",
-      interests: ["writing"],
-      strengths: ["consistency"],
-      constraints: ["time"],
-      goal_intention: "Write and publish a real novel.",
-      ...(overrides.profile as Record<string, unknown> | undefined),
-    },
-    growth_target: overrides.growth_target ?? null,
-    relationship: overrides.relationship ?? null,
-    execution_carrier: overrides.execution_carrier ?? null,
-    presentation: {
-      profile_id: "profile-1",
-      buddy_name: "Nova",
-      lifecycle_state: "bonded",
-      presence_state: "attentive",
-      mood_state: "warm",
-      current_form: "seed",
-      rarity: "common",
-      current_goal_summary: "",
-      current_task_summary: "",
-      why_now_summary: "",
-      single_next_action_summary: "",
-      companion_strategy_summary: "",
-      ...(overrides.presentation as Record<string, unknown> | undefined),
-    },
-    growth: {
-      profile_id: "profile-1",
-      intimacy: 0,
-      affinity: 0,
-      growth_level: 1,
-      companion_experience: 0,
-      knowledge_value: 0,
-      skill_value: 0,
-      pleasant_interaction_score: 0,
-      communication_count: 0,
-      completed_support_runs: 0,
-      completed_assisted_closures: 0,
-      evolution_stage: "seed",
-      progress_to_next_stage: 0,
-      ...(overrides.growth as Record<string, unknown> | undefined),
-    },
-    onboarding: {
-      session_id: "session-1",
-      status: "contract-draft",
-      operation_id: "",
-      operation_kind: "",
-      operation_status: "idle",
-      operation_error: "",
-      service_intent: "",
-      collaboration_role: "orchestrator",
-      autonomy_level: "proactive",
-      confirm_boundaries: [],
-      report_style: "result-first",
-      collaboration_notes: "",
-      candidate_directions: [],
-      recommended_direction: "",
-      selected_direction: "",
-      requires_direction_confirmation: false,
-      requires_naming: false,
-      completed: false,
-      ...(overrides.onboarding as Record<string, unknown> | undefined),
-    },
-  };
-}
-
 describe("EntryRedirect", () => {
   beforeEach(() => {
     resetBuddyProfileBindingForTests();
     (window as RuntimeWindow).currentThreadMeta = undefined;
     navigateMock.mockReset();
     apiMock.getBuddyEntry.mockReset();
-    apiMock.getBuddySurface.mockReset();
     runtimeChatMock.buildBuddyExecutionCarrierChatBinding.mockReset();
     runtimeChatMock.openRuntimeChat.mockReset();
   });
@@ -151,7 +76,6 @@ describe("EntryRedirect", () => {
         replace: true,
       });
     });
-    expect(apiMock.getBuddySurface).not.toHaveBeenCalled();
   });
 
   it("falls back to the active thread buddy profile when storage is empty", async () => {
@@ -162,59 +86,19 @@ describe("EntryRedirect", () => {
       mode: "chat-ready",
       profile_id: "profile-1",
       session_id: null,
+      profile_display_name: "Alex",
+      execution_carrier: {
+        instance_id: "buddy:profile-1:domain-writing",
+        label: "Writing carrier",
+        owner_scope: "profile-1",
+        current_cycle_id: "cycle-1",
+        team_generated: true,
+        thread_id:
+          "industry-chat:buddy:profile-1:domain-writing:execution-core",
+        control_thread_id:
+          "industry-chat:buddy:profile-1:domain-writing:execution-core",
+      },
     });
-    apiMock.getBuddySurface.mockResolvedValue(
-      buildSurface({
-        growth_target: {
-          target_id: "target-1",
-          profile_id: "profile-1",
-          primary_direction: "Build a durable writing lane.",
-          final_goal: "Publish the first real novel.",
-          why_it_matters: "Turn writing into proof of work.",
-          current_cycle_label: "Cycle 1",
-        },
-        relationship: {
-          relationship_id: "relationship-1",
-          profile_id: "profile-1",
-          buddy_name: "Nova",
-          encouragement_style: "old-friend",
-        },
-        execution_carrier: {
-          instance_id: "buddy:profile-1:domain-writing",
-          label: "Writing carrier",
-          owner_scope: "profile-1",
-          current_cycle_id: "cycle-1",
-          team_generated: true,
-          thread_id:
-            "industry-chat:buddy:profile-1:domain-writing:execution-core",
-          control_thread_id:
-            "industry-chat:buddy:profile-1:domain-writing:execution-core",
-        },
-        onboarding: {
-          session_id: "session-1",
-          status: "named",
-          operation_id: "",
-          operation_kind: "",
-          operation_status: "idle",
-          operation_error: "",
-          activation_status: "succeeded",
-          activation_error: "",
-          activation_attempt_count: 1,
-          service_intent: "Help me build a durable writing lane.",
-          collaboration_role: "orchestrator",
-          autonomy_level: "guarded-proactive",
-          confirm_boundaries: ["external spend"],
-          report_style: "result-first",
-          collaboration_notes: "",
-          candidate_directions: ["Build a durable writing lane."],
-          recommended_direction: "Build a durable writing lane.",
-          selected_direction: "Build a durable writing lane.",
-          requires_direction_confirmation: false,
-          requires_naming: false,
-          completed: true,
-        },
-      }),
-    );
     runtimeChatMock.buildBuddyExecutionCarrierChatBinding.mockReturnValue({
       name: "Nova",
       threadId: "industry-chat:buddy:profile-1:domain-writing:execution-core",
@@ -226,7 +110,6 @@ describe("EntryRedirect", () => {
 
     await waitFor(() => {
       expect(apiMock.getBuddyEntry).toHaveBeenCalledWith("profile-1");
-      expect(apiMock.getBuddySurface).toHaveBeenCalledWith("profile-1");
     });
   });
 
@@ -250,7 +133,6 @@ describe("EntryRedirect", () => {
     });
 
     expect(window.localStorage.getItem("copaw.buddy_profile_id")).toBe("profile-1");
-    expect(apiMock.getBuddySurface).not.toHaveBeenCalled();
   });
 
   it("opens chat directly when the buddy is already ready", async () => {
@@ -259,62 +141,19 @@ describe("EntryRedirect", () => {
       mode: "chat-ready",
       profile_id: "profile-1",
       session_id: null,
+      profile_display_name: "Alex",
+      execution_carrier: {
+        instance_id: "buddy:profile-1:domain-writing",
+        label: "Writing carrier",
+        owner_scope: "profile-1",
+        current_cycle_id: "cycle-1",
+        team_generated: true,
+        thread_id:
+          "industry-chat:buddy:profile-1:domain-writing:execution-core",
+        control_thread_id:
+          "industry-chat:buddy:profile-1:domain-writing:execution-core",
+      },
     });
-    apiMock.getBuddySurface.mockResolvedValue(
-      buildSurface({
-        growth_target: {
-          target_id: "target-1",
-          profile_id: "profile-1",
-          primary_direction: "Build a durable writing lane.",
-          final_goal: "Publish the first real novel.",
-          why_it_matters: "Turn writing into proof of work.",
-          current_cycle_label: "Cycle 1",
-        },
-        relationship: {
-          relationship_id: "relationship-1",
-          profile_id: "profile-1",
-          buddy_name: "Nova",
-          encouragement_style: "old-friend",
-          service_intent: "Help me build a durable writing lane.",
-          collaboration_role: "orchestrator",
-          autonomy_level: "guarded-proactive",
-          confirm_boundaries: ["external spend"],
-          report_style: "decision-first",
-          collaboration_notes: "Keep it concise.",
-        },
-        execution_carrier: {
-          instance_id: "buddy:profile-1:domain-writing",
-          label: "Writing carrier",
-          owner_scope: "profile-1",
-          current_cycle_id: "cycle-1",
-          team_generated: true,
-          thread_id:
-            "industry-chat:buddy:profile-1:domain-writing:execution-core",
-          control_thread_id:
-            "industry-chat:buddy:profile-1:domain-writing:execution-core",
-        },
-        onboarding: {
-          session_id: "session-1",
-          status: "named",
-          operation_id: "",
-          operation_kind: "",
-          operation_status: "idle",
-          operation_error: "",
-          service_intent: "Help me build a durable writing lane.",
-          collaboration_role: "orchestrator",
-          autonomy_level: "guarded-proactive",
-          confirm_boundaries: ["external spend"],
-          report_style: "decision-first",
-          collaboration_notes: "Keep it concise.",
-          candidate_directions: ["Build a durable writing lane."],
-          recommended_direction: "Build a durable writing lane.",
-          selected_direction: "Build a durable writing lane.",
-          requires_direction_confirmation: false,
-          requires_naming: false,
-          completed: true,
-        },
-      }),
-    );
     runtimeChatMock.buildBuddyExecutionCarrierChatBinding.mockReturnValue({
       name: "Nova",
       threadId: "industry-chat:buddy:profile-1:domain-writing:execution-core",

@@ -1,218 +1,150 @@
 # Frontend Boundary P1 P2 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+## Status
 
-**Goal:** Finish the remaining frontend boundary cleanup from the audit by removing page-owned bootstrap work from Runtime Center, Industry, RightPanel, Knowledge, Predictions, and Settings.
-
-**Architecture:** Keep the current route and page structure, but stop first paint from waiting on unnecessary work. Centralize Buddy summary reads, stage heavy page loads, and narrow each page to its own visible data instead of letting it open extra flows on mount.
-
-**Tech Stack:** React, TypeScript, React Router, Ant Design, Vitest, Testing Library
+- 状态：已完成
+- 目标：把剩余主链页面从“首屏先把一堆事做完”收回到“页面先出来，重活后补”
 
 ---
 
-## File Map
+## 1. P1 / P2 实际落地范围
+
+这轮 P1 / P2 实际完成的是 5 块：
+
+1. RightPanel 共享 Buddy summary
+2. Runtime Center 改成 `cards first / main_brain later`
+3. Industry 改成 `active first / retired later / detail on demand`
+4. Knowledge / Predictions / Settings 改成 page-first staged loading
+5. 对这些读链补了前端回归测试
+
+这轮没有再新开一套后端接口，而是优先把前端重复读取和错误首屏时机收回到共享 truth。
+
+---
+
+## 2. 已落地内容
+
+### 2.1 RightPanel 已改成共享 Buddy summary
+
+当前正式事实：
+
+- RightPanel 不再自己决定 Buddy 真相
+- RightPanel 不再自己单独直连一套 Buddy 读取时机
+- Buddy summary 已进入共享 store
+
+已落地文件：
 
 - `console/src/runtime/buddySummaryStore.ts`
-  New shared read cache/store for Buddy summary so global UI does not independently re-fetch the same truth.
-- `console/src/runtime/buddySummaryStore.test.ts`
-  Regression coverage for cache, subscription, and refresh behavior.
 - `console/src/layouts/RightPanel/index.tsx`
-  Consume shared Buddy summary, stop owning its own truth.
-- `console/src/layouts/RightPanel/index.test.tsx`
-  Verify RightPanel reads shared summary, refresh timing, and failure isolation.
+- `console/src/runtime/buddyProfileBinding.ts`
+
+当前效果：
+
+- 右侧固定区和主页面消费的是同一份 Buddy summary 真相
+- RightPanel 继续保留自己的刷新节奏，但不再是“另起一套 truth”
+
+### 2.2 Runtime Center 已改成 cards first
+
+当前正式事实：
+
+- 首屏先请求 `cards`
+- `main_brain` 改成后续跟进请求
+- 页面在 `main_brain` 未返回时仍可正常显示和使用
+
+已落地文件：
+
 - `console/src/pages/RuntimeCenter/useRuntimeCenter.ts`
-  Change Runtime Center first paint to cards-first, main-brain-second.
-- `console/src/pages/RuntimeCenter/useRuntimeCenter.test.ts`
-  Verify staged loading and separate main-brain follow-up load.
 - `console/src/pages/RuntimeCenter/index.tsx`
-  Keep page rendering stable while main-brain loads separately.
-- `console/src/pages/RuntimeCenter/index.test.tsx`
-  Verify page stays usable while main-brain is still loading.
+
+### 2.3 Industry 已不再首屏直读 Buddy surface
+
+当前正式事实：
+
+- `Industry` 首屏不再直接调 `api.getBuddySurface()`
+- 当前 Buddy carrier 真相改为走：
+  - `buddyProfileBinding`
+  - `buddySummaryStore`
+- 首屏先 active list
+- retired list 后补
+- detail 按需补
+
+已落地文件：
+
 - `console/src/pages/Industry/useIndustryPageState.ts`
-  Split Industry first paint into active list first, retired/detail later.
-- `console/src/pages/Industry/useIndustryPageState.test.tsx`
-  Verify first paint no longer waits on retired/detail chain.
-- `console/src/pages/Industry/index.tsx`
-  Keep list-first UI stable with partial data.
-- `console/src/pages/Industry/index.test.tsx`
-  Verify industry first paint remains usable before detail hydration.
+- `console/src/runtime/buddySummaryStore.ts`
+- `console/src/runtime/buddyProfileBinding.ts`
+
+这条要特别说明：
+
+> 本轮没有新加 Industry 专用后端 summary 接口。当前落地方案是“共享 Buddy truth + staged load”，不是“再开一个新后端前门”。
+
+### 2.4 Knowledge / Predictions / Settings 已改成 staged loading
+
+当前正式事实：
+
+- `Knowledge`：主页面先显示，workspace/detail 后补
+- `Predictions`：list first，detail/action later
+- `Settings/System`：主要内容先显示，附加请求后补
+- `Settings/Environments`：首屏不再同时硬等双请求
+
+已落地文件：
+
 - `console/src/pages/Knowledge/index.tsx`
-  Separate first paint from memory workspace/detail work.
-- `console/src/pages/Knowledge/index.test.tsx`
-  Verify page loads the primary list before background workspace work.
 - `console/src/pages/Predictions/index.tsx`
-  Keep list-first load and isolate later detail/action work.
-- `console/src/pages/Predictions/index.test.ts`
-  Verify list-first load path.
 - `console/src/pages/Settings/System/index.tsx`
-  Replace hard first-paint `Promise.all` with staged loading.
-- `console/src/pages/Settings/System/index.test.tsx`
-  Verify visible system surface renders without waiting on every section.
 - `console/src/pages/Settings/Environments/index.tsx`
-  Replace hard first-paint dual request with staged loading.
-- `console/src/pages/Settings/Environments/index.test.tsx`
-  New regression coverage for staged environment settings loading.
 
-## Task 1: Add Shared Buddy Summary Store And Rewire RightPanel
+---
 
-**Files:**
-- Create: `console/src/runtime/buddySummaryStore.ts`
-- Create: `console/src/runtime/buddySummaryStore.test.ts`
-- Modify: `console/src/layouts/RightPanel/index.tsx`
-- Modify: `console/src/layouts/RightPanel/index.test.tsx`
-- Modify if needed: `console/src/runtime/buddyChatEntry.ts`
-- Modify if needed: `console/src/routes/entryRedirect.tsx`
-- Modify if needed: `console/src/pages/BuddyOnboarding/index.tsx`
+## 3. 本轮验证
 
-- [ ] **Step 1: Write the failing tests**
-
-Cover these cases:
-- store caches Buddy summary per profile id
-- multiple consumers do not trigger duplicate reads for the same profile
-- RightPanel consumes the store instead of directly owning `getBuddySurface` timing
-- RightPanel still refreshes on the existing 5-minute cadence and failure does not break the page
-
-- [ ] **Step 2: Run the focused tests to verify failure**
-
-Run: `npm --prefix console test -- src/runtime/buddySummaryStore.test.ts src/layouts/RightPanel/index.test.tsx`
-Expected: FAIL because the shared store does not exist yet and RightPanel still reads directly.
-
-- [ ] **Step 3: Implement the minimal shared Buddy summary path**
-
-Implement these rules:
-- create a small app-level Buddy summary store/cache with subscription support
-- the store owns deduped fetch and refresh timing
-- RightPanel subscribes to store state and no longer independently decides truth
-- existing Buddy entry/chat/onboarding paths may seed the store when they already hold fresh Buddy data
-
-- [ ] **Step 4: Run the focused tests again**
-
-Run: `npm --prefix console test -- src/runtime/buddySummaryStore.test.ts src/layouts/RightPanel/index.test.tsx`
-Expected: PASS
-
-## Task 2: Make Runtime Center Cards-First And Main-Brain-Second
-
-**Files:**
-- Modify: `console/src/pages/RuntimeCenter/useRuntimeCenter.ts`
-- Modify: `console/src/pages/RuntimeCenter/index.tsx`
-- Modify: `console/src/pages/RuntimeCenter/useRuntimeCenter.test.ts`
-- Modify: `console/src/pages/RuntimeCenter/index.test.tsx`
-
-- [ ] **Step 1: Write the failing tests**
-
-Cover these cases:
-- first paint requests `cards` only
-- main-brain loads in a follow-up request
-- cards stay visible while main-brain is still loading
-- event-driven refresh continues to request only the needed sections
-
-- [ ] **Step 2: Run the focused tests to verify failure**
-
-Run: `npm --prefix console test -- src/pages/RuntimeCenter/useRuntimeCenter.test.ts src/pages/RuntimeCenter/index.test.tsx`
-Expected: FAIL because Runtime Center still defaults to `cards + main_brain` on first paint.
-
-- [ ] **Step 3: Implement the minimal staged Runtime Center load**
-
-Implement these rules:
-- first paint requests only `cards`
-- a follow-up effect requests `main_brain`
-- page UI remains usable while `main_brain` is pending
-- keep section-aware event refresh behavior intact
-
-- [ ] **Step 4: Run the focused tests again**
-
-Run: `npm --prefix console test -- src/pages/RuntimeCenter/useRuntimeCenter.test.ts src/pages/RuntimeCenter/index.test.tsx`
-Expected: PASS
-
-## Task 3: Split Industry First Paint Into List-First Loading
-
-**Files:**
-- Modify: `console/src/pages/Industry/useIndustryPageState.ts`
-- Modify: `console/src/pages/Industry/useIndustryPageState.test.tsx`
-- Modify: `console/src/pages/Industry/index.tsx`
-- Modify: `console/src/pages/Industry/index.test.tsx`
-
-- [ ] **Step 1: Write the failing tests**
-
-Cover these cases:
-- active list renders without waiting on retired list
-- first paint does not wait on detail hydration for current carrier
-- retired/detail work can finish later without blocking page usability
-
-- [ ] **Step 2: Run the focused tests to verify failure**
-
-Run: `npm --prefix console test -- src/pages/Industry/useIndustryPageState.test.tsx src/pages/Industry/index.test.tsx`
-Expected: FAIL because Industry still waits on combined first-paint work.
-
-- [ ] **Step 3: Implement the minimal staged Industry load**
-
-Implement these rules:
-- first paint loads active instances first
-- retired instances load in follow-up work
-- detail stays on-demand
-- current carrier should not force a full detail fetch before the page becomes usable
-
-- [ ] **Step 4: Run the focused tests again**
-
-Run: `npm --prefix console test -- src/pages/Industry/useIndustryPageState.test.tsx src/pages/Industry/index.test.tsx`
-Expected: PASS
-
-## Task 4: Reduce Secondary Page First-Paint Work
-
-**Files:**
-- Modify: `console/src/pages/Knowledge/index.tsx`
-- Modify: `console/src/pages/Knowledge/index.test.tsx`
-- Modify: `console/src/pages/Predictions/index.tsx`
-- Modify: `console/src/pages/Predictions/index.test.ts`
-- Modify: `console/src/pages/Settings/System/index.tsx`
-- Modify: `console/src/pages/Settings/System/index.test.tsx`
-- Modify: `console/src/pages/Settings/Environments/index.tsx`
-- Create or Modify: `console/src/pages/Settings/Environments/index.test.tsx`
-
-- [ ] **Step 1: Write the failing tests**
-
-Cover these cases:
-- Knowledge first paint loads the main page before memory workspace/detail
-- Predictions first paint stays list-first
-- Settings/System no longer hard-waits on every section
-- Settings/Environments no longer hard-waits on both initial requests
-
-- [ ] **Step 2: Run the focused tests to verify failure**
-
-Run: `npm --prefix console test -- src/pages/Knowledge/index.test.tsx src/pages/Predictions/index.test.ts src/pages/Settings/System/index.test.tsx src/pages/Settings/Environments/index.test.tsx`
-Expected: FAIL because these pages still bind first paint to extra work.
-
-- [ ] **Step 3: Implement the minimal secondary-page staged loading**
-
-Implement these rules:
-- Knowledge: page-first, workspace/detail later
-- Predictions: list-first, detail/action later
-- Settings/System: visible primary section first, remaining requests later
-- Settings/Environments: provider list or active surface first, secondary context later
-
-- [ ] **Step 4: Run the focused tests again**
-
-Run: `npm --prefix console test -- src/pages/Knowledge/index.test.tsx src/pages/Predictions/index.test.ts src/pages/Settings/System/index.test.tsx src/pages/Settings/Environments/index.test.tsx`
-Expected: PASS
-
-## Task 5: Verify The Remaining P1 P2 Scope
-
-**Files:**
-- Reuse all touched frontend files
-
-- [ ] **Step 1: Run the consolidated remaining frontend verification**
-
-Run: `npm --prefix console test -- src/runtime/buddySummaryStore.test.ts src/layouts/RightPanel/index.test.tsx src/pages/RuntimeCenter/useRuntimeCenter.test.ts src/pages/RuntimeCenter/index.test.tsx src/pages/Industry/useIndustryPageState.test.tsx src/pages/Industry/index.test.tsx src/pages/Knowledge/index.test.tsx src/pages/Predictions/index.test.ts src/pages/Settings/System/index.test.tsx src/pages/Settings/Environments/index.test.tsx`
-Expected: PASS
-
-- [ ] **Step 2: Run production build**
-
-Run: `npm --prefix console run build`
-Expected: PASS
-
-- [ ] **Step 3: Commit**
+### 3.1 前端专项验证
 
 ```bash
-git add console/src/runtime/buddySummaryStore.ts console/src/runtime/buddySummaryStore.test.ts console/src/layouts/RightPanel/index.tsx console/src/layouts/RightPanel/index.test.tsx console/src/pages/RuntimeCenter/useRuntimeCenter.ts console/src/pages/RuntimeCenter/index.tsx console/src/pages/RuntimeCenter/useRuntimeCenter.test.ts console/src/pages/RuntimeCenter/index.test.tsx console/src/pages/Industry/useIndustryPageState.ts console/src/pages/Industry/useIndustryPageState.test.tsx console/src/pages/Industry/index.tsx console/src/pages/Industry/index.test.tsx console/src/pages/Knowledge/index.tsx console/src/pages/Knowledge/index.test.tsx console/src/pages/Predictions/index.tsx console/src/pages/Predictions/index.test.ts console/src/pages/Settings/System/index.tsx console/src/pages/Settings/System/index.test.tsx console/src/pages/Settings/Environments/index.tsx console/src/pages/Settings/Environments/index.test.tsx
-git commit -m "feat: finish frontend staged loading and shared buddy summary"
+npm --prefix console test -- src/runtime/buddySummaryStore.test.ts src/layouts/RightPanel/index.test.tsx src/pages/RuntimeCenter/useRuntimeCenter.test.ts src/pages/RuntimeCenter/index.test.tsx src/pages/Industry/useIndustryPageState.test.tsx src/pages/Industry/index.test.tsx src/pages/Knowledge/index.test.tsx src/pages/Predictions/index.test.ts src/pages/Predictions/index.page.test.tsx src/pages/Settings/System/index.test.tsx src/pages/Settings/Environments/index.test.tsx
 ```
+
+这组验证已包含在更大的前端回归里。
+
+当前更大一轮实际验证结果：
+
+```bash
+npm --prefix console test -- src/runtime/buddyFlow.test.ts src/runtime/buddyChatEntry.test.ts src/routes/entryRedirect.test.tsx src/pages/BuddyOnboarding/index.test.tsx src/pages/Chat/index.entry.test.tsx src/pages/Chat/sessionApi/index.test.ts src/runtime/buddySummaryStore.test.ts src/layouts/RightPanel/index.test.tsx src/pages/RuntimeCenter/useRuntimeCenter.test.ts src/pages/RuntimeCenter/index.test.tsx src/pages/Industry/useIndustryPageState.test.tsx src/pages/Industry/index.test.tsx src/pages/Knowledge/index.test.tsx src/pages/Predictions/index.test.ts src/pages/Predictions/index.page.test.tsx src/pages/Settings/System/index.test.tsx src/pages/Settings/Environments/index.test.tsx
+```
+
+结果：
+
+- `17` 个测试文件
+- `80 passed`
+
+---
+
+## 4. P1 / P2 收口后的正式边界
+
+### 4.1 现在这些页面该怎么工作
+
+- RightPanel：消费共享 Buddy truth，不再独自持有真相
+- Runtime Center：首屏先 cards，不再默认 hard wait `main_brain`
+- Industry：先 active list，不再首屏直读 Buddy surface
+- Knowledge / Predictions / Settings：页面先可用，非必要读面后补
+
+### 4.2 这轮没做什么
+
+这轮 P1 / P2 没有声称完成这些内容：
+
+- Reports / Performance / Calendar / CapabilityMarket 全量再审
+- Channels / Models / Agent Config 全量 staged loading 整理
+- 为 Industry 新增专门的后端轻 summary API
+- 对所有页面再统一做一轮全量 IA 重设计
+
+所以当前准确说法是：
+
+> P1 / P2 已经把重点主链页面的首屏阻塞和 Buddy 重复读链收正，但没有宣称整站所有页面都完成同等级重构。
+
+---
+
+## 5. 施工后结论
+
+P1 / P2 已完成，且当前有效结论只有两句：
+
+1. Buddy 共享 truth 已进入 RightPanel / Industry 这一层的正式读链。
+2. Runtime Center / Industry / Knowledge / Predictions / Settings 的首屏已经回到“页面先出来，重活后补”。

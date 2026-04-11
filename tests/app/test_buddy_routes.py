@@ -218,6 +218,7 @@ def _build_client(tmp_path) -> tuple[TestClient, SQLiteStateStore]:
         relationship_repository=relationship_repository,
         onboarding_session_repository=onboarding_session_repository,
         domain_capability_repository=domain_capability_repository,
+        industry_instance_repository=industry_repository,
     )
     app = FastAPI()
     app.state.buddy_onboarding_service = service
@@ -566,3 +567,6 @@ def test_buddy_entry_returns_chat_ready_for_completed_onboarding(tmp_path) -> No
     assert payload["mode"] == "chat-ready"
     assert payload["profile_id"] == confirm["session"]["profile_id"]
     assert payload["session_id"] is None
+    assert payload["profile_display_name"] == "Mina"
+    assert payload["execution_carrier"]["instance_id"] == confirm["execution_carrier"]["instance_id"]
+    assert payload["execution_carrier"]["current_cycle_id"] == confirm["execution_carrier"]["current_cycle_id"]

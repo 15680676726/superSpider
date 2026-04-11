@@ -78,6 +78,7 @@ class BuddyProjectionService:
         relationship_repository: SqliteCompanionRelationshipRepository,
         onboarding_session_repository: SqliteBuddyOnboardingSessionRepository,
         domain_capability_repository: SqliteBuddyDomainCapabilityRepository | None = None,
+        industry_instance_repository: object | None = None,
         domain_capability_growth_service: BuddyDomainCapabilityGrowthService | None = None,
         human_assist_task_service: object | None = None,
         current_focus_resolver: CurrentFocusResolver | None = None,
@@ -87,6 +88,7 @@ class BuddyProjectionService:
         self._relationship_repository = relationship_repository
         self._onboarding_session_repository = onboarding_session_repository
         self._domain_capability_repository = domain_capability_repository
+        self._industry_instance_repository = industry_instance_repository
         self._domain_capability_growth_service = domain_capability_growth_service
         self._human_assist_task_service = human_assist_task_service
         self._current_focus_resolver = current_focus_resolver
@@ -473,14 +475,33 @@ class BuddyProjectionService:
         if not instance_id:
             return None
         control_thread_id = str(getattr(active_domain, "control_thread_id", "") or "").strip()
+        current_cycle_id = self._resolve_current_cycle_id(
+            growth_target=growth_target,
+            instance_id=instance_id,
+        )
         return build_buddy_execution_carrier_handoff(
             profile=profile,
             instance_id=instance_id,
             control_thread_id=control_thread_id or None,
             label=profile.display_name,
-            current_cycle_id=growth_target.current_cycle_label or "Cycle 1",
+            current_cycle_id=current_cycle_id,
             team_generated=False,
         )
+
+    def _resolve_current_cycle_id(
+        self,
+        *,
+        growth_target: GrowthTarget,
+        instance_id: str,
+    ) -> str:
+        repository = self._industry_instance_repository
+        getter = getattr(repository, "get_instance", None)
+        if callable(getter):
+            instance = getter(instance_id)
+            resolved_cycle_id = str(getattr(instance, "current_cycle_id", "") or "").strip()
+            if resolved_cycle_id:
+                return resolved_cycle_id
+        return growth_target.current_cycle_label or "Cycle 1"
 
     def _fallback_current_task_summary(self, profile_id: str) -> str:
         human_focus = resolve_active_human_assist_focus(

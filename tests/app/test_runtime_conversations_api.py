@@ -428,7 +428,7 @@ def test_runtime_conversation_detail_resolves_industry_thread() -> None:
     client = TestClient(app)
 
     response = client.get(
-        "/runtime-center/conversations/industry-chat:industry-v1-acme:execution-core",
+        "/runtime-center/conversations/industry-chat:industry-v1-acme:execution-core?optional_meta=human_assist_task",
     )
 
     assert response.status_code == 200
@@ -533,7 +533,7 @@ def test_runtime_conversation_detail_exposes_current_human_assist_task_meta() ->
     client = TestClient(app)
 
     response = client.get(
-        "/runtime-center/conversations/industry-chat:industry-v1-acme:execution-core",
+        "/runtime-center/conversations/industry-chat:industry-v1-acme:execution-core?optional_meta=human_assist_task",
     )
 
     assert response.status_code == 200
@@ -553,7 +553,7 @@ def test_runtime_conversation_detail_keeps_meta_surface_lightweight() -> None:
     client = TestClient(app)
 
     response = client.get(
-        "/runtime-center/conversations/industry-chat:industry-v1-acme:execution-core",
+        "/runtime-center/conversations/industry-chat:industry-v1-acme:execution-core?optional_meta=human_assist_task",
     )
 
     assert response.status_code == 200
@@ -842,7 +842,9 @@ def test_runtime_conversation_detail_surfaces_persisted_main_brain_commit_state_
     )
     client = TestClient(app)
 
-    response = client.get(f"/runtime-center/conversations/{control_thread_id}")
+    response = client.get(
+        f"/runtime-center/conversations/{control_thread_id}?optional_meta=main_brain_commit",
+    )
 
     assert response.status_code == 200
     payload = response.json()
@@ -871,7 +873,9 @@ def test_runtime_conversation_detail_surfaces_persisted_main_brain_commit_state_
         source_ref="test:/main-brain-commit-state",
     )
 
-    reloaded = client.get(f"/runtime-center/conversations/{control_thread_id}")
+    reloaded = client.get(
+        f"/runtime-center/conversations/{control_thread_id}?optional_meta=main_brain_commit",
+    )
 
     assert reloaded.status_code == 200
     reloaded_payload = reloaded.json()
@@ -913,7 +917,9 @@ def test_runtime_conversation_detail_commit_path_reload_surfaces_query_runtime_c
     )
     client = TestClient(app)
 
-    response = client.get(f"/runtime-center/conversations/{control_thread_id}")
+    response = client.get(
+        f"/runtime-center/conversations/{control_thread_id}?optional_meta=main_brain_commit",
+    )
 
     assert response.status_code == 200
     payload = response.json()
@@ -948,7 +954,9 @@ def test_runtime_conversation_detail_surfaces_accepted_persistence_when_commit_n
     )
     client = TestClient(app)
 
-    response = client.get(f"/runtime-center/conversations/{control_thread_id}")
+    response = client.get(
+        f"/runtime-center/conversations/{control_thread_id}?optional_meta=main_brain_commit",
+    )
 
     assert response.status_code == 200
     payload = response.json()

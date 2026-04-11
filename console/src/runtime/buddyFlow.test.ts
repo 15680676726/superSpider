@@ -49,12 +49,62 @@ describe("buddyFlow", () => {
     const decision = resolveBuddyEntryDecision({
       mode: "chat-ready",
       profile_id: "profile-1",
+      profile_display_name: "Mina",
       session_id: null,
+      execution_carrier: {
+        instance_id: "instance-1",
+        label: "Mina",
+        owner_scope: "profile-1",
+        current_cycle_id: "cycle-1",
+        team_generated: true,
+        thread_id: "thread-1",
+        control_thread_id: "thread-1",
+        chat_binding: {
+          thread_id: "thread-1",
+          control_thread_id: "thread-1",
+          user_id: "buddy:profile-1",
+          channel: "console",
+          context_key: "control-thread:thread-1",
+          binding_kind: "buddy-execution-carrier",
+          metadata: {
+            industry_instance_id: "instance-1",
+            industry_role_id: "execution-core",
+            industry_role_name: "execution-core",
+            owner_scope: "profile-1",
+            team_generated: true,
+          },
+        },
+      },
     });
     expect(decision).toEqual({
       mode: "chat-ready",
       sessionId: null,
       profileId: "profile-1",
+      profileDisplayName: "Mina",
+      executionCarrier: {
+        instance_id: "instance-1",
+        label: "Mina",
+        owner_scope: "profile-1",
+        current_cycle_id: "cycle-1",
+        team_generated: true,
+        thread_id: "thread-1",
+        control_thread_id: "thread-1",
+        chat_binding: {
+          thread_id: "thread-1",
+          control_thread_id: "thread-1",
+          user_id: "buddy:profile-1",
+          channel: "console",
+          context_key: "control-thread:thread-1",
+          binding_kind: "buddy-execution-carrier",
+          metadata: {
+            industry_instance_id: "instance-1",
+            industry_role_id: "execution-core",
+            industry_role_name: "execution-core",
+            owner_scope: "profile-1",
+            team_generated: true,
+          },
+        },
+      },
     });
   });
 });

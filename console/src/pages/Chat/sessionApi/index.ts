@@ -570,14 +570,18 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
     threadId: string,
   ): Promise<RuntimeConversation> {
     try {
-      return await api.getRuntimeConversation(threadId);
+      return await api.getRuntimeConversation(threadId, {
+        optionalMeta: ["main_brain_commit"],
+      });
     } catch (error) {
       if (!(isApiError(error) && error.isNotFound)) {
         throw error;
       }
     }
     await new Promise((resolve) => window.setTimeout(resolve, 300));
-    return api.getRuntimeConversation(threadId);
+    return api.getRuntimeConversation(threadId, {
+      optionalMeta: ["main_brain_commit"],
+    });
   }
 
   private updateWindowVariables(session: ExtendedSession): void {

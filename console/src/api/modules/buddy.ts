@@ -266,6 +266,8 @@ export interface BuddyEntryResponse {
   mode: "start-onboarding" | "resume-onboarding" | "chat-ready";
   profile_id: string | null;
   session_id: string | null;
+  profile_display_name?: string | null;
+  execution_carrier?: BuddyExecutionCarrier | null;
 }
 
 export const buddyApi = {

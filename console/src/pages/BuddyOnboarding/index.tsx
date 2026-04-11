@@ -301,7 +301,23 @@ export default function BuddyOnboardingPage() {
         if (cancelled) return;
         const decision = resolveBuddyEntryDecision(entry);
         const profileIdFromEntry = decision.profileId ?? requestedProfileId ?? undefined;
+        if (decision.profileId) {
+          writeBuddyProfileId(decision.profileId);
+        }
         if (decision.mode === "start-onboarding") {
+          return;
+        }
+        if (decision.mode === "chat-ready" && decision.profileId) {
+          const binding = buildBuddyExecutionCarrierChatBinding({
+            sessionId: null,
+            profileId: decision.profileId,
+            profileDisplayName: decision.profileDisplayName,
+            executionCarrier: decision.executionCarrier,
+            entrySource: "buddy-onboarding-resume",
+          });
+          await openRuntimeChat(binding, navigate, {
+            shouldNavigate: () => !cancelled,
+          });
           return;
         }
         const surface = await api.getBuddySurface(profileIdFromEntry);
@@ -309,23 +325,6 @@ export default function BuddyOnboardingPage() {
         if (surface?.profile?.profile_id) {
           writeBuddyProfileId(surface.profile.profile_id);
           seedBuddySummary(surface.profile.profile_id, surface);
-        }
-        if (decision.mode === "chat-ready" && surface?.profile?.profile_id) {
-          if (!surface.execution_carrier) {
-            setError("伙伴聊天主场还没准备好，请刷新后重试。");
-            return;
-          }
-          const binding = buildBuddyExecutionCarrierChatBinding({
-            sessionId: null,
-            profileId: surface.profile.profile_id,
-            profileDisplayName: surface.profile.display_name,
-            executionCarrier: surface.execution_carrier,
-            entrySource: "buddy-onboarding-resume",
-          });
-          await openRuntimeChat(binding, navigate, {
-            shouldNavigate: () => !cancelled,
-          });
-          return;
         }
         if (
           decision.mode === "resume-onboarding" &&

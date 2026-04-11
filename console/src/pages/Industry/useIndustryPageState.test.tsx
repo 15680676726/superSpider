@@ -15,13 +15,33 @@ vi.mock("../../api", async () => {
       ...actual.default,
       listIndustryInstances: vi.fn(),
       getRuntimeIndustryDetail: vi.fn(),
-      getBuddySurface: vi.fn(),
       previewIndustry: vi.fn(),
       bootstrapIndustry: vi.fn(),
       updateIndustryTeam: vi.fn(),
     },
   };
 });
+
+const buddySummaryStoreMock = vi.hoisted(() => ({
+  getBuddySummarySnapshot: vi.fn(),
+  refreshBuddySummary: vi.fn(),
+}));
+
+const buddyProfileBindingMock = vi.hoisted(() => ({
+  readBuddyProfileId: vi.fn(),
+  resolveCanonicalBuddyProfileId: vi.fn((...values: Array<string | null | undefined>) => {
+    for (const value of values) {
+      if (typeof value !== "string") {
+        continue;
+      }
+      const trimmed = value.trim();
+      if (trimmed.length > 0) {
+        return trimmed;
+      }
+    }
+    return null;
+  }),
+}));
 
 vi.mock("../../utils/runtimeChat", () => ({
   buildIndustryRoleChatBinding: vi.fn(),
@@ -30,6 +50,10 @@ vi.mock("../../utils/runtimeChat", () => ({
     detail?.team?.agents?.find((agent) => agent.role_id === "execution-core") || null
   ),
 }));
+
+vi.mock("../../runtime/buddySummaryStore", () => buddySummaryStoreMock);
+
+vi.mock("../../runtime/buddyProfileBinding", () => buddyProfileBindingMock);
 
 import api from "../../api";
 import {
@@ -44,12 +68,20 @@ import {
 
 const mockedListIndustryInstances = vi.mocked(api.listIndustryInstances);
 const mockedGetRuntimeIndustryDetail = vi.mocked(api.getRuntimeIndustryDetail);
-const mockedGetBuddySurface = vi.mocked(api.getBuddySurface);
 const mockedPreviewIndustry = vi.mocked(api.previewIndustry);
 const mockedBootstrapIndustry = vi.mocked(api.bootstrapIndustry);
 const mockedUpdateIndustryTeam = vi.mocked(api.updateIndustryTeam);
 const mockedBuildIndustryRoleChatBinding = vi.mocked(buildIndustryRoleChatBinding);
 const mockedOpenRuntimeChat = vi.mocked(openRuntimeChat);
+const mockedGetBuddySummarySnapshot = vi.mocked(
+  buddySummaryStoreMock.getBuddySummarySnapshot,
+);
+const mockedRefreshBuddySummary = vi.mocked(
+  buddySummaryStoreMock.refreshBuddySummary,
+);
+const mockedReadBuddyProfileId = vi.mocked(
+  buddyProfileBindingMock.readBuddyProfileId,
+);
 
 describe("useIndustryPageState", () => {
   afterEach(() => {
@@ -57,12 +89,21 @@ describe("useIndustryPageState", () => {
     resetIndustryPageStateCache();
     mockedListIndustryInstances.mockReset();
     mockedGetRuntimeIndustryDetail.mockReset();
-    mockedGetBuddySurface.mockReset();
     mockedPreviewIndustry.mockReset();
     mockedBootstrapIndustry.mockReset();
     mockedUpdateIndustryTeam.mockReset();
     mockedBuildIndustryRoleChatBinding.mockReset();
     mockedOpenRuntimeChat.mockReset();
+    mockedGetBuddySummarySnapshot.mockReset();
+    mockedRefreshBuddySummary.mockReset();
+    mockedReadBuddyProfileId.mockReset();
+    mockedGetBuddySummarySnapshot.mockReturnValue({
+      loading: false,
+      error: null,
+      surface: null,
+    });
+    mockedRefreshBuddySummary.mockResolvedValue(null);
+    mockedReadBuddyProfileId.mockReturnValue(null);
   });
 
   it("loads active and retired teams through the extracted page-state hook", async () => {
@@ -176,14 +217,19 @@ describe("useIndustryPageState", () => {
   });
 
   it("prefers the buddy-generated execution carrier over unrelated active instances", async () => {
-    mockedGetBuddySurface.mockResolvedValue({
-      profile: {
-        profile_id: "profile-1",
+    mockedReadBuddyProfileId.mockReturnValue("profile-1");
+    mockedGetBuddySummarySnapshot.mockReturnValue({
+      loading: false,
+      error: null,
+      surface: {
+        profile: {
+          profile_id: "profile-1",
+        },
+        execution_carrier: {
+          instance_id: "buddy:profile-1:stocks",
+        },
       },
-      execution_carrier: {
-        instance_id: "buddy:profile-1:stocks",
-      },
-    } as never);
+    });
     mockedListIndustryInstances.mockImplementation(async (options) => {
       const status =
         typeof options === "object" && options ? options.status : undefined;
@@ -230,10 +276,17 @@ describe("useIndustryPageState", () => {
         ([instanceId]) => instanceId === "buddy:profile-1:stocks",
       ),
     ).toBe(true);
+    expect(mockedRefreshBuddySummary).not.toHaveBeenCalled();
   });
 
   it("protects the current buddy carrier from server truth even when local storage is empty", async () => {
-    mockedGetBuddySurface.mockResolvedValue({
+    mockedReadBuddyProfileId.mockReturnValue("profile-7");
+    mockedGetBuddySummarySnapshot.mockReturnValue({
+      loading: false,
+      error: null,
+      surface: null,
+    });
+    mockedRefreshBuddySummary.mockResolvedValue({
       profile: {
         profile_id: "profile-7",
       },
@@ -281,6 +334,8 @@ describe("useIndustryPageState", () => {
       expect(result.current.protectedCarrierInstanceId).toBe("buddy:profile-7:design");
       expect(result.current.selectedInstanceId).toBe("buddy:profile-7:design");
     });
+
+    expect(mockedRefreshBuddySummary).toHaveBeenCalledWith("profile-7");
   });
 
   it("resolves the current buddy carrier as the protected instance id", () => {
@@ -442,11 +497,16 @@ describe("useIndustryPageState", () => {
   });
 
   it("keeps the current carrier in update mode after regenerating a draft preview", async () => {
-    mockedGetBuddySurface.mockResolvedValue({
-      profile: {
-        profile_id: "profile-1",
+    mockedReadBuddyProfileId.mockReturnValue("profile-1");
+    mockedGetBuddySummarySnapshot.mockReturnValue({
+      loading: false,
+      error: null,
+      surface: {
+        profile: {
+          profile_id: "profile-1",
+        },
       },
-    } as never);
+    });
     mockedListIndustryInstances.mockResolvedValue([
       {
         instance_id: "buddy:profile-1",

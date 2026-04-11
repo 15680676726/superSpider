@@ -7,7 +7,6 @@ import {
   readActiveBuddyProfileId,
   writeBuddyProfileId,
 } from "../runtime/buddyProfileBinding";
-import { seedBuddySummary } from "../runtime/buddySummaryStore";
 import { resolveBuddyEntryDecision } from "../runtime/buddyFlow";
 import {
   buildBuddyExecutionCarrierChatBinding,
@@ -53,23 +52,17 @@ export default function EntryRedirect() {
         }
 
         const resolvedProfileId = decision.profileId ?? profileId;
-        const surface = await api.getBuddySurface(resolvedProfileId);
-        if (cancelled) {
-          return;
-        }
-        const resolvedSurfaceProfileId = surface?.profile?.profile_id;
-        if (!resolvedSurfaceProfileId || !surface.execution_carrier) {
+        if (!resolvedProfileId) {
           redirectToOnboarding();
           return;
         }
-        writeBuddyProfileId(resolvedSurfaceProfileId);
-        seedBuddySummary(resolvedSurfaceProfileId, surface);
+        writeBuddyProfileId(resolvedProfileId);
 
         const binding = buildBuddyExecutionCarrierChatBinding({
           sessionId: null,
-          profileId: resolvedSurfaceProfileId,
-          profileDisplayName: surface.profile.display_name,
-          executionCarrier: surface.execution_carrier,
+          profileId: resolvedProfileId,
+          profileDisplayName: decision.profileDisplayName,
+          executionCarrier: decision.executionCarrier,
           entrySource: "entry-redirect",
         });
         await openRuntimeChat(binding, navigate, {

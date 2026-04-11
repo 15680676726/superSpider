@@ -72,6 +72,8 @@ class BuddyEntryResponse(BaseModel):
     mode: str
     profile_id: str | None = None
     session_id: str | None = None
+    profile_display_name: str | None = None
+    execution_carrier: dict[str, object] | None = None
 
 
 def _get_buddy_onboarding_service(request: Request) -> BuddyOnboardingService:
@@ -576,6 +578,7 @@ def _resolve_buddy_entry_mode(*, surface) -> BuddyEntryResponse:
     execution_carrier = getattr(surface, "execution_carrier", None)
     profile = getattr(surface, "profile", None)
     profile_id = str(getattr(profile, "profile_id", "") or "").strip() or None
+    profile_display_name = str(getattr(profile, "display_name", "") or "").strip() or None
     session_id = str(getattr(onboarding, "session_id", "") or "").strip() or None
     onboarding_completed = bool(getattr(onboarding, "completed", False))
     carrier_instance_id = ""
@@ -586,6 +589,8 @@ def _resolve_buddy_entry_mode(*, surface) -> BuddyEntryResponse:
             mode="chat-ready",
             profile_id=profile_id,
             session_id=None,
+            profile_display_name=profile_display_name,
+            execution_carrier=execution_carrier,
         )
     return BuddyEntryResponse(
         mode="resume-onboarding",

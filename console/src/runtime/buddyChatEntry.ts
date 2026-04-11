@@ -6,7 +6,6 @@ import {
   openRuntimeChat,
 } from "../utils/runtimeChat";
 import { writeBuddyProfileId } from "./buddyProfileBinding";
-import { seedBuddySummary } from "./buddySummaryStore";
 import { resolveBuddyEntryDecision } from "./buddyFlow";
 
 const BUDDY_ONBOARDING_ROUTE = "/buddy-onboarding";
@@ -35,23 +34,20 @@ export async function resumeBuddyChatFromProfile(params: {
   }
 
   const resolvedProfileId = decision.profileId ?? profileId;
-  const surface = await api.getBuddySurface(resolvedProfileId);
-  const resolvedSurfaceProfileId = surface?.profile?.profile_id;
-  if (!resolvedSurfaceProfileId || !surface.execution_carrier) {
+  if (!resolvedProfileId) {
     if (!params.shouldNavigate || params.shouldNavigate()) {
       params.navigate(BUDDY_ONBOARDING_ROUTE, { replace: true });
     }
     return "onboarding";
   }
 
-  writeBuddyProfileId(resolvedSurfaceProfileId);
-  seedBuddySummary(resolvedSurfaceProfileId, surface);
+  writeBuddyProfileId(resolvedProfileId);
 
   const binding = buildBuddyExecutionCarrierChatBinding({
     sessionId: null,
-    profileId: resolvedSurfaceProfileId,
-    profileDisplayName: surface.profile.display_name,
-    executionCarrier: surface.execution_carrier,
+    profileId: resolvedProfileId,
+    profileDisplayName: decision.profileDisplayName,
+    executionCarrier: decision.executionCarrier,
     entrySource: params.entrySource,
   });
 

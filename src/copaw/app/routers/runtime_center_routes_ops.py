@@ -17,11 +17,22 @@ async def get_runtime_conversation(
     conversation_id: str,
     request: Request,
     response: Response,
+    optional_meta: str | None = None,
 ) -> RuntimeConversationPayload:
     apply_runtime_center_surface_headers(response, surface="runtime-center")
     facade = _get_runtime_conversation_facade(request)
+    requested_optional_meta = {
+        item.strip()
+        for item in str(optional_meta or "").split(",")
+        if item.strip()
+    }
+    if "all" in requested_optional_meta:
+        requested_optional_meta = {"main_brain_commit", "human_assist_task"}
     try:
-        return await facade.get_conversation(conversation_id)
+        return await facade.get_conversation(
+            conversation_id,
+            optional_meta_keys=requested_optional_meta,
+        )
     except KeyError as exc:
         raise HTTPException(404, detail=str(exc).strip("'")) from exc
     except ValueError as exc:

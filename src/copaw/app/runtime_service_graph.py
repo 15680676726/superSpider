@@ -703,6 +703,7 @@ def build_runtime_bootstrap(
         relationship_repository=buddy_relationship_repository,
         domain_capability_repository=buddy_domain_capability_repository,
         onboarding_session_repository=buddy_onboarding_session_repository,
+        industry_instance_repository=repositories.industry_instance_repository,
         domain_capability_growth_service=buddy_domain_capability_growth_service,
         human_assist_task_service=human_assist_task_service,
         current_focus_resolver=buddy_current_focus_resolver,
