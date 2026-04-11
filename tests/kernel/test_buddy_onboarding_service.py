@@ -381,7 +381,7 @@ def test_submit_contract_rejects_compile_without_lane_hints(tmp_path) -> None:
         )
 
 
-def test_submit_identity_reuses_single_current_profile(tmp_path) -> None:
+def test_submit_identity_creates_distinct_profile_for_new_onboarding(tmp_path) -> None:
     service = _build_service(tmp_path)
 
     first = service.submit_identity(
@@ -403,10 +403,47 @@ def test_submit_identity_reuses_single_current_profile(tmp_path) -> None:
         goal_intention="I want one real long-term direction.",
     )
 
-    assert second.profile.profile_id == first.profile.profile_id
+    assert second.profile.profile_id != first.profile.profile_id
     assert second.profile.display_name == "Mina Updated"
     assert second.profile.profession == "Builder"
-    assert service._profile_repository.count_profiles() == 1  # pylint: disable=protected-access
+    assert service._profile_repository.count_profiles() == 2  # pylint: disable=protected-access
+
+
+def test_start_identity_operation_creates_distinct_profile_without_overwriting_existing(
+    tmp_path,
+) -> None:
+    service = _build_service(tmp_path)
+
+    first = service.submit_identity(
+        display_name="Alpha",
+        profession="Operator",
+        current_stage="exploring",
+        interests=["content"],
+        strengths=["consistency"],
+        constraints=["money"],
+        goal_intention="I want a bigger life direction.",
+    )
+
+    handle = service.start_identity_operation(
+        display_name="Beta",
+        profession="Builder",
+        current_stage="restarting",
+        interests=["systems"],
+        strengths=["clarity"],
+        constraints=["time"],
+        goal_intention="I want one real long-term direction.",
+    )
+
+    stored_first = service._profile_repository.get_profile(first.profile.profile_id)  # pylint: disable=protected-access
+    running_session = service._onboarding_session_repository.get_session(handle.session_id)  # pylint: disable=protected-access
+
+    assert handle.profile_id != first.profile.profile_id
+    assert service._profile_repository.count_profiles() == 2  # pylint: disable=protected-access
+    assert stored_first is not None
+    assert stored_first.display_name == "Alpha"
+    assert running_session is not None
+    assert running_session.profile_id == handle.profile_id
+    assert running_session.operation_status == "running"
 
 
 def test_confirm_primary_direction_persists_contract_and_execution_identity_payload(

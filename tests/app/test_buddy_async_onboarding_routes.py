@@ -254,6 +254,37 @@ def test_sync_contract_submit_clears_stale_async_failure_on_surface(tmp_path) ->
     assert surface["onboarding"]["operation_error"] == ""
 
 
+def test_start_identity_operation_creates_distinct_profile_without_overwriting_latest(
+    tmp_path,
+) -> None:
+    client = TestClient(_build_app(tmp_path, compiler=_DeterministicContractCompiler()))
+    first = client.post("/buddy/onboarding/identity", json=_identity_payload()).json()
+
+    second_payload = {
+        **_identity_payload(),
+        "display_name": "Beta",
+        "profession": "Operator",
+        "goal_intention": "Build a second durable direction with leverage.",
+    }
+    response = client.post("/buddy/onboarding/identity/start", json=second_payload)
+
+    assert response.status_code == 202
+    handle = response.json()
+    succeeded_surface = _wait_for_surface(
+        client,
+        handle["profile_id"],
+        operation_status="succeeded",
+    )
+    profile_repository = client.app.state.buddy_onboarding_service._profile_repository  # pylint: disable=protected-access
+    stored_first = profile_repository.get_profile(first["profile"]["profile_id"])
+
+    assert handle["profile_id"] != first["profile"]["profile_id"]
+    assert profile_repository.count_profiles() == 2
+    assert stored_first is not None
+    assert stored_first.display_name == _identity_payload()["display_name"]
+    assert succeeded_surface["profile"]["display_name"] == "Beta"
+
+
 def test_start_confirm_direction_materializes_execution_carrier_after_contract_ready(
     tmp_path,
 ) -> None:

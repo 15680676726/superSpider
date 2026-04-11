@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from copaw.kernel.buddy_onboarding_service import BuddyOnboardingService
 from copaw.kernel.buddy_projection_service import BuddyProjectionService
 from copaw.kernel.buddy_runtime_focus import build_buddy_current_focus_resolver
@@ -155,7 +157,9 @@ def test_buddy_projection_reads_draft_contract_from_onboarding_session(tmp_path)
     assert payload.execution_carrier is None
 
 
-def test_buddy_projection_resolves_current_profile_without_explicit_binding(tmp_path) -> None:
+def test_buddy_projection_requires_explicit_profile_binding_when_multiple_profiles_exist(
+    tmp_path,
+) -> None:
     onboarding, projection = _build_services(tmp_path)
     first = onboarding.submit_identity(
         display_name="Alpha",
@@ -176,12 +180,9 @@ def test_buddy_projection_resolves_current_profile_without_explicit_binding(tmp_
         goal_intention="Build a durable direction with leverage.",
     )
 
-    payload = projection.build_chat_surface()
-
-    assert second.profile.profile_id == first.profile.profile_id
-    assert payload.profile.profile_id == first.profile.profile_id
-    assert payload.profile.display_name == "Beta"
-    assert payload.profile.profession == "Operator"
+    assert second.profile.profile_id != first.profile.profile_id
+    with pytest.raises(ValueError, match="多个伙伴档案"):
+        projection.build_chat_surface()
 
 
 def test_buddy_projection_filters_human_assist_fallback_by_profile(tmp_path) -> None:

@@ -329,7 +329,11 @@ async def start_buddy_identity(
 
     def _work() -> None:
         try:
-            service.submit_identity(**payload_data)
+            service.complete_identity_operation(
+                session_id=handle.session_id,
+                profile_id=handle.profile_id,
+                **payload_data,
+            )
         except TimeoutError as exc:
             service.mark_operation_failed(
                 session_id=handle.session_id,

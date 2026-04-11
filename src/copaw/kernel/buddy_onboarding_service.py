@@ -367,50 +367,14 @@ class BuddyOnboardingService:
         constraints: list[str] | None = None,
         goal_intention: str,
     ) -> BuddyIdentitySubmitResult:
-        existing_profile = self._profile_repository.get_latest_profile()
-        profile = HumanProfile(
+        return self._store_identity_submission(
             display_name=display_name,
             profession=profession,
             current_stage=current_stage,
-            interests=interests or [],
-            strengths=strengths or [],
-            constraints=constraints or [],
+            interests=interests,
+            strengths=strengths,
+            constraints=constraints,
             goal_intention=goal_intention,
-        )
-        if existing_profile is not None:
-            profile = profile.model_copy(
-                update={
-                    "profile_id": existing_profile.profile_id,
-                    "created_at": existing_profile.created_at,
-                    "updated_at": _utc_now(),
-                },
-            )
-        profile = self._profile_repository.upsert_profile(profile)
-
-        existing_session = self._onboarding_session_repository.get_latest_session_for_profile(
-            profile.profile_id,
-        )
-        session = self._build_contract_draft_session(
-            profile=profile,
-            existing_session=existing_session,
-            operation_id=str(getattr(existing_session, "operation_id", "") or "").strip(),
-            operation_kind=str(getattr(existing_session, "operation_kind", "") or "").strip(),
-            operation_status=str(getattr(existing_session, "operation_status", "") or "idle").strip() or "idle",
-            operation_error=str(getattr(existing_session, "operation_error", "") or "").strip(),
-        )
-        if existing_session is not None:
-            session = session.model_copy(
-                update={
-                    "session_id": existing_session.session_id,
-                    "created_at": existing_session.created_at,
-                    "updated_at": _utc_now(),
-                },
-            )
-        session = self._onboarding_session_repository.upsert_session(session)
-        return BuddyIdentitySubmitResult(
-            session_id=session.session_id,
-            profile=profile,
-            status=session.status,
         )
 
     def start_identity_operation(
@@ -424,53 +388,63 @@ class BuddyOnboardingService:
         constraints: list[str] | None = None,
         goal_intention: str,
     ) -> BuddyOnboardingOperationHandle:
-        existing_profile = self._profile_repository.get_latest_profile()
-        profile = HumanProfile(
-            display_name=display_name,
-            profession=profession,
-            current_stage=current_stage,
-            interests=interests or [],
-            strengths=strengths or [],
-            constraints=constraints or [],
-            goal_intention=goal_intention,
+        profile = self._profile_repository.upsert_profile(
+            HumanProfile(
+                display_name=display_name,
+                profession=profession,
+                current_stage=current_stage,
+                interests=interests or [],
+                strengths=strengths or [],
+                constraints=constraints or [],
+                goal_intention=goal_intention,
+            ),
         )
-        if existing_profile is not None:
-            profile = profile.model_copy(
-                update={
-                    "profile_id": existing_profile.profile_id,
-                    "created_at": existing_profile.created_at,
-                    "updated_at": _utc_now(),
-                },
-            )
-        profile = self._profile_repository.upsert_profile(profile)
-        existing_session = self._onboarding_session_repository.get_latest_session_for_profile(
-            profile.profile_id,
-        )
-        if existing_session is not None and existing_session.operation_status == "running":
-            raise ValueError("伙伴建档正在处理中，请稍后再试。")
         operation_id = _new_buddy_operation_id()
         session = self._build_contract_draft_session(
             profile=profile,
-            existing_session=existing_session,
+            existing_session=None,
             operation_id=operation_id,
             operation_kind="identity",
             operation_status="running",
             operation_error="",
         )
-        if existing_session is not None:
-            session = session.model_copy(
-                update={
-                    "session_id": existing_session.session_id,
-                    "created_at": existing_session.created_at,
-                    "updated_at": _utc_now(),
-                },
-            )
         session = self._onboarding_session_repository.upsert_session(session)
         return BuddyOnboardingOperationHandle(
             session_id=session.session_id,
             profile_id=profile.profile_id,
             operation_id=operation_id,
             operation_kind="identity",
+        )
+
+    def complete_identity_operation(
+        self,
+        *,
+        session_id: str,
+        profile_id: str,
+        display_name: str,
+        profession: str,
+        current_stage: str,
+        interests: list[str] | None = None,
+        strengths: list[str] | None = None,
+        constraints: list[str] | None = None,
+        goal_intention: str,
+    ) -> BuddyIdentitySubmitResult:
+        existing_profile = self._profile_repository.get_profile(profile_id)
+        if existing_profile is None:
+            raise ValueError(f"未找到该档案：{profile_id}")
+        existing_session = self._require_session(session_id)
+        if existing_session.profile_id != profile_id:
+            raise ValueError("伙伴建档会话与档案不匹配。")
+        return self._store_identity_submission(
+            display_name=display_name,
+            profession=profession,
+            current_stage=current_stage,
+            interests=interests,
+            strengths=strengths,
+            constraints=constraints,
+            goal_intention=goal_intention,
+            existing_profile=existing_profile,
+            existing_session=existing_session,
         )
 
     def submit_contract(
@@ -1217,6 +1191,53 @@ class BuddyOnboardingService:
                 "created_at": existing_session.created_at,
                 "updated_at": _utc_now(),
             },
+        )
+
+    def _store_identity_submission(
+        self,
+        *,
+        display_name: str,
+        profession: str,
+        current_stage: str,
+        interests: list[str] | None = None,
+        strengths: list[str] | None = None,
+        constraints: list[str] | None = None,
+        goal_intention: str,
+        existing_profile: HumanProfile | None = None,
+        existing_session: BuddyOnboardingSessionRecord | None = None,
+    ) -> BuddyIdentitySubmitResult:
+        profile = HumanProfile(
+            display_name=display_name,
+            profession=profession,
+            current_stage=current_stage,
+            interests=interests or [],
+            strengths=strengths or [],
+            constraints=constraints or [],
+            goal_intention=goal_intention,
+        )
+        if existing_profile is not None:
+            profile = profile.model_copy(
+                update={
+                    "profile_id": existing_profile.profile_id,
+                    "created_at": existing_profile.created_at,
+                    "updated_at": _utc_now(),
+                },
+            )
+        profile = self._profile_repository.upsert_profile(profile)
+        session = self._build_contract_draft_session(
+            profile=profile,
+            existing_session=existing_session,
+            operation_id=str(getattr(existing_session, "operation_id", "") or "").strip(),
+            operation_kind=str(getattr(existing_session, "operation_kind", "") or "").strip(),
+            operation_status=str(getattr(existing_session, "operation_status", "") or "idle").strip()
+            or "idle",
+            operation_error=str(getattr(existing_session, "operation_error", "") or "").strip(),
+        )
+        session = self._onboarding_session_repository.upsert_session(session)
+        return BuddyIdentitySubmitResult(
+            session_id=session.session_id,
+            profile=profile,
+            status=session.status,
         )
 
     def _build_contract_compile_cache(
