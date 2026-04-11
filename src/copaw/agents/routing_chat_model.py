@@ -96,13 +96,31 @@ class RoutingChatModel(ChatModelBase):
         structured_model: Type[BaseModel] | None,
         kwargs: dict[str, Any],
     ) -> ChatResponse | AsyncGenerator[ChatResponse, None]:
-        return await endpoint.model(
-            messages=messages,
-            tools=tools,
-            tool_choice=tool_choice,
-            structured_model=structured_model,
-            **kwargs,
-        )
+        original_stream = getattr(endpoint.model, "stream", None)
+        stream_overridden = isinstance(original_stream, bool)
+        if stream_overridden:
+            try:
+                setattr(endpoint.model, "stream", bool(self.stream))
+            except Exception:
+                stream_overridden = False
+        try:
+            return await endpoint.model(
+                messages=messages,
+                tools=tools,
+                tool_choice=tool_choice,
+                structured_model=structured_model,
+                **kwargs,
+            )
+        finally:
+            if stream_overridden:
+                try:
+                    setattr(endpoint.model, "stream", original_stream)
+                except Exception:
+                    logger.debug(
+                        "Failed to restore endpoint stream flag: provider=%s model=%s",
+                        endpoint.provider_id,
+                        endpoint.model_name,
+                    )
 
     async def _call_with_fallback(
         self,

@@ -36,7 +36,12 @@ class ProviderRuntimeSurface(Protocol):
         self,
     ) -> tuple[ModelSlotConfig, bool, str, list[str]]: ...
 
-    def build_chat_model_for_slot(self, slot: ModelSlotConfig) -> ChatModelBase: ...
+    def build_chat_model_for_slot(
+        self,
+        slot: ModelSlotConfig,
+        *,
+        stream: bool = True,
+    ) -> ChatModelBase: ...
 
     def get_preferred_chat_model_class(self) -> type[ChatModelBase]: ...
 
@@ -82,8 +87,16 @@ class ProviderRuntimeFacade:
     ) -> tuple[ModelSlotConfig, bool, str, list[str]]:
         return self._provider_manager.resolve_model_slot()
 
-    def build_chat_model_for_slot(self, slot: ModelSlotConfig) -> ChatModelBase:
-        return self._provider_manager.build_chat_model_for_slot(slot)
+    def build_chat_model_for_slot(
+        self,
+        slot: ModelSlotConfig,
+        *,
+        stream: bool = True,
+    ) -> ChatModelBase:
+        return self._provider_manager.build_chat_model_for_slot(
+            slot,
+            stream=stream,
+        )
 
     def get_preferred_chat_model_class(self) -> type[ChatModelBase]:
         return self._provider_manager.get_preferred_chat_model_class()

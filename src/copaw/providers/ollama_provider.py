@@ -144,7 +144,12 @@ class OllamaProvider(Provider):
         self.models = await self.fetch_models()
         return True
 
-    def get_chat_model_instance(self, model_id: str) -> ChatModelBase:
+    def get_chat_model_instance(
+        self,
+        model_id: str,
+        *,
+        stream: bool = True,
+    ) -> ChatModelBase:
         from .openai_chat_model_compat import OpenAIChatModelCompat
 
         if self.base_url.endswith("/"):
@@ -153,7 +158,7 @@ class OllamaProvider(Provider):
             openai_compatible_url = self.base_url + "/v1"
         return OpenAIChatModelCompat(
             model_name=model_id,
-            stream=True,
+            stream=stream,
             api_key=self.api_key,
             client_kwargs={"base_url": openai_compatible_url},
         )

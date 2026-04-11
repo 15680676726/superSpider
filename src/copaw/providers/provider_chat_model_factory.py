@@ -23,17 +23,22 @@ class ProviderChatModelFactory:
     def __init__(self, manager: ProviderManager) -> None:
         self._manager = manager
 
-    def build_chat_model_for_slot(self, slot: ModelSlotConfig) -> ChatModelBase:
+    def build_chat_model_for_slot(
+        self,
+        slot: ModelSlotConfig,
+        *,
+        stream: bool = True,
+    ) -> ChatModelBase:
         provider = self._manager._registry_service.get_provider(slot.provider_id)
         if provider is None:
             raise ValueError(f"Provider '{slot.provider_id}' not found.")
         if provider.is_local:
             return create_local_chat_model(
                 model_id=slot.model,
-                stream=True,
+                stream=stream,
                 generate_kwargs={"max_tokens": None},
             )
-        return provider.get_chat_model_instance(slot.model)
+        return provider.get_chat_model_instance(slot.model, stream=stream)
 
     def get_preferred_chat_model_class(self) -> type[ChatModelBase]:
         return self._manager._resolution_service.get_preferred_chat_model_class()

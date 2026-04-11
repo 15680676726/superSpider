@@ -82,16 +82,21 @@ def test_provider_manager_build_chat_model_for_slot_delegates_to_factory() -> No
 
     class StubChatModelFactory:
         def __init__(self) -> None:
-            self.calls: list[ModelSlotConfig] = []
+            self.calls: list[tuple[ModelSlotConfig, bool]] = []
 
-        def build_chat_model_for_slot(self, target: ModelSlotConfig):
-            self.calls.append(target)
-            return {"slot": target.model, "delegated": True}
+        def build_chat_model_for_slot(
+            self,
+            target: ModelSlotConfig,
+            *,
+            stream: bool = True,
+        ):
+            self.calls.append((target, stream))
+            return {"slot": target.model, "delegated": True, "stream": stream}
 
     stub = StubChatModelFactory()
     manager._chat_model_factory = stub  # type: ignore[attr-defined]
 
     result = manager.build_chat_model_for_slot(slot)
 
-    assert result == {"slot": "gpt-5.2", "delegated": True}
-    assert stub.calls == [slot]
+    assert result == {"slot": "gpt-5.2", "delegated": True, "stream": True}
+    assert stub.calls == [(slot, True)]

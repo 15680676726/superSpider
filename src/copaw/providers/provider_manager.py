@@ -257,8 +257,16 @@ class ProviderManager:
     def _iter_model_slot_candidates(self) -> list[tuple[str, ModelSlotConfig]]:
         return self._fallback_service.iter_model_slot_candidates()
 
-    def build_chat_model_for_slot(self, slot: ModelSlotConfig) -> ChatModelBase:
-        return self._chat_model_factory.build_chat_model_for_slot(slot)
+    def build_chat_model_for_slot(
+        self,
+        slot: ModelSlotConfig,
+        *,
+        stream: bool = True,
+    ) -> ChatModelBase:
+        return self._chat_model_factory.build_chat_model_for_slot(
+            slot,
+            stream=stream,
+        )
 
     def get_preferred_chat_model_class(self) -> type[ChatModelBase]:
         return self._chat_model_factory.get_preferred_chat_model_class()

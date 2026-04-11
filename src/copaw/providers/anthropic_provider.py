@@ -91,7 +91,12 @@ class AnthropicProvider(Provider):
         except anthropic.APIError:
             return False
 
-    def get_chat_model_instance(self, model_id: str) -> ChatModelBase:
+    def get_chat_model_instance(
+        self,
+        model_id: str,
+        *,
+        stream: bool = True,
+    ) -> ChatModelBase:
         from agentscope.model import AnthropicChatModel
 
         dashscope_base_urls = [
@@ -115,7 +120,7 @@ class AnthropicProvider(Provider):
 
         return AnthropicChatModel(
             model_name=model_id,
-            stream=True,
+            stream=stream,
             api_key=self.api_key,
             client_kwargs=client_kwargs,
         )

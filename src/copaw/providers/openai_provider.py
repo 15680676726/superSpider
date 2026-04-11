@@ -89,7 +89,12 @@ class OpenAIProvider(Provider):
         except APIError:
             return False
 
-    def get_chat_model_instance(self, model_id: str) -> ChatModelBase:
+    def get_chat_model_instance(
+        self,
+        model_id: str,
+        *,
+        stream: bool = True,
+    ) -> ChatModelBase:
         from .openai_chat_model_compat import OpenAIChatModelCompat
 
         dashscope_base_urls = [
@@ -114,7 +119,7 @@ class OpenAIProvider(Provider):
 
         return OpenAIChatModelCompat(
             model_name=model_id,
-            stream=True,
+            stream=stream,
             api_key=self.api_key,
             client_kwargs=client_kwargs,
         )

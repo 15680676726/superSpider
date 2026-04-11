@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from copaw.agents.routing_chat_model import RoutingChatModel, RoutingEndpoint
 from copaw.providers.provider_manager import ProviderManager
 
 
@@ -15,6 +16,26 @@ class _DummyChatModel:
     async def __call__(self, *args, **kwargs):
         del args, kwargs
         return SimpleNamespace(content="ok", usage={})
+
+
+class _ModeAwareChatModel:
+    preferred_chat_model_class = object
+
+    def __init__(self, label: str) -> None:
+        self.label = label
+        self.stream = True
+        self.stream_history: list[bool] = []
+
+    async def __call__(self, *args, **kwargs):
+        del args, kwargs
+        self.stream_history.append(bool(self.stream))
+        if not self.stream:
+            return SimpleNamespace(content=f"{self.label}-final", usage={})
+
+        async def _stream():
+            yield SimpleNamespace(content=f"{self.label}-stream", usage={})
+
+        return _stream()
 
 
 def test_provider_manager_get_active_chat_model_returns_routing_when_enabled(
@@ -78,3 +99,30 @@ def test_provider_manager_get_active_chat_model_rejects_mismatched_families(
     with pytest.raises(ValueError, match="formatter family"):
         ProviderManager.get_active_chat_model()
 
+
+@pytest.mark.asyncio
+async def test_routing_chat_model_propagates_non_stream_mode_to_endpoint_models() -> None:
+    local = _ModeAwareChatModel("local")
+    cloud = _ModeAwareChatModel("cloud")
+    routing_cfg = SimpleNamespace(mode="local_first")
+    model = RoutingChatModel(
+        local_endpoint=RoutingEndpoint(
+            provider_id="llamacpp",
+            model_name="llama-local",
+            model=local,
+        ),
+        cloud_endpoint=RoutingEndpoint(
+            provider_id="openai",
+            model_name="gpt-5",
+            model=cloud,
+        ),
+        routing_cfg=routing_cfg,
+    )
+    model.stream = False
+
+    result = await model(messages=[{"role": "user", "content": "hello"}])
+
+    assert not hasattr(result, "__aiter__")
+    assert getattr(result, "content", None) == "local-final"
+    assert local.stream_history == [False]
+    assert cloud.stream_history == []

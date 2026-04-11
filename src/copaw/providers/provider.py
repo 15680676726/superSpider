@@ -148,7 +148,12 @@ class Provider(ProviderInfo, ABC):
         )
 
     @abstractmethod
-    def get_chat_model_instance(self, model_id: str) -> ChatModelBase:
+    def get_chat_model_instance(
+        self,
+        model_id: str,
+        *,
+        stream: bool = True,
+    ) -> ChatModelBase:
         """Return an instance of the chat model associated with this
         provider and model_id."""
 
@@ -194,7 +199,13 @@ class DefaultProvider(Provider):
     def update_config(self, config: Dict) -> None:
         pass
 
-    def get_chat_model_instance(self, model_id: str) -> ChatModelBase:
+    def get_chat_model_instance(
+        self,
+        model_id: str,
+        *,
+        stream: bool = True,
+    ) -> ChatModelBase:
+        _ = stream
         raise NotImplementedError(
             "DefaultProvider does not implement chat model",
         )

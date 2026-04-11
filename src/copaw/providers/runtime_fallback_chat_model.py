@@ -60,7 +60,7 @@ class RuntimeFallbackChatModel(ChatModelBase):
                 attempts.append(unavailable_attempt(slot=slot, source=source, reason=reason))
                 continue
             try:
-                model = self._manager.build_chat_model_for_slot(slot)
+                model = self._manager.build_chat_model_for_slot(slot, stream=False)
             except Exception as exc:
                 last_exception = exc
                 record, classification = failed_attempt(
@@ -77,6 +77,7 @@ class RuntimeFallbackChatModel(ChatModelBase):
                     last_classification=classification,
                 ) from exc
             try:
+                self._apply_stream_mode(model, stream=False)
                 result = await model(*args, **kwargs)
                 self._log_fallback_success(index=index, slot=slot, attempts=attempts)
                 return result
@@ -114,7 +115,7 @@ class RuntimeFallbackChatModel(ChatModelBase):
                 attempts.append(unavailable_attempt(slot=slot, source=source, reason=reason))
                 continue
             try:
-                model = self._manager.build_chat_model_for_slot(slot)
+                model = self._manager.build_chat_model_for_slot(slot, stream=True)
             except Exception as exc:
                 record, classification = failed_attempt(
                     slot=slot,
@@ -130,6 +131,7 @@ class RuntimeFallbackChatModel(ChatModelBase):
                     last_classification=classification,
                 ) from exc
             try:
+                self._apply_stream_mode(model, stream=True)
                 result = await model(*args, **kwargs)
             except Exception as exc:
                 record, classification = failed_attempt(
@@ -204,6 +206,15 @@ class RuntimeFallbackChatModel(ChatModelBase):
             return _stream_current(result, index, slot, source)
 
         raise build_exhausted_model_exception(attempts=attempts)
+
+    @staticmethod
+    def _apply_stream_mode(model: Any, *, stream: bool) -> None:
+        current = getattr(model, "stream", None)
+        if isinstance(current, bool):
+            try:
+                setattr(model, "stream", stream)
+            except Exception:
+                logger.debug("Failed to set child chat model stream=%s", stream)
 
     def _log_fallback_success(
         self,

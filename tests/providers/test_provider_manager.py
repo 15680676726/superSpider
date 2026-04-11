@@ -501,7 +501,8 @@ async def test_get_active_chat_model_uses_runtime_fallback_when_primary_creation
 
             return _stream()
 
-    def fake_get_chat_model_instance(self, model_id: str):
+    def fake_get_chat_model_instance(self, model_id: str, *, stream: bool = True):
+        _ = stream
         if self.id == "openai":
             raise RuntimeError("primary unavailable")
         return _StreamingModel({"provider_id": self.id, "model": model_id})
@@ -559,7 +560,8 @@ async def test_runtime_fallback_handles_first_token_failure(
 
             return _stream()
 
-    def fake_get_chat_model_instance(self, model_id: str):
+    def fake_get_chat_model_instance(self, model_id: str, *, stream: bool = True):
+        _ = stream
         if self.id == "openai":
             return _FirstTokenFailureModel()
         return _FallbackStreamModel()
