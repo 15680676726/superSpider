@@ -6,11 +6,11 @@ import {
   resolveLikelyNextRoutePaths,
   scheduleRoutePreload,
 } from "../../routes/preload";
+import Header from "../Header";
+import RightPanel from "../RightPanel";
+import Sidebar from "../Sidebar";
 import styles from "../index.module.less";
 
-const Sidebar = lazy(() => import("../Sidebar"));
-const Header = lazy(() => import("../Header"));
-const RightPanel = lazy(() => import("../RightPanel"));
 const ConsoleCronBubble = lazy(() => import("../../components/ConsoleCronBubble"));
 const RuntimeExecutionLauncher = lazy(
   () => import("../../components/RuntimeExecutionLauncher"),
@@ -32,20 +32,6 @@ function RouteFallback() {
   );
 }
 
-function ShellFallback({ minHeight = 0, width = "100%" }: {
-  minHeight?: number;
-  width?: number | string;
-}) {
-  return (
-    <div
-      style={{
-        width,
-        minHeight,
-      }}
-    />
-  );
-}
-
 export default function MainLayout() {
   const location = useLocation();
   const selectedKey = resolveSelectedKey(location.pathname, location.search);
@@ -61,18 +47,14 @@ export default function MainLayout() {
       style={{ display: "flex", flexDirection: "row", height: "100vh", overflow: "hidden" }}
     >
       {/* ---- 左侧导航 ---- */}
-      <Suspense fallback={<ShellFallback width={252} />}>
-        <Sidebar selectedKey={selectedKey} />
-      </Suspense>
+      <Sidebar selectedKey={selectedKey} />
 
       {/* ---- 中间主内容 ---- */}
       <Layout
         className="baize-layout-content"
         style={{ background: "transparent", flex: 1, minWidth: 0 }}
       >
-        <Suspense fallback={<ShellFallback minHeight={60} />}>
-          <Header selectedKey={selectedKey} />
-        </Suspense>
+        <Header selectedKey={selectedKey} />
         <Content className={styles.pageContainer}>
           <Suspense fallback={null}>
             <ConsoleCronBubble />
@@ -96,9 +78,7 @@ export default function MainLayout() {
       </Layout>
 
       {/* ---- 右侧智体面板 ---- */}
-      <Suspense fallback={<ShellFallback width={260} />}>
-        <RightPanel />
-      </Suspense>
+      <RightPanel />
     </div>
   );
 }

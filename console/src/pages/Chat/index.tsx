@@ -54,6 +54,7 @@ import { useChatRuntimeState } from "./useChatRuntimeState";
 import styles from "./index.module.less";
 import { useRuntimeBinding } from "./useRuntimeBinding";
 import { readBuddyProfileId } from "../../runtime/buddyProfileBinding";
+import { resumeBuddyChatFromProfile } from "../../runtime/buddyChatEntry";
 import { BUDDY_IDENTITY_CENTER_ROUTE } from "../../runtime/buddyFlow";
 import {
   mergeBuddyProfileIntoThreadMeta,
@@ -316,8 +317,28 @@ export default function ChatPage() {
       }
       const storedBuddyProfileId = readBuddyProfileId();
       if (storedBuddyProfileId) {
-        navigate("/", { replace: true });
-        return;
+        let cancelled = false;
+        setThreadBootstrapError(null);
+        setAutoBindingPending(true);
+        void resumeBuddyChatFromProfile({
+          profileId: storedBuddyProfileId,
+          navigate,
+          entrySource: "chat-page",
+          shouldNavigate: () => !cancelled,
+        })
+          .catch(() => {
+            if (!cancelled) {
+              navigate(BUDDY_IDENTITY_CENTER_ROUTE, { replace: true });
+            }
+          })
+          .finally(() => {
+            if (!cancelled) {
+              setAutoBindingPending(false);
+            }
+          });
+        return () => {
+          cancelled = true;
+        };
       }
       sessionApi.setPreferredThreadId(null);
       sessionApi.clearBoundThreadContext();
