@@ -27,6 +27,75 @@ function resolveNodeModulePackage(id: string): string | null {
   return segments[0] || null;
 }
 
+const antdFormPackages = new Set([
+  "@rc-component/async-validator",
+  "@rc-component/color-picker",
+  "@rc-component/mini-decimal",
+  "rc-cascader",
+  "rc-checkbox",
+  "rc-field-form",
+  "rc-input",
+  "rc-input-number",
+  "rc-mentions",
+  "rc-picker",
+  "rc-rate",
+  "rc-segmented",
+  "rc-select",
+  "rc-slider",
+  "rc-switch",
+  "rc-textarea",
+  "rc-tree-select",
+  "rc-upload",
+]);
+
+const antdComponentPackages = new Set([
+  ...antdFormPackages,
+  "rc-dropdown",
+  "rc-menu",
+  "rc-overflow",
+  "rc-pagination",
+  "rc-steps",
+  "rc-tabs",
+  "@rc-component/qrcode",
+  "rc-collapse",
+  "rc-image",
+  "rc-progress",
+  "rc-table",
+  "rc-tree",
+  "@rc-component/tour",
+  "rc-dialog",
+  "rc-drawer",
+  "rc-notification",
+  "rc-tooltip",
+]);
+
+function resolveAntDesignChunk(pkg: string): string | undefined {
+  if (
+    pkg === "@ant-design/icons" ||
+    pkg === "@ant-design/icons-svg" ||
+    pkg === "@agentscope-ai/icons-override-antd" ||
+    pkg === "@agentscope-ai/icons-svg-override-antd"
+  ) {
+    return "vendor-antd-icons";
+  }
+
+  if (
+    pkg === "@ant-design/cssinjs" ||
+    pkg === "@ant-design/cssinjs-utils" ||
+    pkg === "@ant-design/colors" ||
+    pkg === "@ant-design/fast-color" ||
+    pkg === "@ctrl/tinycolor"
+  ) {
+    return "vendor-antd-style";
+  }
+
+  if (antdComponentPackages.has(pkg)) {
+    return "vendor-antd-components";
+  }
+
+  return undefined;
+}
+
 function resolveManualChunk(id: string): string | undefined {
   const normalized = normalizeModuleId(id);
   if (!normalized.includes("/node_modules/")) {
@@ -60,6 +129,11 @@ function resolveManualChunk(id: string): string | undefined {
     pkg === "@agentscope-ai/icons-svg-override-antd"
   ) {
     return "vendor-agentscope-icons";
+  }
+
+  const antDesignChunk = resolveAntDesignChunk(pkg);
+  if (antDesignChunk) {
+    return antDesignChunk;
   }
 
   if (
