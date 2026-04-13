@@ -54,7 +54,7 @@ def _parse_tool_response_json(response: object) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {"ok": False, "raw_text": text}
 
 
-def _list_installed_mcp_clients(capability_service: object | None) -> dict[str, bool]:
+def _fetch_installed_mcp_clients(capability_service: object | None) -> dict[str, bool]:
     if capability_service is None:
         return {}
     lister = getattr(capability_service, "list_mcp_client_infos", None)
@@ -76,7 +76,7 @@ def _list_installed_mcp_clients(capability_service: object | None) -> dict[str, 
     return installed
 
 
-def _get_capability_mount(
+def _fetch_capability_mount(
     capability_service: object | None,
     capability_id: str,
 ) -> object | None:
@@ -91,8 +91,60 @@ def _get_capability_mount(
         return None
 
 
-def _mount_enabled(capability_service: object | None, capability_id: str) -> bool | None:
-    mount = _get_capability_mount(capability_service, capability_id)
+class _InstallTemplateCapabilityLookup:
+    def __init__(self, capability_service: object | None) -> None:
+        self._capability_service = capability_service
+        self._capability_mounts_by_id: dict[str, object | None] = {}
+        self._installed_mcp_clients: dict[str, bool] | None = None
+
+    def list_installed_mcp_clients(self) -> dict[str, bool]:
+        if self._installed_mcp_clients is None:
+            self._installed_mcp_clients = _fetch_installed_mcp_clients(
+                self._capability_service,
+            )
+        return dict(self._installed_mcp_clients)
+
+    def get_capability_mount(self, capability_id: str) -> object | None:
+        if capability_id not in self._capability_mounts_by_id:
+            self._capability_mounts_by_id[capability_id] = _fetch_capability_mount(
+                self._capability_service,
+                capability_id,
+            )
+        return self._capability_mounts_by_id[capability_id]
+
+
+def _list_installed_mcp_clients(
+    capability_service: object | None,
+    *,
+    capability_lookup: _InstallTemplateCapabilityLookup | None = None,
+) -> dict[str, bool]:
+    if capability_lookup is not None:
+        return capability_lookup.list_installed_mcp_clients()
+    return _fetch_installed_mcp_clients(capability_service)
+
+
+def _get_capability_mount(
+    capability_service: object | None,
+    capability_id: str,
+    *,
+    capability_lookup: _InstallTemplateCapabilityLookup | None = None,
+) -> object | None:
+    if capability_lookup is not None:
+        return capability_lookup.get_capability_mount(capability_id)
+    return _fetch_capability_mount(capability_service, capability_id)
+
+
+def _mount_enabled(
+    capability_service: object | None,
+    capability_id: str,
+    *,
+    capability_lookup: _InstallTemplateCapabilityLookup | None = None,
+) -> bool | None:
+    mount = _get_capability_mount(
+        capability_service,
+        capability_id,
+        capability_lookup=capability_lookup,
+    )
     if mount is None:
         return None
     return bool(getattr(mount, "enabled", False))
@@ -428,8 +480,14 @@ def _browser_manifest() -> InstallTemplateManifest:
 def _builtin_capability_state(
     capability_service: object | None,
     capability_id: str,
+    *,
+    capability_lookup: _InstallTemplateCapabilityLookup | None = None,
 ) -> tuple[bool, bool | None]:
-    mount = _get_capability_mount(capability_service, capability_id)
+    mount = _get_capability_mount(
+        capability_service,
+        capability_id,
+        capability_lookup=capability_lookup,
+    )
     if mount is None:
         return False, None
     return True, bool(getattr(mount, "enabled", False))
@@ -861,7 +919,11 @@ def list_install_templates(
     environment_service: object | None = None,
     include_runtime: bool = False,
 ) -> list[CapabilityInstallTemplateSpec]:
-    installed_clients = _list_installed_mcp_clients(capability_service)
+    capability_lookup = _InstallTemplateCapabilityLookup(capability_service)
+    installed_clients = _list_installed_mcp_clients(
+        capability_service,
+        capability_lookup=capability_lookup,
+    )
     templates: list[CapabilityInstallTemplateSpec] = []
     for template in list_desktop_mcp_templates():
         templates.append(
@@ -878,6 +940,7 @@ def list_install_templates(
             decision_request_repository=decision_request_repository,
             browser_runtime_service=browser_runtime_service,
             include_runtime=include_runtime,
+            capability_lookup=capability_lookup,
         ),
     )
     templates.extend(
@@ -888,24 +951,28 @@ def list_install_templates(
                 browser_runtime_service=browser_runtime_service,
                 environment_service=environment_service,
                 include_runtime=include_runtime,
+                capability_lookup=capability_lookup,
             ),
             _build_document_bridge_install_template(
                 capability_service=capability_service,
                 decision_request_repository=decision_request_repository,
                 environment_service=environment_service,
                 include_runtime=include_runtime,
+                capability_lookup=capability_lookup,
             ),
             _build_host_watchers_install_template(
                 capability_service=capability_service,
                 decision_request_repository=decision_request_repository,
                 environment_service=environment_service,
                 include_runtime=include_runtime,
+                capability_lookup=capability_lookup,
             ),
             _build_windows_app_adapters_install_template(
                 capability_service=capability_service,
                 decision_request_repository=decision_request_repository,
                 environment_service=environment_service,
                 include_runtime=include_runtime,
+                capability_lookup=capability_lookup,
             ),
         ],
     )
@@ -921,7 +988,11 @@ def get_install_template(
     environment_service: object | None = None,
     include_runtime: bool = True,
 ) -> CapabilityInstallTemplateSpec | None:
-    installed_clients = _list_installed_mcp_clients(capability_service)
+    capability_lookup = _InstallTemplateCapabilityLookup(capability_service)
+    installed_clients = _list_installed_mcp_clients(
+        capability_service,
+        capability_lookup=capability_lookup,
+    )
     for desktop_template in list_desktop_mcp_templates():
         if desktop_template.template_id != template_id:
             continue
@@ -937,6 +1008,7 @@ def get_install_template(
             decision_request_repository=decision_request_repository,
             browser_runtime_service=browser_runtime_service,
             include_runtime=include_runtime,
+            capability_lookup=capability_lookup,
         )
     if template_id == "browser-companion":
         return _build_browser_companion_install_template(
@@ -945,6 +1017,7 @@ def get_install_template(
             browser_runtime_service=browser_runtime_service,
             environment_service=environment_service,
             include_runtime=include_runtime,
+            capability_lookup=capability_lookup,
         )
     if template_id == "document-office-bridge":
         return _build_document_bridge_install_template(
@@ -952,6 +1025,7 @@ def get_install_template(
             decision_request_repository=decision_request_repository,
             environment_service=environment_service,
             include_runtime=include_runtime,
+            capability_lookup=capability_lookup,
         )
     if template_id == "host-watchers":
         return _build_host_watchers_install_template(
@@ -959,6 +1033,7 @@ def get_install_template(
             decision_request_repository=decision_request_repository,
             environment_service=environment_service,
             include_runtime=include_runtime,
+            capability_lookup=capability_lookup,
         )
     if template_id == "windows-app-adapters":
         return _build_windows_app_adapters_install_template(
@@ -966,6 +1041,7 @@ def get_install_template(
             decision_request_repository=decision_request_repository,
             environment_service=environment_service,
             include_runtime=include_runtime,
+            capability_lookup=capability_lookup,
         )
     for template in list_install_templates(
         capability_service=capability_service,
@@ -1220,11 +1296,15 @@ def _build_browser_install_template(
     decision_request_repository: object | None = None,
     browser_runtime_service: BrowserRuntimeService | None = None,
     include_runtime: bool = False,
+    capability_lookup: _InstallTemplateCapabilityLookup | None = None,
 ) -> CapabilityInstallTemplateSpec:
     support = get_browser_support_snapshot()
     runtime: dict[str, Any] = {}
-    enabled = _mount_enabled(capability_service, "tool:browser_use")
-    installed = _get_capability_mount(capability_service, "tool:browser_use") is not None
+    installed, enabled = _builtin_capability_state(
+        capability_service,
+        "tool:browser_use",
+        capability_lookup=capability_lookup,
+    )
     host_policy = _browser_host_policy(bool(support.get("playwright_ready")))
     ready = bool(enabled) and host_policy.ready
     manifest = _browser_manifest()
@@ -1417,10 +1497,12 @@ def _build_browser_companion_install_template(
     browser_runtime_service: BrowserRuntimeService | None = None,
     environment_service: object | None = None,
     include_runtime: bool = False,
+    capability_lookup: _InstallTemplateCapabilityLookup | None = None,
 ) -> CapabilityInstallTemplateSpec:
     installed, enabled = _builtin_capability_state(
         capability_service,
         "system:browser_companion_runtime",
+        capability_lookup=capability_lookup,
     )
     browser_support = get_browser_support_snapshot()
     host_policy = _browser_host_policy(bool(browser_support.get("playwright_ready")))
@@ -1578,10 +1660,12 @@ def _build_document_bridge_install_template(
     decision_request_repository: object | None = None,
     environment_service: object | None = None,
     include_runtime: bool = False,
+    capability_lookup: _InstallTemplateCapabilityLookup | None = None,
 ) -> CapabilityInstallTemplateSpec:
     installed, enabled = _builtin_capability_state(
         capability_service,
         "system:document_bridge_runtime",
+        capability_lookup=capability_lookup,
     )
     host_policy = _windows_cooperative_host_policy(
         host_kind="cooperative-document-host",
@@ -1721,10 +1805,12 @@ def _build_host_watchers_install_template(
     decision_request_repository: object | None = None,
     environment_service: object | None = None,
     include_runtime: bool = False,
+    capability_lookup: _InstallTemplateCapabilityLookup | None = None,
 ) -> CapabilityInstallTemplateSpec:
     installed, enabled = _builtin_capability_state(
         capability_service,
         "system:host_watchers_runtime",
+        capability_lookup=capability_lookup,
     )
     host_policy = _windows_cooperative_host_policy(
         host_kind="cooperative-host-watchers",
@@ -1862,10 +1948,12 @@ def _build_windows_app_adapters_install_template(
     decision_request_repository: object | None = None,
     environment_service: object | None = None,
     include_runtime: bool = False,
+    capability_lookup: _InstallTemplateCapabilityLookup | None = None,
 ) -> CapabilityInstallTemplateSpec:
     installed, enabled = _builtin_capability_state(
         capability_service,
         "system:windows_app_adapter_runtime",
+        capability_lookup=capability_lookup,
     )
     host_policy = _windows_cooperative_host_policy(
         host_kind="cooperative-windows-apps",

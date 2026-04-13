@@ -1196,7 +1196,12 @@ class _WorkflowServicePreviewMixin:
         host_twin_requirements: list[dict[str, Any]] = []
         materialized_goals: list[dict[str, Any]] = []
         materialized_schedules: list[dict[str, Any]] = []
-        installed_client_keys = self._list_installed_mcp_client_keys()
+        capability_mounts_by_id: dict[str, Any | None] = {}
+        installed_client_cache: dict[str, set[str]] = {}
+        install_template_candidates_by_runtime: dict[bool, list[Any]] = {}
+        installed_client_keys = self._list_installed_mcp_client_keys(
+            cached_values=installed_client_cache,
+        )
 
         for raw_step in template.step_specs:
             if not isinstance(raw_step, dict):
@@ -1220,7 +1225,10 @@ class _WorkflowServicePreviewMixin:
             missing_capability_ids = [
                 capability_id
                 for capability_id in required_capability_ids
-                if not self._has_capability(capability_id)
+                if not self._has_capability(
+                    capability_id,
+                    capability_mounts_by_id=capability_mounts_by_id,
+                )
             ]
             if owner_agent_id:
                 budget_by_agent[owner_agent_id] = (
@@ -1231,10 +1239,13 @@ class _WorkflowServicePreviewMixin:
                 )
                 owner_role_by_agent.setdefault(owner_agent_id, owner_role_id)
             for capability_id in required_capability_ids:
-                mount = self._get_capability_mount(capability_id)
-                status = dependency_map.setdefault(
-                    capability_id,
-                    WorkflowTemplateDependencyStatus(
+                status = dependency_map.get(capability_id)
+                if status is None:
+                    mount = self._get_capability_mount(
+                        capability_id,
+                        capability_mounts_by_id=capability_mounts_by_id,
+                    )
+                    status = WorkflowTemplateDependencyStatus(
                         capability_id=capability_id,
                         installed=mount is not None,
                         enabled=mount.enabled if mount is not None else None,
@@ -1243,9 +1254,12 @@ class _WorkflowServicePreviewMixin:
                             template=template,
                             capability_id=capability_id,
                             installed_client_keys=installed_client_keys,
+                            install_template_candidates_by_runtime=(
+                                install_template_candidates_by_runtime
+                            ),
                         ),
-                    ),
-                )
+                    )
+                    dependency_map[capability_id] = status
                 if raw_step.get("id") and str(raw_step["id"]) not in status.required_by_steps:
                     status.required_by_steps.append(str(raw_step["id"]))
                 if owner_agent_id and owner_agent_id not in status.target_agent_ids:
@@ -1458,7 +1472,11 @@ class _WorkflowServicePreviewMixin:
             missing_assignments = sorted(
                 capability_id
                 for capability_id in required_capabilities
-                if capability_id not in assigned_capabilities and self._has_capability(capability_id)
+                if capability_id not in assigned_capabilities
+                and self._has_capability(
+                    capability_id,
+                    capability_mounts_by_id=capability_mounts_by_id,
+                )
             )
             if not missing_assignments:
                 continue

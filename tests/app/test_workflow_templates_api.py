@@ -18,6 +18,7 @@ from copaw.app.routers.workflow_templates import (
     run_router as workflow_runs_router,
 )
 from copaw.capabilities import CapabilityService
+from copaw.capabilities.install_templates import CapabilityInstallTemplateSpec
 from copaw.evidence import EvidenceLedger
 from copaw.evidence.models import EvidenceRecord
 from copaw.goals import GoalService
@@ -939,6 +940,76 @@ def test_workflow_preview_exposes_install_template_routes(tmp_path) -> None:
     )
     if not dependency["installed"]:
         assert "mcp:desktop_windows" in payload["missing_capability_ids"]
+
+
+def test_workflow_preview_reuses_install_template_listing_with_multiple_dependencies(
+    tmp_path,
+) -> None:
+    client = TestClient(_build_workflow_app(tmp_path))
+    instance_id = _bootstrap_industry(client)
+    repository = client.app.state.workflow_template_repository
+    repository.upsert_template(
+        WorkflowTemplateRecord(
+            template_id="multi-install-template-preview-smoke",
+            title="Multi dependency preview",
+            summary="Exercise install-template memoization during preview.",
+            category="smoke",
+            status="active",
+            version="v1",
+            dependency_capability_ids=["mcp:desktop_windows", "tool:browser_use"],
+            suggested_role_ids=["solution-lead"],
+            owner_role_id="solution-lead",
+            step_specs=[
+                {
+                    "id": "multi-install-step",
+                    "kind": "goal",
+                    "execution_mode": "leaf",
+                    "owner_role_id": "solution-lead",
+                    "title": "Need browser and desktop surfaces",
+                    "summary": "Resolve both dependency install-template refs.",
+                    "required_capability_ids": [
+                        "mcp:desktop_windows",
+                        "tool:browser_use",
+                    ],
+                }
+            ],
+            metadata={
+                "builtin": False,
+                "dependency_install_templates": {
+                    "mcp:desktop_windows": ["desktop-windows"],
+                    "tool:browser_use": ["browser-local"],
+                },
+            },
+        ),
+    )
+    install_templates = [
+        CapabilityInstallTemplateSpec(
+            id="desktop-windows",
+            name="Windows Desktop Host",
+            default_client_key="desktop_windows",
+            capability_tags=["desktop"],
+        ),
+        CapabilityInstallTemplateSpec(
+            id="browser-local",
+            name="Local Browser Runtime",
+            default_client_key=None,
+            capability_tags=["browser"],
+        ),
+    ]
+
+    with patch(
+        "copaw.workflows.service_context.list_install_templates",
+        side_effect=lambda **kwargs: list(install_templates),
+    ) as mocked_list_install_templates:
+        preview = client.post(
+            "/workflow-templates/multi-install-template-preview-smoke/preview",
+            json={"industry_instance_id": instance_id},
+        )
+
+    assert preview.status_code == 200
+    payload = preview.json()
+    assert len(payload["dependencies"]) == 2
+    assert mocked_list_install_templates.call_count == 1
 
 
 def test_workflow_presets_can_be_created_and_applied(tmp_path) -> None:

@@ -326,19 +326,47 @@ class _WorkflowServiceContextMixin:
             lines.append(f"... and {remaining} more blocker(s).")
         return "Workflow launch blocked: " + " ".join(lines)
 
-    def _get_capability_mount(self, capability_id: str):
+    def _get_capability_mount(
+        self,
+        capability_id: str,
+        *,
+        capability_mounts_by_id: dict[str, Any | None] | None = None,
+    ):
+        if capability_mounts_by_id is not None and capability_id in capability_mounts_by_id:
+            return capability_mounts_by_id[capability_id]
         if self._capability_service is None:
+            if capability_mounts_by_id is not None:
+                capability_mounts_by_id[capability_id] = None
             return None
         getter = getattr(self._capability_service, "get_capability", None)
         if not callable(getter):
+            if capability_mounts_by_id is not None:
+                capability_mounts_by_id[capability_id] = None
             return None
-        return getter(capability_id)
+        mount = getter(capability_id)
+        if capability_mounts_by_id is not None:
+            capability_mounts_by_id[capability_id] = mount
+        return mount
 
-    def _has_capability(self, capability_id: str) -> bool:
-        mount = self._get_capability_mount(capability_id)
+    def _has_capability(
+        self,
+        capability_id: str,
+        *,
+        capability_mounts_by_id: dict[str, Any | None] | None = None,
+    ) -> bool:
+        mount = self._get_capability_mount(
+            capability_id,
+            capability_mounts_by_id=capability_mounts_by_id,
+        )
         return bool(mount is not None and mount.enabled)
 
-    def _list_installed_mcp_client_keys(self) -> set[str]:
+    def _list_installed_mcp_client_keys(
+        self,
+        *,
+        cached_values: dict[str, set[str]] | None = None,
+    ) -> set[str]:
+        if cached_values is not None and "installed_mcp_client_keys" in cached_values:
+            return set(cached_values["installed_mcp_client_keys"])
         if self._capability_service is None:
             return set()
         lister = getattr(self._capability_service, "list_mcp_client_infos", None)
@@ -357,6 +385,8 @@ class _WorkflowServiceContextMixin:
             key = _string(item.get("key"))
             if key:
                 installed.add(key)
+        if cached_values is not None:
+            cached_values["installed_mcp_client_keys"] = set(installed)
         return installed
 
     def _resolve_install_templates_for_capability(
@@ -365,16 +395,25 @@ class _WorkflowServiceContextMixin:
         template: WorkflowTemplateRecord,
         capability_id: str,
         installed_client_keys: set[str],
+        install_template_candidates_by_runtime: dict[bool, list[Any]] | None = None,
     ) -> list[WorkflowTemplateInstallTemplateRef]:
         mappings = template.metadata.get("dependency_install_templates")
         explicit_template_ids = _unique_strings(
             mappings.get(capability_id) if isinstance(mappings, dict) else [],
         )
-        candidates = list_install_templates(
-            capability_service=self._capability_service,
-            decision_request_repository=self._decision_request_repository,
-            include_runtime=False,
+        candidates = (
+            install_template_candidates_by_runtime.get(False)
+            if install_template_candidates_by_runtime is not None
+            else None
         )
+        if candidates is None:
+            candidates = list_install_templates(
+                capability_service=self._capability_service,
+                decision_request_repository=self._decision_request_repository,
+                include_runtime=False,
+            )
+            if install_template_candidates_by_runtime is not None:
+                install_template_candidates_by_runtime[False] = list(candidates)
         if not explicit_template_ids:
             explicit_template_ids = [
                 candidate.id
