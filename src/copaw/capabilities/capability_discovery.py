@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+import os
 import sys
 from typing import Any
 from urllib.parse import quote
@@ -82,6 +83,22 @@ _MCP_REGISTRY_FAMILY_CATEGORY_MAP: dict[str, tuple[str, ...]] = {
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _hub_search_timeout_seconds() -> float:
+    raw = os.environ.get("COPAW_HUB_SEARCH_TIMEOUT_SECONDS", "12")
+    try:
+        return max(1.0, float(raw))
+    except Exception:
+        return 12.0
+
+
+def _curated_search_timeout_seconds() -> float:
+    raw = os.environ.get("COPAW_CURATED_SEARCH_TIMEOUT_SECONDS", "10")
+    try:
+        return max(1.0, float(raw))
+    except Exception:
+        return 10.0
 
 
 def _get_industry_discovery_attr(
@@ -1112,10 +1129,13 @@ class CapabilityDiscoveryService:
                         search_curated_skill_catalog,
                         _NATIVE_SEARCH_CURATED_SKILL_CATALOG,
                     )
-                    search_response = await asyncio.to_thread(
-                        search_curated,
-                        candidate.query,
-                        limit=8,
+                    search_response = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            search_curated,
+                            candidate.query,
+                            limit=8,
+                        ),
+                        timeout=_curated_search_timeout_seconds(),
                     )
                 except Exception:
                     warnings.append(
@@ -1564,10 +1584,13 @@ class CapabilityDiscoveryService:
             search_hub_skills,
             _NATIVE_SEARCH_HUB_SKILLS,
         )
-        results = await asyncio.to_thread(
-            search_hub,
-            normalized_query,
-            limit,
+        results = await asyncio.wait_for(
+            asyncio.to_thread(
+                search_hub,
+                normalized_query,
+                limit,
+            ),
+            timeout=_hub_search_timeout_seconds(),
         )
         self._hub_search_cache[cache_key] = (
             now + timedelta(minutes=10),

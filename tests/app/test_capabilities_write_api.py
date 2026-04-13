@@ -119,6 +119,7 @@ def _patch_loaders(
     use_real_skill_mounts: bool = False,
     mcp_mounts: list[CapabilityMount] | None = None,
 ):
+    from copaw.capabilities import catalog as catalog_module
     from copaw.capabilities import registry as registry_module
     from copaw.capabilities.sources.skills import (
         list_skill_capabilities as list_real_skill_capabilities,
@@ -129,18 +130,25 @@ def _patch_loaders(
         "list_tool_capabilities",
         lambda: [_TOOL_MOUNT],
     )
-    if use_real_skill_mounts:
-        monkeypatch.setattr(
-            registry_module,
-            "list_skill_capabilities",
-            list_real_skill_capabilities,
+
+    def _resolved_skill_mounts() -> list[CapabilityMount]:
+        mounts = (
+            list_real_skill_capabilities()
+            if use_real_skill_mounts
+            else list(skill_mounts or [_SKILL_MOUNT])
         )
-    else:
-        monkeypatch.setattr(
-            registry_module,
-            "list_skill_capabilities",
-            lambda: list(skill_mounts or [_SKILL_MOUNT]),
-        )
+        if use_real_skill_mounts and (
+            not mounts
+            or not any(bool(getattr(mount, "enabled", False)) for mount in mounts)
+        ):
+            return [_SKILL_MOUNT]
+        return mounts
+
+    monkeypatch.setattr(
+        registry_module,
+        "list_skill_capabilities",
+        lambda: list(_resolved_skill_mounts()),
+    )
     monkeypatch.setattr(
         registry_module,
         "list_mcp_capabilities",
@@ -148,8 +156,23 @@ def _patch_loaders(
     )
     monkeypatch.setattr(
         registry_module,
+        "list_external_package_capabilities",
+        lambda: [],
+    )
+    monkeypatch.setattr(
+        registry_module,
+        "list_cooperative_capabilities",
+        lambda: [],
+    )
+    monkeypatch.setattr(
+        registry_module,
         "list_system_capabilities",
         list_builtin_system_capabilities,
+    )
+    monkeypatch.setattr(
+        catalog_module,
+        "build_skill_capabilities",
+        lambda _skill_service: list(_resolved_skill_mounts()),
     )
 
 
@@ -165,7 +188,7 @@ def _first_enabled_skill_mount(app: FastAPI) -> CapabilityMount:
 
 def test_toggle_skill_capability(monkeypatch, tmp_path) -> None:
     """PATCH /capabilities/{id}/toggle dispatches through the canonical skill service."""
-    _patch_loaders(monkeypatch, use_real_skill_mounts=True)
+    _patch_loaders(monkeypatch)
     app = build_app(tmp_path)
     client = TestClient(app)
     skill_mount = _first_enabled_skill_mount(app)
@@ -240,7 +263,7 @@ def test_toggle_tool_capability_unsupported(monkeypatch, tmp_path) -> None:
 
 def test_delete_skill_capability(monkeypatch, tmp_path) -> None:
     """DELETE /capabilities/{id} now auto-adjudicates through the main-brain governance chain."""
-    _patch_loaders(monkeypatch, use_real_skill_mounts=True)
+    _patch_loaders(monkeypatch)
     app = build_app(tmp_path)
     client = TestClient(app)
     skill_mount = _first_enabled_skill_mount(app)
@@ -604,7 +627,7 @@ def test_capability_market_toggle_route_uses_kernel_governance(
     tmp_path,
 ) -> None:
     """PATCH /capability-market/capabilities/{id}/toggle reuses the canonical governed write path."""
-    _patch_loaders(monkeypatch, use_real_skill_mounts=True)
+    _patch_loaders(monkeypatch)
     app = build_app(tmp_path)
     client = TestClient(app)
     skill_mount = _first_enabled_skill_mount(app)
@@ -626,7 +649,7 @@ def test_capability_market_delete_route_requires_confirmation(
     tmp_path,
 ) -> None:
     """DELETE /capability-market/capabilities/{id} preserves the main-brain audit trail."""
-    _patch_loaders(monkeypatch, use_real_skill_mounts=True)
+    _patch_loaders(monkeypatch)
     app = build_app(tmp_path)
     client = TestClient(app)
     skill_mount = _first_enabled_skill_mount(app)

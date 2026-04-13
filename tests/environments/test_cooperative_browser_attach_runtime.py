@@ -421,6 +421,27 @@ def test_browser_channel_resolver_defaults_to_built_in_when_attach_path_is_unava
     assert resolution["browser_mcp"]["healthy"] is False
 
 
+def test_browser_channel_resolver_ignores_workspace_mount_without_browser_session(
+    tmp_path,
+) -> None:
+    service, _, _ = _build_environment_service(tmp_path)
+    workspace = service.touch_environment(
+        ref=r"C:\Users\21492\.copaw",
+        kind="workspace",
+        status="active",
+        metadata={"workspace_scope": "project:copaw"},
+    )
+
+    assert workspace is not None
+
+    resolution = service.resolve_browser_channel(environment_id=workspace.id)
+
+    assert resolution["selected_channel"] == "built-in-browser"
+    assert resolution["selection_status"] == "ready"
+    assert resolution["fail_closed"] is False
+    assert resolution["browser_mcp"]["healthy"] is False
+
+
 def test_browser_channel_resolver_prefers_browser_mcp_when_companion_and_attach_are_healthy(
     tmp_path,
 ) -> None:

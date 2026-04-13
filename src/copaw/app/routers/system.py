@@ -82,7 +82,11 @@ def _resolve_working_dir(app_state: Any) -> Path:
     state_store = getattr(app_state, "state_store", None)
     raw_path = getattr(state_store, "_path", None)
     if raw_path is not None:
-        return Path(raw_path).expanduser().resolve().parent
+        state_path = Path(raw_path).expanduser().resolve()
+        state_dir = state_path.parent
+        if state_dir.name == "state":
+            return state_dir.parent
+        return state_dir
     return WORKING_DIR
 
 

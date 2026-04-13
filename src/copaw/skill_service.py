@@ -4,6 +4,7 @@ import filecmp
 import logging
 import shutil
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 from pydantic import BaseModel
 import frontmatter
@@ -498,6 +499,11 @@ def _read_skills_from_dir(
         List of SkillInfo objects.
     """
     skills: list[SkillInfo] = []
+    started_at = perf_counter()
+    skill_count = 0
+    skill_md_elapsed = 0.0
+    references_elapsed = 0.0
+    scripts_elapsed = 0.0
 
     if not directory.exists():
         return skills
@@ -511,19 +517,25 @@ def _read_skills_from_dir(
             continue
 
         try:
+            stage_started_at = perf_counter()
             content = skill_md.read_text(encoding="utf-8")
+            skill_md_elapsed += perf_counter() - stage_started_at
 
             # Build references directory tree
             references = {}
             references_dir = skill_dir / "references"
             if references_dir.exists() and references_dir.is_dir():
+                stage_started_at = perf_counter()
                 references = _build_directory_tree(references_dir)
+                references_elapsed += perf_counter() - stage_started_at
 
             # Build scripts directory tree
             scripts = {}
             scripts_dir = skill_dir / "scripts"
             if scripts_dir.exists() and scripts_dir.is_dir():
+                stage_started_at = perf_counter()
                 scripts = _build_directory_tree(scripts_dir)
+                scripts_elapsed += perf_counter() - stage_started_at
 
             skills.append(
                 SkillInfo(
@@ -535,6 +547,7 @@ def _read_skills_from_dir(
                     scripts=scripts,
                 ),
             )
+            skill_count += 1
         except Exception as e:
             logger.error(
                 "Failed to read skill '%s': %s",
@@ -542,6 +555,16 @@ def _read_skills_from_dir(
                 e,
             )
 
+    logger.info(
+        "Skill directory read timings: source=%s dir=%s skills=%d skill_md=%.2fs references=%.2fs scripts=%.2fs total=%.2fs",
+        source,
+        directory,
+        skill_count,
+        skill_md_elapsed,
+        references_elapsed,
+        scripts_elapsed,
+        perf_counter() - started_at,
+    )
     return skills
 
 
@@ -609,8 +632,12 @@ class SkillService:
         Returns:
             List of SkillInfo with name, content, source, and path.
         """
+        timings: dict[str, float] = {}
+        started_at = perf_counter()
         try:
+            stage_started_at = perf_counter()
             synced, _ = sync_skills_from_active_to_customized()
+            timings["sync_active_to_customized"] = perf_counter() - stage_started_at
             if synced > 0:
                 logger.debug(
                     "Synced %d skill(s) from active_skills to "
@@ -618,6 +645,7 @@ class SkillService:
                     synced,
                 )
         except Exception as e:
+            timings["sync_active_to_customized"] = perf_counter() - started_at
             logger.debug(
                 "Failed to sync skills from active_skills to "
                 "customized_skills: %s",
@@ -627,11 +655,21 @@ class SkillService:
         skills: list[SkillInfo] = []
 
         # Collect from builtin and customized skills
+        stage_started_at = perf_counter()
         skills.extend(
             _read_skills_from_dir(get_builtin_skills_dir(), "builtin"),
         )
+        timings["read_builtin"] = perf_counter() - stage_started_at
+        stage_started_at = perf_counter()
         skills.extend(
             _read_skills_from_dir(get_customized_skills_dir(), "customized"),
+        )
+        timings["read_customized"] = perf_counter() - stage_started_at
+        timings["total"] = perf_counter() - started_at
+        logger.info(
+            "SkillService.list_all_skills timings: count=%d %s",
+            len(skills),
+            " ".join(f"{key}={value:.2f}s" for key, value in timings.items()),
         )
 
         return skills

@@ -22,6 +22,7 @@ from copaw.app.runtime_center import (
 from copaw.agents.skills_hub import HubSkillResult
 from copaw.capabilities.browser_runtime import BrowserRuntimeService
 from copaw.capabilities import CapabilityMount, CapabilityService
+from copaw.capabilities.skill_service import CapabilitySkillService
 from copaw.capabilities.remote_skill_catalog import (
     CuratedSkillCatalogEntry,
     CuratedSkillCatalogSearchResponse,
@@ -454,6 +455,7 @@ def _build_industry_app(
     capability_service = CapabilityService(
         evidence_ledger=evidence_ledger,
         turn_executor=turn_executor or FakeTurnExecutor(),
+        skill_service=CapabilitySkillService(),
     )
     work_context_service = WorkContextService(repository=work_context_repository)
     task_store = KernelTaskStore(

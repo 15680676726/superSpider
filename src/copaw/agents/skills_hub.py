@@ -459,6 +459,8 @@ def _hydrate_clawhub_payload(
 # pylint: disable-next=too-many-branches
 def _normalize_bundle(
     data: Any,
+    *,
+    fallback_name: str = "",
 ) -> tuple[str, str, dict[str, Any], dict[str, Any], dict[str, Any]]:
     payload = data
     if isinstance(data, dict) and isinstance(data.get("skill"), dict):
@@ -513,6 +515,8 @@ def _normalize_bundle(
             name = post.get("name", "")
         except Exception:
             name = ""
+    if not name and fallback_name:
+        name = fallback_name
     if not name:
         raise ValueError("Hub bundle missing skill name")
 
@@ -522,6 +526,16 @@ def _normalize_bundle(
 def _safe_fallback_name(raw: str) -> str:
     out = re.sub(r"[^a-zA-Z0-9_-]", "-", raw).strip("-_")
     return out or "imported-skill"
+
+
+def _fallback_skill_name_from_url(url: str) -> str:
+    parsed = urlparse(url.strip())
+    leaf = parsed.path.rsplit("/", 1)[-1].strip() if parsed.path else ""
+    if not leaf:
+        return ""
+    if "." in leaf:
+        leaf = leaf.rsplit(".", 1)[0]
+    return _safe_fallback_name(unquote(leaf))
 
 
 def _is_http_url(text: str) -> bool:
@@ -567,7 +581,10 @@ def remote_skill_bundle_is_installable(
             )
         else:
             return False
-        _normalize_bundle(data)
+        _normalize_bundle(
+            data,
+            fallback_name=_fallback_skill_name_from_url(_source_url or bundle_url),
+        )
         return True
     except Exception:
         return False
@@ -578,6 +595,7 @@ def _inject_package_metadata(
     *,
     package_ref: str,
     package_version: str,
+    fallback_name: str = "",
 ) -> str:
     try:
         post = frontmatter.loads(content)
@@ -586,6 +604,9 @@ def _inject_package_metadata(
             "Hub bundle SKILL.md must contain valid YAML Front Matter.",
         ) from exc
     skill_name = str(post.get("name") or "").strip()
+    if not skill_name and fallback_name:
+        skill_name = fallback_name
+        post["name"] = skill_name
     description = str(post.get("description") or "").strip()
     if not skill_name or not description:
         raise ValueError(
@@ -1391,14 +1412,16 @@ def install_skill_from_hub(
                         "Unsupported skill bundle source. Use a validated SkillHub, GitHub, skills.sh, or skillsmp URL.",
                     )
 
-    name, content, references, scripts, extra_files = _normalize_bundle(data)
-    if not name:
-        fallback = urlparse(bundle_url).path.strip("/").split("/")[-1]
-        name = _safe_fallback_name(fallback)
+    fallback_name = _fallback_skill_name_from_url(source_url or bundle_url)
+    name, content, references, scripts, extra_files = _normalize_bundle(
+        data,
+        fallback_name=fallback_name,
+    )
     content = _inject_package_metadata(
         content,
         package_ref=bundle_url,
         package_version=version,
+        fallback_name=name,
     )
 
     created = SkillService.create_skill(

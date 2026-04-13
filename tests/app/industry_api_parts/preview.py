@@ -361,6 +361,22 @@ def test_industry_bootstrap_executes_hub_skill_install_plan(
     assert "skill:salesforce" in (override.capabilities or [])
 
 
+def test_industry_test_apps_do_not_share_mutable_skill_service_singleton(
+    tmp_path,
+) -> None:
+    first_app = _build_industry_app(tmp_path / "one")
+    second_app = _build_industry_app(tmp_path / "two")
+
+    first_skill_service = (
+        first_app.state.capability_service._system_handler._skills._skill_service
+    )
+    second_skill_service = (
+        second_app.state.capability_service._system_handler._skills._skill_service
+    )
+
+    assert first_skill_service is not second_skill_service
+
+
 def test_industry_preview_defers_skillhub_curated_matching_for_matching_role(
     tmp_path,
 ) -> None:

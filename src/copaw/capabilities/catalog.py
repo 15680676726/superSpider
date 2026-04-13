@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from collections import Counter
+import logging
+from time import perf_counter
 from typing import TYPE_CHECKING, Any, Callable
 
 from ..skill_service import SkillFrontmatterError, parse_skill_frontmatter
@@ -24,6 +26,9 @@ if TYPE_CHECKING:
         SqliteAgentProfileOverrideRepository,
         SqliteCapabilityOverrideRepository,
     )
+
+
+logger = logging.getLogger(__name__)
 
 
 class CapabilityCatalogFacade:
@@ -70,16 +75,38 @@ class CapabilityCatalogFacade:
         kind: str | None = None,
         enabled_only: bool = False,
     ) -> list[CapabilityMount]:
+        timings: dict[str, float] = {}
+        started_at = perf_counter()
+
+        stage_started_at = perf_counter()
         registry_mounts = self._registry.list_capabilities()
+        timings["registry.list_capabilities"] = perf_counter() - stage_started_at
         if type(self._registry) is CapabilityRegistry:
+            stage_started_at = perf_counter()
             registry_mounts = self._rebind_skill_mounts(registry_mounts)
-        mounts = self._bind_package_metadata(
-            self._apply_overrides(registry_mounts),
-        )
+            timings["rebind_skill_mounts"] = perf_counter() - stage_started_at
+        stage_started_at = perf_counter()
+        overridden_mounts = self._apply_overrides(registry_mounts)
+        timings["apply_overrides"] = perf_counter() - stage_started_at
+        stage_started_at = perf_counter()
+        mounts = self._bind_package_metadata(overridden_mounts)
+        timings["bind_package_metadata"] = perf_counter() - stage_started_at
         if kind:
+            stage_started_at = perf_counter()
             mounts = [mount for mount in mounts if mount.kind == kind]
+            timings["filter_kind"] = perf_counter() - stage_started_at
         if enabled_only:
+            stage_started_at = perf_counter()
             mounts = [mount for mount in mounts if mount.enabled]
+            timings["filter_enabled"] = perf_counter() - stage_started_at
+        timings["total"] = perf_counter() - started_at
+        logger.info(
+            "Capability catalog list_capabilities timings: kind=%s enabled_only=%s count=%d %s",
+            kind,
+            enabled_only,
+            len(mounts),
+            " ".join(f"{key}={value:.2f}s" for key, value in timings.items()),
+        )
         return mounts
 
     def list_public_capabilities(
@@ -129,10 +156,20 @@ class CapabilityCatalogFacade:
         kind: str | None = None,
         enabled_only: bool = False,
     ) -> list[CapabilityMount]:
+        timings: dict[str, float] = {}
+        started_at = perf_counter()
+
+        stage_started_at = perf_counter()
         mounts = self.list_capabilities(kind=kind, enabled_only=enabled_only)
+        timings["list_capabilities"] = perf_counter() - stage_started_at
+        stage_started_at = perf_counter()
         profile = self._resolve_agent_profile(agent_id)
+        timings["resolve_agent_profile"] = perf_counter() - stage_started_at
+        stage_started_at = perf_counter()
         explicit_allowlist = self._resolve_explicit_capability_allowlist(agent_id)
-        return [
+        timings["resolve_explicit_allowlist"] = perf_counter() - stage_started_at
+        stage_started_at = perf_counter()
+        accessible = [
             mount
             for mount in mounts
             if self._is_mount_accessible(
@@ -142,6 +179,18 @@ class CapabilityCatalogFacade:
                 explicit_allowlist=explicit_allowlist,
             )
         ]
+        timings["filter_accessible_mounts"] = perf_counter() - stage_started_at
+        timings["total"] = perf_counter() - started_at
+        logger.info(
+            "Capability catalog accessible timings: agent=%s kind=%s enabled_only=%s accessible=%d total_mounts=%d %s",
+            agent_id,
+            kind,
+            enabled_only,
+            len(accessible),
+            len(mounts),
+            " ".join(f"{key}={value:.2f}s" for key, value in timings.items()),
+        )
+        return accessible
 
     def toggle_capability(self, capability_id: str) -> dict[str, object]:
         mount = self.get_capability(capability_id)

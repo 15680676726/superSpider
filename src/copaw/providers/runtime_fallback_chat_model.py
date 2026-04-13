@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import AsyncGenerator
+from time import perf_counter
 from typing import Any, TYPE_CHECKING
 
 from agentscope.model import ChatModelBase, OpenAIChatModel
@@ -114,6 +115,7 @@ class RuntimeFallbackChatModel(ChatModelBase):
             if not available:
                 attempts.append(unavailable_attempt(slot=slot, source=source, reason=reason))
                 continue
+            build_started_at = perf_counter()
             try:
                 model = self._manager.build_chat_model_for_slot(slot, stream=True)
             except Exception as exc:
@@ -132,7 +134,9 @@ class RuntimeFallbackChatModel(ChatModelBase):
                 ) from exc
             try:
                 self._apply_stream_mode(model, stream=True)
+                request_started_at = perf_counter()
                 result = await model(*args, **kwargs)
+                request_ready_elapsed = perf_counter() - request_started_at
             except Exception as exc:
                 record, classification = failed_attempt(
                     slot=slot,
@@ -149,6 +153,14 @@ class RuntimeFallbackChatModel(ChatModelBase):
                 ) from exc
 
             if not hasattr(result, "__aiter__"):
+                logger.info(
+                    "Runtime provider non-stream response ready: slot=%s source=%s build=%.2fs request_ready=%.2fs prior_attempts=%d",
+                    format_slot_label(slot),
+                    source,
+                    perf_counter() - build_started_at,
+                    request_ready_elapsed,
+                    len(attempts),
+                )
                 self._log_fallback_success(index=index, slot=slot, attempts=attempts)
 
                 async def _single_response() -> AsyncGenerator[Any, None]:
@@ -165,6 +177,18 @@ class RuntimeFallbackChatModel(ChatModelBase):
                 yielded = False
                 try:
                     async for item in current_result:
+                        if not yielded:
+                            total_first_token_elapsed = perf_counter() - request_started_at
+                            logger.info(
+                                "Runtime provider stream first token: slot=%s source=%s build=%.2fs request_ready=%.2fs first_token=%.2fs total=%.2fs prior_attempts=%d",
+                                format_slot_label(current_slot),
+                                current_source,
+                                perf_counter() - build_started_at,
+                                request_ready_elapsed,
+                                max(0.0, total_first_token_elapsed - request_ready_elapsed),
+                                total_first_token_elapsed,
+                                len(attempts),
+                            )
                         yielded = True
                         if not attempts:
                             self._log_fallback_success(

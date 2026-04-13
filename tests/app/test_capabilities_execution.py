@@ -2313,6 +2313,54 @@ def test_system_dispatch_query_propagates_turn_executor_failure_status() -> None
 
     assert payload["success"] is False
     assert payload["phase"] == "failed"
+
+
+def test_system_dispatch_query_treats_canceled_response_as_cancelled() -> None:
+    class _CancelledTurnExecutor:
+        def __init__(self) -> None:
+            self.requests: list[tuple[object, dict[str, object]]] = []
+
+        async def stream_request(self, request, **kwargs):
+            self.requests.append((request, kwargs))
+            yield {
+                "object": "response",
+                "status": "canceled",
+                "error": None,
+                "request": request,
+            }
+
+    evidence_ledger = EvidenceLedger()
+    turn_executor = _CancelledTurnExecutor()
+    capability_service = CapabilityService(
+        evidence_ledger=evidence_ledger,
+        turn_executor=turn_executor,
+    )
+    dispatcher = KernelDispatcher(capability_service=capability_service)
+
+    payload = _execute_capability_direct(
+        capability_service,
+        dispatcher,
+        capability_id="system:dispatch_query",
+        payload={
+            "request": {
+                "input": [
+                    {
+                        "role": "user",
+                        "content": [{"type": "text", "text": "cancel this run"}],
+                    },
+                ],
+                "session_id": "goal-cancel",
+                "user_id": "ops-agent",
+                "channel": "goal",
+            },
+            "mode": "final",
+            "dispatch_events": False,
+        },
+    )
+
+    assert payload["success"] is False
+    assert payload["phase"] == "cancelled"
+    assert payload["output"]["dispatch_status"] == "cancelled"
     assert payload["error"] == "query runtime failed"
 
 
@@ -2728,12 +2776,14 @@ def test_system_delegate_task_executes_through_delegation_service() -> None:
         capability_id="system:delegate_task",
         title="Delegate research",
         owner_agent_id="ops-agent",
+        environment_ref="session:console:industry-chat:buddy:demo:execution-core",
         payload={
             "parent_task_id": "task-parent-1",
             "owner_agent_id": "ops-researcher",
             "prompt_text": "Review the latest operator handoff notes.",
             "industry_instance_id": "industry-v1-ops",
             "industry_role_id": "researcher",
+            "inherit_environment_ref": False,
         },
     )
     assert payload["success"] is True
@@ -2744,6 +2794,7 @@ def test_system_delegate_task_executes_through_delegation_service() -> None:
     assert parent_task_id == "task-parent-1"
     assert kwargs["owner_agent_id"] == "ops-researcher"
     assert kwargs["industry_role_id"] == "researcher"
+    assert kwargs["environment_ref"] is None
 
 
 def test_execute_task_enforces_role_access_policy() -> None:

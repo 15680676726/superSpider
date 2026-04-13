@@ -934,15 +934,21 @@ class EnvironmentService:
         attach_snapshot: dict[str, Any] = {}
         has_runtime_context = environment_id is not None or session_mount_id is not None
         if self._browser_companion_runtime is not None and has_runtime_context:
-            companion_snapshot = self.browser_companion_snapshot(
-                environment_id=environment_id,
-                session_mount_id=session_mount_id,
-            )
+            try:
+                companion_snapshot = self.browser_companion_snapshot(
+                    environment_id=environment_id,
+                    session_mount_id=session_mount_id,
+                )
+            except KeyError:
+                companion_snapshot = {}
         if self._browser_attach_runtime is not None and has_runtime_context:
-            attach_snapshot = self.browser_attach_snapshot(
-                environment_id=environment_id,
-                session_mount_id=session_mount_id,
-            )
+            try:
+                attach_snapshot = self.browser_attach_snapshot(
+                    environment_id=environment_id,
+                    session_mount_id=session_mount_id,
+                )
+            except KeyError:
+                attach_snapshot = {}
         return resolve_browser_channel_policy(
             companion_snapshot=companion_snapshot,
             attach_snapshot=attach_snapshot,

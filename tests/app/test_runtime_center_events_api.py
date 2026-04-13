@@ -810,10 +810,12 @@ def test_runtime_center_state_query_candidate_projection_exposes_baseline_protec
             "protected_from_auto_replace",
             "required_by_role_blueprint",
         ],
+        metadata={"target_agent_id": "agent-browser-seat"},
     )
 
     class _AgentProfileService:
-        def get_agent_detail(self, _agent_id: str):
+        def get_agent_detail(self, agent_id: str):
+            assert agent_id == "agent-browser-seat"
             return {
                 "runtime": {
                     "metadata": {
@@ -863,9 +865,16 @@ def test_runtime_center_state_query_candidate_projection_exposes_baseline_protec
             "required_by_role_blueprint",
         ],
     }
+    assert payload[0]["target_scope_projection"] == {
+        "target_scope": "seat",
+        "target_role_id": "operator",
+        "target_agent_id": "agent-browser-seat",
+        "target_seat_ref": "seat-browser",
+    }
     assert payload[0]["active_pack_composition"] == {
         "target_scope": "seat",
         "target_role_id": "operator",
+        "target_agent_id": "agent-browser-seat",
         "target_seat_ref": "seat-browser",
         "role_prototype_capability_ids": ["mcp:browser_runtime"],
         "seat_instance_capability_ids": ["mcp:clipboard"],

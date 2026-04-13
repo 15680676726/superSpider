@@ -244,6 +244,55 @@ def test_install_skill_from_hub_rejects_invalid_skill_frontmatter(
         )
 
 
+def test_install_skill_from_hub_falls_back_to_bundle_slug_when_name_missing(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        skills_hub_module,
+        "load_skillhub_bundle_from_url",
+        lambda url: (
+            {
+                "files": {
+                    "SKILL.md": "---\ndescription: support replies\n---\nbody\n",
+                }
+            },
+            url,
+        ),
+    )
+    monkeypatch.setattr(
+        skills_hub_module.SkillService,
+        "create_skill",
+        lambda name, content, overwrite=False, references=None, scripts=None, extra_files=None: captured.update(
+            {
+                "name": name,
+                "content": content,
+                "references": references or {},
+                "scripts": scripts or {},
+                "extra_files": extra_files or {},
+            }
+        )
+        or True,
+    )
+    monkeypatch.setattr(
+        skills_hub_module.SkillService,
+        "enable_skill",
+        lambda name, force=True: True,
+    )
+
+    result = skills_hub_module.install_skill_from_hub(
+        bundle_url=(
+            "https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/"
+            "skills/customer-service-reply.zip"
+        ),
+    )
+
+    assert captured["name"] == "customer-service-reply"
+    assert "name: customer-service-reply" in str(captured["content"])
+    assert result.name == "customer-service-reply"
+
+
 def test_remote_skill_bundle_is_installable_accepts_github_repo_with_skill(
     monkeypatch,
 ) -> None:

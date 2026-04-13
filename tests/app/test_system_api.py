@@ -207,6 +207,50 @@ def test_system_self_check_hides_qmd_runtime_state(tmp_path: Path) -> None:
     assert "memory_qmd_sidecar" not in by_name
 
 
+def test_system_self_check_uses_runtime_root_for_preflight_paths(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    workspace_root = tmp_path / "runtime-root"
+    workspace_root.mkdir()
+    _patch_workspace(monkeypatch, workspace_root)
+
+    app = build_app(tmp_path)
+    app.state.state_store = SQLiteStateStore(
+        workspace_root / "state" / "phase1.sqlite3"
+    )
+    app.state.state_store.initialize()
+    client = TestClient(app)
+
+    overview_response = client.get("/system/overview")
+    self_check_response = client.get("/system/self-check")
+
+    assert overview_response.status_code == 200
+    assert self_check_response.status_code == 200
+
+    overview = overview_response.json()
+    self_check = self_check_response.json()
+    assert overview["self_check"]["state_db_path"] == str(
+        workspace_root / "state" / "phase1.sqlite3"
+    )
+    assert overview["self_check"]["evidence_db_path"] == str(
+        workspace_root / "evidence" / "phase1.sqlite3"
+    )
+
+    preflight_by_name = {
+        item["name"]: item for item in self_check["environment_preflight"]["checks"]
+    }
+    assert preflight_by_name["workspace_write_access"]["meta"]["path"] == str(
+        workspace_root
+    )
+    assert preflight_by_name["log_path_write_access"]["meta"]["path"] == str(
+        workspace_root / "copaw.log"
+    )
+    assert preflight_by_name["evidence_db_write_access"]["meta"]["path"] == str(
+        workspace_root / "evidence" / "phase1.sqlite3"
+    )
+
+
 def test_system_self_check_exposes_runtime_summary_for_automation_and_recovery(
     tmp_path: Path,
 ) -> None:

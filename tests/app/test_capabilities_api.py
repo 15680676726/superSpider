@@ -63,6 +63,7 @@ _MCP_MOUNT = CapabilityMount(
 
 
 def _patch_loaders(monkeypatch):
+    from copaw.capabilities import catalog as catalog_module
     from copaw.capabilities import registry as registry_module
 
     monkeypatch.setattr(
@@ -82,8 +83,23 @@ def _patch_loaders(monkeypatch):
     )
     monkeypatch.setattr(
         registry_module,
+        "list_external_package_capabilities",
+        lambda: [],
+    )
+    monkeypatch.setattr(
+        registry_module,
+        "list_cooperative_capabilities",
+        lambda: [],
+    )
+    monkeypatch.setattr(
+        registry_module,
         "list_system_capabilities",
         lambda: [],
+    )
+    monkeypatch.setattr(
+        catalog_module,
+        "build_skill_capabilities",
+        lambda _skill_service: [_SKILL_MOUNT],
     )
 
 
