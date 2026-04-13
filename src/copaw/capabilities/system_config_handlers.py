@@ -18,11 +18,13 @@ class SystemConfigCapabilityFacade:
         save_config_fn: Callable[[Any], None],
         set_capability_enabled_fn: Callable[..., dict[str, object]],
         delete_capability_fn: Callable[[str], dict[str, object]],
+        invalidate_capability_cache_fn: Callable[[], None] | None = None,
     ) -> None:
         self._load_config = load_config_fn
         self._save_config = save_config_fn
         self._set_capability_enabled = set_capability_enabled_fn
         self._delete_capability = delete_capability_fn
+        self._invalidate_capability_cache = invalidate_capability_cache_fn
 
     def handle_set_capability_enabled(
         self,
@@ -78,6 +80,7 @@ class SystemConfigCapabilityFacade:
         config = self._load_config()
         config.channels = channels
         self._save_config(config)
+        self._invalidate_cache()
         return {
             "success": True,
             "summary": "Updated channel configuration.",
@@ -103,6 +106,7 @@ class SystemConfigCapabilityFacade:
         config = self._load_config()
         setattr(config.channels, channel_name, channel_config)
         self._save_config(config)
+        self._invalidate_cache()
         return {
             "success": True,
             "summary": f"Updated channel '{channel_name}'.",
@@ -126,6 +130,7 @@ class SystemConfigCapabilityFacade:
         config = self._load_config()
         config.agents.defaults.heartbeat = heartbeat
         self._save_config(config)
+        self._invalidate_cache()
         return {
             "success": True,
             "summary": "Updated heartbeat configuration.",
@@ -148,6 +153,7 @@ class SystemConfigCapabilityFacade:
         config = self._load_config()
         config.agents.llm_routing = llm_routing
         self._save_config(config)
+        self._invalidate_cache()
         return {
             "success": True,
             "summary": "Updated agent LLM routing configuration.",
@@ -170,6 +176,7 @@ class SystemConfigCapabilityFacade:
         config = self._load_config()
         config.agents.running = running_config
         self._save_config(config)
+        self._invalidate_cache()
         return {
             "success": True,
             "summary": "Updated agent running configuration.",
@@ -200,6 +207,7 @@ class SystemConfigCapabilityFacade:
             }
         config.mcp.clients[client_key] = client_config
         self._save_config(config)
+        self._invalidate_cache()
         return {
             "success": True,
             "summary": f"Created MCP client '{client_key}'.",
@@ -244,9 +252,14 @@ class SystemConfigCapabilityFacade:
             return {"success": False, "error": str(exc)}
         config.mcp.clients[client_key] = client_config
         self._save_config(config)
+        self._invalidate_cache()
         return {
             "success": True,
             "summary": f"Updated MCP client '{client_key}'.",
             "client_key": client_key,
             "client": client_config.model_dump(mode="json"),
         }
+
+    def _invalidate_cache(self) -> None:
+        if callable(self._invalidate_capability_cache):
+            self._invalidate_capability_cache()

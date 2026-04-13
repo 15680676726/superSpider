@@ -8,6 +8,7 @@ from .config import (
 )
 from .utils import (
     get_available_channels,
+    get_config_file_signature,
     get_config_path,
     get_heartbeat_config,
     get_heartbeat_query_path,
@@ -29,6 +30,7 @@ __all__ = [
     "HeartbeatConfig",
     "ConfigWatcher",
     "get_available_channels",
+    "get_config_file_signature",
     "get_config_path",
     "get_heartbeat_config",
     "get_heartbeat_query_path",

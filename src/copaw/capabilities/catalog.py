@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections import Counter
 import logging
+from threading import RLock
 from time import perf_counter
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -38,6 +39,7 @@ class CapabilityCatalogFacade:
         registry: CapabilityRegistry,
         load_config_fn: Callable[[], Any],
         save_config_fn: Callable[[Any], None],
+        config_signature_fn: Callable[[], object] | None = None,
         skill_service: CapabilitySkillService,
         override_repository: "SqliteCapabilityOverrideRepository | None" = None,
         agent_profile_service: "AgentProfileService | None" = None,
@@ -46,10 +48,20 @@ class CapabilityCatalogFacade:
         self._registry = registry
         self._load_config = load_config_fn
         self._save_config = save_config_fn
+        self._config_signature_fn = config_signature_fn
         self._skill_service = skill_service
         self._override_repository = override_repository
         self._agent_profile_service = agent_profile_service
         self._agent_profile_override_repository = agent_profile_override_repository
+        self._skill_mount_rebind_cache_lock = RLock()
+        self._skill_mount_rebind_cache_key: tuple[object, ...] | None = None
+        self._skill_mount_rebind_cache_mounts: tuple[CapabilityMount, ...] = ()
+        self._skill_map_cache_lock = RLock()
+        self._skill_map_cache_key: object | None = None
+        self._skill_map_cache_value: dict[str, Any] = {}
+        self._base_mounts_cache_lock = RLock()
+        self._base_mounts_cache_key: tuple[object, ...] | None = None
+        self._base_mounts_cache_mounts: tuple[CapabilityMount, ...] = ()
 
     def set_override_repository(
         self,
@@ -69,6 +81,17 @@ class CapabilityCatalogFacade:
     ) -> None:
         self._agent_profile_override_repository = override_repository
 
+    def invalidate_caches(self) -> None:
+        with self._base_mounts_cache_lock:
+            self._base_mounts_cache_key = None
+            self._base_mounts_cache_mounts = ()
+        with self._skill_mount_rebind_cache_lock:
+            self._skill_mount_rebind_cache_key = None
+            self._skill_mount_rebind_cache_mounts = ()
+        with self._skill_map_cache_lock:
+            self._skill_map_cache_key = None
+            self._skill_map_cache_value = {}
+
     def list_capabilities(
         self,
         *,
@@ -79,18 +102,13 @@ class CapabilityCatalogFacade:
         started_at = perf_counter()
 
         stage_started_at = perf_counter()
-        registry_mounts = self._registry.list_capabilities()
-        timings["registry.list_capabilities"] = perf_counter() - stage_started_at
-        if type(self._registry) is CapabilityRegistry:
-            stage_started_at = perf_counter()
-            registry_mounts = self._rebind_skill_mounts(registry_mounts)
-            timings["rebind_skill_mounts"] = perf_counter() - stage_started_at
+        base_mounts, base_cache_state, base_timings = self._cached_base_mounts()
+        timings["resolve_base_mounts"] = perf_counter() - stage_started_at
+        timings.update(base_timings)
         stage_started_at = perf_counter()
-        overridden_mounts = self._apply_overrides(registry_mounts)
+        overridden_mounts = self._apply_overrides(base_mounts)
         timings["apply_overrides"] = perf_counter() - stage_started_at
-        stage_started_at = perf_counter()
-        mounts = self._bind_package_metadata(overridden_mounts)
-        timings["bind_package_metadata"] = perf_counter() - stage_started_at
+        mounts = overridden_mounts
         if kind:
             stage_started_at = perf_counter()
             mounts = [mount for mount in mounts if mount.kind == kind]
@@ -101,10 +119,11 @@ class CapabilityCatalogFacade:
             timings["filter_enabled"] = perf_counter() - stage_started_at
         timings["total"] = perf_counter() - started_at
         logger.info(
-            "Capability catalog list_capabilities timings: kind=%s enabled_only=%s count=%d %s",
+            "Capability catalog list_capabilities timings: kind=%s enabled_only=%s count=%d base_cache=%s %s",
             kind,
             enabled_only,
             len(mounts),
+            base_cache_state,
             " ".join(f"{key}={value:.2f}s" for key, value in timings.items()),
         )
         return mounts
@@ -214,6 +233,7 @@ class CapabilityCatalogFacade:
                 self._skill_service.enable_skill(name)
             else:
                 self._skill_service.disable_skill(name)
+            self.invalidate_caches()
             return {"toggled": True, "id": capability_id, "enabled": enabled}
 
         if mount.source_kind == "mcp":
@@ -224,6 +244,7 @@ class CapabilityCatalogFacade:
                 return {"toggled": False, "error": f"MCP client '{key}' not found in config"}
             client.enabled = enabled
             self._save_config(config)
+            self.invalidate_caches()
             return {"toggled": True, "id": capability_id, "enabled": enabled}
 
         if mount.source_kind in {"project", "adapter", "runtime"}:
@@ -240,6 +261,7 @@ class CapabilityCatalogFacade:
             packages[config_key] = package
             config.external_capability_packages = packages
             self._save_config(config)
+            self.invalidate_caches()
             return {"toggled": True, "id": capability_id, "enabled": enabled}
 
         return {"toggled": False, "error": f"Toggle not supported for source_kind '{mount.source_kind}'"}
@@ -252,6 +274,7 @@ class CapabilityCatalogFacade:
         if mount.source_kind == "skill":
             name = _capability_name_from_id(capability_id, prefix="skill:")
             result = self._skill_service.delete_skill(name)
+            self.invalidate_caches()
             return {"deleted": bool(result), "id": capability_id}
 
         if mount.source_kind == "mcp":
@@ -261,6 +284,7 @@ class CapabilityCatalogFacade:
                 return {"deleted": False, "error": f"MCP client '{key}' not found in config"}
             del config.mcp.clients[key]
             self._save_config(config)
+            self.invalidate_caches()
             return {"deleted": True, "id": capability_id}
 
         if mount.source_kind in {"project", "adapter", "runtime"}:
@@ -275,13 +299,14 @@ class CapabilityCatalogFacade:
             del packages[config_key]
             config.external_capability_packages = packages
             self._save_config(config)
+            self.invalidate_caches()
             return {"deleted": True, "id": capability_id}
 
         return {"deleted": False, "error": f"Delete not supported for source_kind '{mount.source_kind}'"}
 
     def list_skill_specs(self, *, enabled_only: bool = False) -> list[dict[str, object]]:
         mounts = self.list_capabilities(kind="skill-bundle", enabled_only=enabled_only)
-        all_skills = {skill.name: skill for skill in self._skill_service.list_all_skills()}
+        all_skills = self._cached_skill_map()
         enabled_names = set(self._skill_service.list_available_skill_names())
         payload: list[dict[str, object]] = []
         for mount in mounts:
@@ -405,10 +430,7 @@ class CapabilityCatalogFacade:
         )
         skill_map = {}
         if needs_skill_binding:
-            skill_map = {
-                skill.name: skill
-                for skill in self._skill_service.list_all_skills()
-            }
+            skill_map = self._cached_skill_map()
         mcp_clients = {}
         if needs_mcp_binding:
             config = self._load_config()
@@ -473,6 +495,132 @@ class CapabilityCatalogFacade:
                 ),
             )
         return bound_mounts
+
+    def _cached_rebind_skill_mounts(
+        self,
+        mounts: list[CapabilityMount],
+    ) -> list[CapabilityMount]:
+        cache_key = (
+            self._skill_inventory_signature(),
+            self._mounts_signature(mounts),
+        )
+        with self._skill_mount_rebind_cache_lock:
+            if self._skill_mount_rebind_cache_key == cache_key:
+                return self._clone_mounts(self._skill_mount_rebind_cache_mounts)
+        rebound = self._rebind_skill_mounts(mounts)
+        with self._skill_mount_rebind_cache_lock:
+            self._skill_mount_rebind_cache_key = cache_key
+            self._skill_mount_rebind_cache_mounts = tuple(
+                mount.model_copy(deep=True) for mount in rebound
+            )
+            return self._clone_mounts(self._skill_mount_rebind_cache_mounts)
+
+    def _cached_base_mounts(
+        self,
+    ) -> tuple[list[CapabilityMount], str, dict[str, float]]:
+        cache_key = self._base_mounts_cache_key_for_inputs()
+        if cache_key is not None:
+            with self._base_mounts_cache_lock:
+                if self._base_mounts_cache_key == cache_key:
+                    return self._clone_mounts(self._base_mounts_cache_mounts), "hit", {}
+
+        timings: dict[str, float] = {}
+        stage_started_at = perf_counter()
+        registry_mounts = self._registry.list_capabilities()
+        timings["registry.list_capabilities"] = perf_counter() - stage_started_at
+        if type(self._registry) is CapabilityRegistry:
+            stage_started_at = perf_counter()
+            registry_mounts = self._cached_rebind_skill_mounts(registry_mounts)
+            timings["rebind_skill_mounts"] = perf_counter() - stage_started_at
+        stage_started_at = perf_counter()
+        mounts = self._bind_package_metadata(registry_mounts)
+        timings["bind_package_metadata"] = perf_counter() - stage_started_at
+
+        if cache_key is None:
+            return mounts, "off", timings
+
+        with self._base_mounts_cache_lock:
+            self._base_mounts_cache_key = cache_key
+            self._base_mounts_cache_mounts = tuple(
+                mount.model_copy(deep=True) for mount in mounts
+            )
+            return self._clone_mounts(self._base_mounts_cache_mounts), "miss", timings
+
+    def _base_mounts_cache_key_for_inputs(self) -> tuple[object, ...] | None:
+        if type(self._registry) is not CapabilityRegistry:
+            return None
+        try:
+            return (
+                self._skill_inventory_signature(),
+                self._config_signature(),
+            )
+        except Exception:
+            logger.debug(
+                "capability catalog failed to compute base mount cache key",
+                exc_info=True,
+            )
+            return None
+
+    def _cached_skill_map(self) -> dict[str, Any]:
+        cache_key = self._skill_inventory_signature()
+        with self._skill_map_cache_lock:
+            if self._skill_map_cache_key == cache_key:
+                return dict(self._skill_map_cache_value)
+        skill_map = {
+            skill.name: skill
+            for skill in self._skill_service.list_all_skills()
+        }
+        with self._skill_map_cache_lock:
+            self._skill_map_cache_key = cache_key
+            self._skill_map_cache_value = dict(skill_map)
+            return dict(self._skill_map_cache_value)
+
+    def _skill_inventory_signature(self) -> object:
+        reader = getattr(self._skill_service, "list_inventory_signature", None)
+        if callable(reader):
+            try:
+                return reader()
+            except Exception:
+                logger.debug(
+                    "capability catalog failed to read skill inventory signature",
+                    exc_info=True,
+                )
+        return (
+            tuple(sorted(getattr(self._skill_service, "list_available_skill_names", lambda: [])())),
+            tuple(
+                sorted(
+                    (
+                        getattr(skill, "name", None),
+                        getattr(skill, "path", None),
+                    )
+                    for skill in getattr(self._skill_service, "list_all_skills", lambda: [])()
+                )
+            ),
+        )
+
+    def _config_signature(self) -> tuple[object, object]:
+        if self._config_signature_fn is not None:
+            signature = self._config_signature_fn()
+            if isinstance(signature, tuple) and len(signature) == 2:
+                return signature
+            return (signature, None)
+        config = self._load_config()
+        return (
+            _stable_signature_value(
+                getattr(getattr(config, "mcp", None), "clients", {}),
+            ),
+            _stable_signature_value(
+                getattr(config, "external_capability_packages", {}),
+            ),
+        )
+
+    @staticmethod
+    def _mounts_signature(mounts: list[CapabilityMount]) -> tuple[str, ...]:
+        return tuple(mount.model_dump_json() for mount in mounts)
+
+    @staticmethod
+    def _clone_mounts(mounts: tuple[CapabilityMount, ...]) -> list[CapabilityMount]:
+        return [mount.model_copy(deep=True) for mount in mounts]
 
     def _rebind_skill_mounts(
         self,
@@ -768,6 +916,26 @@ def _mask_mapping(value: dict[str, str] | None) -> dict[str, str]:
     if not value:
         return {}
     return {key: _mask_secret(secret) for key, secret in value.items()}
+
+
+def _stable_signature_value(value: object) -> object:
+    if hasattr(value, "model_dump"):
+        try:
+            value = value.model_dump(mode="json")
+        except TypeError:
+            value = value.model_dump()
+    if isinstance(value, dict):
+        return tuple(
+            (str(key), _stable_signature_value(item))
+            for key, item in sorted(value.items(), key=lambda entry: str(entry[0]))
+        )
+    if isinstance(value, (list, tuple, set)):
+        return tuple(_stable_signature_value(item) for item in value)
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if hasattr(value, "__dict__"):
+        return _stable_signature_value(vars(value))
+    return repr(value)
 
 
 def _normalize_package_text(value: object | None) -> str | None:

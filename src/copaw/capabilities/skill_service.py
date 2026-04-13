@@ -243,6 +243,9 @@ class CapabilitySkillService:
     def list_all_skills(self) -> list[Any]:
         return SkillService.list_all_skills()
 
+    def list_inventory_signature(self) -> object:
+        return SkillService.list_inventory_signature()
+
     def list_available_skill_names(self) -> list[str]:
         return list_available_skills()
 

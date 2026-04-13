@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any, Callable
 from typing import TYPE_CHECKING
 
-from ..config import load_config, save_config
+from ..config import get_config_file_signature, load_config, save_config
 from ..evidence import EvidenceLedger, EvidenceRecord
 from .capability_discovery import CapabilityDiscoveryService
 from .catalog import CapabilityCatalogFacade, summarize_capability_mounts
@@ -61,6 +61,7 @@ class CapabilityService:
         cron_manager: object | None = None,
         load_config_fn: Callable[[], Any] | None = None,
         save_config_fn: Callable[[Any], None] | None = None,
+        config_signature_fn: Callable[[], object] | None = None,
     ) -> None:
         self._registry = registry or CapabilityRegistry()
         self._evidence_ledger = evidence_ledger
@@ -87,11 +88,18 @@ class CapabilityService:
         self._cron_manager = cron_manager
         self._load_config_fn = load_config_fn or (lambda: load_config())
         self._save_config_fn = save_config_fn or (lambda config: save_config(config))
+        self._config_signature_fn = config_signature_fn
+        if self._config_signature_fn is None and load_config_fn is None:
+            self._config_signature_fn = lambda: (
+                get_config_file_signature(),
+                id(load_config),
+            )
 
         self._catalog = CapabilityCatalogFacade(
             registry=self._registry,
             load_config_fn=self._load_config_fn,
             save_config_fn=self._save_config_fn,
+            config_signature_fn=self._config_signature_fn,
             skill_service=self._skill_service,
             override_repository=self._override_repository,
             agent_profile_service=self._agent_profile_service,
@@ -106,6 +114,7 @@ class CapabilityService:
             get_capability_fn=self.get_capability,
             set_capability_enabled_fn=self.set_capability_enabled,
             delete_capability_fn=self.delete_capability,
+            invalidate_capability_cache_fn=self.invalidate_catalog_cache,
             resolve_agent_profile_fn=self._resolve_agent_profile,
             load_config_fn=self._load_config_fn,
             save_config_fn=self._save_config_fn,
@@ -190,6 +199,9 @@ class CapabilityService:
     def summarize_public(self) -> CapabilitySummary:
         _mounts, summary = self.list_public_capability_inventory()
         return summary
+
+    def invalidate_catalog_cache(self) -> None:
+        self._catalog.invalidate_caches()
 
     def get_discovery_service(self) -> CapabilityDiscoveryService:
         return self._discovery_service

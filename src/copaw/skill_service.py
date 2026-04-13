@@ -4,6 +4,7 @@ import filecmp
 import logging
 import shutil
 from pathlib import Path
+from threading import RLock
 from time import perf_counter
 from typing import Any
 from pydantic import BaseModel
@@ -52,6 +53,11 @@ class SkillInfo(BaseModel):
     scripts: dict[str, Any] = {}
 
 
+_SKILL_LIST_CACHE_LOCK = RLock()
+_SKILL_LIST_CACHE_KEY: tuple[object, ...] | None = None
+_SKILL_LIST_CACHE_SKILLS: tuple[SkillInfo, ...] = ()
+
+
 def get_builtin_skills_dir() -> Path:
     """Get the path to built-in skills directory in the code."""
     return Path(__file__).parent / "agents" / "skills"
@@ -74,6 +80,48 @@ def get_working_skills_dir() -> Path:
     Deprecated: Use get_active_skills_dir() instead.
     """
     return get_active_skills_dir()
+
+
+def _clone_skill_infos(skills: tuple[SkillInfo, ...]) -> list[SkillInfo]:
+    return [skill.model_copy(deep=True) for skill in skills]
+
+
+def _invalidate_skill_list_cache() -> None:
+    global _SKILL_LIST_CACHE_KEY, _SKILL_LIST_CACHE_SKILLS
+    with _SKILL_LIST_CACHE_LOCK:
+        _SKILL_LIST_CACHE_KEY = None
+        _SKILL_LIST_CACHE_SKILLS = ()
+
+
+def _path_signature(path: Path) -> tuple[int, int] | None:
+    try:
+        stat_result = path.stat()
+    except OSError:
+        return None
+    return (stat_result.st_mtime_ns, stat_result.st_size)
+
+
+def _skill_inventory_signature(directory: Path) -> tuple[object, ...]:
+    skills = _collect_skills_from_dir(directory)
+    payload: list[object] = [str(directory)]
+    for skill_name, skill_dir in sorted(skills.items()):
+        payload.append(
+            (
+                skill_name,
+                _path_signature(skill_dir / "SKILL.md"),
+                _path_signature(skill_dir / "references"),
+                _path_signature(skill_dir / "scripts"),
+            ),
+        )
+    return tuple(payload)
+
+
+def _list_all_skills_cache_key() -> tuple[object, ...]:
+    return (
+        _skill_inventory_signature(get_builtin_skills_dir()),
+        _skill_inventory_signature(get_customized_skills_dir()),
+        _skill_inventory_signature(get_active_skills_dir()),
+    )
 
 
 def _normalize_text(value: object | None) -> str:
@@ -632,8 +680,22 @@ class SkillService:
         Returns:
             List of SkillInfo with name, content, source, and path.
         """
+        global _SKILL_LIST_CACHE_KEY, _SKILL_LIST_CACHE_SKILLS
         timings: dict[str, float] = {}
         started_at = perf_counter()
+        stage_started_at = perf_counter()
+        cache_key = _list_all_skills_cache_key()
+        timings["compute_cache_key"] = perf_counter() - stage_started_at
+        with _SKILL_LIST_CACHE_LOCK:
+            if _SKILL_LIST_CACHE_KEY == cache_key:
+                cached_skills = _clone_skill_infos(_SKILL_LIST_CACHE_SKILLS)
+                timings["total"] = perf_counter() - started_at
+                logger.info(
+                    "SkillService.list_all_skills timings: count=%d cache=hit %s",
+                    len(cached_skills),
+                    " ".join(f"{key}={value:.2f}s" for key, value in timings.items()),
+                )
+                return cached_skills
         try:
             stage_started_at = perf_counter()
             synced, _ = sync_skills_from_active_to_customized()
@@ -665,14 +727,24 @@ class SkillService:
             _read_skills_from_dir(get_customized_skills_dir(), "customized"),
         )
         timings["read_customized"] = perf_counter() - stage_started_at
+        stage_started_at = perf_counter()
+        final_cache_key = _list_all_skills_cache_key()
+        timings["refresh_cache_key"] = perf_counter() - stage_started_at
+        with _SKILL_LIST_CACHE_LOCK:
+            _SKILL_LIST_CACHE_KEY = final_cache_key
+            _SKILL_LIST_CACHE_SKILLS = tuple(skills)
         timings["total"] = perf_counter() - started_at
         logger.info(
-            "SkillService.list_all_skills timings: count=%d %s",
+            "SkillService.list_all_skills timings: count=%d cache=miss %s",
             len(skills),
             " ".join(f"{key}={value:.2f}s" for key, value in timings.items()),
         )
 
-        return skills
+        return _clone_skill_infos(_SKILL_LIST_CACHE_SKILLS)
+
+    @staticmethod
+    def list_inventory_signature() -> tuple[object, ...]:
+        return _list_all_skills_cache_key()
 
     @staticmethod
     def list_available_skills() -> list[SkillInfo]:

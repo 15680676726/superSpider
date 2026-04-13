@@ -64,6 +64,7 @@ class SystemCapabilityHandler:
         get_capability_fn: Callable[[str], object | None],
         set_capability_enabled_fn: Callable[..., dict[str, object]],
         delete_capability_fn: Callable[[str], dict[str, object]],
+        invalidate_capability_cache_fn: Callable[[], None] | None,
         resolve_agent_profile_fn: Callable[[str | None], object | None],
         load_config_fn: Callable[[], Any],
         save_config_fn: Callable[[Any], None],
@@ -106,6 +107,7 @@ class SystemCapabilityHandler:
             save_config_fn=save_config_fn,
             set_capability_enabled_fn=set_capability_enabled_fn,
             delete_capability_fn=delete_capability_fn,
+            invalidate_capability_cache_fn=invalidate_capability_cache_fn,
         )
         self._skills = SystemSkillCapabilityFacade(
             skill_service=skill_service,

@@ -1,11 +1,24 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+from threading import Lock
+
 from ..skill_service import default_skill_service
 from ..models import CapabilityMount
 
+_SKILL_CAPABILITY_CACHE_LOCK = Lock()
+_SKILL_CAPABILITY_CACHE: dict[int, tuple[object, tuple[CapabilityMount, ...]]] = {}
+
 
 def build_skill_capabilities(skill_service: object) -> list[CapabilityMount]:
+    cache_key = _skill_inventory_signature(skill_service)
+    service_key = id(skill_service)
+    if cache_key is not None:
+        with _SKILL_CAPABILITY_CACHE_LOCK:
+            cached = _SKILL_CAPABILITY_CACHE.get(service_key)
+            if cached is not None and cached[0] == cache_key:
+                return _clone_mounts(cached[1])
+
     enabled = set(skill_service.list_available_skill_names())
     mounts: list[CapabilityMount] = []
     for skill in skill_service.list_all_skills():
@@ -69,6 +82,11 @@ def build_skill_capabilities(skill_service: object) -> list[CapabilityMount]:
             ),
         )
     mounts.sort(key=lambda item: item.id)
+    if cache_key is not None:
+        cached_mounts = tuple(mount.model_copy(deep=True) for mount in mounts)
+        with _SKILL_CAPABILITY_CACHE_LOCK:
+            _SKILL_CAPABILITY_CACHE[service_key] = (cache_key, cached_mounts)
+        return _clone_mounts(cached_mounts)
     return mounts
 
 
@@ -82,6 +100,17 @@ def _skill_summary(content: str) -> str:
         if stripped:
             return stripped
     return "Skill bundle"
+
+
+def _skill_inventory_signature(skill_service: object) -> object | None:
+    reader = getattr(skill_service, "list_inventory_signature", None)
+    if not callable(reader):
+        return None
+    return reader()
+
+
+def _clone_mounts(mounts: tuple[CapabilityMount, ...]) -> list[CapabilityMount]:
+    return [mount.model_copy(deep=True) for mount in mounts]
 
 
 __all__ = ["build_skill_capabilities", "list_skill_capabilities"]

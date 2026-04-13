@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from copaw.capabilities.catalog import CapabilityCatalogFacade
 from copaw.capabilities.models import CapabilityMount
 from copaw.capabilities.registry import CapabilityRegistry
+from copaw.capabilities.sources.skills import build_skill_capabilities
 
 
 class _FakeRegistry(CapabilityRegistry):
@@ -223,6 +225,408 @@ def test_capability_catalog_access_prefers_merged_profile_capabilities_over_raw_
         "system:dispatch_query",
         "tool:read_file",
     }
+
+
+def test_capability_catalog_reuses_skill_mount_rebind_when_skill_inventory_is_stable() -> None:
+    skill_service = SimpleNamespace(
+        list_all_skills=lambda: [],
+        list_available_skill_names=lambda: [],
+        list_available_skills=lambda: [],
+        read_skill_package_binding=lambda _skill: {
+            "package_ref": None,
+            "package_kind": None,
+            "package_version": None,
+        },
+        enable_skill=lambda _name: None,
+        disable_skill=lambda _name: None,
+        delete_skill=lambda _name: True,
+        list_inventory_signature=lambda: (
+            ("builtin", ("skill-a", 1)),
+            ("customized", ()),
+            ("active", ()),
+        ),
+    )
+    registry = CapabilityRegistry()
+    facade = CapabilityCatalogFacade(
+        registry=registry,
+        load_config_fn=lambda: SimpleNamespace(mcp=SimpleNamespace(clients={})),
+        save_config_fn=lambda _config: None,
+        skill_service=skill_service,
+    )
+    real_rebind = facade._rebind_skill_mounts
+
+    with (
+        patch.object(
+            registry,
+            "list_capabilities",
+            return_value=[
+                CapabilityMount(
+                    id="tool:read_file",
+                    name="read_file",
+                    summary="Read file",
+                    kind="local-tool",
+                    source_kind="tool",
+                    risk_level="auto",
+                    enabled=True,
+                ),
+            ],
+        ),
+        patch.object(facade, "_rebind_skill_mounts", wraps=real_rebind) as wrapped_rebind,
+    ):
+        first = facade.list_capabilities()
+        second = facade.list_capabilities()
+
+    assert [mount.id for mount in first] == [mount.id for mount in second]
+    assert wrapped_rebind.call_count == 1
+
+
+def test_capability_catalog_rebind_cache_invalidates_when_skill_inventory_changes() -> None:
+    inventory_signature = {
+        "value": (("builtin", ("skill-a", 1)), ("customized", ()), ("active", ())),
+    }
+    skill_service = SimpleNamespace(
+        list_all_skills=lambda: [],
+        list_available_skill_names=lambda: [],
+        list_available_skills=lambda: [],
+        read_skill_package_binding=lambda _skill: {
+            "package_ref": None,
+            "package_kind": None,
+            "package_version": None,
+        },
+        enable_skill=lambda _name: None,
+        disable_skill=lambda _name: None,
+        delete_skill=lambda _name: True,
+        list_inventory_signature=lambda: inventory_signature["value"],
+    )
+    registry = CapabilityRegistry()
+    facade = CapabilityCatalogFacade(
+        registry=registry,
+        load_config_fn=lambda: SimpleNamespace(mcp=SimpleNamespace(clients={})),
+        save_config_fn=lambda _config: None,
+        skill_service=skill_service,
+    )
+    real_rebind = facade._rebind_skill_mounts
+
+    with (
+        patch.object(
+            registry,
+            "list_capabilities",
+            return_value=[
+                CapabilityMount(
+                    id="tool:read_file",
+                    name="read_file",
+                    summary="Read file",
+                    kind="local-tool",
+                    source_kind="tool",
+                    risk_level="auto",
+                    enabled=True,
+                ),
+            ],
+        ),
+        patch.object(facade, "_rebind_skill_mounts", wraps=real_rebind) as wrapped_rebind,
+    ):
+        facade.list_capabilities()
+        inventory_signature["value"] = (
+            ("builtin", ("skill-a", 2)),
+            ("customized", ()),
+            ("active", ()),
+        )
+        facade.list_capabilities()
+
+    assert wrapped_rebind.call_count == 2
+
+
+def test_capability_catalog_reuses_skill_map_for_package_binding_when_inventory_is_stable() -> None:
+    skill = SimpleNamespace(
+        name="research",
+        path="/tmp/research",
+        source="customized",
+        content=(
+            "---\n"
+            "name: research\n"
+            "description: Research\n"
+            "package_ref: /tmp/research\n"
+            "package_kind: filesystem\n"
+            "---\n"
+            "# Research\n"
+        ),
+        references={},
+        scripts={},
+    )
+    skill_service = SimpleNamespace(
+        list_all_skills=lambda: [skill],
+        list_available_skill_names=lambda: ["research"],
+        list_available_skills=lambda: [skill],
+        read_skill_package_binding=lambda _skill: {
+            "package_ref": "/tmp/research",
+            "package_kind": "filesystem",
+            "package_version": None,
+        },
+        enable_skill=lambda _name: None,
+        disable_skill=lambda _name: None,
+        delete_skill=lambda _name: True,
+        list_inventory_signature=lambda: (
+            ("builtin", ()),
+            ("customized", ("research", 1)),
+            ("active", ("research", 1)),
+        ),
+    )
+    registry = CapabilityRegistry()
+    facade = CapabilityCatalogFacade(
+        registry=registry,
+        load_config_fn=lambda: SimpleNamespace(mcp=SimpleNamespace(clients={})),
+        save_config_fn=lambda _config: None,
+        skill_service=skill_service,
+    )
+
+    with (
+        patch.object(
+            registry,
+            "list_capabilities",
+            return_value=[
+                CapabilityMount(
+                    id="skill:research",
+                    name="research",
+                    summary="Research",
+                    kind="skill-bundle",
+                    source_kind="skill",
+                    risk_level="auto",
+                    enabled=True,
+                ),
+            ],
+        ),
+        patch.object(
+            skill_service,
+            "list_all_skills",
+            wraps=skill_service.list_all_skills,
+        ) as wrapped_list_all,
+    ):
+        first = facade.list_capabilities()
+        second = facade.list_capabilities()
+
+    assert [mount.id for mount in first] == [mount.id for mount in second]
+    assert wrapped_list_all.call_count == 2
+
+
+def test_capability_catalog_reuses_base_mount_snapshot_when_inputs_are_stable() -> None:
+    skill_service = SimpleNamespace(
+        list_all_skills=lambda: [],
+        list_available_skill_names=lambda: [],
+        list_available_skills=lambda: [],
+        read_skill_package_binding=lambda _skill: {
+            "package_ref": None,
+            "package_kind": None,
+            "package_version": None,
+        },
+        enable_skill=lambda _name: None,
+        disable_skill=lambda _name: None,
+        delete_skill=lambda _name: True,
+        list_inventory_signature=lambda: (
+            ("builtin", ("skill-a", 1)),
+            ("customized", ()),
+            ("active", ()),
+        ),
+    )
+    registry = CapabilityRegistry()
+    facade = CapabilityCatalogFacade(
+        registry=registry,
+        load_config_fn=lambda: SimpleNamespace(
+            mcp=SimpleNamespace(clients={}),
+            external_capability_packages={},
+        ),
+        save_config_fn=lambda _config: None,
+        skill_service=skill_service,
+    )
+
+    with patch.object(
+        registry,
+        "list_capabilities",
+        return_value=[
+            CapabilityMount(
+                id="tool:read_file",
+                name="read_file",
+                summary="Read file",
+                kind="local-tool",
+                source_kind="tool",
+                risk_level="auto",
+                enabled=True,
+            ),
+        ],
+    ) as wrapped_registry_list:
+        first = facade.list_capabilities()
+        second = facade.list_capabilities()
+
+    assert [mount.id for mount in first] == [mount.id for mount in second]
+    assert wrapped_registry_list.call_count == 1
+
+
+def test_capability_catalog_base_mount_cache_invalidates_when_config_changes() -> None:
+    config_state = {
+        "value": SimpleNamespace(
+            mcp=SimpleNamespace(clients={}),
+            external_capability_packages={},
+        ),
+    }
+    skill_service = SimpleNamespace(
+        list_all_skills=lambda: [],
+        list_available_skill_names=lambda: [],
+        list_available_skills=lambda: [],
+        read_skill_package_binding=lambda _skill: {
+            "package_ref": None,
+            "package_kind": None,
+            "package_version": None,
+        },
+        enable_skill=lambda _name: None,
+        disable_skill=lambda _name: None,
+        delete_skill=lambda _name: True,
+        list_inventory_signature=lambda: (
+            ("builtin", ("skill-a", 1)),
+            ("customized", ()),
+            ("active", ()),
+        ),
+    )
+    registry = CapabilityRegistry()
+    facade = CapabilityCatalogFacade(
+        registry=registry,
+        load_config_fn=lambda: config_state["value"],
+        save_config_fn=lambda _config: None,
+        skill_service=skill_service,
+    )
+
+    with patch.object(
+        registry,
+        "list_capabilities",
+        return_value=[
+            CapabilityMount(
+                id="tool:read_file",
+                name="read_file",
+                summary="Read file",
+                kind="local-tool",
+                source_kind="tool",
+                risk_level="auto",
+                enabled=True,
+            ),
+        ],
+    ) as wrapped_registry_list:
+        facade.list_capabilities()
+        config_state["value"] = SimpleNamespace(
+            mcp=SimpleNamespace(
+                clients={
+                    "desktop": SimpleNamespace(
+                        name="desktop",
+                        description="Desktop",
+                        enabled=True,
+                        transport="stdio",
+                        command="python",
+                        url=None,
+                        cwd=".",
+                        registry=None,
+                    ),
+                },
+            ),
+            external_capability_packages={},
+        )
+        facade.list_capabilities()
+
+    assert wrapped_registry_list.call_count == 2
+
+
+def test_capability_catalog_uses_config_signature_reader_without_loading_config_on_cache_hit() -> None:
+    load_config_calls = {"count": 0}
+    skill_service = SimpleNamespace(
+        list_all_skills=lambda: [],
+        list_available_skill_names=lambda: [],
+        list_available_skills=lambda: [],
+        read_skill_package_binding=lambda _skill: {
+            "package_ref": None,
+            "package_kind": None,
+            "package_version": None,
+        },
+        enable_skill=lambda _name: None,
+        disable_skill=lambda _name: None,
+        delete_skill=lambda _name: True,
+        list_inventory_signature=lambda: (
+            ("builtin", ("skill-a", 1)),
+            ("customized", ()),
+            ("active", ()),
+        ),
+    )
+    registry = CapabilityRegistry()
+
+    def _load_config():
+        load_config_calls["count"] += 1
+        return SimpleNamespace(
+            mcp=SimpleNamespace(clients={}),
+            external_capability_packages={},
+        )
+
+    facade = CapabilityCatalogFacade(
+        registry=registry,
+        load_config_fn=_load_config,
+        save_config_fn=lambda _config: None,
+        skill_service=skill_service,
+        config_signature_fn=lambda: ("config", 1),
+    )
+
+    with patch.object(
+        registry,
+        "list_capabilities",
+        return_value=[
+            CapabilityMount(
+                id="tool:read_file",
+                name="read_file",
+                summary="Read file",
+                kind="local-tool",
+                source_kind="tool",
+                risk_level="auto",
+                enabled=True,
+            ),
+        ],
+    ):
+        first = facade.list_capabilities()
+        second = facade.list_capabilities()
+
+    assert [mount.id for mount in first] == [mount.id for mount in second]
+    assert load_config_calls["count"] == 0
+
+
+def test_build_skill_capabilities_reuses_cached_snapshot_when_inventory_is_stable() -> None:
+    skill = SimpleNamespace(
+        name="research",
+        source="customized",
+        path="/tmp/research",
+        content="# Research",
+        references={},
+        scripts={},
+    )
+    skill_service = SimpleNamespace(
+        list_all_skills=lambda: [skill],
+        list_available_skill_names=lambda: ["research"],
+        list_inventory_signature=lambda: (
+            ("builtin", ()),
+            ("customized", ("research", 1)),
+            ("active", ("research", 1)),
+        ),
+    )
+
+    with (
+        patch.object(
+            skill_service,
+            "list_all_skills",
+            wraps=skill_service.list_all_skills,
+        ) as wrapped_list_all,
+        patch.object(
+            skill_service,
+            "list_available_skill_names",
+            wraps=skill_service.list_available_skill_names,
+        ) as wrapped_list_available,
+    ):
+        first = build_skill_capabilities(skill_service)
+        second = build_skill_capabilities(skill_service)
+
+    assert [mount.id for mount in first] == [mount.id for mount in second]
+    assert wrapped_list_all.call_count == 1
+    assert wrapped_list_available.call_count == 1
 
 
 def test_capability_catalog_public_inventory_uses_one_snapshot() -> None:

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from copaw.capabilities.skill_evolution_service import SkillEvolutionService
 from copaw.capabilities.skill_service import CapabilitySkillService
+from copaw import skill_service as skill_service_module
 from copaw.skill_service import SkillService
 
 
@@ -246,3 +248,68 @@ target_seat_ref: seat-primary
     assert summary["activation_scope_key"] == "seat:researcher:seat-primary"
     assert summary["path_scoped_activation"] is True
     assert summary["package_bound"] is True
+
+
+def test_skill_service_list_all_skills_reuses_inventory_cache_when_unchanged(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    builtin_dir, customized_dir, active_dir = _patch_skill_dirs(monkeypatch, tmp_path)
+    _ = active_dir
+    (builtin_dir / "builtin_skill").mkdir()
+    (builtin_dir / "builtin_skill" / "SKILL.md").write_text(
+        "---\nname: builtin_skill\ndescription: Builtin skill\n---\n# Builtin\n",
+        encoding="utf-8",
+    )
+    (customized_dir / "custom_skill").mkdir()
+    (customized_dir / "custom_skill" / "SKILL.md").write_text(
+        "---\nname: custom_skill\ndescription: Custom skill\n---\n# Custom\n",
+        encoding="utf-8",
+    )
+
+    with (
+        patch.object(
+            skill_service_module,
+            "sync_skills_from_active_to_customized",
+            return_value=(0, 0),
+        ),
+        patch.object(
+            skill_service_module,
+            "_read_skills_from_dir",
+            wraps=skill_service_module._read_skills_from_dir,
+        ) as wrapped_read_dir,
+    ):
+        first = SkillService.list_all_skills()
+        second = SkillService.list_all_skills()
+
+    assert [skill.name for skill in first] == [skill.name for skill in second]
+    assert wrapped_read_dir.call_count == 2
+
+
+def test_skill_service_list_all_skills_invalidates_cache_when_inventory_changes(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    builtin_dir, customized_dir, active_dir = _patch_skill_dirs(monkeypatch, tmp_path)
+    _ = active_dir
+    (builtin_dir / "builtin_skill").mkdir()
+    (builtin_dir / "builtin_skill" / "SKILL.md").write_text(
+        "---\nname: builtin_skill\ndescription: Builtin skill\n---\n# Builtin\n",
+        encoding="utf-8",
+    )
+
+    with patch.object(
+        skill_service_module,
+        "sync_skills_from_active_to_customized",
+        return_value=(0, 0),
+    ):
+        first = SkillService.list_all_skills()
+        (customized_dir / "custom_skill").mkdir()
+        (customized_dir / "custom_skill" / "SKILL.md").write_text(
+            "---\nname: custom_skill\ndescription: Custom skill\n---\n# Custom\n",
+            encoding="utf-8",
+        )
+        second = SkillService.list_all_skills()
+
+    assert [skill.name for skill in first] == ["builtin_skill"]
+    assert [skill.name for skill in second] == ["builtin_skill", "custom_skill"]

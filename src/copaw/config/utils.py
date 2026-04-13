@@ -353,6 +353,17 @@ def load_config(config_path: Optional[Path] = None) -> Config:
     return Config.model_validate(data)
 
 
+def get_config_file_signature(config_path: Optional[Path] = None) -> tuple[object, ...]:
+    """Return a cheap filesystem signature for the config file."""
+    if config_path is None:
+        config_path = get_config_path()
+    try:
+        stat_result = config_path.stat()
+    except OSError:
+        return (str(config_path), None)
+    return (str(config_path), stat_result.st_mtime_ns, stat_result.st_size)
+
+
 def save_config(config: Config, config_path: Optional[Path] = None) -> None:
     """Save the config to the file."""
     if config_path is None:
