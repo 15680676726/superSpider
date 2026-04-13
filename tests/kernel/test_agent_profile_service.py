@@ -41,6 +41,18 @@ def test_agent_profile_service_supports_business_and_system_views():
     assert "copaw-agent-runner" in all_ids
 
 
+def test_agent_profile_service_does_not_mark_default_system_agents_as_goal_focus() -> None:
+    service = AgentProfileService()
+
+    for agent_id in ("copaw-agent-runner", "copaw-scheduler", "copaw-governance"):
+        profile = service.get_agent(agent_id)
+
+        assert profile is not None
+        assert profile.current_focus_kind is None
+        assert profile.current_focus_id is None
+        assert profile.current_focus
+
+
 def test_agent_profile_service_filters_agents_by_industry_instance(tmp_path) -> None:
     store = SQLiteStateStore(tmp_path / "state.db")
     override_repo = SqliteAgentProfileOverrideRepository(store)

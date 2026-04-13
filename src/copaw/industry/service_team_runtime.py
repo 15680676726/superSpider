@@ -742,10 +742,6 @@ class _IndustryTeamRuntimeMixin:
             current_focus_kind = "assignment"
             current_focus_id = assignment_id
             current_focus = assignment_title or assignment_summary or assignment_id
-        elif goal_id is not None:
-            current_focus_kind = "goal"
-            current_focus_id = goal_id
-            current_focus = goal_title or goal_id
         elif current_focus_kind == "assignment" and (
             assignment_id is None
             or assignment_terminal

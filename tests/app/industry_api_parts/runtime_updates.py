@@ -273,7 +273,7 @@ def test_industry_bootstrap_goal_compile_regression_keeps_specialist_runtime_con
     assert "- Evidence expectations:" in prompt_text
 
 
-def test_industry_bootstrap_specialist_runtime_metadata_only_persists_current_focus(
+def test_industry_bootstrap_specialist_runtime_metadata_does_not_persist_idle_goal_focus(
     tmp_path,
 ) -> None:
     app = _build_industry_app(tmp_path)
@@ -315,9 +315,9 @@ def test_industry_bootstrap_specialist_runtime_metadata_only_persists_current_fo
     metadata = runtime.metadata
     assert "goal_id" not in metadata
     assert "goal_title" not in metadata
-    assert metadata["current_focus_kind"] == "goal"
-    assert metadata["current_focus_id"] == specialist_goal["goal_id"]
-    assert metadata["current_focus"] == specialist_goal["title"]
+    assert metadata.get("current_focus_kind") is None
+    assert metadata.get("current_focus_id") is None
+    assert metadata.get("current_focus") is None
 
 
 def test_industry_runtime_sync_preserves_assignment_focus_without_goal(tmp_path) -> None:

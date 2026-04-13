@@ -82,7 +82,6 @@ DEFAULT_AGENTS: list[AgentProfile] = [
         role_summary="系统唯一执行大脑，负责承接团队目标、统一调度执行与分派协作。",
         agent_class="business",
         status="running",
-        current_focus_kind="goal",
         current_focus="承接业务团队目标并统一调度执行，不再生成团队级主管副本。",
         environment_summary="workspace + browser + session",
     ),
@@ -92,7 +91,6 @@ DEFAULT_AGENTS: list[AgentProfile] = [
         role_name="定时调度",
         role_summary="管理定时任务的生命周期和触发",
         status="idle",
-        current_focus_kind="goal",
         current_focus="让 schedule 只保留 ingress/adapter 角色，停止依赖 runner 执行 turn",
     ),
     AgentProfile(
@@ -101,7 +99,6 @@ DEFAULT_AGENTS: list[AgentProfile] = [
         role_name="风险治理",
         role_summary="审查高风险操作，管理 confirm 审批流",
         status="idle",
-        current_focus_kind="goal",
         current_focus="补齐 Decision 前端动作，并继续收口 patch/expiry 治理策略",
     ),
 ]

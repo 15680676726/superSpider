@@ -71,9 +71,9 @@
 
 - [ ] Add failing tests that runtime focus is not written as `goal` when assignment/task truth exists.
 - [ ] Add failing tests that read models do not fabricate `current_focus_*` from selected assignment/backlog when execution truth is empty.
-- [ ] Remove `goal_id/goal_title -> current_focus_kind="goal"` runtime sync behavior.
+- [x] Remove `goal_id/goal_title -> current_focus_kind="goal"` runtime sync behavior.
 - [ ] Remove read-side fallback that invents `execution.current_focus_*`.
-- [ ] Run focused runtime-view and industry runtime tests.
+- [x] Run focused runtime-view and industry runtime tests.
 
 ### Task 4: Unify DecisionRequest / Acquisition Governance Paths
 
