@@ -367,6 +367,11 @@ class BuddyOnboardingService:
         constraints: list[str] | None = None,
         goal_intention: str,
     ) -> BuddyIdentitySubmitResult:
+        existing_profile = self._profile_repository.find_latest_profile_by_identity_signature(
+            display_name=display_name,
+            profession=profession,
+            current_stage=current_stage,
+        )
         return self._store_identity_submission(
             display_name=display_name,
             profession=profession,
@@ -375,6 +380,7 @@ class BuddyOnboardingService:
             strengths=strengths,
             constraints=constraints,
             goal_intention=goal_intention,
+            existing_profile=existing_profile,
         )
 
     def start_identity_operation(
@@ -388,17 +394,29 @@ class BuddyOnboardingService:
         constraints: list[str] | None = None,
         goal_intention: str,
     ) -> BuddyOnboardingOperationHandle:
-        profile = self._profile_repository.upsert_profile(
-            HumanProfile(
-                display_name=display_name,
-                profession=profession,
-                current_stage=current_stage,
-                interests=interests or [],
-                strengths=strengths or [],
-                constraints=constraints or [],
-                goal_intention=goal_intention,
-            ),
+        existing_profile = self._profile_repository.find_latest_profile_by_identity_signature(
+            display_name=display_name,
+            profession=profession,
+            current_stage=current_stage,
         )
+        profile = HumanProfile(
+            display_name=display_name,
+            profession=profession,
+            current_stage=current_stage,
+            interests=interests or [],
+            strengths=strengths or [],
+            constraints=constraints or [],
+            goal_intention=goal_intention,
+        )
+        if existing_profile is not None:
+            profile = profile.model_copy(
+                update={
+                    "profile_id": existing_profile.profile_id,
+                    "created_at": existing_profile.created_at,
+                    "updated_at": _utc_now(),
+                },
+            )
+        profile = self._profile_repository.upsert_profile(profile)
         operation_id = _new_buddy_operation_id()
         session = self._build_contract_draft_session(
             profile=profile,

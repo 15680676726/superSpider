@@ -175,6 +175,36 @@ class SqliteHumanProfileRepository:
             ).fetchone()
         return _human_profile_from_row(row)
 
+    def find_latest_profile_by_identity_signature(
+        self,
+        *,
+        display_name: str,
+        profession: str,
+        current_stage: str,
+    ) -> HumanProfile | None:
+        normalized_display_name = str(display_name or "").strip()
+        normalized_profession = str(profession or "").strip()
+        normalized_current_stage = str(current_stage or "").strip()
+        if not normalized_display_name or not normalized_profession or not normalized_current_stage:
+            return None
+        with self._store.connection() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM human_profiles
+                WHERE lower(trim(display_name)) = lower(trim(?))
+                  AND lower(trim(profession)) = lower(trim(?))
+                  AND lower(trim(current_stage)) = lower(trim(?))
+                ORDER BY updated_at DESC, created_at DESC
+                LIMIT 1
+                """,
+                (
+                    normalized_display_name,
+                    normalized_profession,
+                    normalized_current_stage,
+                ),
+            ).fetchone()
+        return _human_profile_from_row(row)
+
     def count_profiles(self) -> int:
         with self._store.connection() as conn:
             row = conn.execute(

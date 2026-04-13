@@ -20,10 +20,19 @@ def test_buddy_current_focus_resolver_prefers_profile_scaffold_before_execution_
                 why_it_matters="Because this is the first real proof that moves the long-term goal.",
             ),
         ),
+        domain_capability_repository=SimpleNamespace(
+            get_active_domain_capability=lambda profile_id: SimpleNamespace(
+                industry_instance_id="buddy:profile-1:domain-proof",
+            ),
+        ),
         industry_instance_repository=SimpleNamespace(
-            get_instance=lambda instance_id: SimpleNamespace(
-                instance_id=instance_id,
-                current_cycle_id="cycle-1",
+            get_instance=lambda instance_id: (
+                SimpleNamespace(
+                    instance_id=instance_id,
+                    current_cycle_id="cycle-1",
+                )
+                if instance_id == "buddy:profile-1:domain-proof"
+                else None
             ),
         ),
         assignment_service=SimpleNamespace(
