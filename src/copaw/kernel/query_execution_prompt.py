@@ -842,10 +842,17 @@ class _QueryExecutionPromptMixin:
             lines.append(f"- Newly recorded recurring loop: {title}")
         if chat_writeback_summary.get("deduplicated"):
             lines.append("- This instruction already exists in formal state; no duplicate record was created.")
+        started_assignment_ids = _string_list(
+            chat_writeback_summary.get("started_assignment_ids"),
+        )
         materialized_assignment_ids = _string_list(
             chat_writeback_summary.get("materialized_assignment_ids"),
         )
-        if materialized_assignment_ids:
+        if started_assignment_ids:
+            lines.append(
+                "- This instruction already entered the live execution chain and a specialist seat is now running it.",
+            )
+        elif materialized_assignment_ids:
             lines.append(
                 "- This instruction already materialized formal execution assignments and is waiting for dispatch/seat runtime start.",
             )

@@ -162,13 +162,25 @@ def _resolve_initial_materialization(
         if str(item)
     ]
     if materialized_assignment_ids:
+        started_assignment_ids = [
+            str(item)
+            for item in list(writeback.get("started_assignment_ids") or [])
+            if str(item)
+        ]
+        started_task_ids = [
+            str(item)
+            for item in list(writeback.get("started_task_ids") or [])
+            if str(item)
+        ]
         return {
             "instance_id": instance_id,
             "started_cycle_id": writeback.get("materialized_cycle_id"),
             "created_assignment_ids": materialized_assignment_ids,
-            "created_task_ids": [],
+            "created_task_ids": started_task_ids,
             "created_report_ids": [],
             "processed_report_ids": [],
+            "auto_resumed_assignment_ids": started_assignment_ids,
+            "auto_resumed_task_ids": started_task_ids,
         }
 
     cycle_result = asyncio.run(
@@ -527,8 +539,7 @@ def test_runtime_canonical_flow_harness_auto_writeback_requested_actions_routes_
             "industry_role_id": "execution-core",
             "session_kind": "industry-control-thread",
             "control_thread_id": control_thread_id,
-            "interaction_mode": "auto",
-            "requested_actions": ["writeback_backlog"],
+            "interaction_mode": "orchestrate",
             "input": [
                 {
                     "role": "user",
@@ -767,8 +778,7 @@ def test_runtime_canonical_flow_harness_auto_frontdoor_replan_materializes_follo
             "industry_role_id": "execution-core",
             "session_kind": "industry-control-thread",
             "control_thread_id": control_thread_id,
-            "interaction_mode": "auto",
-            "requested_actions": ["writeback_backlog"],
+            "interaction_mode": "orchestrate",
             "input": [
                 {
                     "role": "user",
@@ -1005,8 +1015,7 @@ def test_runtime_canonical_flow_harness_chat_frontdoor_closes_through_fixed_sop_
             "industry_role_id": "execution-core",
             "session_kind": "industry-control-thread",
             "control_thread_id": control_thread_id,
-            "interaction_mode": "auto",
-            "requested_actions": ["writeback_backlog"],
+            "interaction_mode": "orchestrate",
             "input": [
                 {
                     "role": "user",
@@ -1147,9 +1156,7 @@ def test_runtime_canonical_flow_harness_chat_assignment_delegated_child_closes_t
                 goal_title="Research same-thread follow-up",
                 goal_summary="Hand the governed follow-up into the main chain and close it with a delegated child run.",
                 goal_plan_steps=[
-                    "Write the follow-up into the governed main chain.",
-                    "Dispatch the assignment on the same work context.",
-                    "Close the result through a delegated child run and terminal report.",
+                    "Use a delegated child run on the same work context, then close the governed result through the terminal report.",
                 ],
             ),
             should_kickoff=False,
@@ -1206,8 +1213,7 @@ def test_runtime_canonical_flow_harness_chat_assignment_delegated_child_closes_t
             "industry_role_id": "execution-core",
             "session_kind": "industry-control-thread",
             "control_thread_id": control_thread_id,
-            "interaction_mode": "auto",
-            "requested_actions": ["writeback_backlog"],
+            "interaction_mode": "orchestrate",
             "input": [
                 {
                     "role": "user",
@@ -1239,18 +1245,21 @@ def test_runtime_canonical_flow_harness_chat_assignment_delegated_child_closes_t
         auto_dispatch_materialized_goals=False,
     )
     assignment_id = processed_instance["created_assignment_ids"][0]
-
-    dispatch_result = asyncio.run(
-        app.state.industry_service._dispatch_operating_cycle_assignments(
-            instance_id=instance_id,
-            assignment_ids=[assignment_id],
-            actor="test:canonical-flow-delegated-child-dispatch",
-            include_execution_core=True,
-            execute_background=True,
-        ),
-    )
-    assert dispatch_result is not None
-    parent_task_id = dispatch_result["created_task_ids"][0]
+    started_task_ids = list(processed_instance.get("created_task_ids") or [])
+    if started_task_ids:
+        parent_task_id = started_task_ids[0]
+    else:
+        dispatch_result = asyncio.run(
+            app.state.industry_service._dispatch_operating_cycle_assignments(
+                instance_id=instance_id,
+                assignment_ids=[assignment_id],
+                actor="test:canonical-flow-delegated-child-dispatch",
+                include_execution_core=True,
+                execute_background=True,
+            ),
+        )
+        assert dispatch_result is not None
+        parent_task_id = dispatch_result["created_task_ids"][0]
     parent_task = app.state.task_repository.get_task(parent_task_id)
     assert parent_task is not None
     assert parent_task.assignment_id == assignment_id
@@ -1345,6 +1354,12 @@ def test_runtime_canonical_flow_harness_chat_assignment_delegated_child_closes_t
     assert report.work_context_id == work_context_id
     assert report.evidence_ids
     assert report.processed is True
+
+    app.state.kernel_dispatcher.complete_task(
+        parent_task_id,
+        summary="Delegated child result accepted by parent.",
+        metadata={"source": "test:canonical-flow-delegated-child-parent-close"},
+    )
 
     assignment = app.state.assignment_repository.get_assignment(assignment_id)
     assert assignment is not None

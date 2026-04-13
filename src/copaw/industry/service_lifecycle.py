@@ -4149,6 +4149,8 @@ class _IndustryLifecycleMixin:
                 pass
         materialized_cycle_id: str | None = None
         materialized_assignment_ids: list[str] = []
+        started_assignment_ids: list[str] = []
+        started_task_ids: list[str] = []
         if (
             created_backlog_ids
             and decision_request_id is None
@@ -4196,6 +4198,15 @@ class _IndustryLifecycleMixin:
                     )
                     if assignment_id is not None
                 ]
+                started_assignment_ids = _unique_strings(
+                    list(processed_instance.get("started_assignment_ids") or []),
+                    list(processed_instance.get("auto_resumed_assignment_ids") or []),
+                )
+                started_task_ids = _unique_strings(
+                    list(processed_instance.get("started_task_ids") or []),
+                    list(processed_instance.get("created_task_ids") or []),
+                    list(processed_instance.get("auto_resumed_task_ids") or []),
+                )
         dispatch_deferred = bool(created_backlog_ids)
         accepted_delegation_state = (
             "waiting_confirm"
@@ -4256,6 +4267,8 @@ class _IndustryLifecycleMixin:
             "created_backlog_ids": created_backlog_ids,
             "materialized_cycle_id": materialized_cycle_id,
             "materialized_assignment_ids": materialized_assignment_ids,
+            "started_assignment_ids": started_assignment_ids,
+            "started_task_ids": started_task_ids,
             "reused_backlog_ids": reused_backlog_ids,
             "created_schedule_ids": created_schedule_ids,
             "created_schedule_titles": created_schedule_titles,
