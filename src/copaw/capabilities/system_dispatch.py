@@ -36,6 +36,20 @@ def _resolve_dispatch_summary(event: object | None, fallback: str) -> str:
     return fallback
 
 
+def _normalize_dispatch_status(value: object | None) -> str:
+    status = str(value or "").strip().lower()
+    if status == "canceled":
+        return "cancelled"
+    return status
+
+
+def _default_dispatch_error(summary: str) -> str:
+    lowered = summary.strip().lower()
+    if "command" in lowered:
+        return "command runtime failed"
+    return "query runtime failed"
+
+
 class SystemDispatchFacade:
     def __init__(
         self,
@@ -208,7 +222,7 @@ class SystemDispatchFacade:
             event_status = str(last_event.get("status") or "")
         elif last_event is not None:
             event_status = str(getattr(last_event, "status", "") or "")
-        normalized_status = event_status.strip().lower()
+        normalized_status = _normalize_dispatch_status(event_status)
         success = normalized_status not in {"failed", "error", "cancelled"}
         error = None
         if not success:
@@ -228,6 +242,8 @@ class SystemDispatchFacade:
                     error = str(
                         getattr(error_payload, "message", None) or error_payload,
                     ).strip() or None
+            if error is None:
+                error = _default_dispatch_error(summary)
 
         effective_summary = _resolve_dispatch_summary(last_message_event, summary)
         return {

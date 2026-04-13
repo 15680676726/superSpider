@@ -790,7 +790,6 @@ class _ChatWritebackIndustryService(_FakeIndustryService):
         return {
             "applied": True,
             "strategy_updated": True,
-            "created_goal_titles": ["现场验证主线"],
             "created_schedule_titles": ["现场验证例行节奏"],
         }
 
@@ -854,7 +853,6 @@ class _KickoffAwareIndustryService(_FakeIndustryService):
         return {
             "applied": True,
             "strategy_updated": True,
-            "created_goal_titles": ["follow-up loop"],
             "created_schedule_titles": ["follow-up cadence"],
         }
 

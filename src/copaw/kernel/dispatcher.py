@@ -63,6 +63,9 @@ class KernelDispatcher:
     def submit(self, task: KernelTask) -> KernelResult:
         """Accept a task into the kernel and apply risk gating."""
         accepted = self._lifecycle.accept(task)
+        parent_block_reason = self._terminal_parent_block_reason(accepted)
+        if parent_block_reason:
+            return self.cancel_task(accepted.id, resolution=parent_block_reason)
         if self._governance_service is not None:
             block_reason = self._governance_service.admission_block_reason(accepted)
             if block_reason:
@@ -213,11 +216,21 @@ class KernelDispatcher:
             return self.fail_task(task_id, error=str(exc))
 
         if not execution.get("success", False):
-            result = self.fail_task(
-                task_id,
-                error=str(execution.get("error") or execution.get("summary") or "execution failed"),
-                append_kernel_evidence=not bool(execution.get("evidence_emitted")),
+            failure_kind = str(execution.get("error_kind") or "").strip().lower()
+            failure_error = str(
+                execution.get("error") or execution.get("summary") or "execution failed",
             )
+            if failure_kind == "cancelled":
+                result = self.cancel_task(
+                    task_id,
+                    resolution=failure_error,
+                ).model_copy(update={"error": failure_error})
+            else:
+                result = self.fail_task(
+                    task_id,
+                    error=failure_error,
+                    append_kernel_evidence=not bool(execution.get("evidence_emitted")),
+                )
             output = execution.get("output") if isinstance(execution, dict) else None
             if isinstance(output, dict):
                 result = result.model_copy(update={"output": output})
@@ -423,6 +436,12 @@ class KernelDispatcher:
         self._after_terminal_transition(task=task, result=result)
         return result.model_copy(update={"decision_request_id": resolved_decision_id})
 
+    def heartbeat_task(self, task_id: str) -> KernelTask | None:
+        task = self._lifecycle.get_task(task_id)
+        if task is None:
+            return None
+        return self._lifecycle.heartbeat(task_id)
+
     def reject_decision(
         self,
         decision_id: str,
@@ -555,6 +574,7 @@ class KernelDispatcher:
         task: KernelTask,
         result: KernelResult,
     ) -> None:
+        self._cancel_live_child_subtree(task=task, result=result)
         self._reconcile_parent_after_child_terminal(task)
         self._notify_goal_service(task)
         self._resume_goal_background_chain(task)
@@ -682,6 +702,38 @@ class KernelDispatcher:
             f"'{task_id}'."
         )
 
+    def _terminal_parent_block_reason(self, task: KernelTask) -> str | None:
+        parent_task_id = str(task.parent_task_id or "").strip()
+        if not parent_task_id:
+            return None
+        parent = self._lifecycle.get_task(parent_task_id)
+        if parent is None:
+            return None
+        if parent.phase not in {"completed", "failed", "cancelled"}:
+            return None
+        return (
+            f"Parent task '{parent_task_id}' is already {parent.phase}; "
+            "rejecting child admission fail-closed."
+        )
+
+    def _cancel_live_child_subtree(
+        self,
+        *,
+        task: KernelTask,
+        result: KernelResult,
+    ) -> None:
+        if result.phase not in {"failed", "cancelled"}:
+            return
+        for child in self._list_child_tasks(task.id):
+            if child.phase in {"completed", "failed", "cancelled"}:
+                continue
+            self.cancel_task(
+                child.id,
+                resolution=(
+                    f"Parent task '{task.id}' {result.phase}; closing child fail-closed."
+                ),
+            )
+
     def _reconcile_parent_after_child_terminal(self, task: KernelTask) -> None:
         parent_task_id = str(task.parent_task_id or "").strip()
         if not parent_task_id:
@@ -697,6 +749,8 @@ class KernelDispatcher:
         summary = self._terminal_child_summary(child_tasks)
         if any(child.phase in {"failed", "cancelled"} for child in child_tasks):
             self.fail_task(parent_task_id, error=summary)
+            return
+        if _parent_requires_explicit_terminal_close(parent):
             return
         self.complete_task(
             parent_task_id,
@@ -740,6 +794,11 @@ def _approval_completion_summary(task: KernelTask) -> str | None:
     if isinstance(value, str) and value.strip():
         return value.strip()
     return None
+
+
+def _parent_requires_explicit_terminal_close(task: KernelTask) -> bool:
+    capability_ref = str(task.capability_ref or "").strip()
+    return capability_ref in {"system:dispatch_query", "system:dispatch_command"}
 
 
 _MAIN_BRAIN_OUTCOME_CAPABILITY_PREFIXES = ("tool:", "skill:", "mcp:")

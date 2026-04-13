@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from time import perf_counter
 from typing import Sequence
 
 
@@ -194,6 +195,8 @@ class _IndustryStrategyMixin:
 
         requested_surfaces: list[str] | None = None,
 
+        role_surface_context: dict[str, dict[str, object]] | None = None,
+
     ) -> tuple[IndustryRoleBlueprint | None, list[str]]:
 
         goal_context_by_agent = self._build_instance_goal_context_by_agent(record=record)
@@ -221,6 +224,12 @@ class _IndustryStrategyMixin:
                 goal_context=goal_context_by_agent.get(role.agent_id, []),
 
                 requested_surfaces=normalized_requested_surfaces,
+
+                role_surface_context=(
+                    _mapping(role_surface_context).get(role.agent_id)
+                    if role_surface_context is not None
+                    else None
+                ),
 
             )
 
@@ -428,11 +437,33 @@ class _IndustryStrategyMixin:
         message_text: str,
         goal_context: list[str],
         requested_surfaces: list[str] | None = None,
+        role_surface_context: dict[str, object] | None = None,
     ) -> tuple[int, list[str]]:
-        capability_mounts = self._list_chat_writeback_role_capability_mounts(role=role)
-        capability_ids = self._list_chat_writeback_role_capability_ids(
-            role=role,
-            capability_mounts=capability_mounts,
+        cached_context = _mapping(role_surface_context)
+        cached_mounts = list(cached_context.get("capability_mounts") or [])
+        has_cached_mounts = (
+            role_surface_context is not None and "capability_mounts" in cached_context
+        )
+        capability_mounts = (
+            cached_mounts
+            if has_cached_mounts
+            else self._list_chat_writeback_role_capability_mounts(role=role)
+        )
+        cached_capability_ids = {
+            str(item).strip().lower()
+            for item in list(cached_context.get("capability_ids") or [])
+            if str(item).strip()
+        }
+        has_cached_capability_ids = (
+            role_surface_context is not None and "capability_ids" in cached_context
+        )
+        capability_ids = (
+            cached_capability_ids
+            if has_cached_capability_ids
+            else self._list_chat_writeback_role_capability_ids(
+                role=role,
+                capability_mounts=capability_mounts,
+            )
         )
         normalized_requested_surfaces = _unique_strings(list(requested_surfaces or []))
 
@@ -643,8 +674,14 @@ class _IndustryStrategyMixin:
             return []
 
         try:
-
+            started_at = perf_counter()
             mounts = lister(agent_id=role.agent_id, enabled_only=True)
+            logger.info(
+                "Industry role accessible capability timings: agent=%s role=%s elapsed=%.2fs",
+                role.agent_id,
+                role.role_id,
+                perf_counter() - started_at,
+            )
 
         except Exception:
 
@@ -698,7 +735,8 @@ class _IndustryStrategyMixin:
 
         team: IndustryTeamBlueprint,
 
-    ) -> tuple[list[str], list[Any], list[str]]:
+    ) -> tuple[list[str], list[Any], list[str], dict[str, dict[str, object]]]:
+        started_at = perf_counter()
 
         capability_ids: list[str] = []
 
@@ -706,35 +744,74 @@ class _IndustryStrategyMixin:
 
         environment_texts: list[str] = []
 
+        role_surface_context: dict[str, dict[str, object]] = {}
+
         for role in team.agents:
 
             if is_execution_core_role_id(role.role_id):
 
                 continue
 
+            role_started_at = perf_counter()
+            mounts_started_at = perf_counter()
             role_mounts = self._list_chat_writeback_role_capability_mounts(role=role)
+            mounts_elapsed = perf_counter() - mounts_started_at
+
+            capability_ids_started_at = perf_counter()
+            role_capability_ids = list(
+                self._list_chat_writeback_role_capability_ids(
+                    role=role,
+                    capability_mounts=role_mounts,
+                ),
+            )
+            capability_ids_elapsed = perf_counter() - capability_ids_started_at
+
+            environment_texts_started_at = perf_counter()
+            role_environment_texts = self._build_chat_writeback_role_surface_environment_texts(
+                role=role,
+            )
+            environment_texts_elapsed = perf_counter() - environment_texts_started_at
 
             capability_mounts.extend(role_mounts)
 
-            capability_ids.extend(
+            capability_ids.extend(role_capability_ids)
 
-                self._list_chat_writeback_role_capability_ids(
+            environment_texts.extend(role_environment_texts)
 
-                    role=role,
-
-                    capability_mounts=role_mounts,
-
-                )
-
+            role_surface_context[role.agent_id] = {
+                "capability_mounts": list(role_mounts),
+                "capability_ids": list(role_capability_ids),
+                "environment_texts": list(role_environment_texts),
+            }
+            logger.info(
+                "Industry team surface role timings: agent=%s role=%s mounts=%.2fs capability_ids=%.2fs environment_texts=%.2fs total=%.2fs mount_count=%d capability_id_count=%d",
+                role.agent_id,
+                role.role_id,
+                mounts_elapsed,
+                capability_ids_elapsed,
+                environment_texts_elapsed,
+                perf_counter() - role_started_at,
+                len(role_mounts),
+                len(role_capability_ids),
             )
 
-            environment_texts.extend(
-
-                self._build_chat_writeback_role_surface_environment_texts(role=role)
-
-            )
-
-        return _unique_strings(capability_ids), capability_mounts, _unique_strings(environment_texts)
+        total_elapsed = perf_counter() - started_at
+        unique_capability_ids = _unique_strings(capability_ids)
+        unique_environment_texts = _unique_strings(environment_texts)
+        logger.info(
+            "Industry team surface context timings: roles=%d total=%.2fs unique_capability_ids=%d mounts=%d env_texts=%d",
+            len(role_surface_context),
+            total_elapsed,
+            len(unique_capability_ids),
+            len(capability_mounts),
+            len(unique_environment_texts),
+        )
+        return (
+            unique_capability_ids,
+            capability_mounts,
+            unique_environment_texts,
+            role_surface_context,
+        )
 
 
 

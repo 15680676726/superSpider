@@ -863,6 +863,134 @@ def test_delegation_service_execute_true_marks_cancelled_child_mailbox_as_cancel
     assert checkpoints[0].status == "abandoned"
 
 
+def test_delegation_service_execute_true_preserves_child_checkpoint_output_and_evidence(
+    tmp_path,
+) -> None:
+    store = SQLiteStateStore(tmp_path / "state.db")
+    evidence_ledger = EvidenceLedger(tmp_path / "evidence.db")
+    task_repository = SqliteTaskRepository(store)
+    task_runtime_repository = SqliteTaskRuntimeRepository(store)
+    runtime_repository = SqliteAgentRuntimeRepository(store)
+    mailbox_repository = SqliteAgentMailboxRepository(store)
+    checkpoint_repository = SqliteAgentCheckpointRepository(store)
+
+    task_repository.upsert_task(
+        TaskRecord(
+            id="task-parent",
+            goal_id="goal-1",
+            title="Parent task",
+            summary="Delegate the work.",
+            task_type="system:dispatch_query",
+            status="running",
+            owner_agent_id="execution-core-agent",
+        ),
+    )
+    task_runtime_repository.upsert_runtime(
+        TaskRuntimeRecord(
+            task_id="task-parent",
+            runtime_status="active",
+            current_phase="executing",
+            active_environment_id="session:console:execution-core-main",
+            last_owner_agent_id="execution-core-agent",
+        ),
+    )
+    runtime_repository.upsert_runtime(
+        AgentRuntimeRecord(
+            agent_id="worker",
+            actor_key="industry-v1-ops:worker",
+            actor_fingerprint="fp-worker",
+            actor_class="industry-dynamic",
+            desired_state="active",
+            runtime_status="idle",
+            industry_instance_id="industry-v1-ops",
+            industry_role_id="solution-lead",
+            display_name="Worker",
+            role_name="Worker",
+        ),
+    )
+    mailbox_service = ActorMailboxService(
+        mailbox_repository=mailbox_repository,
+        runtime_repository=runtime_repository,
+        checkpoint_repository=checkpoint_repository,
+    )
+
+    class _QueuedDispatcher:
+        def submit(self, task):
+            return SimpleNamespace(phase="executing", summary="Queued delegated task")
+
+        async def execute_task(self, task_id: str):
+            raise AssertionError("delegation service must not bypass the actor supervisor")
+
+    class _CompletingSupervisor:
+        async def run_agent_once(self, agent_id: str) -> bool:
+            mailbox_item = mailbox_service.list_items(agent_id=agent_id, limit=1)[0]
+            mailbox_service.start_item(
+                mailbox_item.id,
+                worker_id="copaw-actor-worker",
+                task_id=mailbox_item.task_id,
+            )
+            checkpoint = mailbox_service.create_checkpoint(
+                agent_id=agent_id,
+                mailbox_id=mailbox_item.id,
+                task_id=mailbox_item.task_id,
+                checkpoint_kind="task-result",
+                status="applied",
+                phase="completed",
+                conversation_thread_id=mailbox_item.conversation_thread_id,
+                summary=f"Completed {mailbox_item.task_id}",
+                snapshot_payload={
+                    "result": {
+                        "task_id": mailbox_item.task_id,
+                        "trace_id": "trace-child",
+                        "success": True,
+                        "phase": "completed",
+                        "summary": f"Completed {mailbox_item.task_id}",
+                        "evidence_id": "evidence-child-1",
+                        "output": {
+                            "artifact_path": "D:/word/copaw/out.md",
+                            "artifact_kind": "file",
+                        },
+                    },
+                },
+            )
+            mailbox_service.complete_item(
+                mailbox_item.id,
+                result_summary=f"Completed {mailbox_item.task_id}",
+                checkpoint_id=checkpoint.id if checkpoint is not None else None,
+                task_id=mailbox_item.task_id,
+            )
+            return True
+
+    service = TaskDelegationService(
+        task_repository=task_repository,
+        task_runtime_repository=task_runtime_repository,
+        kernel_dispatcher=_QueuedDispatcher(),
+        evidence_ledger=evidence_ledger,
+        actor_mailbox_service=mailbox_service,
+        actor_supervisor=_CompletingSupervisor(),
+    )
+
+    result = asyncio.run(
+        service.delegate_task(
+            "task-parent",
+            title="Worker follow-up",
+            owner_agent_id="execution-core-agent",
+            target_agent_id="worker",
+            prompt_text="Create the file and report back.",
+            execute=True,
+            channel="console",
+        ),
+    )
+
+    assert result["dispatch_status"] == "completed"
+    assert result["dispatch_result"]["phase"] == "completed"
+    assert result["dispatch_result"]["evidence_id"] == "evidence-child-1"
+    assert result["dispatch_result"]["output"] == {
+        "artifact_path": "D:/word/copaw/out.md",
+        "artifact_kind": "file",
+    }
+
+
 def test_preview_delegation_ignores_cold_compiled_tasks_for_overload_and_conflicts(
     tmp_path,
 ) -> None:
@@ -947,3 +1075,69 @@ def test_preview_delegation_ignores_cold_compiled_tasks_for_overload_and_conflic
     assert preview["blocked"] is False
     assert preview["active_task_count"] == 0
     assert preview["conflict_count"] == 0
+
+
+def test_delegation_service_can_opt_out_of_parent_environment_inheritance(
+    tmp_path,
+) -> None:
+    store = SQLiteStateStore(tmp_path / "state.db")
+    evidence_ledger = EvidenceLedger(tmp_path / "evidence.db")
+    task_repository = SqliteTaskRepository(store)
+    task_runtime_repository = SqliteTaskRuntimeRepository(store)
+    runtime_frame_repository = SqliteRuntimeFrameRepository(store)
+    decision_repository = SqliteDecisionRequestRepository(store)
+
+    task_repository.upsert_task(
+        TaskRecord(
+            id="task-parent",
+            goal_id="goal-1",
+            title="Parent task",
+            summary="Delegate the work.",
+            task_type="system:dispatch_query",
+            status="running",
+            owner_agent_id="execution-core-agent",
+        ),
+    )
+    task_runtime_repository.upsert_runtime(
+        TaskRuntimeRecord(
+            task_id="task-parent",
+            runtime_status="active",
+            current_phase="executing",
+            active_environment_id="session:console:industry-chat:industry-1:execution-core",
+            last_owner_agent_id="execution-core-agent",
+        ),
+    )
+
+    task_store = KernelTaskStore(
+        task_repository=task_repository,
+        task_runtime_repository=task_runtime_repository,
+        runtime_frame_repository=runtime_frame_repository,
+        decision_request_repository=decision_repository,
+        evidence_ledger=evidence_ledger,
+    )
+    dispatcher = KernelDispatcher(
+        task_store=task_store,
+        capability_service=_FakeCapabilityService(),
+    )
+    service = TaskDelegationService(
+        task_repository=task_repository,
+        task_runtime_repository=task_runtime_repository,
+        kernel_dispatcher=dispatcher,
+        evidence_ledger=evidence_ledger,
+    )
+
+    result = asyncio.run(
+        service.delegate_task(
+            "task-parent",
+            title="Worker follow-up",
+            owner_agent_id="execution-core-agent",
+            target_agent_id="worker",
+            prompt_text="Review the evidence and draft the next action.",
+            execute=False,
+            channel="console",
+            inherit_environment_ref=False,
+        ),
+    )
+
+    assert result["governance"]["blocked"] is False
+    assert result["child_task"]["environment_ref"] is None

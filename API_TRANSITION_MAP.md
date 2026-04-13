@@ -442,11 +442,11 @@
   - 当前 chat 模型更像旧式会话壳
   - 未来应围绕 `Task / Agent / Evidence` 重组
   - `2026-03-14` 起旧 chat shell 层已物理删除；正式会话当前统一由 `RuntimeConversationFacade + AgentThreadBindingRecord + SessionRuntimeThreadHistoryReader` 解析
-  - `2026-03-11` 起 widget session persistence 已改走 `GET /api/runtime-center/conversations/{thread_id}`，thread_id 采用 `industry-chat:{instance_id}:{role_id}` / `agent-chat:{agent_id}` 正式语义
+  - `2026-03-11` 起 widget session persistence 已改走 `GET /api/runtime-center/conversations/{thread_id}`；仓内历史绑定记录仍可能出现 `industry-chat:*` / `agent-chat:*` 语义，但当前前台正式聊天入口已收口到主脑控制线程
 - `2026-03-21` 起 `/chat` 已正式收口为“单一主脑控制线程前台”：行业前台控制线程保持 `industry-chat:{instance_id}:execution-core`，前端不再暴露 `task-chat:*` 第二聊天入口，也不再通过 `/runtime-center/chat/tasks*` 维护任务线程看板；执行结果应通过 `assignment / task / report / evidence / work-context` 正式读面回看
 - `2026-03-25` hard-cut 补充：`/runtime-center/chat/run` 将成为 `MainBrainChatService + MainBrainOrchestrator` 的 auto frontdoor；纯聊天不再直接进行 durable writeback，所有正式写入改由 orchestrator 负责
 - `2026-03-25` hard-cut 补充：`/runtime-center/chat/orchestrate` 已从 router 物理删除；显式执行编排 handoff 统一并回 `/runtime-center/chat/run` 的 auto/orchestrate 裁决链
-- `2026-03-21` 起 runtime conversation facade 只接受 `industry-chat:{instance_id}:{role_id}` 与 `agent-chat:{agent_id}` 两类正式线程 id；`actor-chat:*` 与 `task-chat:*` 已从前台产品与正式解析链退役，请求会直接返回 `400`
+- `2026-03-21` 起 runtime conversation facade 的前台正式会话已收口到 `industry-chat:{instance_id}:{role_id}` 主脑控制线程；`actor-chat:*` 与 `task-chat:*` 会直接拒绝，`agent-chat:{agent_id}` 也不再作为前台可直接打开的正式会话，而是提示改回对应 `industry-chat:*` 控制线程。`agent-chat:*` 只应视为后台执行 artifact/binding
 - `2026-03-21` 起 execution-core 聊天前门的结构化输出已删除 `query_confirmation_policy_change` 分支；“默认执行 / 恢复确认”不再是持久治理能力，风险动作统一回到 kernel 既有 `auto / guarded / confirm` 链，浏览器/桌面等高风险外部动作默认继续显式确认
 - `2026-03-19` 起 `/chat` 已新增显式 media panel，先经 `/api/media/*` 产出 `MediaAnalysisRecord`，再把 `media_analysis_ids` 顶层透传到 `chat/intake|run`；聊天主链消费的是分析结果而不是页面本地附件真相
 - `2026-03-29` 补充：prompt recall 现已优先消费 `work_context_id`。当线程/任务已绑定共享工作上下文时，媒体分析与长期记忆的 recall 不再只按 `task_id` 兜底，而会优先命中同一 `work_context` scope，避免共享工作区里的素材/记忆在 follow-up turn 中漏召回

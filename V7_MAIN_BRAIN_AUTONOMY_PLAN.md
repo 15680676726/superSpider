@@ -7,6 +7,13 @@
 它不是要推翻当前 `state / kernel / goals / routines / runtime-center` 基线，
 而是要在当前已落地骨架上，把“长期身份、长期目标、每日规划、职业派工、汇报回流”对象化、可见化、可测试化。
 
+`2026-04-12` 代码核对修正：
+
+- 当前活代码的正式 planning/runtime 主链已经是 `writeback -> backlog -> cycle -> assignment -> report -> replan`；`industry instance -> active goals + schedules -> dispatch -> tasks -> evidence -> reconcile` 只应视为历史背景，不再代表当前真实主链。
+- `GoalRecord` 仍是活代码里的周期/阶段执行对象，当前仍用于 workflow launch、goal detail、startup recovery 等链路。
+- `ScheduleRecord` 仍是活代码里的正式 cadence/runtime state object，当前仍通过 cron/runtime-center 落库、读写，并持续生成 backlog。
+- 新 cycle 物化时可以直接从 backlog 生成 assignment，不要求先存在 active goal；`GoalRecord` 现在更多承担阶段目标、leaf detail、workflow/runtime 兼容锚点。
+
 如果与以下文档冲突，优先级依次为：
 
 1. `AGENTS.md`
@@ -27,19 +34,19 @@
 - 正式 `Routine / RoutineRun`
 - `dispatch-active-goals`、`learning-strategy` 自动循环
 
-但当前主链仍偏向：
+本文件最初写作时，主链仍偏向：
 
 `industry instance -> active goals + schedules -> dispatch -> tasks -> evidence -> reconcile`
 
-这条链已经能跑，但它还不是“一个长期主脑每天知道自己该干什么”的正式模型。
+这条旧链当时已经能跑，但它还不是“一个长期主脑每天知道自己该干什么”的正式模型。
 
-当前最核心的结构性缺口有 5 个：
+本文件最初写作时，最核心的结构性缺口有 5 个：
 
 1. 长期载体语义和阶段执行语义仍混在 `IndustryInstanceRecord.status` 里。
-2. “每天/每周/事件触发应该做什么”还没有独立的正式 `cycle` 对象。
-3. operator 指令和新机会缺少统一 backlog，很多输入仍会直接变成 active goal。
-4. 职业 agent 的执行结果缺少统一、结构化的回流对象。
-5. 前端 Runtime Center 还主要围绕 `goal / task / evidence` 展示，没有把“主脑当前周期、责任车道、汇报回流”做成一等对象。
+2. `cycle / backlog / assignment / report` 虽然现在都已落地，但 formal planner 仍需要继续增强，不能只停留在规则驱动的浅层编排。
+3. operator 指令现在大多已先进入 backlog；剩余问题是少数 workflow/兼容流仍会直接物化 `GoalRecord`。
+4. `AgentReportRecord` 已落地；剩余问题主要是 synthesis / replan / 前端可见化还要继续统一。
+5. Runtime Center 与 `/industry` 已经显式展示主脑 planning surface；剩余问题是并非所有读面都完全摆脱旧 `goal/task/evidence` 心智。
 
 ---
 
@@ -460,7 +467,7 @@ Runtime Center 首屏必须回答：
 
 除了现有 goal/task/evidence 闭环测试，还必须新增：
 
-- 载体创建后，在没有 active goals 的情况下，下一轮 cycle 仍会生成新的 goal/assignment
+- 载体创建后，在没有 active goal 的情况下，下一轮 cycle 仍能从 backlog 直接 materialize assignment；只有 workflow/兼容链路需要时才额外物化 `GoalRecord`
 - operator 指令默认进入 backlog，而不是直接变 active goal
 - 周期 review 能根据 report 和 evidence 调整 strategy / lane priority
 - 职业 agent 完成 task 后会自动生成 `AgentReportRecord`

@@ -580,12 +580,70 @@ def test_query_execution_service_uses_agent_profile_and_capability_graph(
     assert "Goal dispatch is mounted" not in agent.kwargs["prompt_appendix"]
     assert "Focused sub-query dispatch is mounted" in agent.kwargs["prompt_appendix"]
     assert "Governed role/capability assignment is mounted" in agent.kwargs["prompt_appendix"]
+    assert "Shell execution runs on the current Windows host." in agent.kwargs["prompt_appendix"]
+    assert "Prefer PowerShell or other Windows-native commands first." in agent.kwargs[
+        "prompt_appendix"
+    ]
+    assert "Do not start with Linux-only probing such as command -v, find, sed, or bash syntax." in agent.kwargs[
+        "prompt_appendix"
+    ]
+    assert "For file/path discovery on Windows, prefer rg, Get-ChildItem, and Select-String." in agent.kwargs[
+        "prompt_appendix"
+    ]
     assert "Do not describe this runtime as a generic sandbox" in agent.kwargs["prompt_appendix"]
     assert "The main-brain control thread cannot use direct tools." not in agent.kwargs[
         "prompt_appendix"
     ]
     assert mcp_manager.requested_keys == []
     assert mcp_manager.get_clients_calls == 0
+
+
+def test_query_execution_prompt_appendix_reuses_industry_instance_within_single_build() -> None:
+    class _CountingIndustryService(_FakeIndustryService):
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def get_instance_detail(self, instance_id: str):
+            self.calls += 1
+            return super().get_instance_detail(instance_id)
+
+    industry_service = _CountingIndustryService()
+    service = KernelQueryExecutionService(
+        session_backend=_FakeSessionBackend(),
+        capability_service=_FakeCapabilityService(),
+        agent_profile_service=_FakeAgentProfileService(),
+        industry_service=industry_service,
+        knowledge_service=_FakeKnowledgeService(),
+    )
+    request = SimpleNamespace(
+        session_id="industry-chat:industry-v1-ops:execution-core",
+        user_id="ops-agent",
+        channel="console",
+        industry_instance_id="industry-v1-ops",
+        industry_role_id="execution-core",
+        industry_label="Ops Industry Team",
+        owner_scope="industry-v1-ops-scope",
+        session_kind="industry-agent-chat",
+    )
+    prompt_appendix = service._build_profile_prompt_appendix(
+        request=request,
+        msgs=[SimpleNamespace(get_text_content=lambda: "plan the next move")],
+        owner_agent_id="ops-agent",
+        agent_profile=_FakeAgentProfileService().get_agent("ops-agent"),
+        mounted_capabilities=[],
+        capability_layers=None,
+        desktop_actuation_available=False,
+        execution_context={},
+        delegation_guard=None,
+        industry_kickoff_summary=None,
+        chat_writeback_summary=None,
+        team_role_gap_summary=None,
+    )
+
+    assert prompt_appendix is not None
+    assert "# Industry Brief" in prompt_appendix
+    assert "# Team Roster" in prompt_appendix
+    assert industry_service.calls == 1
 
 
 def test_query_execution_service_passes_typed_capability_layers_into_agent_and_prompt(
@@ -1054,7 +1112,6 @@ def test_query_execution_service_applies_chat_writeback_before_prompt_build(
     assert "Must include: 改成先做现场验证再做规模复制" in prompt_appendix
     assert "Priority: 先做现场验证" in prompt_appendix
     assert "Priority: 再做规模复制" in prompt_appendix
-    assert "Newly recorded goal: 现场验证主线" in prompt_appendix
 
 
 def test_query_execution_service_applies_model_approved_writeback_when_rules_miss(

@@ -9,6 +9,9 @@ from agentscope_runtime.engine.schemas.agent_schemas import AgentRequest
 
 from copaw.kernel.main_brain_intake import MainBrainIntakeContract
 from copaw.kernel.main_brain_orchestrator import MainBrainExecutionEnvelope, MainBrainOrchestrator
+from copaw.kernel.query_execution_writeback import (
+    ChatWritebackDecisionModelTimeoutError,
+)
 
 
 class _FakeQueryExecutionService:
@@ -23,8 +26,20 @@ class _FakeQueryExecutionService:
 @pytest.mark.asyncio
 async def test_main_brain_orchestrator_executes_formal_turn_through_query_execution_service():
     query_execution_service = _FakeQueryExecutionService()
+
+    async def _fake_resolver(**_kwargs):
+        return MainBrainIntakeContract(
+            message_text="把这个目标接过去并开始安排执行",
+            decision=SimpleNamespace(intent_kind="execute-task", kickoff_allowed=True),
+            intent_kind="execute-task",
+            writeback_requested=False,
+            writeback_plan=None,
+            should_kickoff=True,
+        )
+
     orchestrator = MainBrainOrchestrator(
         query_execution_service=query_execution_service,
+        intake_contract_resolver=_fake_resolver,
     )
     request = AgentRequest(
         id="req-orchestrator",
@@ -144,10 +159,18 @@ def test_main_brain_orchestrator_allows_query_execution_service_rebinding():
 async def test_main_brain_orchestrator_passes_request_into_intake_resolver():
     query_execution_service = _FakeQueryExecutionService()
     captured: dict[str, object] = {}
+    intake_contract = MainBrainIntakeContract(
+        message_text="把这条需求写回 backlog。",
+        decision=SimpleNamespace(intent_kind="chat"),
+        intent_kind="chat",
+        writeback_requested=False,
+        writeback_plan=None,
+        should_kickoff=False,
+    )
 
     async def _fake_resolver(**kwargs):
         captured.update(kwargs)
-        return None
+        return intake_contract
 
     orchestrator = MainBrainOrchestrator(
         query_execution_service=query_execution_service,
@@ -174,3 +197,44 @@ async def test_main_brain_orchestrator_passes_request_into_intake_resolver():
     assert len(streamed) == 1
     assert captured["request"] is request
     assert captured["msgs"] == msgs
+
+
+@pytest.mark.asyncio
+async def test_main_brain_orchestrator_does_not_silently_swallow_intake_model_timeout():
+    query_execution_service = _FakeQueryExecutionService()
+
+    async def _failing_resolver(**_kwargs):
+        raise ChatWritebackDecisionModelTimeoutError(
+            "Chat writeback decision model timed out.",
+        )
+
+    orchestrator = MainBrainOrchestrator(
+        query_execution_service=query_execution_service,
+        intake_contract_resolver=_failing_resolver,
+    )
+    request = AgentRequest(
+        id="req-orchestrator-timeout",
+        session_id="industry-chat:industry-timeout:execution-core",
+        user_id="user-orchestrator-timeout",
+        channel="console",
+        input=[],
+    )
+    request.industry_instance_id = "industry-timeout"
+    request.control_thread_id = "industry-chat:industry-timeout:execution-core"
+    msgs = [
+        Msg(
+            name="user",
+            role="user",
+            content="请重新派发这个任务，现在开始执行，完成后回报结果。",
+        ),
+    ]
+
+    with pytest.raises(ChatWritebackDecisionModelTimeoutError):
+        _ = [
+            item
+            async for item in orchestrator.execute_stream(
+                msgs=msgs,
+                request=request,
+                kernel_task_id="kernel-task-timeout",
+            )
+        ]

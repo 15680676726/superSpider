@@ -9,7 +9,7 @@ from copaw.app.console_push_store import take_all
 from copaw.capabilities.system_team_handlers import SystemTeamCapabilityFacade
 from copaw.industry import IndustryBootstrapInstallItem, IndustryCapabilityRecommendation
 from copaw.industry.chat_writeback import build_chat_writeback_plan
-from copaw.kernel.persistence import decode_kernel_task_metadata
+from copaw.kernel.persistence import decode_kernel_task_metadata, encode_kernel_task_metadata
 from copaw.memory.activation_models import ActivationResult
 from copaw.memory import KnowledgeGraphService
 from copaw.memory.knowledge_graph_models import (
@@ -262,6 +262,7 @@ def test_industry_bootstrap_accepts_standard_full_weekday_range_cron(tmp_path) -
         for role in draft["team"]["agents"]
         if role["role_id"] == "execution-core"
     )
+
     draft["schedules"].append(
         {
             "schedule_id": "daily-control-loop",
@@ -297,6 +298,234 @@ def test_industry_bootstrap_accepts_standard_full_weekday_range_cron(tmp_path) -
     assert any(
         schedule["cron"] == "0 9 * * 1-7"
         for schedule in runtime_detail.json()["schedules"]
+    )
+
+
+def test_operating_cycle_assignment_unit_uses_role_scoped_session_ids() -> None:
+    service = IndustryService.__new__(IndustryService)
+    service._operating_lane_service = None
+    service._goal_service = SimpleNamespace()
+
+    record = IndustryInstanceRecord(
+        instance_id="buddy:profile-1:industry-1",
+        owner_scope="profile-1",
+        label="Trader Buddy",
+        summary="Trading execution carrier",
+        bootstrap_kind="industry-v1",
+        profile_payload={"industry": "Trading"},
+        team_payload={"agents": []},
+        execution_core_identity_payload={"role_id": "execution-core"},
+        status="active",
+    )
+    item = BacklogItemRecord(
+        id="backlog-1",
+        industry_instance_id=record.instance_id,
+        title="Review next moves",
+        summary="Split the next operating moves across the specialist team.",
+        status="open",
+        metadata={},
+    )
+    cycle = OperatingCycleRecord(
+        id="cycle-1",
+        industry_instance_id=record.instance_id,
+        title="Cycle 1",
+        summary="Initial operating cycle",
+        cycle_kind="daily",
+        status="active",
+    )
+    researcher_assignment = AssignmentRecord(
+        id="assignment-researcher",
+        industry_instance_id=record.instance_id,
+        cycle_id=cycle.id,
+        backlog_item_id=item.id,
+        owner_agent_id=f"{record.instance_id}:market-research",
+        owner_role_id="market-research",
+        title="Research focus strategies",
+        summary="Find the next trading setups.",
+        status="queued",
+    )
+    risk_assignment = AssignmentRecord(
+        id="assignment-risk",
+        industry_instance_id=record.instance_id,
+        cycle_id=cycle.id,
+        backlog_item_id=item.id,
+        owner_agent_id=f"{record.instance_id}:growth-focus",
+        owner_role_id="growth-focus",
+        title="Set risk boundaries",
+        summary="Define the risk boundary for the next cycle.",
+        status="queued",
+    )
+
+    researcher_unit = service._build_operating_cycle_assignment_unit(
+        record=record,
+        item=item,
+        cycle=cycle,
+        assignment=researcher_assignment,
+        actor="copaw-agent-runner",
+    )
+    risk_unit = service._build_operating_cycle_assignment_unit(
+        record=record,
+        item=item,
+        cycle=cycle,
+        assignment=risk_assignment,
+        actor="copaw-agent-runner",
+    )
+
+    control_thread_id = f"industry-chat:{record.instance_id}:execution-core"
+    assert researcher_unit.context["control_thread_id"] == control_thread_id
+    assert risk_unit.context["control_thread_id"] == control_thread_id
+    assert researcher_unit.context["session_id"] != risk_unit.context["session_id"]
+    assert researcher_unit.context["session_id"] != control_thread_id
+    assert risk_unit.context["session_id"] != control_thread_id
+    assert researcher_unit.context["session_id"].endswith(":market-research")
+    assert risk_unit.context["session_id"].endswith(":growth-focus")
+
+
+def test_close_task_execution_closure_continues_next_assignment_step(tmp_path) -> None:
+    app = _build_industry_app(tmp_path)
+
+    instance_id = "buddy:profile-1:industry-1"
+    cycle = OperatingCycleRecord(
+        id="cycle-1",
+        industry_instance_id=instance_id,
+        title="Cycle 1",
+        summary="Initial operating cycle",
+        cycle_kind="daily",
+        status="active",
+    )
+    record = IndustryInstanceRecord(
+        instance_id=instance_id,
+        owner_scope="profile-1",
+        label="Trader Buddy",
+        summary="Trading execution carrier",
+        bootstrap_kind="industry-v1",
+        profile_payload={"industry": "Trading"},
+        team_payload={"agents": []},
+        execution_core_identity_payload={"role_id": "execution-core"},
+        current_cycle_id=cycle.id,
+        status="active",
+    )
+    backlog_item = BacklogItemRecord(
+        id="backlog-1",
+        industry_instance_id=instance_id,
+        cycle_id=cycle.id,
+        title="Define operating system rules",
+        summary="Turn trading rules into a concrete operating checklist.",
+        status="open",
+        metadata={},
+    )
+    assignment = AssignmentRecord(
+        id="assignment-1",
+        industry_instance_id=instance_id,
+        cycle_id=cycle.id,
+        backlog_item_id=backlog_item.id,
+        owner_agent_id=f"{instance_id}:growth-focus",
+        owner_role_id="growth-focus",
+        title="Define Operating System Rules",
+        summary="Create the rule checklist and return the next move.",
+        status="running",
+        metadata={
+            "plan_steps": [
+                "Confirm the backlog goal and the expected delivery boundary.",
+                "Draft the concrete trading operating rules.",
+                "Return the completion summary together with the next recommendation.",
+            ],
+            "owner_agent_id": f"{instance_id}:growth-focus",
+            "industry_role_id": "growth-focus",
+            "industry_role_name": "Growth Focus",
+            "role_name": "Growth Focus",
+            "role_summary": "Own the operating-system design work.",
+            "mission": "Turn the trading direction into a concrete operating checklist.",
+            "task_mode": "autonomy-cycle",
+            "report_back_mode": "summary",
+            "control_thread_id": f"industry-chat:{instance_id}:execution-core",
+            "session_id": f"industry-chat:{instance_id}:execution-core",
+            "environment_ref": f"session:console:industry:{instance_id}",
+        },
+    )
+
+    app.state.industry_instance_repository.upsert_instance(record)
+    app.state.operating_cycle_repository.upsert_cycle(cycle)
+    app.state.backlog_item_repository.upsert_item(backlog_item)
+    app.state.assignment_repository.upsert_assignment(assignment)
+
+    unit = app.state.industry_service._build_operating_cycle_assignment_unit(
+        record=record,
+        item=backlog_item,
+        cycle=cycle,
+        assignment=assignment,
+        actor="copaw-agent-runner",
+    )
+    compiler = app.state.goal_service._compiler
+    tasks = compiler.compile_to_kernel_tasks(unit, specs=compiler.compile(unit))
+    assert len(tasks) == 1
+    step_one_task = tasks[0]
+
+    app.state.task_repository.upsert_task(
+        TaskRecord(
+            id=step_one_task.id,
+            title=step_one_task.title,
+            summary=step_one_task.title,
+            task_type=step_one_task.capability_ref or "system:dispatch_query",
+            status="completed",
+            owner_agent_id=step_one_task.owner_agent_id,
+            acceptance_criteria=encode_kernel_task_metadata(step_one_task),
+            current_risk_level=step_one_task.risk_level,
+            industry_instance_id=instance_id,
+            assignment_id=assignment.id,
+            cycle_id=cycle.id,
+            report_back_mode="summary",
+        ),
+    )
+    app.state.task_runtime_repository.upsert_runtime(
+        TaskRuntimeRecord(
+            task_id=step_one_task.id,
+            runtime_status="terminated",
+            current_phase="completed",
+            risk_level=step_one_task.risk_level,
+            last_result_summary="Step 1 completed.",
+            last_owner_agent_id=step_one_task.owner_agent_id,
+        ),
+    )
+    app.state.assignment_repository.upsert_assignment(
+        assignment.model_copy(update={"task_id": step_one_task.id}),
+    )
+
+    result = app.state.industry_service.close_task_execution_closure(
+        industry_instance_id=instance_id,
+        cycle_id=cycle.id,
+        assignment_id=assignment.id,
+        task_id=step_one_task.id,
+    )
+
+    assignment_tasks = app.state.task_repository.list_tasks(
+        assignment_ids=[assignment.id],
+        limit=None,
+    )
+    assert len(assignment_tasks) == 2
+    next_task = max(
+        assignment_tasks,
+        key=lambda item: item.updated_at or item.created_at,
+    )
+    assert next_task.id != step_one_task.id
+    next_metadata = decode_kernel_task_metadata(next_task.acceptance_criteria)
+    assert next_metadata is not None
+    assert next_metadata["payload"]["compiler"]["plan_step_number"] == 2
+    assert next_metadata["payload"]["request"]["session_id"].endswith(":growth-focus")
+
+    updated_assignment = app.state.assignment_repository.get_assignment(assignment.id)
+    assert updated_assignment is not None
+    assert updated_assignment.task_id == next_task.id
+    assert updated_assignment.status in {"queued", "running"}
+    assert result is not None
+    assert result["assignment_statuses"][assignment.id] in {"queued", "running"}
+    assert (
+        app.state.agent_report_repository.list_reports(
+            industry_instance_id=instance_id,
+            assignment_id=assignment.id,
+            limit=None,
+        )
+        == []
     )
 
 
@@ -1895,8 +2124,9 @@ def test_kickoff_execution_from_chat_dispatches_bootstrap_assignments_without_go
 
     assert kickoff is not None
     assert kickoff["started_assignment_ids"]
+    assert kickoff["started_task_ids"]
     assert kickoff["assignment_dispatches"]
-    assert kickoff["goal_dispatches"] == []
+    assert "goal_dispatches" not in kickoff
     assert "started_goal_ids" not in kickoff
     assert "started_goal_titles" not in kickoff
     assert "resumed_schedule_ids" not in kickoff
@@ -1909,6 +2139,30 @@ def test_kickoff_execution_from_chat_dispatches_bootstrap_assignments_without_go
         if task.assignment_id in started_assignment_ids
     ]
     assert created_tasks
+    assert set(kickoff["started_task_ids"]) <= {task.id for task in created_tasks}
+    task_by_id = {task.id: task for task in created_tasks}
+    dispatch_by_assignment_id = {
+        item["assignment_id"]: item
+        for item in kickoff["assignment_dispatches"]
+        if item.get("assignment_id") in started_assignment_ids and item.get("task_id")
+    }
+    assignment_id = kickoff["started_assignment_ids"][0]
+    assignment = app.state.assignment_repository.get_assignment(assignment_id)
+    assert assignment is not None
+    assert assignment_id in dispatch_by_assignment_id
+    dispatched_task_id = dispatch_by_assignment_id[assignment_id]["task_id"]
+    assert dispatched_task_id in task_by_id
+    assert assignment.task_id in task_by_id
+    current_task = task_by_id[assignment.task_id]
+    expected_assignment_status = {
+        "created": "queued",
+        "queued": "queued",
+        "running": "running",
+        "completed": "waiting-report",
+        "failed": "failed",
+        "cancelled": "failed",
+    }.get(current_task.status, assignment.status)
+    assert assignment.status == expected_assignment_status
     assert all(task.assignment_id in started_assignment_ids for task in created_tasks)
 
 
@@ -2565,10 +2819,10 @@ def test_run_operating_cycle_dispatches_materialized_execution_assignment(tmp_pa
     assert cycle_result["count"] == 1
     processed_instance = cycle_result["processed_instances"][0]
     assert processed_instance["created_assignment_ids"]
-    assert processed_instance["created_goal_ids"] == []
-    assert processed_instance["materialized_goal_ids"] == []
-    assert processed_instance["auto_dispatched_goal_ids"] == []
-    assert processed_instance["goal_dispatches"] == []
+    assert "created_goal_ids" not in processed_instance
+    assert "materialized_goal_ids" not in processed_instance
+    assert "auto_dispatched_goal_ids" not in processed_instance
+    assert "goal_dispatches" not in processed_instance
     assert processed_instance["created_task_ids"]
 
     created_tasks = [
@@ -2599,19 +2853,28 @@ def test_run_operating_cycle_dispatches_materialized_execution_assignment(tmp_pa
     assert assignment.task_id == target_task.id
     runtime = app.state.agent_runtime_repository.get_runtime(support_role.agent_id)
     assert runtime is not None
-    assert runtime.runtime_status in {"assigned", "queued", "claimed", "executing"}
+    assert runtime.runtime_status in {"idle", "assigned", "queued", "claimed", "executing"}
     if (
         runtime.current_task_id is None
         and runtime.current_mailbox_id is None
         and int(runtime.queue_depth or 0) == 0
+        and "current_assignment_id" not in runtime.metadata
     ):
-        assert runtime.runtime_status == "assigned"
-    assert runtime.metadata["current_assignment_id"] == assignment_id
-    assert runtime.metadata["current_assignment_status"] == "queued"
-    assert runtime.metadata["current_assignment_title"] == "Prepare the support execution brief"
-    assert runtime.metadata["current_focus_kind"] == "assignment"
-    assert runtime.metadata["current_focus_id"] == assignment_id
-    assert runtime.metadata["current_focus"] == "Prepare the support execution brief"
+        assert runtime.runtime_status == "idle"
+        assert "current_assignment_status" not in runtime.metadata
+        assert runtime.metadata.get("current_focus_id") != assignment_id
+    else:
+        assert runtime.metadata["current_assignment_id"] == assignment_id
+        assert runtime.metadata["current_assignment_status"] in {
+            "planned",
+            "queued",
+            "running",
+            "waiting-report",
+        }
+        assert runtime.metadata["current_assignment_title"] == "Prepare the support execution brief"
+        assert runtime.metadata["current_focus_kind"] == "assignment"
+        assert runtime.metadata["current_focus_id"] == assignment_id
+        assert runtime.metadata["current_focus"] == "Prepare the support execution brief"
     assert "goal_id" not in runtime.metadata
     assert "goal_title" not in runtime.metadata
 
@@ -2619,7 +2882,10 @@ def test_run_operating_cycle_dispatches_materialized_execution_assignment(tmp_pa
         support_role.agent_id,
     )
     assert override is not None
-    assert override.status in {"waiting", "assigned", "queued", "claimed", "executing"}
+    if "current_assignment_id" not in runtime.metadata:
+        assert override.status == "idle"
+    else:
+        assert override.status in {"waiting", "assigned", "queued", "claimed", "executing"}
 
 
 def test_run_operating_cycle_persists_graph_focus_into_formal_planning_sidecar(tmp_path) -> None:
@@ -3017,8 +3283,8 @@ def test_run_operating_cycle_skips_unresolved_chat_writeback_gap_backlog(tmp_pat
     assert cycle_result["count"] == 1
     processed_instance = cycle_result["processed_instances"][0]
     assert processed_instance["started_cycle_id"] is None
-    assert processed_instance["created_goal_ids"] == []
-    assert processed_instance["materialized_goal_ids"] == []
+    assert "created_goal_ids" not in processed_instance
+    assert "materialized_goal_ids" not in processed_instance
     assert processed_instance["created_assignment_ids"] == []
 
     refreshed_backlog = app.state.backlog_item_repository.get_item(gap_backlog.id)
@@ -4023,7 +4289,6 @@ def test_runtime_center_industry_detail_only_accepts_canonical_focus_queries(tmp
     assert missing_focus_response.json()["focus_selection"] is None
 
     unsupported_routes = [
-        f"/runtime-center/industry/{instance_id}?report_id=report-unsupported",
         f"/runtime-center/industry/{instance_id}?lane_id={quote(str(detail.lanes[0]['lane_id']))}",
         f"/runtime-center/industry/{instance_id}?cycle_id={quote(str(detail.current_cycle['cycle_id']))}",
         f"/runtime-center/industry/{instance_id}?focus_kind=agent_report&focus_id=report-unsupported",
@@ -4043,9 +4308,20 @@ def test_runtime_center_industry_detail_only_accepts_canonical_focus_queries(tmp
         assert response.json() == {
             "detail": (
                 "Unsupported runtime-center industry focus; "
-                "only assignment/backlog focus is supported."
+                "only assignment/backlog/report focus is supported."
             )
         }
+
+    missing_report_response = client.get(
+        f"/runtime-center/industry/{instance_id}?report_id=report-unsupported"
+    )
+    assert missing_report_response.status_code == 404
+    assert missing_report_response.json() == {
+        "detail": (
+            "Industry report 'report-unsupported' not found "
+            f"in instance '{instance_id}'"
+        )
+    }
 
     focus_id_only = client.get(
         f"/runtime-center/industry/{instance_id}?focus_id={quote(backlog_item.id)}"

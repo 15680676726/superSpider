@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import logging
+from time import perf_counter
+
 from .service_context import *  # noqa: F401,F403
 from .service_recommendation_search import *  # noqa: F401,F403
 from .service_recommendation_pack import *  # noqa: F401,F403
@@ -8,6 +11,8 @@ from ..capabilities.lifecycle_assignment import (
     build_capability_lifecycle_assignment_payload,
 )
 from ..kernel.governed_mutation_dispatch import dispatch_governed_mutation_runtime
+
+logger = logging.getLogger(__name__)
 
 
 class _IndustryActivationMixin:
@@ -41,6 +46,13 @@ class _IndustryActivationMixin:
         capability_assignment_mode: Literal["replace", "merge"] = "merge",
         review_acknowledged: bool = False,
     ) -> IndustryBootstrapInstallResult:
+        started_at = perf_counter()
+        logger.info(
+            "Industry auto-close capability gap start: instance=%s recommendation=%s install_kind=%s",
+            instance_id,
+            recommendation.recommendation_id,
+            recommendation.install_kind,
+        )
         detail = self.get_instance_detail(instance_id)
         if detail is None:
             raise KeyError(f"Industry instance '{instance_id}' not found")
@@ -140,7 +152,7 @@ class _IndustryActivationMixin:
             governed_actor="industry-bootstrap",
             governed_risk_level_override="auto",
         )
-        return (
+        result = (
             results[0]
             if results
             else IndustryBootstrapInstallResult(
@@ -159,6 +171,15 @@ class _IndustryActivationMixin:
                 installed=False,
             )
         )
+        logger.info(
+            "Industry auto-close capability gap finish: instance=%s recommendation=%s elapsed=%.2fs status=%s detail=%s",
+            instance_id,
+            recommendation.recommendation_id,
+            perf_counter() - started_at,
+            result.status,
+            result.detail,
+        )
+        return result
 
     async def _activate_plan(
         self,
@@ -649,6 +670,40 @@ class _IndustryActivationMixin:
         self,
         detail: IndustryInstanceDetail,
     ) -> IndustryDraftPlan:
+        team_agents = list(detail.team.agents)
+        has_execution_core = any(
+            normalize_industry_role_id(role.role_id) == EXECUTION_CORE_ROLE_ID
+            for role in team_agents
+        )
+        execution_core_identity = detail.execution_core_identity
+        if not has_execution_core and execution_core_identity is not None:
+            team_agents.insert(
+                0,
+                IndustryRoleBlueprint(
+                    role_id=EXECUTION_CORE_ROLE_ID,
+                    agent_id=execution_core_identity.agent_id,
+                    name=execution_core_identity.role_name,
+                    role_name=execution_core_identity.role_name,
+                    role_summary=execution_core_identity.role_summary,
+                    mission=execution_core_identity.mission,
+                    goal_kind=EXECUTION_CORE_ROLE_ID,
+                    agent_class="system",
+                    employment_mode="career",
+                    activation_mode="persistent",
+                    suspendable=False,
+                    risk_level="guarded",
+                    environment_constraints=list(
+                        execution_core_identity.environment_constraints or [],
+                    ),
+                    allowed_capabilities=list(
+                        execution_core_identity.allowed_capabilities or [],
+                    ),
+                    evidence_expectations=list(
+                        execution_core_identity.evidence_expectations or [],
+                    ),
+                ),
+            )
+
         goals: list[IndustryDraftGoal] = []
         for item in detail.goals:
             payload = dict(item) if isinstance(item, dict) else {}
@@ -667,6 +722,30 @@ class _IndustryActivationMixin:
                     plan_steps=_unique_strings(payload.get("plan_steps")),
                 ),
             )
+        if not goals:
+            fallback_goal_role = next(
+                (
+                    role
+                    for role in team_agents
+                    if role.employment_mode != "temporary"
+                    and normalize_industry_role_id(role.role_id) != EXECUTION_CORE_ROLE_ID
+                ),
+                None,
+            ) or next(
+                (
+                    role
+                    for role in team_agents
+                    if role.employment_mode != "temporary"
+                ),
+                None,
+            ) or (team_agents[0] if team_agents else None)
+            if fallback_goal_role is not None:
+                goals.append(
+                    self._build_default_goal_for_role(
+                        detail.profile,
+                        fallback_goal_role,
+                    ),
+                )
 
         schedules: list[IndustryDraftSchedule] = []
         for item in detail.schedules:
@@ -694,7 +773,7 @@ class _IndustryActivationMixin:
             )
 
         return IndustryDraftPlan(
-            team=detail.team,
+            team=detail.team.model_copy(update={"agents": team_agents}),
             goals=goals,
             schedules=schedules,
         )
@@ -1259,6 +1338,12 @@ class _IndustryActivationMixin:
             payload: dict[str, object],
             fallback_risk: str = "guarded",
         ) -> dict[str, object]:
+            mutation_started_at = perf_counter()
+            logger.info(
+                "Industry install mutation start: capability=%s title=%s",
+                capability_ref,
+                title,
+            )
             governed_owner_agent_id = next(
                 (
                     role.agent_id
@@ -1295,7 +1380,21 @@ class _IndustryActivationMixin:
                         "decision_request_id",
                         _string(response.get("decision_request_id")),
                     )
+                    logger.info(
+                        "Industry install mutation finish: capability=%s title=%s elapsed=%.2fs success=%s",
+                        capability_ref,
+                        title,
+                        perf_counter() - mutation_started_at,
+                        bool(normalized_output.get("success")),
+                    )
                     return normalized_output
+                logger.info(
+                    "Industry install mutation finish: capability=%s title=%s elapsed=%.2fs success=%s",
+                    capability_ref,
+                    title,
+                    perf_counter() - mutation_started_at,
+                    bool(response.get("success")),
+                )
                 return response
             executor = {
                 "system:create_mcp_client": create_mcp_client,
@@ -1306,8 +1405,17 @@ class _IndustryActivationMixin:
             }.get(capability_ref)
             if executor is None:
                 raise ValueError(f"Capability executor '{capability_ref}' is not available.")
-            return await executor(payload=normalized_payload)
+            response = await executor(payload=normalized_payload)
+            logger.info(
+                "Industry install mutation finish: capability=%s title=%s elapsed=%.2fs success=%s",
+                capability_ref,
+                title,
+                perf_counter() - mutation_started_at,
+                bool(response.get("success")) if isinstance(response, dict) else None,
+            )
+            return response
         for item in install_plan:
+            item_started_at = perf_counter()
             recommendation = (
                 recommendation_by_id.get(item.recommendation_id)
                 if item.recommendation_id
@@ -1409,6 +1517,12 @@ class _IndustryActivationMixin:
             version = _string(item.version) or (
                 _string(recommendation.version) if recommendation is not None else ""
             ) or ""
+            logger.info(
+                "Industry install item start: install_kind=%s template=%s source=%s",
+                install_kind,
+                item.template_id,
+                source_url,
+            )
             if install_kind == "mcp-template":
                 template = get_desktop_mcp_template(item.template_id)
                 if template is None:
@@ -2164,5 +2278,12 @@ class _IndustryActivationMixin:
                         ),
                     },
                 ),
+            )
+            logger.info(
+                "Industry install item finish: install_kind=%s template=%s elapsed=%.2fs status=%s",
+                install_kind,
+                item.template_id,
+                perf_counter() - item_started_at,
+                results[-1].status,
             )
         return results

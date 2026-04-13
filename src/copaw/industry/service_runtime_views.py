@@ -16,6 +16,62 @@ from ..state.strategy_memory_service import resolve_strategy_payload
 
 
 class _IndustryRuntimeViewsMixin:
+    def _build_runtime_task_entry(
+        self,
+        task: TaskRecord,
+    ) -> dict[str, Any]:
+        runtime_repository = getattr(self._goal_service, "_task_runtime_repository", None)
+        frame_repository = getattr(self._goal_service, "_runtime_frame_repository", None)
+        decision_repository = getattr(
+            self._goal_service,
+            "_decision_request_repository",
+            None,
+        )
+        runtime = (
+            runtime_repository.get_runtime(task.id)
+            if runtime_repository is not None
+            else None
+        )
+        frames = (
+            frame_repository.list_frames(task.id, limit=3)
+            if frame_repository is not None
+            else []
+        )
+        decisions = (
+            decision_repository.list_decision_requests(task_id=task.id, limit=None)
+            if decision_repository is not None
+            else []
+        )
+        pending_decision_count = sum(
+            1
+            for decision in decisions
+            if _string(getattr(decision, "status", None)) in {"open", "reviewing"}
+        )
+        evidence = (
+            self._evidence_ledger.list_by_task(task.id)
+            if self._evidence_ledger is not None
+            else []
+        )
+        latest_evidence_id = (
+            evidence[-1].id
+            if evidence and evidence[-1].id is not None
+            else (
+                runtime.last_evidence_id
+                if runtime is not None
+                else None
+            )
+        )
+        return {
+            "task": task.model_dump(mode="json"),
+            "runtime": runtime.model_dump(mode="json") if runtime is not None else None,
+            "frames": [frame.model_dump(mode="json") for frame in frames],
+            "decision_count": len(decisions),
+            "pending_decision_count": pending_decision_count,
+            "evidence_count": len(evidence),
+            "latest_evidence_id": latest_evidence_id,
+            "route": f"/api/runtime-center/tasks/{task.id}",
+        }
+
     def _list_instance_schedules(
         self,
         instance_id: str,
@@ -106,6 +162,7 @@ class _IndustryRuntimeViewsMixin:
     def _resolve_live_focus_payload(
         self,
         *,
+        instance_id: str | None = None,
         execution: IndustryExecutionSummary | None,
         assignments: list[dict[str, Any]],
         backlog: list[dict[str, Any]],
@@ -113,7 +170,7 @@ class _IndustryRuntimeViewsMixin:
         selected_assignment_id: str | None = None,
         selected_backlog_item_id: str | None = None,
     ) -> dict[str, Any]:
-        focus_task = self._pick_execution_focus_task(tasks)
+        focus_task = self._pick_execution_focus_task(tasks, instance_id=instance_id)
         if focus_task is None and execution is not None and execution.current_task_id:
             focus_task = next(
                 (
@@ -915,7 +972,7 @@ class _IndustryRuntimeViewsMixin:
         selected_assignment_id: str | None = None,
         selected_backlog_item_id: str | None = None,
     ) -> IndustryMainChainGraph:
-        focus_task = self._pick_execution_focus_task(tasks)
+        focus_task = self._pick_execution_focus_task(tasks, instance_id=record.instance_id)
         if focus_task is None and execution is not None and execution.current_task_id:
             focus_task = next(
                 (
@@ -2091,7 +2148,7 @@ class _IndustryRuntimeViewsMixin:
             ),
             None,
         )
-        focus_task = self._pick_execution_focus_task(tasks)
+        focus_task = self._pick_execution_focus_task(tasks, instance_id=record.instance_id)
         if focus_task is None:
             if autonomy_status == "learning":
                 return IndustryExecutionSummary(
@@ -2674,11 +2731,20 @@ class _IndustryRuntimeViewsMixin:
 
                     else (
 
-                        f"/api/goals/{quote(report.goal_id)}/detail"
+                        f"/api/runtime-center/industry/{quote(record.instance_id)}"
+                        f"?assignment_id={quote(report.assignment_id)}"
 
-                        if report.goal_id
+                        if report.assignment_id
 
-                        else lane_route_by_id.get(report.lane_id)
+                        else (
+
+                            f"/api/goals/{quote(report.goal_id)}/detail"
+
+                            if report.goal_id
+
+                            else lane_route_by_id.get(report.lane_id)
+
+                        )
 
                     )
 
@@ -3077,7 +3143,16 @@ class _IndustryRuntimeViewsMixin:
 
             goals.append(goal_entry)
 
-
+        task_repository = getattr(self._goal_service, "_task_repository", None)
+        if task_repository is not None:
+            for task in task_repository.list_tasks(
+                industry_instance_id=record.instance_id,
+                limit=None,
+            ):
+                if task.id in tasks_by_id:
+                    continue
+                task_ids.add(task.id)
+                tasks_by_id[task.id] = self._build_runtime_task_entry(task)
 
         additional_evidence_ids = {
 
@@ -3240,6 +3315,7 @@ class _IndustryRuntimeViewsMixin:
 
         )
         baseline_live_focus = self._resolve_live_focus_payload(
+            instance_id=record.instance_id,
             execution=execution,
             assignments=assignments,
             backlog=backlog,
@@ -3248,6 +3324,7 @@ class _IndustryRuntimeViewsMixin:
             selected_backlog_item_id=None,
         )
         live_focus = self._resolve_live_focus_payload(
+            instance_id=record.instance_id,
             execution=execution,
             assignments=assignments,
             backlog=backlog,
@@ -3626,6 +3703,8 @@ class _IndustryRuntimeViewsMixin:
     def _pick_execution_focus_task(
         self,
         tasks: list[dict[str, Any]],
+        *,
+        instance_id: str | None = None,
     ) -> dict[str, Any] | None:
         if not tasks:
             return None
@@ -3636,6 +3715,17 @@ class _IndustryRuntimeViewsMixin:
         ]
         if not live_tasks:
             return None
+        if instance_id is not None:
+            continuity_live_tasks = [
+                item
+                for item in live_tasks
+                if not self._task_entry_conflicts_with_instance_continuity(
+                    item,
+                    instance_id=instance_id,
+                )
+            ]
+            if continuity_live_tasks:
+                live_tasks = continuity_live_tasks
         priorities = {
             "waiting-verification": 0,
             "waiting-confirm": 1,
@@ -3660,6 +3750,66 @@ class _IndustryRuntimeViewsMixin:
         )
         return ranked[0] if ranked else None
 
+    def _task_entry_conflicts_with_instance_continuity(
+        self,
+        task_entry: dict[str, Any],
+        *,
+        instance_id: str,
+    ) -> bool:
+        expected_anchor = f"industry-chat:{instance_id}:"
+        continuity_refs = self._task_entry_continuity_refs(task_entry)
+        industry_refs = [value for value in continuity_refs if "industry-chat:" in value]
+        if not industry_refs:
+            return False
+        return not any(expected_anchor in value for value in industry_refs)
+
+    def _task_entry_continuity_refs(
+        self,
+        task_entry: dict[str, Any],
+    ) -> list[str]:
+        task_payload = _mapping(task_entry.get("task"))
+        runtime_payload = _mapping(task_entry.get("runtime"))
+        metadata = decode_kernel_task_metadata(task_payload.get("acceptance_criteria"))
+        payload = _mapping(metadata.get("payload"))
+        compiler = _mapping(payload.get("compiler"))
+        task_seed = _mapping(payload.get("task_seed"))
+        request_context = _mapping(task_seed.get("request_context"))
+        meta = _mapping(payload.get("meta"))
+        refs = [
+            _string(runtime_payload.get("active_environment_id")),
+            _string(runtime_payload.get("active_environment_ref")),
+            _string(runtime_payload.get("environment_id")),
+            _string(runtime_payload.get("environment_ref")),
+            _string(runtime_payload.get("session_id")),
+            _string(runtime_payload.get("thread_id")),
+            _string(runtime_payload.get("control_thread_id")),
+            _string(task_payload.get("environment_ref")),
+            _string(task_payload.get("session_id")),
+            _string(task_payload.get("thread_id")),
+            _string(task_payload.get("control_thread_id")),
+            _string(payload.get("environment_ref")),
+            _string(payload.get("session_id")),
+            _string(payload.get("thread_id")),
+            _string(payload.get("control_thread_id")),
+            _string(meta.get("environment_ref")),
+            _string(meta.get("session_id")),
+            _string(meta.get("thread_id")),
+            _string(meta.get("control_thread_id")),
+            _string(compiler.get("environment_ref")),
+            _string(compiler.get("session_id")),
+            _string(compiler.get("thread_id")),
+            _string(compiler.get("control_thread_id")),
+            _string(task_seed.get("environment_ref")),
+            _string(task_seed.get("session_id")),
+            _string(task_seed.get("thread_id")),
+            _string(task_seed.get("control_thread_id")),
+            _string(request_context.get("environment_ref")),
+            _string(request_context.get("session_id")),
+            _string(request_context.get("thread_id")),
+            _string(request_context.get("control_thread_id")),
+        ]
+        return [value for value in refs if value]
+
     def _derive_execution_task_state(
         self,
         task_entry: dict[str, Any],
@@ -3675,7 +3825,7 @@ class _IndustryRuntimeViewsMixin:
             or _string(runtime_payload.get("last_result_summary"))
             or _string(task_payload.get("summary"))
         )
-        decision_count = int(task_entry.get("decision_count") or 0)
+        pending_decision_count = int(task_entry.get("pending_decision_count") or 0)
         verification_markers = (
             "验证码",
             "短信",
@@ -3689,22 +3839,11 @@ class _IndustryRuntimeViewsMixin:
             "verification",
             "verify",
         )
-        resource_markers = (
-            "缺少",
-            "未找到",
-            "不可用",
-            "permission",
-            "forbidden",
-            "not available",
-            "install",
-            "api key",
-            "登录",
-            "cookie",
-            "session",
-            "resource",
-            "文件",
-        )
-        if decision_count > 0 or status == "waiting-confirm" or phase == "waiting-confirm":
+        if (
+            pending_decision_count > 0
+            or status == "waiting-confirm"
+            or phase == "waiting-confirm"
+        ):
             if self._matches_execution_marker(detail_text, verification_markers):
                 return {
                     "status": "waiting-verification",
@@ -3717,18 +3856,6 @@ class _IndustryRuntimeViewsMixin:
                 "stuck_reason": None,
             }
         if status in {"failed", "blocked", "cancelled"}:
-            if self._matches_execution_marker(detail_text, verification_markers):
-                return {
-                    "status": "waiting-verification",
-                    "blocked_reason": detail_text or "Waiting for user-owned verification checkpoint.",
-                    "stuck_reason": None,
-                }
-            if self._matches_execution_marker(detail_text, resource_markers):
-                return {
-                    "status": "waiting-resource",
-                    "blocked_reason": detail_text or "Waiting for an external resource or environment prerequisite.",
-                    "stuck_reason": None,
-                }
             return {
                 "status": "failed",
                 "blocked_reason": detail_text or "Execution failed or was blocked.",

@@ -172,10 +172,12 @@ def test_query_execution_service_system_dispatch_tools_execute_via_kernel_dispat
     assert len(kernel_dispatcher.executed) == 4
     dispatch_query_task = kernel_dispatcher.submitted[0]
     assert dispatch_query_task.owner_agent_id == "ops-agent"
+    assert dispatch_query_task.parent_task_id == "task-1"
     assert dispatch_query_task.payload["request"]["agent_id"] == "ops-researcher"
     assert dispatch_query_task.payload["request"]["industry_instance_id"] == "industry-v1-ops"
     assert dispatch_query_task.payload["request"]["industry_role_id"] == "researcher"
     assert dispatch_query_task.payload["mode"] == "final"
+    assert dispatch_query_task.payload["task_id"] == dispatch_query_task.id
     discover_capabilities_task = kernel_dispatcher.submitted[1]
     assert discover_capabilities_task.payload["queries"] == ["crm follow-up automation"]
     assert discover_capabilities_task.payload["providers"] == ["remote"]
@@ -186,6 +188,109 @@ def test_query_execution_service_system_dispatch_tools_execute_via_kernel_dispat
     delegate_task = kernel_dispatcher.submitted[3]
     assert delegate_task.payload["parent_task_id"] == "task-1"
     assert delegate_task.payload["owner_agent_id"] == "ops-researcher"
+    assert delegate_task.payload["inherit_environment_ref"] is False
+
+
+def test_query_execution_service_delegate_task_tool_ignores_model_supplied_parent_override() -> None:
+    capability_service = _FakeCapabilityService()
+    kernel_dispatcher = _FakeKernelDispatcher()
+    agent_profile_service = _FakeAgentProfileService()
+    service = KernelQueryExecutionService(
+        session_backend=_FakeSessionBackend(),
+        capability_service=capability_service,
+        kernel_dispatcher=kernel_dispatcher,
+        agent_profile_service=agent_profile_service,
+        industry_service=_FakeIndustryService(),
+    )
+    agent_profile = agent_profile_service.get_agent("ops-agent")
+    request = SimpleNamespace(
+        session_id="industry-chat-1",
+        user_id="ops-agent",
+        channel="industry",
+        owner_scope="industry-v1-ops-scope",
+        industry_instance_id="industry-v1-ops",
+        industry_role_id="execution-core",
+        session_kind="industry-agent-chat",
+        entry_source="agent-workbench",
+    )
+
+    tool_functions = service._build_system_tool_functions(
+        request=request,
+        owner_agent_id="ops-agent",
+        agent_profile=agent_profile,
+        system_capability_ids={
+            "system:delegate_task",
+        },
+        kernel_task_id="task-root-1",
+    )
+    delegate_task = next(
+        tool_fn
+        for tool_fn in tool_functions
+        if tool_fn.__name__ == "delegate_task"
+    )
+
+    delegate_task_result = asyncio.run(
+        delegate_task(
+            "Check the missing file and report back honestly.",
+            target_role_name="Ops Researcher",
+            parent_task_id="ctask:stale-auto-cycle-parent",
+        ),
+    )
+
+    delegate_task_payload = query_execution_module._structured_tool_payload(
+        delegate_task_result,
+        default_error="delegate_task test payload missing",
+    )
+
+    assert delegate_task_payload["success"] is True
+    [submitted] = kernel_dispatcher.submitted
+    assert submitted.parent_task_id == "task-root-1"
+    assert submitted.payload["parent_task_id"] == "task-root-1"
+
+
+def test_query_execution_service_specialist_assignment_turn_hides_dispatch_and_delegate_tools() -> None:
+    capability_service = _FakeCapabilityService()
+    kernel_dispatcher = _FakeKernelDispatcher()
+    service = KernelQueryExecutionService(
+        session_backend=_FakeSessionBackend(),
+        capability_service=capability_service,
+        kernel_dispatcher=kernel_dispatcher,
+        agent_profile_service=_FakeAgentProfileService(),
+        industry_service=_FakeIndustryService(),
+    )
+    request = SimpleNamespace(
+        session_id="industry-chat-1",
+        user_id="ops-researcher",
+        channel="industry",
+        owner_scope="industry-v1-ops-scope",
+        industry_instance_id="industry-v1-ops",
+        industry_role_id="growth-focus",
+        assignment_id="assignment-1",
+        task_mode="autonomy-cycle",
+        session_kind="industry-agent-chat",
+        entry_source="agent-workbench",
+    )
+
+    tool_functions = service._build_system_tool_functions(
+        request=request,
+        owner_agent_id="ops-researcher",
+        agent_profile=None,
+        system_capability_ids={
+            "system:apply_role",
+            "system:discover_capabilities",
+            "system:dispatch_query",
+            "system:delegate_task",
+        },
+        kernel_task_id="task-1",
+    )
+
+    assert {
+        tool_fn.__name__
+        for tool_fn in tool_functions
+    } == {
+        "discover_capabilities",
+        "apply_role",
+    }
 
 
 def test_query_execution_service_discover_capabilities_preserves_mcp_registry_provider() -> None:
@@ -596,8 +701,68 @@ def test_query_execution_service_delegation_first_guard_blocks_direct_work_until
     assert self_target_payload["error_code"] == "delegation_self_target_blocked"
     assert delegation_guard.locked is True
 
-    preflight = service._build_tool_preflight(delegation_guard=delegation_guard)
-    assert preflight("execute_shell_command") is None
+    preflight = service._build_tool_preflight(
+        delegation_guard=delegation_guard,
+        request=request,
+        owner_agent_id="ops-agent",
+        agent_profile=agent_profile,
+    )
+    blocked_tool = preflight("execute_shell_command")
+    blocked_tool_payload = query_execution_module._structured_tool_payload(
+        blocked_tool,
+        default_error="delegation tool preflight payload missing",
+    )
+    assert blocked_tool_payload["success"] is False
+    assert blocked_tool_payload["error_code"] == "delegation_direct_tool_blocked"
+
+
+def test_query_execution_service_delegation_first_guard_prefers_agent_payload_capabilities() -> None:
+    class _RecordingCapabilityLookupService(_FakeCapabilityService):
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls: list[str | None] = []
+
+        def list_accessible_capabilities(self, *, agent_id: str | None, enabled_only: bool = False):
+            _ = enabled_only
+            self.calls.append(agent_id)
+            return super().list_accessible_capabilities(
+                agent_id=agent_id,
+                enabled_only=enabled_only,
+            )
+
+    capability_service = _RecordingCapabilityLookupService()
+    service = KernelQueryExecutionService(
+        session_backend=_FakeSessionBackend(),
+        capability_service=capability_service,
+        kernel_dispatcher=_FakeKernelDispatcher(),
+        agent_profile_service=_FakeAgentProfileService(),
+        industry_service=_FakeIndustryService(),
+    )
+    request = SimpleNamespace(
+        session_id="industry-chat-1",
+        user_id="ops-agent",
+        channel="industry",
+        owner_scope="industry-v1-ops-scope",
+        industry_instance_id="industry-v1-ops",
+        industry_role_id="execution-core",
+        session_kind="industry-agent-chat",
+        entry_source="agent-workbench",
+    )
+
+    delegation_guard = service._resolve_delegation_first_guard(
+        request=request,
+        owner_agent_id="ops-agent",
+        agent_profile=service._agent_profile_service.get_agent("ops-agent"),
+        system_capability_ids={
+            "system:dispatch_query",
+            "system:delegate_task",
+        },
+    )
+
+    assert delegation_guard is not None
+    assert delegation_guard.locked is True
+    assert [item["agent_id"] for item in delegation_guard.teammates] == ["ops-researcher"]
+    assert capability_service.calls == []
 
 
 def test_query_execution_service_delegation_first_guard_unlocks_after_child_terminal_report(

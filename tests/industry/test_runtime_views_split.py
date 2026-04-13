@@ -9,6 +9,7 @@ from copaw.industry.models import (
 )
 from copaw.industry.service_runtime_views import _IndustryRuntimeViewsMixin
 from copaw.state import (
+    AgentReportRecord,
     AgentRuntimeRecord,
     AssignmentRecord,
     BacklogItemRecord,
@@ -126,6 +127,16 @@ class _RuntimeViewsHarness(_IndustryRuntimeViewsMixin):
         summary = str(evidence.get("summary") or "").strip()
         return summary or None
 
+    def _matches_execution_marker(
+        self,
+        detail_text: str | None,
+        markers: tuple[str, ...],
+    ) -> bool:
+        if not detail_text:
+            return False
+        lowered = detail_text.lower()
+        return any(marker.lower() in lowered for marker in markers)
+
     def _list_schedule_ids_for_instance(self, instance_id: str) -> list[str]:
         _ = instance_id
         return []
@@ -237,8 +248,12 @@ class _CapabilityGovernanceRuntimeViewsHarness(_RuntimeViewsHarness):
         _ = (instance_id, schedule_ids)
         return []
 
-    def _resolve_instance_goal_ids(self, record: IndustryInstanceRecord) -> list[str]:
-        _ = record
+    def _resolve_instance_goal_ids(
+        self,
+        record: IndustryInstanceRecord,
+        team=None,
+    ) -> list[str]:
+        _ = (record, team)
         return []
 
     def _list_instance_agents(self, agent_ids: set[str]) -> list[dict[str, object]]:
@@ -321,6 +336,31 @@ class _FocusSelectionDetailRuntimeViewsHarness(_CapabilityGovernanceRuntimeViews
     def _build_instance_execution_summary(self, **kwargs) -> IndustryExecutionSummary:
         _ = kwargs
         return self._execution
+
+
+class _AgentReportRouteRuntimeViewsHarness(_FocusSelectionDetailRuntimeViewsHarness):
+    def __init__(
+        self,
+        strategy: StrategyMemoryRecord,
+        runtime_repository,
+        *,
+        assignments: list[AssignmentRecord],
+        backlog_items: list[BacklogItemRecord],
+        reports: list[AgentReportRecord],
+        execution: IndustryExecutionSummary,
+    ) -> None:
+        super().__init__(
+            strategy,
+            runtime_repository,
+            assignments=assignments,
+            backlog_items=backlog_items,
+            execution=execution,
+        )
+        self._reports = reports
+
+    def _list_agent_report_records(self, instance_id: str, limit=None):
+        _ = (instance_id, limit)
+        return list(self._reports)
 
 
 def test_runtime_views_mixin_owns_instance_detail_builder() -> None:
@@ -794,6 +834,170 @@ def test_execution_summary_does_not_invent_focus_from_live_task_title() -> None:
     assert summary.current_task_id == "task-live-focus"
 
 
+def test_execution_summary_ignores_malformed_waiting_confirm_task_after_recovery() -> None:
+    strategy = StrategyMemoryRecord(
+        strategy_id="strategy-industry-1",
+        scope_type="industry",
+        scope_id="industry-1",
+        title="Planning truth",
+    )
+    runtime_views = _RuntimeViewsHarness(strategy)
+    record = IndustryInstanceRecord(
+        instance_id="industry-1",
+        label="Northwind Robotics",
+        owner_scope="industry:northwind",
+        autonomy_status="active",
+    )
+
+    summary = runtime_views._build_instance_execution_summary(
+        record=record,
+        goals=[],
+        agents=[
+            {
+                "agent_id": "ops-agent",
+                "role_name": "Operator",
+                "risk_level": "guarded",
+            }
+        ],
+        tasks=[
+            {
+                "task": {
+                    "id": "task-stale-waiting-confirm",
+                    "title": "Malformed recovery checkpoint",
+                    "summary": "Older malformed recovery checkpoint is still hanging around.",
+                    "status": "running",
+                    "owner_agent_id": "ops-agent",
+                    "acceptance_criteria": (
+                        '{"kind":"kernel-task-meta-v1","payload":'
+                        '{"control_thread_id":"industry-chat:-core",'
+                        '"session_id":"industry-chat:-core",'
+                        '"thread_id":"industry-chat:-core"}}'
+                    ),
+                    "updated_at": "2026-04-03T00:01:00Z",
+                },
+                "runtime": {
+                    "runtime_status": "waiting-confirm",
+                    "current_phase": "waiting-confirm",
+                    "active_environment_id": (
+                        "session:console:delegate:query:session:console:"
+                        "copaw-agent-runner:industry-chat:-core:"
+                        "req-clean-s2-writeback:industry-researcher-northwind-robotics"
+                    ),
+                    "last_result_summary": "Waiting for operator confirm on malformed recovery thread.",
+                    "updated_at": "2026-04-03T00:02:00Z",
+                },
+                "route": "/api/runtime-center/kernel/tasks/task-stale-waiting-confirm",
+                "evidence_count": 0,
+            },
+            {
+                "task": {
+                    "id": "task-recovered-child",
+                    "title": "Recovered child task",
+                    "summary": "Recovered child task failed after confirm.",
+                    "status": "failed",
+                    "owner_agent_id": "ops-agent",
+                    "acceptance_criteria": (
+                        '{"kind":"kernel-task-meta-v1","payload":'
+                        '{"control_thread_id":"industry-chat:industry-1:execution-core",'
+                        '"session_id":"industry-chat:industry-1:execution-core",'
+                        '"thread_id":"industry-chat:industry-1:execution-core"}}'
+                    ),
+                    "updated_at": "2999-04-03T00:05:00Z",
+                },
+                "runtime": {
+                    "runtime_status": "failed",
+                    "current_phase": "failed",
+                    "active_environment_id": (
+                        "session:console:industry-chat:"
+                        "industry-1:execution-core"
+                    ),
+                    "last_error_summary": "Recovered child task failed after confirm.",
+                    "updated_at": "2999-04-03T00:06:00Z",
+                },
+                "route": "/api/runtime-center/kernel/tasks/task-recovered-child",
+                "evidence_count": 0,
+            },
+        ],
+        evidence=[],
+    )
+
+    assert summary.status == "failed"
+    assert summary.current_task_id == "task-recovered-child"
+    assert summary.current_owner_agent_id == "ops-agent"
+    assert summary.current_focus_id is None
+    assert summary.current_focus is None
+
+
+def test_execution_summary_failed_delegate_wrapper_does_not_misclassify_structured_error_as_waiting_verification() -> None:
+    strategy = StrategyMemoryRecord(
+        strategy_id="strategy-industry-1",
+        scope_type="industry",
+        scope_id="industry-1",
+        title="Planning truth",
+    )
+    runtime_views = _RuntimeViewsHarness(strategy)
+    record = IndustryInstanceRecord(
+        instance_id="industry-1",
+        label="Northwind Robotics",
+        owner_scope="industry:northwind",
+        autonomy_status="active",
+    )
+
+    structured_delegate_failure = (
+        "{'parent_task': {'id': 'ctask:stale-parent', "
+        "'summary': 'Verify the result and supporting evidence.'}, "
+        "'dispatch_result': {'phase': 'cancelled', "
+        "'summary': \"Parent task 'ctask:stale-parent' is already failed; "
+        "rejecting child admission fail-closed.\"}}"
+    )
+
+    summary = runtime_views._build_instance_execution_summary(
+        record=record,
+        goals=[],
+        agents=[
+            {
+                "agent_id": "ops-agent",
+                "role_name": "Operator",
+                "risk_level": "guarded",
+            }
+        ],
+        tasks=[
+            {
+                "task": {
+                    "id": "task-delegate-wrapper-failed",
+                    "title": "Delegate missing file check",
+                    "summary": "Delegated child tasks finished with 0 completed, 1 failed, 0 cancelled.",
+                    "status": "failed",
+                    "owner_agent_id": "ops-agent",
+                    "acceptance_criteria": (
+                        '{"kind":"kernel-task-meta-v1","payload":'
+                        '{"control_thread_id":"industry-chat:industry-1:execution-core",'
+                        '"session_id":"industry-chat:industry-1:execution-core",'
+                        '"thread_id":"industry-chat:industry-1:execution-core"}}'
+                    ),
+                    "updated_at": "2999-04-03T00:07:00Z",
+                },
+                "runtime": {
+                    "runtime_status": "failed",
+                    "current_phase": "failed",
+                    "active_environment_id": (
+                        "session:console:industry-chat:"
+                        "industry-1:execution-core"
+                    ),
+                    "last_error_summary": structured_delegate_failure,
+                    "updated_at": "2999-04-03T00:08:00Z",
+                },
+                "route": "/api/runtime-center/kernel/tasks/task-delegate-wrapper-failed",
+                "evidence_count": 0,
+            },
+        ],
+        evidence=[],
+    )
+
+    assert summary.status == "failed"
+    assert summary.current_task_id == "task-delegate-wrapper-failed"
+
+
 def test_execution_summary_coordinating_without_live_focus_does_not_fallback_to_goal_title() -> None:
     strategy = StrategyMemoryRecord(
         strategy_id="strategy-industry-1",
@@ -1177,3 +1381,57 @@ def test_industry_runtime_routes_point_to_runtime_center_surface(tmp_path: Path)
 
     assert '"runtime_center": "/api/runtime-center/surface"' in runtime_views
     assert '"runtime_center": "/api/runtime-center/surface"' in service_strategy
+
+
+def test_instance_detail_prefers_assignment_route_for_report_without_task(tmp_path) -> None:
+    state_store = SQLiteStateStore(tmp_path / "runtime-views-report-route.db")
+    runtime_repository = SqliteAgentRuntimeRepository(state_store)
+    strategy = StrategyMemoryRecord(
+        strategy_id="strategy-industry-1",
+        scope_type="industry",
+        scope_id="industry-1",
+        title="Planning truth",
+    )
+    runtime_views = _AgentReportRouteRuntimeViewsHarness(
+        strategy,
+        runtime_repository,
+        assignments=[
+            AssignmentRecord(
+                id="assignment-1",
+                industry_instance_id="industry-1",
+                goal_id="goal-legacy-focus",
+                title="Assignment title",
+                summary="Assignment summary",
+                status="queued",
+            ),
+        ],
+        backlog_items=[],
+        reports=[
+            AgentReportRecord(
+                id="report-1",
+                industry_instance_id="industry-1",
+                assignment_id="assignment-1",
+                goal_id="goal-legacy-focus",
+                headline="Report headline",
+                summary="Report summary",
+                result="completed",
+            ),
+        ],
+        execution=IndustryExecutionSummary(status="idle"),
+    )
+    record = IndustryInstanceRecord(
+        instance_id="industry-1",
+        label="Northwind Robotics",
+        summary="Governed industry runtime.",
+        owner_scope="industry:northwind",
+        profile_payload={"industry": "robotics", "company_name": "Northwind Robotics"},
+        agent_ids=["agent-seat"],
+        lifecycle_status="running",
+        autonomy_status="active",
+    )
+
+    detail = runtime_views._build_instance_detail(record).model_dump(mode="json")
+
+    assert detail["agent_reports"][0]["route"] == (
+        "/api/runtime-center/industry/industry-1?assignment_id=assignment-1"
+    )

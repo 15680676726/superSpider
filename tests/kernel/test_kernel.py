@@ -418,7 +418,7 @@ class TestKernelDispatcher:
         assert decision.status == "rejected"
         assert decision.resolution == "Rejected by operator."
 
-    def test_parent_task_waits_for_child_tasks_before_completing(self, tmp_path):
+    def test_dispatch_query_parent_does_not_auto_complete_on_child_terminal(self, tmp_path):
         dispatcher, _task_store = _build_dispatcher_with_decisions(tmp_path)
         parent = KernelTask(
             id="parent-task",
@@ -430,6 +430,32 @@ class TestKernelDispatcher:
             parent_task_id=parent.id,
             title="Child task",
             capability_ref="system:dispatch_query",
+        )
+        dispatcher.submit(parent)
+        dispatcher.submit(child)
+
+        blocked = dispatcher.complete_task(parent.id, summary="parent done")
+        assert blocked.phase == "executing"
+        assert dispatcher.lifecycle.get_task(parent.id).phase == "executing"
+
+        dispatcher.complete_task(child.id, summary="child done")
+        assert dispatcher.lifecycle.get_task(parent.id).phase == "executing"
+
+        completed = dispatcher.complete_task(parent.id, summary="parent done after turn closeout")
+        assert completed.phase == "completed"
+
+    def test_non_query_parent_auto_completes_after_last_child_terminal(self, tmp_path):
+        dispatcher, _task_store = _build_dispatcher_with_decisions(tmp_path)
+        parent = KernelTask(
+            id="parent-task",
+            title="Parent task",
+            capability_ref="system:delegate_task",
+        )
+        child = KernelTask(
+            id="child-task",
+            parent_task_id=parent.id,
+            title="Child task",
+            capability_ref="tool:execute_shell_command",
         )
         dispatcher.submit(parent)
         dispatcher.submit(child)
@@ -459,6 +485,85 @@ class TestKernelDispatcher:
 
         dispatcher.fail_task(child.id, error="child failed")
         assert dispatcher.lifecycle.get_task(parent.id).phase == "failed"
+
+    def test_failing_parent_cancels_live_child_subtree(self, tmp_path):
+        dispatcher, task_store = _build_dispatcher_with_decisions(tmp_path)
+        parent = KernelTask(
+            id="parent-task",
+            title="Parent task",
+            capability_ref="system:dispatch_query",
+        )
+        active_child = KernelTask(
+            id="child-active",
+            parent_task_id=parent.id,
+            title="Active child",
+            capability_ref="system:delegate_task",
+        )
+        waiting_child = KernelTask(
+            id="child-waiting",
+            parent_task_id=parent.id,
+            title="Waiting child",
+            capability_ref="tool:get_current_time",
+            risk_level="confirm",
+        )
+        waiting_grandchild = KernelTask(
+            id="grandchild-waiting",
+            parent_task_id=active_child.id,
+            title="Waiting grandchild",
+            capability_ref="tool:get_current_time",
+            risk_level="confirm",
+        )
+
+        dispatcher.submit(parent)
+        dispatcher.submit(active_child)
+        waiting_child_result = dispatcher.submit(waiting_child)
+        waiting_grandchild_result = dispatcher.submit(waiting_grandchild)
+
+        assert dispatcher.lifecycle.get_task(active_child.id).phase == "executing"
+        assert dispatcher.lifecycle.get_task(waiting_child.id).phase == "waiting-confirm"
+        assert dispatcher.lifecycle.get_task(waiting_grandchild.id).phase == "waiting-confirm"
+
+        dispatcher.fail_task(parent.id, error="parent failed")
+
+        assert dispatcher.lifecycle.get_task(parent.id).phase == "failed"
+        assert dispatcher.lifecycle.get_task(active_child.id).phase == "cancelled"
+        assert dispatcher.lifecycle.get_task(waiting_child.id).phase == "cancelled"
+        assert dispatcher.lifecycle.get_task(waiting_grandchild.id).phase == "cancelled"
+
+        waiting_child_decision = task_store.get_decision_request(
+            waiting_child_result.decision_request_id,
+        )
+        waiting_grandchild_decision = task_store.get_decision_request(
+            waiting_grandchild_result.decision_request_id,
+        )
+        assert waiting_child_decision is not None
+        assert waiting_child_decision.status == "rejected"
+        assert waiting_grandchild_decision is not None
+        assert waiting_grandchild_decision.status == "rejected"
+
+    def test_submit_rejects_child_when_parent_is_already_terminal(self, tmp_path):
+        dispatcher, task_store = _build_dispatcher_with_decisions(tmp_path)
+        parent = KernelTask(
+            id="parent-task",
+            title="Parent task",
+            capability_ref="system:dispatch_query",
+        )
+        dispatcher.submit(parent)
+        dispatcher.fail_task(parent.id, error="parent failed")
+
+        child = KernelTask(
+            id="child-after-parent-failed",
+            parent_task_id=parent.id,
+            title="Child after parent failed",
+            capability_ref="tool:get_current_time",
+            risk_level="confirm",
+        )
+
+        result = dispatcher.submit(child)
+
+        assert result.phase == "cancelled"
+        assert dispatcher.lifecycle.get_task(child.id).phase == "cancelled"
+        assert task_store.list_decision_requests(task_id=child.id) == []
 
     def test_fail_task_is_idempotent_for_terminal_task(self, tmp_path):
         dispatcher, task_store = _build_dispatcher_with_decisions(tmp_path)

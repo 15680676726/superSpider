@@ -326,11 +326,13 @@ def _recover_legacy_execution_core_chat_writebacks(
             _string(getattr(backlog_item, "goal_id", None))
             or _string(getattr(assignment, "goal_id", None))
         )
-        tasks = (
-            list(task_repository.list_tasks(goal_id=goal_id))
-            if goal_id is not None and callable(getattr(task_repository, "list_tasks", None))
-            else []
-        )
+        tasks: list[Any] = []
+        list_tasks = getattr(task_repository, "list_tasks", None)
+        if callable(list_tasks):
+            if assignment_id is not None:
+                tasks = list(list_tasks(assignment_id=assignment_id))
+            if not tasks and goal_id is not None:
+                tasks = list(list_tasks(goal_id=goal_id))
         runtimes_by_task_id = {
             task.id: task_runtime_repository.get_runtime(task.id)
             for task in tasks

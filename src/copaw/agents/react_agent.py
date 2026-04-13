@@ -634,15 +634,29 @@ class CoPawAgent(ReActAgent):
         ):
             # update memory manager
             self.memory = self.conversation_compaction_service.get_in_memory_memory()
-
-            # Register memory_search as a tool function
-            self.toolkit.register_tool_function(
-                _wrap_tool_function_for_toolkit(
-                    create_memory_search_tool(self.conversation_compaction_service),
-                ),
+            self._register_memory_tools(
+                toolkit=self.toolkit,
                 namesake_strategy=namesake_strategy,
             )
-            logger.debug("Registered memory_search tool")
+
+    def _register_memory_tools(
+        self,
+        *,
+        toolkit: Toolkit,
+        namesake_strategy: NamesakeStrategy,
+    ) -> None:
+        if (
+            not self._enable_memory_manager
+            or self.conversation_compaction_service is None
+        ):
+            return
+        toolkit.register_tool_function(
+            _wrap_tool_function_for_toolkit(
+                create_memory_search_tool(self.conversation_compaction_service),
+            ),
+            namesake_strategy=namesake_strategy,
+        )
+        logger.debug("Registered memory_search tool")
 
     def _register_hooks(self) -> None:
         """Register pre-reasoning hooks."""
@@ -676,6 +690,31 @@ class CoPawAgent(ReActAgent):
             if msg.role == "system":
                 msg.content = self.sys_prompt
             break
+
+    def set_prompt_appendix(self, prompt_appendix: str | None) -> None:
+        self._prompt_appendix = prompt_appendix
+
+    async def refresh_runtime_bindings(
+        self,
+        *,
+        prompt_appendix: str | None,
+        extra_tool_functions: list[object] | None,
+    ) -> None:
+        self._prompt_appendix = prompt_appendix
+        self._extra_tool_functions = list(extra_tool_functions or [])
+        toolkit = self._create_toolkit(namesake_strategy=self._namesake_strategy)
+        self._register_skills(toolkit)
+        self._register_memory_tools(
+            toolkit=toolkit,
+            namesake_strategy=self._namesake_strategy,
+        )
+        for client in self._mcp_clients:
+            await toolkit.register_mcp_client(
+                client,
+                namesake_strategy=self._namesake_strategy,
+            )
+        self.toolkit = toolkit
+        self.rebuild_sys_prompt()
 
     async def register_mcp_clients(
         self,

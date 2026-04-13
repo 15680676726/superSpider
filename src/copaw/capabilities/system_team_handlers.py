@@ -152,6 +152,9 @@ class SystemTeamCapabilityFacade:
                 industry_label=_string_value(resolved_payload.get("industry_label")),
                 owner_scope=_string_value(resolved_payload.get("owner_scope")),
                 session_kind=_string_value(resolved_payload.get("session_kind")),
+                inherit_environment_ref=bool(
+                    resolved_payload.get("inherit_environment_ref", True),
+                ),
             )
         except KeyError as exc:
             return {

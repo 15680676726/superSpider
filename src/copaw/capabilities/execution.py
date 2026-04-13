@@ -259,7 +259,11 @@ class CapabilityExecutionFacade:
             payload.setdefault("task_id", task.id)
             payload.setdefault("owner_agent_id", task.owner_agent_id)
             payload.setdefault("goal_id", task.goal_id)
-            payload.setdefault("environment_ref", task.environment_ref)
+            delegate_inherits_environment = bool(
+                payload.get("inherit_environment_ref", True),
+            )
+            if capability_id != "system:delegate_task" or delegate_inherits_environment:
+                payload.setdefault("environment_ref", task.environment_ref)
         mount = self._get_capability(capability_id)
         execution_context = self._build_execution_context(
             task,
@@ -841,10 +845,19 @@ class CapabilityExecutionFacade:
     def _response_phase(output_payload: dict[str, object] | None) -> str | None:
         if not isinstance(output_payload, dict):
             return None
+        dispatch_status = str(output_payload.get("dispatch_status") or "").strip().lower()
+        if dispatch_status == "canceled":
+            dispatch_status = "cancelled"
+        if dispatch_status in {"waiting-confirm", "blocked", "cancelled", "timeout"}:
+            return dispatch_status
         phase = str(output_payload.get("phase") or "").strip().lower()
+        if phase == "canceled":
+            phase = "cancelled"
         if phase in {"waiting-confirm", "blocked", "cancelled", "timeout"}:
             return phase
         status = str(output_payload.get("status") or "").strip().lower()
+        if status == "canceled":
+            status = "cancelled"
         if status in {"blocked", "cancelled", "timeout"}:
             return status
         return None

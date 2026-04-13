@@ -17,6 +17,12 @@
 >
 > 后续如两份文档有冲突，聊天入口与模式拆链以
 > `MAIN_BRAIN_CHAT_ORCHESTRATION_SPLIT_PLAN.md` 为准。
+>
+> `2026-04-12` 代码核对修正：
+>
+> - `task-chat:*` 已不再是正式前台导航目标，也不是 `RuntimeConversationFacade` 的正式会话 id。
+> - 前台正式聊天线程现在收口为主脑控制线程 `industry-chat:*`；`agent-chat:*` 与 `task-chat:*` 最多只应被理解为后台/兼容 artifact。
+> - 下文残留 `task-chat:*` 相关内容，如未显式改写为“后台 artifact / 历史规划”，都应按历史背景理解。
 
 ## 0. 文档目的
 
@@ -75,7 +81,7 @@
    - `should_writeback`
    - `query_confirmation_policy_change`
    - `team_role_gap_action`
-6. 如果是执行型请求，前端会在真正开始流式执行前先导航到 `task-chat:{task_id}`
+6. 这条历史设计里，如果是执行型请求，前端会在真正开始流式执行前先导航到 `task-chat:{task_id}`；当前活代码已不再这样做。
 
 这条链的问题有 4 个：
 
@@ -151,7 +157,7 @@
 
 ### 4.5 task thread 是结果，不是入口
 
-只有当 turn 里真的创建了正式任务、派发了后台执行或 materialize 了 task object，才应该出现 `task-chat:{task_id}`。
+只有当 turn 里真的创建了正式任务、派发了后台执行或 materialize 了 task object，后台/兼容层才可能残留 `task-chat:{task_id}` 一类 artifact；前台不应再把它当正式聊天入口。
 
 ---
 
@@ -359,14 +365,14 @@ task thread 只能来自真实 `Task / TaskRuntime / dispatch_query / assignment
 
 目标：
 
-- 保留 `control thread / task thread` 作为读模型
+- 保留 `control thread` 作为正式读模型；`task thread` 如仍存在，也只能作为后台/兼容读痕迹
 - 删除“任务线程优先于执行”的入口语义
 - task thread 只能由真实任务创建反推
 
 新的语义应为：
 
 - control thread：主脑/执行中枢对话面
-- task thread：已经存在正式任务后的工作线程
+- task thread：如果仍出现，只能解释为已经存在正式任务后的后台/兼容工作线程，不是前台可切换聊天页
 - chat 页面里的 task list：从实际 task metadata/evidence 派生
 
 而不是：
@@ -492,7 +498,7 @@ task thread 只能来自真实 `Task / TaskRuntime / dispatch_query / assignment
 
 ### 阶段 C：把 task thread 降级成结果面
 
-- 由真实任务创建回推 `task-chat:*`
+- 若仍保留 task thread artifact，只允许由真实任务创建后回推，不能恢复成前台路由
 - 重写 conversations/task list/query surfaces
 
 ### 阶段 D：删旧 + 文档 + 验收

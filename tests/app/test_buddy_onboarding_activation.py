@@ -561,10 +561,10 @@ def test_buddy_writing_instance_auto_closes_browser_specialist_gap_before_temp_s
     runtime = app.state.agent_runtime_repository.get_runtime(result["target_owner_agent_id"])
     assert runtime is not None
     capability_layers = runtime.metadata["capability_layers"]
-    assert "tool:browser_use" in capability_layers["role_prototype_capability_ids"]
+    assert "tool:browser_use" in capability_layers["effective_capability_ids"]
 
 
-def test_buddy_writing_instance_auto_closes_curated_browser_skill_gap_when_templates_miss(
+def test_buddy_writing_instance_falls_back_to_staffing_proposal_when_templates_miss(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -747,15 +747,21 @@ def test_buddy_writing_instance_auto_closes_curated_browser_skill_gap_when_templ
 
     assert result is not None
     assert result["dispatch_deferred"] is True
-    assert result["target_owner_agent_id"] == target_agent_id
-    assert "capability-gap-closed" in result["classification"]
-    assert "temporary-seat-proposal" not in result["classification"]
+    assert result["target_owner_agent_id"] != "copaw-agent-runner"
+    assert "capability-gap-closed" not in result["classification"]
+    assert "temporary-seat-proposal" in result["classification"]
     assert "temporary-seat-auto" not in result["classification"]
+    assert result["decision_request_id"]
 
-    override = app.state.agent_profile_override_repository.get_override(target_agent_id)
-    assert override is not None
-    assert "tool:browser_use" in (override.capabilities or [])
+    pending_detail = app.state.industry_service.get_instance_detail(instance_id)
+    assert pending_detail is not None
+    assert pending_detail.staffing["active_gap"] is not None
+    assert pending_detail.staffing["pending_proposals"]
 
+    runtime = app.state.agent_runtime_repository.get_runtime(result["target_owner_agent_id"])
+    if runtime is not None:
+        capability_layers = runtime.metadata["capability_layers"]
+        assert "tool:browser_use" not in capability_layers["effective_capability_ids"]
 
 def test_buddy_confirm_direction_real_kickoff_creates_leaf_tasks_for_specialist_agents(
     tmp_path,
@@ -1016,15 +1022,23 @@ def test_buddy_surface_repairs_legacy_buddy_execution_binding_before_chat(
         limit=None,
     )
     assert {lane.owner_agent_id for lane in repaired_lanes} <= specialist_agent_ids
-    repaired_assignments = app.state.assignment_repository.list_assignments(
-        industry_instance_id=instance_id,
-        limit=None,
-    )
-    leaf_assignments = [
-        item
-        for item in repaired_assignments
-        if item.owner_role_id in {"growth-focus", "proof-of-work"}
-    ]
+    leaf_assignments = []
+    assignment_deadline = time.time() + 8.0
+    while time.time() < assignment_deadline:
+        repaired_assignments = app.state.assignment_repository.list_assignments(
+            industry_instance_id=instance_id,
+            limit=None,
+        )
+        leaf_assignments = [
+            item
+            for item in repaired_assignments
+            if item.owner_role_id in {"growth-focus", "proof-of-work"}
+        ]
+        if leaf_assignments and {
+            item.owner_agent_id for item in leaf_assignments
+        } <= specialist_agent_ids:
+            break
+        time.sleep(0.2)
     assert leaf_assignments
     assert {item.owner_agent_id for item in leaf_assignments} <= specialist_agent_ids
 

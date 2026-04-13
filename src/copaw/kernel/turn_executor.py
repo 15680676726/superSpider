@@ -34,12 +34,14 @@ from ..app.runtime_commands import (
 )
 from ..industry.identity import is_execution_core_role_id
 from ..providers.model_diagnostics import normalize_runtime_exception
+from .lease_heartbeat import LeaseHeartbeat
 from .runtime_outcome import (
     build_execution_diagnostics,
     is_cancellation_runtime_error,
 )
 from .main_brain_intake import (
     extract_main_brain_intake_text,
+    materialize_requested_actions_main_brain_intake_contract,
     normalize_main_brain_runtime_context,
     read_attached_main_brain_intake_contract,
     resolve_main_brain_intake_contract,
@@ -62,9 +64,23 @@ from .query_execution_shared import (
     _first_non_empty,
     _is_hypothetical_control_text,
 )
+from .query_execution_writeback import (
+    ChatWritebackDecisionModelTimeoutError,
+    ChatWritebackDecisionModelUnavailableError,
+)
 from ..memory.conversation_compaction_service import ConversationCompactionService
 
 logger = logging.getLogger(__name__)
+
+
+def _should_propagate_main_brain_intake_error(exc: Exception) -> bool:
+    return isinstance(
+        exc,
+        (
+            ChatWritebackDecisionModelTimeoutError,
+            ChatWritebackDecisionModelUnavailableError,
+        ),
+    )
 
 _COGNITIVE_ACKNOWLEDGEMENTS = frozenset(
     {
@@ -521,6 +537,16 @@ async def _resolve_auto_chat_mode(
         }
         orchestrate_actions.discard("submit_human_assist")
         if orchestrate_actions:
+            intake_contract = materialize_requested_actions_main_brain_intake_contract(
+                request=request,
+                msgs=msgs,
+            )
+            if intake_contract is not None:
+                _set_request_runtime_value(
+                    request,
+                    "_copaw_main_brain_intake_contract",
+                    intake_contract,
+                )
             return "orchestrate"
 
     text = str(extract_main_brain_intake_text(msgs) or query or "").strip()
@@ -558,7 +584,9 @@ async def _resolve_auto_chat_mode(
                 request=request,
                 msgs=msgs,
             )
-        except Exception:
+        except Exception as exc:
+            if _should_propagate_main_brain_intake_error(exc):
+                raise
             logger.debug("Main-brain attached intake contract resolution failed", exc_info=True)
         if intake_contract is None:
             try:
@@ -566,9 +594,16 @@ async def _resolve_auto_chat_mode(
                     text=text,
                     msgs=msgs,
                 )
-            except Exception:
+            except Exception as exc:
+                if _should_propagate_main_brain_intake_error(exc):
+                    raise
                 logger.debug("Main-brain model intake contract resolution failed", exc_info=True)
     if intake_contract is not None:
+        _set_request_runtime_value(
+            request,
+            "_copaw_main_brain_intake_contract",
+            intake_contract,
+        )
         if intake_contract.should_route_to_orchestrate:
             return "orchestrate"
     if _request_has_active_confirmation_or_continuity(request=request):
@@ -1038,6 +1073,32 @@ class KernelTurnExecutor:
         except Exception:
             logger.exception("Kernel dispatcher failed to record terminal outcome")
 
+    def _build_managed_interactive_task_heartbeat(
+        self,
+        *,
+        kernel_task_id: str | None,
+        managed_by_kernel_dispatcher: bool,
+    ) -> LeaseHeartbeat | None:
+        if not managed_by_kernel_dispatcher or kernel_task_id is None:
+            return None
+        dispatcher = self._kernel_dispatcher
+        heartbeat_task = getattr(dispatcher, "heartbeat_task", None)
+        if not callable(heartbeat_task):
+            return None
+        timeout_seconds = getattr(
+            getattr(dispatcher, "_config", None),
+            "execution_timeout_seconds",
+            None,
+        )
+        interval_seconds = 15.0
+        if isinstance(timeout_seconds, (int, float)) and timeout_seconds > 0:
+            interval_seconds = max(0.01, min(15.0, float(timeout_seconds) / 4.0))
+        return LeaseHeartbeat(
+            label=f"interactive-task:{kernel_task_id}",
+            heartbeat=lambda: heartbeat_task(kernel_task_id),
+            interval_seconds=interval_seconds,
+        )
+
     async def handle_query(
         self,
         *,
@@ -1093,15 +1154,31 @@ class KernelTurnExecutor:
                     yield terminal_message
                     return
 
-                async for msg, last in run_command_path(
-                    request=request,
-                    msgs=msgs,
-                    session_backend=self._session_backend,
-                    memory_manager=self._conversation_compaction_service,
-                    restart_callback=self._restart_callback,
-                ):
-                    last_output_summary = summarize_stream_message(msg)
-                    yield msg, last
+                heartbeat = self._build_managed_interactive_task_heartbeat(
+                    kernel_task_id=kernel_task_id,
+                    managed_by_kernel_dispatcher=managed_by_kernel_dispatcher,
+                )
+                if heartbeat is None:
+                    async for msg, last in run_command_path(
+                        request=request,
+                        msgs=msgs,
+                        session_backend=self._session_backend,
+                        memory_manager=self._conversation_compaction_service,
+                        restart_callback=self._restart_callback,
+                    ):
+                        last_output_summary = summarize_stream_message(msg)
+                        yield msg, last
+                else:
+                    async with heartbeat:
+                        async for msg, last in run_command_path(
+                            request=request,
+                            msgs=msgs,
+                            session_backend=self._session_backend,
+                            memory_manager=self._conversation_compaction_service,
+                            restart_callback=self._restart_callback,
+                        ):
+                            last_output_summary = summarize_stream_message(msg)
+                            yield msg, last
 
                 self._complete_managed_interactive_task(
                     kernel_task_id=kernel_task_id,
@@ -1129,14 +1206,29 @@ class KernelTurnExecutor:
                 yield terminal_message
                 return
 
-            async for msg, last in self._main_brain_orchestrator.execute_stream(
-                msgs=msgs,
-                request=request,
+            heartbeat = self._build_managed_interactive_task_heartbeat(
                 kernel_task_id=kernel_task_id,
-                transient_input_message_ids=transient_input_message_ids,
-            ):
-                last_output_summary = summarize_stream_message(msg)
-                yield msg, last
+                managed_by_kernel_dispatcher=managed_by_kernel_dispatcher,
+            )
+            if heartbeat is None:
+                async for msg, last in self._main_brain_orchestrator.execute_stream(
+                    msgs=msgs,
+                    request=request,
+                    kernel_task_id=kernel_task_id,
+                    transient_input_message_ids=transient_input_message_ids,
+                ):
+                    last_output_summary = summarize_stream_message(msg)
+                    yield msg, last
+            else:
+                async with heartbeat:
+                    async for msg, last in self._main_brain_orchestrator.execute_stream(
+                        msgs=msgs,
+                        request=request,
+                        kernel_task_id=kernel_task_id,
+                        transient_input_message_ids=transient_input_message_ids,
+                    ):
+                        last_output_summary = summarize_stream_message(msg)
+                        yield msg, last
 
             self._complete_managed_interactive_task(
                 kernel_task_id=kernel_task_id,

@@ -731,7 +731,9 @@ class _GoalServiceDispatchMixin:
                                     admitted.summary,
                                 )
                                 break
+                            self._notify_industry_goal_status_change(goal_id=goal_id)
                         execution_result = await dispatcher.execute_task(task_id)
+                        self._notify_industry_goal_status_change(goal_id=goal_id)
                         if execution_result.phase != "completed":
                             logger.warning(
                                 "Background goal task did not complete cleanly; pausing remaining goal chain: goal=%s task=%s phase=%s summary=%s",

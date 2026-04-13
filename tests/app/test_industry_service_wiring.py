@@ -812,7 +812,7 @@ def test_kickoff_execution_from_chat_records_trigger_message_context_in_assignme
     assert captured["actor"] == "operator-1"
     assert result["started_assignment_ids"] == ["assignment-demo"]
     assert result["assignment_dispatches"][0]["task_id"] == "task-demo"
-    assert result["goal_dispatches"] == []
+    assert "goal_dispatches" not in result
     assert "started_goal_ids" not in result
     assert "started_goal_titles" not in result
     assert "resumed_schedule_ids" not in result

@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 import threading
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from hashlib import sha1
 from time import perf_counter
 from .service_context import *  # noqa: F401,F403
@@ -22,6 +22,7 @@ from ..compiler.planning import (
 )
 from ..compiler.models import CompilationUnit
 from ..evidence import EvidenceRecord
+from ..goals.service_shared import _task_compilation_snapshot, _task_compiler_meta
 from ..kernel import KernelTask
 from ..state.strategy_memory_service import resolve_strategy_payload
 from .service_report_closure import (
@@ -1004,6 +1005,38 @@ class _IndustryLifecycleMixin:
         digest = sha1(normalized.encode("utf-8")).hexdigest()[:16]
         return f"assignment:{digest}"
 
+    def _stable_report_id(
+        self,
+        *,
+        task_id: str,
+        result: str,
+    ) -> str:
+        normalized = "|".join(
+            str(part).strip()
+            for part in (task_id, result)
+            if str(part).strip()
+        )
+        digest = sha1(normalized.encode("utf-8")).hexdigest()[:16]
+        return f"report:{digest}"
+
+    def _stable_generated_backlog_id(
+        self,
+        *,
+        industry_instance_id: str,
+        source_kind: str,
+        source_ref: str,
+    ) -> str:
+        normalized = "|".join(
+            str(part).strip()
+            for part in (
+                industry_instance_id,
+                source_ref,
+            )
+            if str(part).strip()
+        )
+        digest = sha1(normalized.encode("utf-8")).hexdigest()[:16]
+        return f"backlog-{source_kind}:{digest}"
+
     def _compile_strategy_constraints(
         self,
         *,
@@ -1594,6 +1627,25 @@ class _IndustryLifecycleMixin:
     ) -> str:
         return _string(session_id) or f"industry-chat:{instance_id}:{EXECUTION_CORE_ROLE_ID}"
 
+    def _operating_cycle_assignment_session_id(
+        self,
+        *,
+        instance_id: str,
+        control_thread_id: str,
+        owner_role_id: str | None,
+        owner_agent_id: str | None,
+    ) -> str:
+        normalized_role_id = normalize_industry_role_id(owner_role_id)
+        if normalized_role_id is None:
+            normalized_owner_agent_id = _string(owner_agent_id)
+            if normalized_owner_agent_id is not None:
+                normalized_role_id = normalize_industry_role_id(
+                    normalized_owner_agent_id.rsplit(":", 1)[-1],
+                )
+        if normalized_role_id is None or normalized_role_id == EXECUTION_CORE_ROLE_ID:
+            return control_thread_id
+        return f"industry-chat:{instance_id}:{normalized_role_id}"
+
     def _append_frontdoor_transition_evidence(
         self,
         *,
@@ -1741,18 +1793,9 @@ class _IndustryLifecycleMixin:
                 goal_context_by_agent=goal_context_by_agent,
             ),
         )
-        curated_items, _curated_warnings = await self._build_curated_skill_recommendations(
-            profile=profile,
-            target_roles=target_roles,
-            goal_context_by_agent=goal_context_by_agent,
-        )
-        hub_items, _hub_warnings = await self._build_hub_skill_recommendations(
-            profile=profile,
-            target_roles=target_roles,
-            goal_context_by_agent=goal_context_by_agent,
-        )
-        items.extend(curated_items)
-        items.extend(hub_items)
+        # Live chat gap closure is a runtime-surface repair path. Keep it local to
+        # runtime/install-template recommendations so operator intake does not block
+        # on remote skill discovery or install traffic.
         return _standardize_recommendation_items(items, target_roles)
 
     async def _auto_close_temporary_seat_capability_gap(
@@ -2115,8 +2158,6 @@ class _IndustryLifecycleMixin:
             or int(existing.queue_depth or 0) > 0
         ):
             return "running"
-        if goal_link is not None:
-            return "running"
         return "idle"
 
     def _sync_role_runtime_surfaces_for_record(
@@ -2368,6 +2409,45 @@ class _IndustryLifecycleMixin:
         if self._backlog_service is None or assignment.backlog_item_id is None:
             return None
         return self._backlog_service.get_item(assignment.backlog_item_id)
+    def _operating_cycle_assignment_plan_steps(
+        self,
+        *,
+        item: BacklogItemRecord | None,
+        assignment: AssignmentRecord,
+    ) -> list[str]:
+        item_metadata = dict(item.metadata or {}) if item is not None else {}
+        assignment_metadata = (
+            dict(assignment.metadata or {})
+            if isinstance(assignment.metadata, Mapping)
+            else {}
+        )
+        assignment_formal_planning = (
+            dict(assignment_metadata.get("formal_planning") or {})
+            if isinstance(assignment_metadata.get("formal_planning"), Mapping)
+            else {}
+        )
+        assignment_plan = (
+            dict(assignment_formal_planning.get("assignment_plan") or {})
+            if isinstance(assignment_formal_planning.get("assignment_plan"), Mapping)
+            else {}
+        )
+        assignment_sidecar_plan = (
+            dict(assignment_plan.get("sidecar_plan") or {})
+            if isinstance(assignment_plan.get("sidecar_plan"), Mapping)
+            else {}
+        )
+        checklist_steps = _unique_strings(assignment_sidecar_plan.get("checklist"))
+        if checklist_steps:
+            return list(checklist_steps)
+        return _unique_strings(
+            item_metadata.get("plan_steps"),
+            assignment_metadata.get("plan_steps"),
+            [
+                "Confirm the backlog goal and the expected delivery boundary.",
+                "Execute the goal, collect evidence, and update the current status.",
+                "Return the completion summary together with the next recommendation.",
+            ],
+        )
     def _resolve_assignment_kickoff_stage(
         self,
         assignment: AssignmentRecord,
@@ -2460,6 +2540,247 @@ class _IndustryLifecycleMixin:
             }:
                 return True
         return False
+
+    @staticmethod
+    def _compiled_step_index_from_value(value: object) -> int | None:
+        if isinstance(value, int):
+            return max(0, value)
+        if isinstance(value, str) and value.strip().isdigit():
+            return max(0, int(value.strip()))
+        return None
+
+    def _assignment_followup_step_index(
+        self,
+        *,
+        tasks: Sequence[TaskRecord],
+        runtimes_by_task_id: Mapping[str, TaskRuntimeRecord],
+    ) -> tuple[int | None, TaskRecord | None]:
+        latest_task: TaskRecord | None = None
+        latest_sort_key = ""
+        latest_step_index: int | None = None
+        latest_step_total: int | None = None
+        latest_outcome: str | None = None
+        for task in tasks:
+            compiler_meta = _task_compiler_meta(task)
+            if compiler_meta.get("source_kind") != "compiler":
+                continue
+            step_index = self._compiled_step_index_from_value(
+                compiler_meta.get("step_index"),
+            )
+            if step_index is None:
+                step_number = self._compiled_step_index_from_value(
+                    compiler_meta.get("plan_step_number"),
+                )
+                if step_number is not None:
+                    step_index = max(0, step_number - 1)
+            step_total = self._compiled_step_index_from_value(
+                compiler_meta.get("plan_step_total"),
+            )
+            if step_index is None or step_total is None or step_total <= 1:
+                continue
+            compiled_at = _string(compiler_meta.get("compiled_at")) or ""
+            sort_key = f"{compiled_at}|{task.updated_at.isoformat()}|{task.id}"
+            if sort_key <= latest_sort_key:
+                continue
+            latest_sort_key = sort_key
+            latest_task = task
+            latest_step_index = step_index
+            latest_step_total = step_total
+            runtime = runtimes_by_task_id.get(task.id)
+            phase = _string(getattr(runtime, "current_phase", None))
+            status = _string(task.status)
+            latest_outcome = (phase or status or "").strip().lower() or None
+        if (
+            latest_task is None
+            or latest_step_index is None
+            or latest_step_total is None
+            or latest_outcome != "completed"
+            or latest_step_index + 1 >= latest_step_total
+        ):
+            return None, latest_task
+        return latest_step_index + 1, latest_task
+
+    def _continue_assignment_followup_steps(
+        self,
+        *,
+        record: IndustryInstanceRecord,
+        cycle_id: str | None,
+        assignment_id: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, list[str]]:
+        task_repository = getattr(self._goal_service, "_task_repository", None)
+        dispatcher = getattr(self._goal_service, "_dispatcher", None)
+        compiler = getattr(self._goal_service, "_compiler", None)
+        runtime_repository = getattr(self._goal_service, "_task_runtime_repository", None)
+        if (
+            task_repository is None
+            or dispatcher is None
+            or compiler is None
+            or self._assignment_repository is None
+        ):
+            return {"continued_terminal_task_ids": [], "created_task_ids": []}
+        current_cycle = (
+            self._operating_cycle_service.get_cycle(cycle_id)
+            if cycle_id is not None and self._operating_cycle_service is not None
+            else self._current_operating_cycle_record(record.instance_id)
+        )
+        if current_cycle is None:
+            return {"continued_terminal_task_ids": [], "created_task_ids": []}
+        assignments = {
+            item.id: item
+            for item in self._list_assignment_records(
+                record.instance_id,
+                cycle_id=current_cycle.id,
+            )
+            if assignment_id is None or item.id == assignment_id
+        }
+        if not assignments:
+            return {"continued_terminal_task_ids": [], "created_task_ids": []}
+        tasks = task_repository.list_tasks(
+            industry_instance_id=record.instance_id,
+            assignment_ids=list(assignments),
+            cycle_id=current_cycle.id,
+            limit=None,
+        )
+        tasks_by_assignment_id: dict[str, list[TaskRecord]] = {}
+        for task in tasks:
+            resolved_assignment_id = _string(task.assignment_id)
+            if resolved_assignment_id is None or resolved_assignment_id not in assignments:
+                continue
+            tasks_by_assignment_id.setdefault(resolved_assignment_id, []).append(task)
+        runtimes_by_task_id = (
+            {
+                runtime.task_id: runtime
+                for runtime in runtime_repository.list_runtimes(
+                    task_ids=[task.id for task in tasks],
+                )
+            }
+            if runtime_repository is not None and tasks
+            else {}
+        )
+        continued_terminal_task_ids: list[str] = []
+        created_task_ids: list[str] = []
+        enqueue = getattr(self._actor_mailbox_service, "enqueue_item", None)
+        block_mailbox = getattr(self._actor_mailbox_service, "block_item", None)
+        for current_assignment_id, assignment in assignments.items():
+            next_step_index, latest_task = self._assignment_followup_step_index(
+                tasks=tasks_by_assignment_id.get(current_assignment_id, []),
+                runtimes_by_task_id=runtimes_by_task_id,
+            )
+            if latest_task is None or next_step_index is None:
+                continue
+            if task_id is not None and latest_task.id != task_id:
+                continue
+            backlog_item = self._kickoff_assignment_backlog_item(assignment)
+            base_unit: CompilationUnit | None = None
+            if backlog_item is not None:
+                base_unit = self._build_operating_cycle_assignment_unit(
+                    record=record,
+                    item=backlog_item,
+                    cycle=current_cycle,
+                    assignment=assignment,
+                    actor=EXECUTION_CORE_AGENT_ID,
+                )
+            else:
+                snapshot = _task_compilation_snapshot(latest_task)
+                if snapshot is not None:
+                    base_unit = snapshot["unit"]
+            if base_unit is None:
+                continue
+            base_context = dict(base_unit.context or {})
+            if not _unique_strings(base_context.get("steps")):
+                fallback_steps = self._operating_cycle_assignment_plan_steps(
+                    item=backlog_item,
+                    assignment=assignment,
+                )
+                if fallback_steps:
+                    base_context["steps"] = list(fallback_steps)
+            new_unit = base_unit.model_copy(
+                update={
+                    "context": {
+                        **base_context,
+                        "current_step_index": next_step_index,
+                    },
+                },
+            )
+            kernel_tasks = compiler.compile_to_kernel_tasks(
+                new_unit,
+                specs=compiler.compile(new_unit),
+            )
+            if not kernel_tasks:
+                continue
+            primary_task_id: str | None = None
+            admitted_phase = "queued"
+            for compiled_task in kernel_tasks:
+                task = compiled_task.model_copy(update={"title": assignment.title})
+                admitted = dispatcher.submit(task)
+                stored_task = task_repository.get_task(task.id)
+                if stored_task is not None:
+                    task_repository.upsert_task(
+                        stored_task.model_copy(
+                            update={
+                                "industry_instance_id": record.instance_id,
+                                "assignment_id": assignment.id,
+                                "lane_id": assignment.lane_id,
+                                "cycle_id": assignment.cycle_id,
+                                "report_back_mode": assignment.report_back_mode,
+                            },
+                        ),
+                    )
+                mailbox_item = None
+                if callable(enqueue):
+                    mailbox_item = enqueue(
+                        agent_id=task.owner_agent_id,
+                        task_id=task.id,
+                        work_context_id=task.work_context_id,
+                        source_agent_id=EXECUTION_CORE_AGENT_ID,
+                        parent_mailbox_id=None,
+                        envelope_type="task",
+                        title=assignment.title,
+                        summary=assignment.summary or assignment.title,
+                        capability_ref=task.capability_ref,
+                        conversation_thread_id=f"agent-chat:{task.owner_agent_id}",
+                        payload={
+                            "capability_ref": task.capability_ref,
+                            "environment_ref": task.environment_ref,
+                            "risk_level": task.risk_level,
+                            "payload": dict(task.payload or {}),
+                        },
+                        metadata={
+                            "industry_instance_id": record.instance_id,
+                            "industry_role_id": assignment.owner_role_id,
+                            "assignment_id": assignment.id,
+                            "lane_id": assignment.lane_id,
+                            "cycle_id": assignment.cycle_id,
+                            "work_context_id": task.work_context_id,
+                            "execution_source": "assignment-followup",
+                        },
+                    )
+                    if admitted.phase != "executing" and callable(block_mailbox):
+                        block_mailbox(
+                            mailbox_item.id,
+                            reason=admitted.summary or f"Task is in phase '{admitted.phase}'",
+                            task_id=task.id,
+                        )
+                created_task_ids.append(task.id)
+                primary_task_id = primary_task_id or task.id
+                admitted_phase = admitted.phase
+            if primary_task_id is None:
+                continue
+            continued_terminal_task_ids.append(latest_task.id)
+            self._assignment_repository.upsert_assignment(
+                assignment.model_copy(
+                    update={
+                        "task_id": primary_task_id,
+                        "status": "running" if admitted_phase == "executing" else "queued",
+                        "updated_at": _utc_now(),
+                    },
+                ),
+            )
+        return {
+            "continued_terminal_task_ids": continued_terminal_task_ids,
+            "created_task_ids": created_task_ids,
+        }
     def _list_pending_kickoff_assignments(
         self,
         record: IndustryInstanceRecord,
@@ -2650,6 +2971,35 @@ class _IndustryLifecycleMixin:
                 record=record,
                 cycle_id=cycle_id,
             )
+            if self._assignment_service is not None:
+                task_repository = getattr(self._goal_service, "_task_repository", None)
+                tasks_by_assignment_id: dict[str, list[TaskRecord]] = {}
+                tasks_by_goal_id: dict[str, list[TaskRecord]] = {}
+                if task_repository is not None:
+                    existing_tasks = task_repository.list_tasks(
+                        industry_instance_id=record.instance_id,
+                        cycle_id=cycle_id,
+                        limit=None,
+                    )
+                    for task in existing_tasks:
+                        assignment_id = _string(task.assignment_id)
+                        if assignment_id is not None:
+                            tasks_by_assignment_id.setdefault(assignment_id, []).append(task)
+                        goal_id = _string(task.goal_id)
+                        if goal_id is not None:
+                            tasks_by_goal_id.setdefault(goal_id, []).append(task)
+                latest_reports_by_assignment_id = self._agent_report_service.latest_reports_by_assignment(
+                    industry_instance_id=record.instance_id,
+                    cycle_id=cycle_id,
+                )
+                self._assignment_service.reconcile_assignments(
+                    industry_instance_id=record.instance_id,
+                    cycle_id=cycle_id,
+                    goals_by_id={},
+                    tasks_by_assignment_id=tasks_by_assignment_id,
+                    tasks_by_goal_id=tasks_by_goal_id,
+                    latest_reports_by_assignment_id=latest_reports_by_assignment_id,
+                )
             if current_cycle is not None and self._operating_cycle_service is not None:
                 self._operating_cycle_service.reconcile_cycle(
                     current_cycle,
@@ -2691,19 +3041,21 @@ class _IndustryLifecycleMixin:
             else self._current_operating_cycle_record(record.instance_id)
         )
         target_cycle_id = cycle_id or (target_cycle.id if target_cycle is not None else None)
+        followup_dispatch = self._continue_assignment_followup_steps(
+            record=record,
+            cycle_id=target_cycle_id,
+            assignment_id=assignment_id,
+            task_id=task_id,
+        )
         created_reports = self._ensure_terminal_agent_reports(
             record=record,
             cycle_id=target_cycle_id,
+            skip_task_ids=set(followup_dispatch.get("continued_terminal_task_ids") or []),
         )
         processed_reports = self._process_pending_agent_reports(
             record=record,
             cycle_id=target_cycle_id,
         )
-        goals_by_id = {
-            goal_id: goal
-            for goal_id in self._resolve_instance_goal_ids(record)
-            if (goal := self._goal_service.get_goal(goal_id)) is not None
-        }
         tasks_by_assignment_id: dict[str, list[TaskRecord]] = {}
         tasks_by_goal_id: dict[str, list[TaskRecord]] = {}
         task_repository = getattr(self._goal_service, "_task_repository", None)
@@ -2727,7 +3079,7 @@ class _IndustryLifecycleMixin:
         assignments = self._assignment_service.reconcile_assignments(
             industry_instance_id=record.instance_id,
             cycle_id=target_cycle_id,
-            goals_by_id=goals_by_id,
+            goals_by_id={},
             tasks_by_assignment_id=tasks_by_assignment_id,
             tasks_by_goal_id=tasks_by_goal_id,
             latest_reports_by_assignment_id=latest_reports_by_assignment_id,
@@ -2756,6 +3108,7 @@ class _IndustryLifecycleMixin:
             "task_id": task_id,
             "created_report_ids": [report.id for report in created_reports],
             "processed_report_ids": [report.id for report in processed_reports],
+            "continued_task_ids": list(followup_dispatch.get("created_task_ids") or []),
             "assignment_statuses": {
                 item.id: item.status
                 for item in assignments
@@ -2906,9 +3259,9 @@ class _IndustryLifecycleMixin:
                     "blocked_stage": "learning",
                     "blocked_reason": "Industry learning stage is still in progress.",
                     "started_assignment_ids": [],
+                    "started_task_ids": [],
                     "started_assignment_titles": [],
                     "assignment_dispatches": [],
-                    "goal_dispatches": [],
                     "pending_execution_remaining": False,
                     "acquisition_cycle": (
                         await _run_learning_acquisition_cycle()
@@ -2930,9 +3283,9 @@ class _IndustryLifecycleMixin:
                 "blocked_stage": "learning",
                 "blocked_reason": "Industry learning stage is still in progress.",
                 "started_assignment_ids": [],
+                "started_task_ids": [],
                 "started_assignment_titles": [],
                 "assignment_dispatches": [],
-                "goal_dispatches": [],
                 "pending_execution_remaining": True,
                 "acquisition_cycle": (
                     await _run_learning_acquisition_cycle()
@@ -2990,6 +3343,13 @@ class _IndustryLifecycleMixin:
             selected_assignment_by_id[assignment_id].title
             for assignment_id in started_assignment_ids
         ]
+        started_task_ids = [
+            task_id
+            for task_id in (
+                _string(item.get("task_id")) for item in assignment_dispatches
+            )
+            if task_id is not None
+        ]
         pending_execution_transition = kickoff_stage == "learning" and (
             any(
                 stage == "execution"
@@ -3007,6 +3367,35 @@ class _IndustryLifecycleMixin:
                 },
             ),
         )
+        if current_cycle is not None and self._assignment_service is not None:
+            task_repository = getattr(self._goal_service, "_task_repository", None)
+            tasks_by_assignment_id: dict[str, list[TaskRecord]] = {}
+            tasks_by_goal_id: dict[str, list[TaskRecord]] = {}
+            if task_repository is not None:
+                existing_tasks = task_repository.list_tasks(
+                    industry_instance_id=updated_record.instance_id,
+                    cycle_id=current_cycle.id,
+                    limit=None,
+                )
+                for task in existing_tasks:
+                    assignment_id = _string(task.assignment_id)
+                    if assignment_id is not None:
+                        tasks_by_assignment_id.setdefault(assignment_id, []).append(task)
+                    goal_id = _string(task.goal_id)
+                    if goal_id is not None:
+                        tasks_by_goal_id.setdefault(goal_id, []).append(task)
+            latest_reports_by_assignment_id = self._agent_report_service.latest_reports_by_assignment(
+                industry_instance_id=updated_record.instance_id,
+                cycle_id=current_cycle.id,
+            )
+            self._assignment_service.reconcile_assignments(
+                industry_instance_id=updated_record.instance_id,
+                cycle_id=current_cycle.id,
+                goals_by_id={},
+                tasks_by_assignment_id=tasks_by_assignment_id,
+                tasks_by_goal_id=tasks_by_goal_id,
+                latest_reports_by_assignment_id=latest_reports_by_assignment_id,
+            )
         if current_cycle is not None and self._operating_cycle_service is not None:
             self._operating_cycle_service.reconcile_cycle(
                 current_cycle,
@@ -3044,9 +3433,9 @@ class _IndustryLifecycleMixin:
             "activated": bool(started_assignment_ids),
             "kickoff_stage": kickoff_stage,
             "started_assignment_ids": started_assignment_ids,
+            "started_task_ids": started_task_ids,
             "started_assignment_titles": started_assignment_titles,
             "assignment_dispatches": assignment_dispatches,
-            "goal_dispatches": [],
             "pending_execution_remaining": pending_execution_transition,
             "acquisition_cycle": acquisition_cycle,
         }
@@ -3098,6 +3487,14 @@ class _IndustryLifecycleMixin:
         writeback_plan: ChatWritebackPlan | None = None,
     ) -> dict[str, Any] | None:
         started_at = perf_counter()
+        stage_timings: dict[str, float] = {}
+
+        def _timed(name: str, factory):
+            stage_started_at = perf_counter()
+            result = factory()
+            stage_timings[name] = perf_counter() - stage_started_at
+            return result
+
         logger.info(
             "Industry chat writeback enter: instance=%s owner=%s",
             industry_instance_id,
@@ -3113,14 +3510,23 @@ class _IndustryLifecycleMixin:
             )
         if plan is None or not plan.active:
             return None
-        profile = IndustryProfile.model_validate(
-            record.profile_payload or {"industry": record.label},
+        profile = _timed(
+            "profile_model_validate",
+            lambda: IndustryProfile.model_validate(
+                record.profile_payload or {"industry": record.label},
+            ),
         )
-        team = self._materialize_team_blueprint(record)
-        execution_core_identity = self._materialize_execution_core_identity(
-            record,
-            profile=profile,
-            team=team,
+        team = _timed(
+            "materialize_team_blueprint",
+            lambda: self._materialize_team_blueprint(record),
+        )
+        execution_core_identity = _timed(
+            "materialize_execution_core_identity",
+            lambda: self._materialize_execution_core_identity(
+                record,
+                profile=profile,
+                team=team,
+            ),
         )
         resolved_execution_owner_agent_id = (
             owner_agent_id
@@ -3132,7 +3538,10 @@ class _IndustryLifecycleMixin:
             team_surface_capability_mounts,
             team_surface_environment_texts,
             role_surface_context,
-        ) = self._collect_team_surface_context(team=team)
+        ) = _timed(
+            "collect_team_surface_context",
+            lambda: self._collect_team_surface_context(team=team),
+        )
         logger.info(
             "Industry chat writeback team surface collected: instance=%s elapsed=%.2fs capability_ids=%d mounts=%d env_texts=%d",
             record.instance_id,
@@ -3141,12 +3550,15 @@ class _IndustryLifecycleMixin:
             len(team_surface_capability_mounts),
             len(team_surface_environment_texts),
         )
-        requested_surfaces = self._list_chat_writeback_requested_surfaces(
-            message_text=plan.normalized_text,
-            plan=plan,
-            capability_ids=team_surface_capability_ids,
-            capability_mounts=team_surface_capability_mounts,
-            environment_texts=team_surface_environment_texts,
+        requested_surfaces = _timed(
+            "resolve_requested_surfaces",
+            lambda: self._list_chat_writeback_requested_surfaces(
+                message_text=plan.normalized_text,
+                plan=plan,
+                capability_ids=team_surface_capability_ids,
+                capability_mounts=team_surface_capability_mounts,
+                environment_texts=team_surface_environment_texts,
+            ),
         )
         logger.info(
             "Industry chat writeback requested surfaces resolved: instance=%s elapsed=%.2fs requested_surfaces=%s",
@@ -3154,12 +3566,15 @@ class _IndustryLifecycleMixin:
             perf_counter() - started_at,
             ",".join(requested_surfaces),
         )
-        matched_role, target_match_signals = self._resolve_chat_writeback_target_role(
-            record=record,
-            team=team,
-            message_text=plan.normalized_text,
-            requested_surfaces=requested_surfaces,
-            role_surface_context=role_surface_context,
+        matched_role, target_match_signals = _timed(
+            "resolve_target_role",
+            lambda: self._resolve_chat_writeback_target_role(
+                record=record,
+                team=team,
+                message_text=plan.normalized_text,
+                requested_surfaces=requested_surfaces,
+                role_surface_context=role_surface_context,
+            ),
         )
         logger.info(
             "Industry chat writeback target role resolved: instance=%s elapsed=%.2fs matched_role=%s signals=%s",
@@ -3168,11 +3583,14 @@ class _IndustryLifecycleMixin:
             _string(getattr(matched_role, "role_id", None)) if matched_role is not None else None,
             ",".join(target_match_signals),
         )
-        seat_resolution = resolve_chat_writeback_seat_gap(
-            message_text=plan.normalized_text,
-            requested_surfaces=requested_surfaces,
-            matched_role=matched_role,
-            team=team,
+        seat_resolution = _timed(
+            "resolve_seat_gap",
+            lambda: resolve_chat_writeback_seat_gap(
+                message_text=plan.normalized_text,
+                requested_surfaces=requested_surfaces,
+                matched_role=matched_role,
+                team=team,
+            ),
         )
         seat_resolution_kind = seat_resolution.kind
         seat_resolution_reason = _string(seat_resolution.reason) or ""
@@ -3183,6 +3601,13 @@ class _IndustryLifecycleMixin:
             seat_resolution_kind,
             _string(getattr(matched_role, "role_id", None)) if matched_role is not None else None,
             ",".join(requested_surfaces),
+        )
+        stage_timings["total"] = perf_counter() - started_at
+        logger.info(
+            "Industry chat writeback timings: instance=%s owner=%s %s",
+            record.instance_id,
+            resolved_execution_owner_agent_id,
+            " ".join(f"{key}={value:.2f}s" for key, value in stage_timings.items()),
         )
         control_thread_id = self._chat_writeback_control_thread_id(
             instance_id=record.instance_id,
@@ -3541,8 +3966,6 @@ class _IndustryLifecycleMixin:
             execution_core_identity=execution_core_identity,
         )
         updated_profile = self._apply_chat_writeback_to_profile(profile, plan=plan)
-        created_goal_ids: list[str] = []
-        created_goal_titles: list[str] = []
         created_backlog_ids: list[str] = []
         reused_backlog_ids: list[str] = []
         if plan.goal is not None:
@@ -3671,7 +4094,6 @@ class _IndustryLifecycleMixin:
                 )
                 created_schedule_ids.append(schedule_seed.schedule_id)
                 created_schedule_titles.append(schedule_seed.title)
-        goal_dispatches: list[dict[str, Any]] = []
         profile_payload = updated_profile.model_dump(mode="json")
         active_record = record
         profile_changed = profile_payload != dict(record.profile_payload or {})
@@ -3831,10 +4253,7 @@ class _IndustryLifecycleMixin:
             "classification": list(plan.classifications),
             "strategy_updated": strategy_updated,
             "strategy_id": strategy_id,
-            "created_goal_ids": created_goal_ids,
-            "created_goal_titles": created_goal_titles,
             "created_backlog_ids": created_backlog_ids,
-            "goal_dispatches": goal_dispatches,
             "materialized_cycle_id": materialized_cycle_id,
             "materialized_assignment_ids": materialized_assignment_ids,
             "reused_backlog_ids": reused_backlog_ids,
@@ -4275,65 +4694,73 @@ class _IndustryLifecycleMixin:
                 or _string(recommendation_metadata.get("target_agent_id"))
                 or _string(action_payload.get("agent_id"))
             )
-            backlog_items.append(
-                self._backlog_service.record_generated_item(
+            source_ref = self._stable_prediction_source_ref(
+                action_kind=_string(recommendation.get("action_kind")),
+                target_agent_id=target_agent_id,
+                target_goal_id=_string(recommendation.get("target_goal_id")),
+                title=_string(recommendation.get("title")) or "Cycle Opportunity",
+                action_payload=action_payload,
+            )
+            existing_backlog_item = self._backlog_service.get_item(
+                self._stable_generated_backlog_id(
                     industry_instance_id=record.instance_id,
-                    lane_id=self._resolve_prediction_lane_id(
-                        industry_instance_id=record.instance_id,
-                        recommendation=recommendation,
-                    ),
-                    title=_string(recommendation.get("title")) or "Cycle Opportunity",
-                    summary=(
-                        _string(recommendation.get("summary"))
-                        or "Prediction surfaced a governed opportunity for the main brain."
-                    ),
-                    priority=self._prediction_backlog_priority(recommendation.get("priority")),
                     source_kind="prediction",
-                    source_ref=self._stable_prediction_source_ref(
-                        action_kind=_string(recommendation.get("action_kind")),
-                        target_agent_id=target_agent_id,
-                        target_goal_id=_string(recommendation.get("target_goal_id")),
-                        title=_string(recommendation.get("title")) or "Cycle Opportunity",
-                        action_payload=action_payload,
-                    ),
-                    metadata={
-                        "source": "operating-cycle",
-                        "trigger_source": f"prediction:{case_id}" if case_id is not None else "prediction:cycle",
-                        "trigger_actor": actor,
-                        "trigger_reason": "Operating cycle surfaced a prediction-backed opportunity for the main brain.",
-                        "prediction_case_id": case_id,
-                        "prediction_recommendation_id": _string(recommendation.get("recommendation_id")),
-                        "prediction_case_kind": _string(case_payload.get("case_kind")),
-                        "prediction_status": _string(recommendation.get("status")),
-                        "prediction_confidence": recommendation.get("confidence"),
-                        "meeting_window": meeting_window,
-                        "action_kind": _string(recommendation.get("action_kind")),
-                        "risk_level": _string(recommendation.get("risk_level")),
-                        "executable": bool(recommendation.get("executable")),
-                        "owner_agent_id": target_agent_id,
-                        "target_goal_id": _string(recommendation.get("target_goal_id")),
-                        "industry_role_id": (
-                            _string(recommendation_metadata.get("industry_role_id"))
-                            or _string(action_payload.get("role_id"))
-                        ),
-                        "industry_role_name": (
-                            _string(recommendation_metadata.get("industry_role_name"))
-                            or _string(recommendation_metadata.get("suggested_role_name"))
-                        ),
-                        "goal_kind": (
-                            _string(recommendation_metadata.get("goal_kind"))
-                            or _string(recommendation_metadata.get("family_id"))
-                        ),
-                        "report_back_mode": "summary",
-                        "source_route": _string(routes.get("case")),
-                        "plan_steps": [
-                            "Review the main-brain meeting recommendation and lock the concrete objective.",
-                            "Execute the next governed move and leave evidence.",
-                            "Report the result, blocker, or follow-up back to the main brain.",
-                        ],
-                    },
+                    source_ref=source_ref,
                 ),
             )
+            backlog_item = self._backlog_service.record_generated_item(
+                industry_instance_id=record.instance_id,
+                lane_id=self._resolve_prediction_lane_id(
+                    industry_instance_id=record.instance_id,
+                    recommendation=recommendation,
+                ),
+                title=_string(recommendation.get("title")) or "Cycle Opportunity",
+                summary=(
+                    _string(recommendation.get("summary"))
+                    or "Prediction surfaced a governed opportunity for the main brain."
+                ),
+                priority=self._prediction_backlog_priority(recommendation.get("priority")),
+                source_kind="prediction",
+                source_ref=source_ref,
+                metadata={
+                    "source": "operating-cycle",
+                    "trigger_source": f"prediction:{case_id}" if case_id is not None else "prediction:cycle",
+                    "trigger_actor": actor,
+                    "trigger_reason": "Operating cycle surfaced a prediction-backed opportunity for the main brain.",
+                    "prediction_case_id": case_id,
+                    "prediction_recommendation_id": _string(recommendation.get("recommendation_id")),
+                    "prediction_case_kind": _string(case_payload.get("case_kind")),
+                    "prediction_status": _string(recommendation.get("status")),
+                    "prediction_confidence": recommendation.get("confidence"),
+                    "meeting_window": meeting_window,
+                    "action_kind": _string(recommendation.get("action_kind")),
+                    "risk_level": _string(recommendation.get("risk_level")),
+                    "executable": bool(recommendation.get("executable")),
+                    "owner_agent_id": target_agent_id,
+                    "target_goal_id": _string(recommendation.get("target_goal_id")),
+                    "industry_role_id": (
+                        _string(recommendation_metadata.get("industry_role_id"))
+                        or _string(action_payload.get("role_id"))
+                    ),
+                    "industry_role_name": (
+                        _string(recommendation_metadata.get("industry_role_name"))
+                        or _string(recommendation_metadata.get("suggested_role_name"))
+                    ),
+                    "goal_kind": (
+                        _string(recommendation_metadata.get("goal_kind"))
+                        or _string(recommendation_metadata.get("family_id"))
+                    ),
+                    "report_back_mode": "summary",
+                    "source_route": _string(routes.get("case")),
+                    "plan_steps": [
+                        "Review the main-brain meeting recommendation and lock the concrete objective.",
+                        "Execute the next governed move and leave evidence.",
+                        "Report the result, blocker, or follow-up back to the main brain.",
+                    ],
+                },
+            )
+            if existing_backlog_item is None:
+                backlog_items.append(backlog_item)
         return (case_id, backlog_items)
     def should_run_operating_cycle(self) -> tuple[bool, str]:
         for record in self._industry_instance_repository.list_instances(status=None):
@@ -4401,12 +4828,13 @@ class _IndustryLifecycleMixin:
                     )
                 else:
                     result["created_task_ids"] = list(result.get("created_task_ids") or [])
-                result["auto_dispatched_goal_ids"] = []
-                result["goal_dispatches"] = []
                 if auto_resume is not None:
                     result["auto_resumed_execution"] = True
                     result["auto_resumed_assignment_ids"] = list(
                         auto_resume.get("started_assignment_ids") or [],
+                    )
+                    result["auto_resumed_task_ids"] = list(
+                        auto_resume.get("started_task_ids") or [],
                     )
                 processed_instances.append(result)
             if limit is not None and len(processed_instances) >= limit:
@@ -4760,11 +5188,6 @@ class _IndustryLifecycleMixin:
             processed=False,
             limit=None,
         )
-        goals_by_id = {
-            goal_id: goal
-            for goal_id in self._resolve_instance_goal_ids(record)
-            if (goal := self._goal_service.get_goal(goal_id)) is not None
-        }
         assignments = self._list_assignment_records(
             record.instance_id,
             cycle_id=current_cycle.id if current_cycle is not None else None,
@@ -4792,7 +5215,7 @@ class _IndustryLifecycleMixin:
         assignments = self._assignment_service.reconcile_assignments(
             industry_instance_id=record.instance_id,
             cycle_id=current_cycle.id if current_cycle is not None else None,
-            goals_by_id=goals_by_id,
+            goals_by_id={},
             tasks_by_assignment_id=tasks_by_assignment_id,
             tasks_by_goal_id=tasks_by_goal_id,
             latest_reports_by_assignment_id=latest_reports_by_assignment_id,
@@ -4831,7 +5254,6 @@ class _IndustryLifecycleMixin:
         )
         reason: str | None = None
         new_cycle: OperatingCycleRecord | None = None
-        new_goal_ids: list[str] = []
         new_assignment_ids: list[str] = []
         planner_current_cycle = None if force and backlog_item_ids else current_cycle
         if new_cycle is None:
@@ -4927,8 +5349,6 @@ class _IndustryLifecycleMixin:
         return {
             "instance_id": reconciled.instance_id,
             "started_cycle_id": new_cycle.id if new_cycle is not None else None,
-            "created_goal_ids": new_goal_ids,
-            "materialized_goal_ids": [],
             "created_assignment_ids": new_assignment_ids,
             "created_task_ids": [],
             "created_report_ids": [report.id for report in created_reports],
@@ -4956,6 +5376,7 @@ class _IndustryLifecycleMixin:
         *,
         record: IndustryInstanceRecord,
         cycle_id: str | None,
+        skip_task_ids: set[str] | None = None,
     ) -> list[AgentReportRecord]:
         task_repository = getattr(self._goal_service, "_task_repository", None)
         runtime_repository = getattr(self._goal_service, "_task_runtime_repository", None)
@@ -4977,6 +5398,8 @@ class _IndustryLifecycleMixin:
             limit=None,
         )
         for task in tasks:
+            if skip_task_ids and task.id in skip_task_ids:
+                continue
             if task.status not in {"completed", "failed", "cancelled"}:
                 continue
             runtime = (
@@ -4987,6 +5410,18 @@ class _IndustryLifecycleMixin:
             assignment = assignments.get(task.assignment_id or "")
             if assignment is None:
                 continue
+            existing_report = None
+            terminal_result = _string(task.status)
+            if (
+                terminal_result in {"completed", "failed", "cancelled"}
+                and self._agent_report_service is not None
+            ):
+                existing_report = self._agent_report_service.get_report(
+                    self._stable_report_id(
+                        task_id=task.id,
+                        result=terminal_result,
+                    ),
+                )
             evidence_ids: list[str] = []
             task_routine_run_id: str | None = None
             task_fixed_sop_binding_id: str | None = None
@@ -5056,7 +5491,7 @@ class _IndustryLifecycleMixin:
                 }
                 or None,
             )
-            if report is not None:
+            if report is not None and existing_report is None:
                 created.append(report)
         return created
     def _process_pending_agent_reports(
@@ -5207,6 +5642,19 @@ class _IndustryLifecycleMixin:
         )
         role_id = _string(assignment.owner_role_id) or _string(metadata.get("industry_role_id"))
         owner_agent_id = _string(assignment.owner_agent_id) or _string(metadata.get("owner_agent_id"))
+        control_thread_id = self._chat_writeback_control_thread_id(
+            instance_id=record.instance_id,
+            session_id=(
+                _string(metadata.get("control_thread_id"))
+                or _string(metadata.get("session_id"))
+            ),
+        )
+        execution_session_id = self._operating_cycle_assignment_session_id(
+            instance_id=record.instance_id,
+            control_thread_id=control_thread_id,
+            owner_role_id=role_id,
+            owner_agent_id=owner_agent_id,
+        )
         lane = (
             self._operating_lane_service.get_lane(item.lane_id)
             if self._operating_lane_service is not None and item.lane_id is not None
@@ -5227,24 +5675,9 @@ class _IndustryLifecycleMixin:
             if isinstance(assignment_plan.get("sidecar_plan"), Mapping)
             else {}
         )
-        checklist_steps = _unique_strings(assignment_sidecar_plan.get("checklist"))
-        if checklist_steps:
-            plan_steps = list(checklist_steps)
-        else:
-            plan_steps = _unique_strings(
-                metadata.get("plan_steps"),
-                [
-                    "Confirm the backlog goal and the expected delivery boundary.",
-                    "Execute the goal, collect evidence, and update the current status.",
-                    "Return the completion summary together with the next recommendation.",
-                ],
-            )
-        control_thread_id = self._chat_writeback_control_thread_id(
-            instance_id=record.instance_id,
-            session_id=(
-                _string(metadata.get("control_thread_id"))
-                or _string(metadata.get("session_id"))
-            ),
+        plan_steps = self._operating_cycle_assignment_plan_steps(
+            item=item,
+            assignment=assignment,
         )
         environment_ref = _string(metadata.get("environment_ref")) or (
             f"session:{_string(metadata.get('chat_writeback_channel')) or 'console'}:industry:{record.instance_id}"
@@ -5349,7 +5782,7 @@ class _IndustryLifecycleMixin:
             "trigger_actor": trigger_actor or actor or EXECUTION_CORE_AGENT_ID,
             "trigger_reason": trigger_reason,
             "environment_ref": environment_ref,
-            "session_id": control_thread_id,
+            "session_id": execution_session_id,
             "control_thread_id": control_thread_id,
             "work_context_id": _string(metadata.get("work_context_id")),
         }

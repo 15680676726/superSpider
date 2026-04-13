@@ -311,6 +311,17 @@ async def resolve_request_main_brain_intake_contract(
     request: Any,
     msgs: list[Any],
 ) -> MainBrainIntakeContract | None:
+    return materialize_requested_actions_main_brain_intake_contract(
+        request=request,
+        msgs=msgs,
+    )
+
+
+def materialize_requested_actions_main_brain_intake_contract(
+    *,
+    request: Any,
+    msgs: list[Any],
+) -> MainBrainIntakeContract | None:
     attached = read_attached_main_brain_intake_contract(request=request)
     if attached is not None:
         return attached
@@ -480,6 +491,7 @@ __all__ = [
     "MainBrainIntakeContract",
     "build_industry_chat_action_kwargs",
     "extract_main_brain_intake_text",
+    "materialize_requested_actions_main_brain_intake_contract",
     "materialize_main_brain_intake_contract",
     "read_attached_main_brain_intake_contract",
     "normalize_main_brain_runtime_context",

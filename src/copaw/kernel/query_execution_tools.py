@@ -38,13 +38,29 @@ class _QueryExecutionToolsMixin:
         )
         current_industry_label = _first_non_empty(getattr(request, "industry_label", None))
         current_owner_scope = _first_non_empty(getattr(request, "owner_scope", None))
+        current_session_id = _first_non_empty(getattr(request, "session_id", None))
         current_channel = _first_non_empty(getattr(request, "channel", None), DEFAULT_CHANNEL) or DEFAULT_CHANNEL
         current_entry_source = _first_non_empty(getattr(request, "entry_source", None)) or "agent-workbench"
         current_parent_task_id = _first_non_empty(kernel_task_id)
+        current_environment_ref = (
+            f"session:{current_channel}:{current_session_id}"
+            if current_session_id is not None
+            else None
+        )
         execution_core_owner = (
             is_execution_core_agent_id(owner_agent_id)
             or current_industry_role_id == EXECUTION_CORE_ROLE_ID
         )
+        assignment_leaf_owner = (
+            not execution_core_owner
+            and _first_non_empty(getattr(request, "assignment_id", None)) is not None
+        )
+        if assignment_leaf_owner:
+            supported.difference_update(
+                {"system:dispatch_query", "system:delegate_task"},
+            )
+            if not supported:
+                return []
 
         tools: list[Any] = []
 
@@ -242,6 +258,8 @@ class _QueryExecutionToolsMixin:
                         owner_agent_id=owner_agent_id,
                         payload=payload,
                         title=title or f"Dispatch query to {resolved_agent_id}",
+                        parent_task_id=current_parent_task_id,
+                        environment_ref=current_environment_ref,
                     ),
                     default_error=(
                         "dispatch_query returned an unexpected result payload"
@@ -273,7 +291,13 @@ class _QueryExecutionToolsMixin:
                     return _json_tool_response(
                         {"success": False, "error": "prompt_text is required"},
                     )
-                resolved_parent_task_id = _first_non_empty(parent_task_id, current_parent_task_id)
+                # The live interactive query task is the authoritative delegation parent.
+                # Model-supplied parent ids may reflect stale recovery/runtime context and
+                # must not override the current frontdoor chain.
+                resolved_parent_task_id = _first_non_empty(
+                    current_parent_task_id,
+                    parent_task_id,
+                )
                 if not resolved_parent_task_id:
                     return _json_tool_response(
                         {
@@ -353,6 +377,7 @@ class _QueryExecutionToolsMixin:
                     "industry_role_id": target_industry_role_id,
                     "industry_label": target_industry_label,
                     "owner_scope": current_owner_scope,
+                    "inherit_environment_ref": False,
                     "session_kind": (
                         "industry-agent-chat"
                         if target_industry_instance_id and target_industry_role_id
@@ -365,6 +390,8 @@ class _QueryExecutionToolsMixin:
                         owner_agent_id=owner_agent_id,
                         payload=payload,
                         title=title or f"Delegate task to {resolved_agent_id}",
+                        parent_task_id=current_parent_task_id,
+                        environment_ref=current_environment_ref,
                     ),
                     default_error=(
                         "delegate_task returned an unexpected result payload"
@@ -482,6 +509,8 @@ class _QueryExecutionToolsMixin:
                             owner_agent_id=owner_agent_id,
                             payload=payload,
                             title=title or f"Apply role/capabilities to {resolved_agent_id}",
+                            parent_task_id=current_parent_task_id,
+                            environment_ref=current_environment_ref,
                         ),
                         default_error=(
                             "apply_role returned an unexpected result payload"
@@ -554,6 +583,8 @@ class _QueryExecutionToolsMixin:
                             owner_agent_id=owner_agent_id,
                             payload=payload,
                             title=title or "Discover capabilities",
+                            parent_task_id=current_parent_task_id,
+                            environment_ref=current_environment_ref,
                         ),
                         default_error=(
                             "discover_capabilities returned an unexpected result payload"
@@ -572,6 +603,8 @@ class _QueryExecutionToolsMixin:
         owner_agent_id: str,
         payload: dict[str, object],
         title: str,
+        parent_task_id: str | None = None,
+        environment_ref: str | None = None,
     ) -> dict[str, object]:
         service = self._capability_service
         if service is None:
@@ -579,13 +612,22 @@ class _QueryExecutionToolsMixin:
         getter = getattr(service, "get_capability", None)
         mount = getter(capability_id) if callable(getter) else None
         if mount is not None and self._kernel_dispatcher is not None:
+            normalized_payload = dict(payload)
             task = KernelTask(
                 title=title,
                 capability_ref=capability_id,
                 owner_agent_id=owner_agent_id,
                 risk_level=getattr(mount, "risk_level", "guarded"),
-                payload=payload,
+                parent_task_id=parent_task_id,
+                environment_ref=environment_ref,
+                payload=normalized_payload,
             )
+            if capability_id in {"system:dispatch_query", "system:dispatch_command"}:
+                if not _first_non_empty(
+                    normalized_payload.get("task_id"),
+                    normalized_payload.get("kernel_task_id"),
+                ):
+                    task.payload["task_id"] = task.id
             admitted = self._kernel_dispatcher.submit(task)
             if admitted.phase != "executing":
                 return admitted.model_dump(mode="json")

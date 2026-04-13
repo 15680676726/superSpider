@@ -877,3 +877,173 @@ def test_startup_recovery_does_not_requeue_legacy_gap_from_capability_environmen
     refreshed_backlog = backlog_repository.get_item(backlog_item.id)
     assert refreshed_backlog is not None
     assert "chat_writeback_requested_surfaces" not in refreshed_backlog.metadata
+
+
+def test_startup_recovery_cancels_assignment_anchored_task_before_goal_fallback(
+    tmp_path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    delegate_task_repository = SqliteTaskRepository(state_store)
+    task_runtime_repository = SqliteTaskRuntimeRepository(state_store)
+    decision_repository = SqliteDecisionRequestRepository(state_store)
+    schedule_repository = SqliteScheduleRepository(state_store)
+    backlog_repository = SqliteBacklogItemRepository(state_store)
+    assignment_repository = SqliteAssignmentRepository(state_store)
+    goal_repository = SqliteGoalRepository(state_store)
+    goal_override_repository = SqliteGoalOverrideRepository(state_store)
+    industry_repository = SqliteIndustryInstanceRepository(state_store)
+    operating_cycle_repository = SqliteOperatingCycleRepository(state_store)
+
+    class _RecordingTaskRepository:
+        def __init__(self, delegate) -> None:
+            self._delegate = delegate
+            self.calls: list[dict[str, object]] = []
+
+        def list_tasks(self, **kwargs):
+            self.calls.append(dict(kwargs))
+            return self._delegate.list_tasks(**kwargs)
+
+        def upsert_task(self, task):
+            return self._delegate.upsert_task(task)
+
+        def get_task(self, task_id: str):
+            return self._delegate.get_task(task_id)
+
+    task_repository = _RecordingTaskRepository(delegate_task_repository)
+
+    industry_repository.upsert_instance(
+        IndustryInstanceRecord(
+            instance_id="industry-1",
+            label="Recovery industry",
+            owner_scope="owner-1",
+            current_cycle_id="cycle-legacy-assignment-anchor",
+        ),
+    )
+    operating_cycle_repository.upsert_cycle(
+        OperatingCycleRecord(
+            id="cycle-legacy-assignment-anchor",
+            industry_instance_id="industry-1",
+            cycle_kind="daily",
+            title="Legacy assignment-anchor cycle",
+            status="active",
+        ),
+    )
+
+    goal_repository.upsert_goal(
+        GoalRecord(
+            id="goal-legacy-assignment-anchor",
+            title="Legacy goal anchor",
+            summary="Legacy goal kept only for compatibility cleanup.",
+            status="active",
+            priority=3,
+            owner_scope="owner-1",
+            industry_instance_id="industry-1",
+            cycle_id="cycle-legacy-assignment-anchor",
+            goal_class="cycle-goal",
+        ),
+    )
+    assignment_repository.upsert_assignment(
+        AssignmentRecord(
+            id="assignment-legacy-assignment-anchor",
+            industry_instance_id="industry-1",
+            cycle_id="cycle-legacy-assignment-anchor",
+            goal_id="goal-legacy-assignment-anchor",
+            owner_agent_id="copaw-agent-runner",
+            owner_role_id="execution-core",
+            title="Assignment anchored task",
+            summary="Recovery should cancel the live assignment task it actually owns.",
+            status="running",
+        ),
+    )
+    backlog_item = BacklogItemRecord(
+        id="backlog-legacy-assignment-anchor",
+        industry_instance_id="industry-1",
+        cycle_id="cycle-legacy-assignment-anchor",
+        goal_id="goal-legacy-assignment-anchor",
+        assignment_id="assignment-legacy-assignment-anchor",
+        title="Handle legacy routing gap",
+        summary="Re-anchor recovery on assignment-owned task truth.",
+        status="materialized",
+        priority=3,
+        source_kind="operator",
+        source_ref="chat-writeback:legacy-assignment-anchor",
+        metadata={
+            "source": "chat-writeback",
+            "industry_role_id": "execution-core",
+            "owner_agent_id": "copaw-agent-runner",
+            "task_mode": "chat-writeback-followup",
+            "chat_writeback_instruction": "Open the desktop workspace and finish the follow-up.",
+            "chat_writeback_requested_surfaces": ["desktop"],
+            "chat_writeback_target_match_signals": [],
+        },
+    )
+    backlog_repository.upsert_item(backlog_item)
+    delegate_task_repository.upsert_task(
+        TaskRecord(
+            id="task-legacy-assignment-anchor",
+            assignment_id="assignment-legacy-assignment-anchor",
+            title="Live assignment task",
+            summary="Task truth hangs off assignment, not goal.",
+            task_type="agent",
+            status="running",
+            priority=3,
+            owner_agent_id="copaw-agent-runner",
+            industry_instance_id="industry-1",
+            cycle_id="cycle-legacy-assignment-anchor",
+        ),
+    )
+    task_runtime_repository.upsert_runtime(
+        TaskRuntimeRecord(
+            task_id="task-legacy-assignment-anchor",
+            runtime_status="active",
+            current_phase="executing",
+            risk_level="guarded",
+            last_owner_agent_id="copaw-agent-runner",
+        ),
+    )
+    assignment_repository.upsert_assignment(
+        AssignmentRecord(
+            id="assignment-legacy-assignment-anchor",
+            industry_instance_id="industry-1",
+            cycle_id="cycle-legacy-assignment-anchor",
+            backlog_item_id=backlog_item.id,
+            goal_id="goal-legacy-assignment-anchor",
+            task_id="task-legacy-assignment-anchor",
+            owner_agent_id="copaw-agent-runner",
+            owner_role_id="execution-core",
+            title="Assignment anchored task",
+            summary="Recovery should cancel the live assignment task it actually owns.",
+            status="running",
+        ),
+    )
+
+    summary = run_startup_recovery(
+        environment_service=None,
+        actor_mailbox_service=None,
+        decision_request_repository=decision_repository,
+        kernel_dispatcher=None,
+        kernel_task_store=None,
+        schedule_repository=schedule_repository,
+        backlog_item_repository=backlog_repository,
+        assignment_repository=assignment_repository,
+        goal_repository=goal_repository,
+        goal_override_repository=goal_override_repository,
+        task_repository=task_repository,
+        task_runtime_repository=task_runtime_repository,
+        reason="startup",
+    )
+
+    assert summary.recovered_legacy_chat_writebacks == 1
+    assert summary.cancelled_legacy_chat_writeback_tasks == 1
+    assert task_repository.calls
+    assert task_repository.calls[0]["assignment_id"] == "assignment-legacy-assignment-anchor"
+    assert task_repository.calls[0].get("goal_id") is None
+
+    refreshed_task = delegate_task_repository.get_task("task-legacy-assignment-anchor")
+    assert refreshed_task is not None
+    assert refreshed_task.status == "cancelled"
+
+    refreshed_runtime = task_runtime_repository.get_runtime("task-legacy-assignment-anchor")
+    assert refreshed_runtime is not None
+    assert refreshed_runtime.runtime_status == "terminated"
+    assert refreshed_runtime.current_phase == "cancelled"

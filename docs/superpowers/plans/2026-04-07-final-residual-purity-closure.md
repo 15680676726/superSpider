@@ -4,7 +4,7 @@
 
 **Goal:** Remove the remaining industry bridge, reporting/prediction goal residue, workflow historical-link dependency, and stale documentation wording from the live product surface.
 
-**Architecture:** Keep the assignment/backlog/cycle/task/evidence chain as the only live runtime truth. Retain legacy `goal/schedule` objects only as leaf execution artifacts where unavoidable, and stop using them as scope anchors, lifecycle truth, or public workflow semantics.
+**Architecture:** Keep the assignment/backlog/cycle/task/evidence chain as the only live planning/runtime truth. Retain `goal/schedule` where code still uses them as execution/detail/cadence artifacts, and continue removing only the places where they masquerade as main-brain planning root, duplicated scope truth, or stale compatibility fallback.
 
 **Tech Stack:** Python, FastAPI, Pydantic, pytest, Markdown docs
 
@@ -68,6 +68,6 @@
   - workflow internal step-record removal of `linked_goal_ids / linked_schedule_ids`
   - cycle reconcile / prediction case removal of `goal_statuses` sidecar
 - Remaining:
-  - industry bootstrap still materializes bootstrap goal/schedule before canonical backlog/cycle takes over
+  - industry bootstrap no longer seeds backlog/cycle from pre-materialized goal/schedule truth, but it still persists bootstrap `GoalRecord / ScheduleRecord` afterward for detail/cadence compatibility
   - workflow `step_execution_seed` still accepts legacy goal/schedule ids as compatibility input for older runs
   - `runtime_service_graph.py` / `runtime_bootstrap_models.py` wiring remains heavy and manually assembled

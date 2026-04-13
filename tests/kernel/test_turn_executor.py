@@ -19,6 +19,9 @@ from copaw.kernel.main_brain_intake import MainBrainIntakeContract
 from copaw.kernel.main_brain_intent_shell import MainBrainIntentShell
 from copaw.kernel.main_brain_orchestrator import MainBrainOrchestrator
 from copaw.kernel.query_execution import KernelQueryExecutionService
+from copaw.kernel.query_execution_writeback import (
+    ChatWritebackDecisionModelTimeoutError,
+)
 
 
 class FakeQueryExecutionService:
@@ -116,6 +119,18 @@ class FakeKernelDispatcher:
         self.cancelled.append((task_id, resolution))
 
 
+class HeartbeatingKernelDispatcher(FakeKernelDispatcher):
+    def __init__(self, *, execution_timeout_seconds: float = 0.04) -> None:
+        super().__init__()
+        self._config = SimpleNamespace(
+            execution_timeout_seconds=execution_timeout_seconds,
+        )
+        self.heartbeats: list[str] = []
+
+    def heartbeat_task(self, task_id: str) -> None:
+        self.heartbeats.append(task_id)
+
+
 class WaitingConfirmKernelDispatcher(FakeKernelDispatcher):
     def submit(self, task):
         self.submitted.append(task)
@@ -209,10 +224,21 @@ def _async_intake_resolver(
 async def test_kernel_turn_executor_delegates_query_execution_to_service():
     query_execution_service = FakeQueryExecutionService()
     kernel_dispatcher = FakeKernelDispatcher()
+    main_brain_orchestrator = MainBrainOrchestrator(
+        query_execution_service=query_execution_service,
+        intake_contract_resolver=_async_intake_resolver(
+            _make_main_brain_intake_contract(
+                message_text="hello kernel",
+                intent_kind="execute-task",
+                kickoff_allowed=True,
+            ),
+        ),
+    )
     executor = KernelTurnExecutor(
         session_backend=object(),
         kernel_dispatcher=kernel_dispatcher,
         query_execution_service=query_execution_service,
+        main_brain_orchestrator=main_brain_orchestrator,
     )
 
     request = AgentRequest(
@@ -545,6 +571,54 @@ async def test_kernel_turn_executor_auto_mode_routes_buddy_runtime_messages_to_o
 
 
 @pytest.mark.asyncio
+async def test_kernel_turn_executor_auto_mode_surfaces_main_brain_intake_timeout(
+    monkeypatch,
+):
+    query_execution_service = FakeQueryExecutionService()
+    main_brain_chat_service = FakeMainBrainChatService()
+    executor = KernelTurnExecutor(
+        session_backend=object(),
+        query_execution_service=query_execution_service,
+        main_brain_chat_service=main_brain_chat_service,
+    )
+    request = AgentRequest(
+        id="req-auto-intake-timeout",
+        session_id="industry-chat:buddy:profile-timeout:execution-core",
+        user_id="buddy-user-timeout",
+        channel="console",
+        input=[],
+    )
+    request.interaction_mode = "auto"
+    request.session_kind = "industry-control-thread"
+    request.industry_instance_id = "buddy-timeout"
+    request.control_thread_id = "industry-chat:buddy:profile-timeout:execution-core"
+    msgs = [
+        Msg(
+            name="user",
+            role="user",
+            content="请把建立股票研究模板这个任务重新派发给合适执行位，现在开始执行，完成后给我回报结果。",
+        ),
+    ]
+
+    async def _raise_timeout(**_kwargs):
+        raise ChatWritebackDecisionModelTimeoutError(
+            "Chat writeback decision model timed out.",
+        )
+
+    monkeypatch.setattr(
+        "copaw.kernel.turn_executor.resolve_request_main_brain_intake_contract",
+        _raise_timeout,
+    )
+    monkeypatch.setattr(
+        "copaw.kernel.turn_executor.resolve_main_brain_intake_contract",
+        _raise_timeout,
+    )
+
+    with pytest.raises(ChatWritebackDecisionModelTimeoutError):
+        _ = [item async for item in executor.handle_query(msgs=msgs, request=request)]
+
+
+@pytest.mark.asyncio
 async def test_kernel_turn_executor_auto_mode_keeps_action_wording_in_chat_without_intake_result(
     monkeypatch,
 ):
@@ -795,6 +869,12 @@ async def test_kernel_turn_executor_auto_mode_routes_to_orchestrate_only_for_exp
     assert main_brain_chat_service.calls == []
     assert query_execution_service.calls == []
     assert resolver_calls == 0
+    attached_contract = getattr(request, "_copaw_main_brain_intake_contract", None)
+    assert attached_contract is not None
+    assert attached_contract.writeback_requested is True
+    assert attached_contract.has_active_writeback_plan is True
+    assert attached_contract.writeback_plan is not None
+    assert attached_contract.writeback_plan.classifications == ["strategy", "backlog"]
 
 
 @pytest.mark.asyncio
@@ -834,6 +914,7 @@ async def test_kernel_turn_executor_auto_mode_prefers_model_resolution_for_main_
     assert streamed[0][0].get_text_content() == "kernel done"
     assert len(query_execution_service.calls) == 1
     assert main_brain_chat_service.calls == []
+    assert getattr(request, "_copaw_main_brain_intake_contract").should_kickoff is True
 
 
 @pytest.mark.asyncio
@@ -2430,6 +2511,40 @@ async def test_kernel_turn_executor_skips_usage_persistence_for_chat_mode(monkey
         "total_tokens": 8,
     }
     assert query_execution_service.recorded_usage == []
+
+
+@pytest.mark.asyncio
+async def test_kernel_turn_executor_heartbeats_managed_query_task_during_long_execution():
+    class _SlowOrchestrator(FakeMainBrainOrchestrator):
+        async def execute_stream(self, **kwargs):
+            self.calls.append(kwargs)
+            await asyncio.sleep(0.03)
+            yield Msg(name="assistant", role="assistant", content="orchestrator done"), True
+
+    kernel_dispatcher = HeartbeatingKernelDispatcher(execution_timeout_seconds=0.04)
+    executor = KernelTurnExecutor(
+        session_backend=object(),
+        query_execution_service=FakeQueryExecutionService(),
+        main_brain_chat_service=FakeMainBrainChatService(),
+        main_brain_orchestrator=_SlowOrchestrator(),
+        kernel_dispatcher=kernel_dispatcher,
+    )
+    request = AgentRequest(
+        id="req-heartbeat",
+        session_id="sess-heartbeat",
+        user_id="user-heartbeat",
+        channel="console",
+        input=[],
+    )
+
+    events = [event async for event in executor.stream_request(request)]
+
+    assert events[-1].status == RunStatus.Completed
+    assert kernel_dispatcher.heartbeats
+    assert kernel_dispatcher.heartbeats[0].startswith(
+        "query:session:console:user-heartbeat:sess-heartbeat:req-heartbeat",
+    )
+    assert kernel_dispatcher.completed
 
 
 @pytest.mark.asyncio

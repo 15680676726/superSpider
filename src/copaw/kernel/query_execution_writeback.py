@@ -19,13 +19,18 @@ from .query_execution_intent_policy import (
 
 logger = logging.getLogger(__name__)
 _CHAT_WRITEBACK_MODEL_TARGETS = frozenset({"strategy", "backlog", "schedule"})
+_CHAT_WRITEBACK_MODEL_INTENT_KINDS = frozenset(
+    {"chat", "discussion", "status-query", "execute-task"},
+)
+_CHAT_WRITEBACK_MODEL_SURFACES = frozenset({"browser", "desktop", "auto"})
+_CHAT_WRITEBACK_TEAM_ROLE_GAP_ACTIONS = frozenset({"approve", "reject"})
 _CHAT_WRITEBACK_MODEL_CACHE_MAX = 128
 _CHAT_WRITEBACK_MODEL_CACHE_LOCK = threading.Lock()
 _CHAT_WRITEBACK_MODEL_CACHE = BoundedLRUCache[str, "_ChatWritebackModelDecision"](
     max_entries=_CHAT_WRITEBACK_MODEL_CACHE_MAX,
 )
 _CHAT_WRITEBACK_DECISION_MODEL_FACTORY = None
-_CHAT_WRITEBACK_MODEL_TIMEOUT_SECONDS = 8.0
+_CHAT_WRITEBACK_MODEL_TIMEOUT_SECONDS = 80.0
 _CHAT_WRITEBACK_MODEL_PLANNER_PROMPT = """
 You are the governed execution-core chat frontdoor for CoPaw.
 
@@ -101,6 +106,27 @@ class _ChatWritebackModelDecision(BaseModel):
     schedule: _ChatWritebackSchedulePayload | None = None
 
 
+class _RawChatWritebackModelDecision(BaseModel):
+    intent_kind: str | None = None
+    intent_confidence: float = 0.0
+    intent_signals: list[str] = Field(default_factory=list)
+    host_observation_requested: bool = False
+    risky_actuation_requested: bool = False
+    risky_actuation_surface: str | None = None
+    should_writeback: bool = False
+    approved_targets: list[str] = Field(default_factory=list)
+    kickoff_allowed: bool = False
+    explicit_execution_confirmation: bool = False
+    team_role_gap_action: str | None = None
+    team_role_gap_notice: bool = False
+    confidence: float = 0.0
+    blockers: list[str] = Field(default_factory=list)
+    rationale: str | None = None
+    strategy: _ChatWritebackStrategyPayload | None = None
+    goal: _ChatWritebackGoalPayload | None = None
+    schedule: _ChatWritebackSchedulePayload | None = None
+
+
 def _first_non_empty(*values: Any) -> str | None:
     for value in values:
         if isinstance(value, str):
@@ -127,6 +153,54 @@ def _string_list(values: Any) -> list[str]:
         if item and item not in normalized:
             normalized.append(item)
     return normalized
+
+
+def _normalize_chat_writeback_literal(
+    value: Any,
+    *,
+    allowed: frozenset[str],
+) -> str | None:
+    normalized = _first_non_empty(value)
+    if normalized is None:
+        return None
+    lowered = normalized.strip().lower()
+    return lowered if lowered in allowed else None
+
+
+def _sanitize_chat_writeback_model_payload(
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    sanitized = dict(payload)
+    intent_kind = _normalize_chat_writeback_literal(
+        payload.get("intent_kind"),
+        allowed=_CHAT_WRITEBACK_MODEL_INTENT_KINDS,
+    )
+    if intent_kind is not None:
+        sanitized["intent_kind"] = intent_kind
+    else:
+        sanitized.pop("intent_kind", None)
+
+    risky_surface = _normalize_chat_writeback_literal(
+        payload.get("risky_actuation_surface"),
+        allowed=_CHAT_WRITEBACK_MODEL_SURFACES,
+    )
+    sanitized["risky_actuation_surface"] = risky_surface
+
+    team_role_gap_action = _normalize_chat_writeback_literal(
+        payload.get("team_role_gap_action"),
+        allowed=_CHAT_WRITEBACK_TEAM_ROLE_GAP_ACTIONS,
+    )
+    sanitized["team_role_gap_action"] = team_role_gap_action
+
+    approved_targets: list[str] = []
+    for item in _string_list(payload.get("approved_targets")):
+        if item in _CHAT_WRITEBACK_MODEL_TARGETS and item not in approved_targets:
+            approved_targets.append(item)
+    sanitized["approved_targets"] = approved_targets
+
+    sanitized["intent_signals"] = _string_list(payload.get("intent_signals"))
+    sanitized["blockers"] = _string_list(payload.get("blockers"))
+    return sanitized
 
 
 def _request_requested_actions(request: Any) -> set[str]:
@@ -527,7 +601,7 @@ async def _resolve_model_chat_writeback_decision(
         response = await asyncio.wait_for(
             model(
                 messages=_decision_messages(text),
-                structured_model=_ChatWritebackModelDecision,
+                structured_model=_RawChatWritebackModelDecision,
             ),
             timeout=_CHAT_WRITEBACK_MODEL_TIMEOUT_SECONDS,
         )
@@ -535,7 +609,9 @@ async def _resolve_model_chat_writeback_decision(
             _materialize_response(response),
             timeout=_CHAT_WRITEBACK_MODEL_TIMEOUT_SECONDS,
         )
-        payload = _response_to_payload(response)
+        payload = _sanitize_chat_writeback_model_payload(
+            _response_to_payload(response),
+        )
         return _ChatWritebackModelDecision.model_validate(payload)
     except TimeoutError:
         logger.warning("Chat writeback decision model timed out.", exc_info=True)

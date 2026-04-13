@@ -162,6 +162,17 @@ class TaskLifecycleManager:
         self._terminal_results[task_id] = result
         return result
 
+    def heartbeat(self, task_id: str) -> KernelTask:
+        task = self._get_task(task_id)
+        if task.phase in {"completed", "failed", "cancelled"}:
+            return task
+        task = task.model_copy(
+            update={"updated_at": self._now()},
+        )
+        self._tasks[task_id] = task
+        self._persist(task)
+        return task
+
     def get_task(self, task_id: str) -> KernelTask | None:
         task = self._tasks.get(task_id)
         if task is not None:

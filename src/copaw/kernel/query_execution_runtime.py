@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib
+from time import perf_counter
 from collections.abc import Collection
 from uuid import uuid4
 
@@ -974,14 +975,27 @@ class _QueryExecutionRuntimeMixin(
                 indent=2,
             ),
         )
+        owner_resolution_started_at = perf_counter()
         owner_agent_id, agent_profile = self._resolve_query_agent_profile(
             request=request,
         )
+        owner_resolution_elapsed = perf_counter() - owner_resolution_started_at
         actor_lock = self._interactive_actor_locks.setdefault(
             owner_agent_id,
             asyncio.Lock(),
         )
+        actor_lock_contended = actor_lock.locked()
+        actor_lock_wait_started_at = perf_counter()
         async with actor_lock:
+            actor_lock_wait_elapsed = perf_counter() - actor_lock_wait_started_at
+            logger.info(
+                "Query runtime entry timings: task=%s owner=%s owner_resolution=%.2fs actor_lock_wait=%.2fs actor_lock_contended=%s",
+                kernel_task_id,
+                owner_agent_id,
+                owner_resolution_elapsed,
+                actor_lock_wait_elapsed,
+                actor_lock_contended,
+            )
             async for msg, last in self._execute_stream_locked(
                 msgs=msgs,
                 request=request,
@@ -1015,6 +1029,7 @@ class _QueryExecutionRuntimeMixin(
         final_summary: str | None = None
         final_error: str | None = None
         stream_step_count = 0
+        agent_call_started_at: float | None = None
         execution_context: dict[str, Any] = {}
         resident_key = self._resident_agent_cache_key(
             channel=channel,
@@ -1022,20 +1037,29 @@ class _QueryExecutionRuntimeMixin(
             user_id=user_id,
             owner_agent_id=owner_agent_id,
         )
+        prep_timings: list[tuple[str, float]] = []
+        prep_started_at = perf_counter()
 
         try:
+            segment_started_at = perf_counter()
             env_context = build_env_context(
                 session_id=session_id,
                 user_id=user_id,
                 channel=channel,
                 working_dir=str(WORKING_DIR),
             )
+            prep_timings.append(("env_context", perf_counter() - segment_started_at))
+            segment_started_at = perf_counter()
             execution_context = self._resolve_execution_task_context(
                 request=request,
                 agent_id=owner_agent_id,
                 kernel_task_id=kernel_task_id,
                 conversation_thread_id=session_id,
             )
+            prep_timings.append(
+                ("execution_context", perf_counter() - segment_started_at),
+            )
+            segment_started_at = perf_counter()
             self._mark_actor_query_started(
                 agent_id=owner_agent_id,
                 task_id=kernel_task_id,
@@ -1045,12 +1069,15 @@ class _QueryExecutionRuntimeMixin(
                 channel=channel,
                 execution_context=execution_context,
             )
+            prep_timings.append(("mark_query_started", perf_counter() - segment_started_at))
             try:
+                segment_started_at = perf_counter()
                 actor_lease = self._acquire_actor_runtime_lease(
                     agent_id=owner_agent_id,
                     task_id=kernel_task_id,
                     conversation_thread_id=session_id,
                 )
+                prep_timings.append(("actor_lease", perf_counter() - segment_started_at))
             except RuntimeError as exc:
                 lowered = str(exc).lower()
                 if "already leased by" in lowered:
@@ -1073,11 +1100,14 @@ class _QueryExecutionRuntimeMixin(
                     yield busy_msg, True
                     return
                 raise
+            segment_started_at = perf_counter()
             self._assert_bound_chat_context(
                 request=request,
                 owner_agent_id=owner_agent_id,
                 agent_profile=agent_profile,
             )
+            prep_timings.append(("bound_chat_context", perf_counter() - segment_started_at))
+            segment_started_at = perf_counter()
             (
                 tool_capability_ids,
                 skill_names,
@@ -1086,6 +1116,8 @@ class _QueryExecutionRuntimeMixin(
                 desktop_actuation_available,
                 capability_layers,
             ) = self._resolve_query_capability_context(owner_agent_id)
+            prep_timings.append(("capability_context", perf_counter() - segment_started_at))
+            segment_started_at = perf_counter()
             (
                 tool_capability_ids,
                 skill_names,
@@ -1102,6 +1134,8 @@ class _QueryExecutionRuntimeMixin(
                 system_capability_ids=system_capability_ids,
                 desktop_actuation_available=desktop_actuation_available,
             )
+            prep_timings.append(("capability_prune", perf_counter() - segment_started_at))
+            segment_started_at = perf_counter()
             delegation_guard = self._resolve_delegation_first_guard(
                 request=request,
                 owner_agent_id=owner_agent_id,
@@ -1110,12 +1144,27 @@ class _QueryExecutionRuntimeMixin(
                 kernel_task_id=kernel_task_id,
                 conversation_thread_id=session_id,
             )
+            prep_timings.append(("delegation_guard", perf_counter() - segment_started_at))
+            team_role_gap_started_at = perf_counter()
+            logger.info(
+                "Query runtime team-role-gap action start: task=%s owner=%s",
+                kernel_task_id,
+                owner_agent_id,
+            )
             team_role_gap_action_result = await self._handle_team_role_gap_chat_action(
                 msgs=msgs,
                 request=request,
                 owner_agent_id=owner_agent_id,
                 agent_profile=agent_profile,
             )
+            logger.info(
+                "Query runtime team-role-gap action finish: task=%s owner=%s elapsed=%.2fs handled=%s",
+                kernel_task_id,
+                owner_agent_id,
+                perf_counter() - team_role_gap_started_at,
+                bool(team_role_gap_action_result is not None),
+            )
+            prep_timings.append(("team_role_gap", perf_counter() - team_role_gap_started_at))
             if team_role_gap_action_result is not None:
                 final_summary = _message_preview(team_role_gap_action_result)
                 yield team_role_gap_action_result, True
@@ -1130,12 +1179,27 @@ class _QueryExecutionRuntimeMixin(
                 final_summary = _message_preview(team_role_gap_notice)
                 yield team_role_gap_notice, True
                 return
+            intake_started_at = perf_counter()
+            logger.info(
+                "Query runtime main-brain intake start: task=%s owner=%s",
+                kernel_task_id,
+                owner_agent_id,
+            )
             chat_writeback_summary, industry_kickoff_summary = await self._apply_requested_main_brain_intake(
                 msgs=msgs,
                 request=request,
                 owner_agent_id=owner_agent_id,
                 agent_profile=agent_profile,
             )
+            logger.info(
+                "Query runtime main-brain intake finish: task=%s owner=%s elapsed=%.2fs writeback_status=%s kickoff_status=%s",
+                kernel_task_id,
+                owner_agent_id,
+                perf_counter() - intake_started_at,
+                _first_non_empty(_mapping_value(chat_writeback_summary).get("status")),
+                _first_non_empty(_mapping_value(industry_kickoff_summary).get("status")),
+            )
+            prep_timings.append(("main_brain_intake", perf_counter() - intake_started_at))
             team_role_gap_summary = self._resolve_active_team_role_gap_summary(
                 request=request,
                 owner_agent_id=owner_agent_id,
@@ -1147,6 +1211,7 @@ class _QueryExecutionRuntimeMixin(
                 mcp_client_keys=mcp_client_keys,
                 system_capability_ids=system_capability_ids,
             )
+            segment_started_at = perf_counter()
             prompt_appendix = self._build_profile_prompt_appendix(
                 request=request,
                 msgs=msgs,
@@ -1162,6 +1227,9 @@ class _QueryExecutionRuntimeMixin(
                 chat_writeback_summary=chat_writeback_summary,
                 team_role_gap_summary=team_role_gap_summary,
             )
+            prep_timings.append(("prompt_appendix", perf_counter() - segment_started_at))
+            prompt_appendix_text = str(prompt_appendix or "")
+            segment_started_at = perf_counter()
             system_tool_functions = self._build_system_tool_functions(
                 request=request,
                 owner_agent_id=owner_agent_id,
@@ -1170,7 +1238,9 @@ class _QueryExecutionRuntimeMixin(
                 kernel_task_id=kernel_task_id,
                 delegation_guard=delegation_guard,
             )
+            prep_timings.append(("system_tools", perf_counter() - segment_started_at))
 
+            segment_started_at = perf_counter()
             mcp_clients = []
             if self._mcp_manager is not None:
                 if mcp_client_keys is None:
@@ -1180,6 +1250,7 @@ class _QueryExecutionRuntimeMixin(
                         client = await self._mcp_manager.get_client(client_key)
                         if client is not None:
                             mcp_clients.append(client)
+            prep_timings.append(("mcp_clients", perf_counter() - segment_started_at))
 
             config = load_config()
             resident_signature = self._resident_agent_signature(
@@ -1192,6 +1263,7 @@ class _QueryExecutionRuntimeMixin(
                 mcp_client_keys=mcp_client_keys,
                 system_capability_ids=system_capability_ids,
             )
+            segment_started_at = perf_counter()
             resident = await self._get_or_create_resident_agent(
                 cache_key=resident_key,
                 signature=resident_signature,
@@ -1199,6 +1271,8 @@ class _QueryExecutionRuntimeMixin(
                 user_id=user_id,
                 channel=channel,
                 owner_agent_id=owner_agent_id,
+                prompt_appendix=prompt_appendix,
+                extra_tool_functions=system_tool_functions,
                 create_agent=lambda: CoPawAgent(
                     env_context=env_context,
                     prompt_appendix=prompt_appendix,
@@ -1212,8 +1286,21 @@ class _QueryExecutionRuntimeMixin(
                     extra_tool_functions=system_tool_functions,
                 ),
             )
+            prep_timings.append(("resident_agent", perf_counter() - segment_started_at))
             agent = resident.agent
             session_state_loaded = True
+            logger.info(
+                "Query runtime agent prepared: task=%s owner=%s prompt_chars=%d prompt_lines=%d tool_caps=%d skill_caps=%d mcp_clients=%d system_caps=%d delegation_locked=%s",
+                kernel_task_id,
+                owner_agent_id,
+                len(prompt_appendix_text),
+                prompt_appendix_text.count("\n") + (1 if prompt_appendix_text else 0),
+                len(tool_capability_ids or ()),
+                len(skill_names or ()),
+                len(mcp_clients),
+                len(system_capability_ids or ()),
+                bool(delegation_guard is not None and delegation_guard.locked),
+            )
 
             if self._environment_service is not None:
                 try:
@@ -1256,7 +1343,19 @@ class _QueryExecutionRuntimeMixin(
                     "session_state_loaded": True,
                 },
             )
+            segment_started_at = perf_counter()
             agent.rebuild_sys_prompt()
+            prep_timings.append(("rebuild_sys_prompt", perf_counter() - segment_started_at))
+            logger.info(
+                "Query runtime prep timings: task=%s owner=%s %s total=%.2fs",
+                kernel_task_id,
+                owner_agent_id,
+                " ".join(
+                    f"{name}={elapsed:.2f}s"
+                    for name, elapsed in prep_timings
+                ),
+                perf_counter() - prep_started_at,
+            )
 
             heartbeat = self._build_query_lease_heartbeat(
                 session_lease=lease,
@@ -1314,11 +1413,24 @@ class _QueryExecutionRuntimeMixin(
                                         capability_trial_attribution=capability_trial_attribution,
                                     ),
                                 ):
+                                    agent_call_started_at = perf_counter()
+                                    logger.info(
+                                        "Query runtime agent call started: task=%s owner=%s",
+                                        kernel_task_id,
+                                        owner_agent_id,
+                                    )
                                     if heartbeat is None:
                                         async for msg, last in stream_printing_messages(
                                             agents=[agent],
                                             coroutine_task=agent(msgs),
                                         ):
+                                            if stream_step_count == 0 and agent_call_started_at is not None:
+                                                logger.info(
+                                                    "Query runtime first stream output: task=%s owner=%s elapsed=%.2fs",
+                                                    kernel_task_id,
+                                                    owner_agent_id,
+                                                    perf_counter() - agent_call_started_at,
+                                                )
                                             stream_step_count += 1
                                             final_summary = _message_preview(msg) or final_summary
                                             self._record_query_checkpoint(
@@ -1346,6 +1458,13 @@ class _QueryExecutionRuntimeMixin(
                                                 agents=[agent],
                                                 coroutine_task=agent(msgs),
                                             ):
+                                                if stream_step_count == 0 and agent_call_started_at is not None:
+                                                    logger.info(
+                                                        "Query runtime first stream output: task=%s owner=%s elapsed=%.2fs",
+                                                        kernel_task_id,
+                                                        owner_agent_id,
+                                                        perf_counter() - agent_call_started_at,
+                                                    )
                                                 stream_step_count += 1
                                                 await heartbeat.pulse()
                                                 final_summary = _message_preview(msg) or final_summary
@@ -1379,6 +1498,14 @@ class _QueryExecutionRuntimeMixin(
             self._resident_agents.pop(resident_key, None)
             raise
         finally:
+            if agent_call_started_at is not None and stream_step_count == 0:
+                logger.warning(
+                    "Query runtime finished without stream output: task=%s owner=%s elapsed=%.2fs final_error=%s",
+                    kernel_task_id,
+                    owner_agent_id,
+                    perf_counter() - agent_call_started_at,
+                    final_error,
+                )
             if agent is not None and session_state_loaded:
                 await self._prune_transient_messages(
                     agent=agent,
@@ -2667,6 +2794,7 @@ class _QueryExecutionRuntimeMixin(
         owner_agent_id: str,
         agent_profile: Any | None,
     ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        intake_started_at = perf_counter()
         industry_instance_id = resolve_execution_core_industry_instance_id(
             request=request,
             owner_agent_id=owner_agent_id,
@@ -2680,6 +2808,14 @@ class _QueryExecutionRuntimeMixin(
         intake_contract = await self._resolve_requested_main_brain_intake_contract(
             msgs=msgs,
             request=request,
+        )
+        logger.info(
+            "Query runtime intake contract resolved: owner=%s instance=%s elapsed=%.2fs active=%s should_kickoff=%s",
+            owner_agent_id,
+            industry_instance_id,
+            perf_counter() - intake_started_at,
+            bool(intake_contract is not None and intake_contract.has_active_writeback_plan),
+            bool(intake_contract is not None and intake_contract.should_kickoff),
         )
         if intake_contract is None:
             return None, None
@@ -2696,6 +2832,12 @@ class _QueryExecutionRuntimeMixin(
         if intake_contract.has_active_writeback_plan:
             applier = getattr(service, "apply_execution_chat_writeback", None)
             if callable(applier):
+                writeback_started_at = perf_counter()
+                logger.info(
+                    "Query runtime intake writeback start: owner=%s instance=%s",
+                    owner_agent_id,
+                    industry_instance_id,
+                )
                 try:
                     apply_kwargs = build_industry_chat_action_kwargs(
                         industry_instance_id=industry_instance_id,
@@ -2722,6 +2864,13 @@ class _QueryExecutionRuntimeMixin(
                         empty_reason="writeback_handler_returned_no_result",
                     )
                     chat_writeback_summary["action_type"] = "writeback_operating_truth"
+                    logger.info(
+                        "Query runtime intake writeback finish: owner=%s instance=%s elapsed=%.2fs status=%s",
+                        owner_agent_id,
+                        industry_instance_id,
+                        perf_counter() - writeback_started_at,
+                        _first_non_empty(_mapping_value(chat_writeback_summary).get("status")),
+                    )
                 except Exception as exc:
                     logger.exception(
                         "Failed to persist execution-core chat writeback for industry '%s'",
@@ -2741,6 +2890,12 @@ class _QueryExecutionRuntimeMixin(
             )
         industry_kickoff_summary = None
         if intake_contract.should_kickoff:
+            kickoff_started_at = perf_counter()
+            logger.info(
+                "Query runtime intake kickoff start: owner=%s instance=%s",
+                owner_agent_id,
+                industry_instance_id,
+            )
             industry_kickoff_summary = await self._run_requested_main_brain_kickoff(
                 service=service,
                 industry_instance_id=industry_instance_id,
@@ -2748,6 +2903,13 @@ class _QueryExecutionRuntimeMixin(
                 owner_agent_id=owner_agent_id,
                 request=request,
                 chat_writeback_summary=chat_writeback_summary,
+            )
+            logger.info(
+                "Query runtime intake kickoff finish: owner=%s instance=%s elapsed=%.2fs status=%s",
+                owner_agent_id,
+                industry_instance_id,
+                perf_counter() - kickoff_started_at,
+                _first_non_empty(_mapping_value(industry_kickoff_summary).get("status")),
             )
         commit_outcome = self._combine_requested_main_brain_commit_outcome(
             chat_writeback_summary=chat_writeback_summary,

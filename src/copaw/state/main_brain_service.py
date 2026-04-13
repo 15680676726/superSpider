@@ -836,13 +836,16 @@ class AssignmentService:
         reconciled: list[AssignmentRecord] = []
         tasks_by_goal_id = tasks_by_goal_id or {}
         for assignment in assignments:
-            goal = goals_by_id.get(assignment.goal_id or "")
             tasks = list(tasks_by_assignment_id.get(assignment.id, []))
             if not tasks and assignment.goal_id:
                 tasks = list(tasks_by_goal_id.get(assignment.goal_id or "", []))
             latest_report = latest_reports_by_assignment_id.get(assignment.id)
             next_status = assignment.status
             task_id = assignment.task_id
+            has_live_task = any(
+                task.status in {"created", "queued", "running", "needs-confirm", "waiting", "blocked"}
+                for task in tasks
+            )
             if tasks:
                 latest_task = max(
                     tasks,
@@ -857,18 +860,17 @@ class AssignmentService:
                     next_status = "waiting-report"
                 elif latest_task.status in {"failed", "cancelled"}:
                     next_status = "failed"
-            if goal is not None:
-                if goal.status == "completed" and latest_report is not None:
-                    next_status = "completed"
-                elif goal.status == "blocked":
-                    next_status = "failed"
-                elif goal.status in {"draft", "paused"}:
-                    next_status = "planned"
-                elif goal.status == "active" and next_status == "planned":
-                    next_status = "queued"
-            if latest_report is not None and latest_report.result in {"completed", "success"}:
+            if (
+                latest_report is not None
+                and latest_report.result in {"completed", "success"}
+                and not has_live_task
+            ):
                 next_status = "completed"
-            elif latest_report is not None and latest_report.result in {"failed", "cancelled", "blocked"}:
+            elif (
+                latest_report is not None
+                and latest_report.result in {"failed", "cancelled", "blocked"}
+                and not has_live_task
+            ):
                 next_status = "failed"
             reconciled.append(
                 self._repository.upsert_assignment(

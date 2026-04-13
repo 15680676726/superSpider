@@ -52,6 +52,20 @@ def _non_empty_text(value: object | None) -> str | None:
     return text or None
 
 
+def _canonical_child_result_phase(value: object | None) -> str | None:
+    normalized = _non_empty_text(value)
+    if normalized is None:
+        return None
+    phase = normalized.lower()
+    if phase == "canceled":
+        return "cancelled"
+    if phase == "blocked":
+        return "waiting-confirm"
+    if phase in {"completed", "failed", "cancelled", "waiting-confirm"}:
+        return phase
+    return None
+
+
 def _model_dump_payload(value: object) -> dict[str, object]:
     model_dump = getattr(value, "model_dump", None)
     if callable(model_dump):
@@ -135,6 +149,7 @@ class TaskDelegationService:
         access_mode: str | None = None,
         lease_class: str | None = None,
         writer_lock_scope: str | None = None,
+        inherit_environment_ref: bool = True,
     ) -> dict[str, object]:
         parent_task = self._task_repository.get_task(parent_task_id)
         if parent_task is None:
@@ -162,7 +177,11 @@ class TaskDelegationService:
         resolved_environment_ref = (
             str(environment_ref).strip()
             if isinstance(environment_ref, str) and environment_ref.strip()
-            else self._task_environment_ref(parent_task)
+            else (
+                self._task_environment_ref(parent_task)
+                if inherit_environment_ref
+                else None
+            )
         )
         if capability_ref == "system:dispatch_query" and self._agent_profile_service is not None:
             getter = getattr(self._agent_profile_service, "get_agent", None)
@@ -585,9 +604,24 @@ class TaskDelegationService:
 
         child_record = self._task_repository.get_task(child_task.id)
         child_runtime = self._task_runtime_repository.get_runtime(child_task.id)
-        runtime_phase = str(getattr(child_runtime, "current_phase", "") or "")
-        phase = runtime_phase if runtime_phase in {"completed", "failed", "cancelled", "waiting-confirm"} else mailbox_phase
+        runtime_phase = _canonical_child_result_phase(
+            getattr(child_runtime, "current_phase", None),
+        )
+        checkpoint = self._latest_child_result_checkpoint(
+            child_task,
+            mailbox_item=refreshed_mailbox,
+        )
+        checkpoint_result = self._checkpoint_result_payload(checkpoint)
+        phase = (
+            self._checkpoint_result_phase(checkpoint_result)
+            or runtime_phase
+            or mailbox_phase
+        )
         summary = (
+            _non_empty_text(checkpoint_result.get("summary")) if checkpoint_result else None
+        ) or (
+            _non_empty_text(getattr(checkpoint, "summary", None)) if checkpoint is not None else None
+        ) or (
             str(getattr(refreshed_mailbox, "result_summary", "") or "").strip()
             or str(getattr(refreshed_mailbox, "error_summary", "") or "").strip()
             or str(getattr(child_runtime, "last_result_summary", "") or "").strip()
@@ -595,21 +629,123 @@ class TaskDelegationService:
             or str(getattr(child_record, "summary", "") or "").strip()
             or fallback_summary
         )
+        checkpoint_error = (
+            _non_empty_text(checkpoint_result.get("error"))
+            if checkpoint_result is not None
+            else None
+        )
         error = (
             None
             if phase == "completed"
-            else str(getattr(refreshed_mailbox, "error_summary", "") or "").strip()
+            else checkpoint_error
+            or str(getattr(refreshed_mailbox, "error_summary", "") or "").strip()
             or str(getattr(child_runtime, "last_error_summary", "") or "").strip()
             or None
         )
+        explicit_success = (
+            checkpoint_result.get("success")
+            if checkpoint_result is not None
+            else None
+        )
+        success = (
+            explicit_success
+            if isinstance(explicit_success, bool)
+            else phase == "completed"
+        )
+        if phase != "completed":
+            success = False
+        evidence_id = (
+            _non_empty_text(checkpoint_result.get("evidence_id"))
+            if checkpoint_result is not None
+            else None
+        )
+        decision_request_id = (
+            _non_empty_text(checkpoint_result.get("decision_request_id"))
+            if checkpoint_result is not None
+            else None
+        )
+        output_payload = (
+            dict(checkpoint_result.get("output"))
+            if checkpoint_result is not None
+            and isinstance(checkpoint_result.get("output"), dict)
+            else None
+        )
         return KernelResult(
             task_id=child_task.id,
-            trace_id=child_task.trace_id,
-            success=phase == "completed",
+            trace_id=(
+                _non_empty_text(checkpoint_result.get("trace_id"))
+                if checkpoint_result is not None
+                else None
+            )
+            or child_task.trace_id,
+            success=success,
             phase=phase,  # type: ignore[arg-type]
             summary=summary,
+            evidence_id=evidence_id,
+            decision_request_id=decision_request_id,
             error=error,
+            output=output_payload,
         )
+
+    def _latest_child_result_checkpoint(
+        self,
+        child_task: KernelTask,
+        *,
+        mailbox_item: object | None,
+    ) -> object | None:
+        if self._actor_mailbox_service is None:
+            return None
+        lister = getattr(self._actor_mailbox_service, "list_checkpoints", None)
+        if not callable(lister):
+            return None
+        mailbox_id = _non_empty_text(getattr(mailbox_item, "id", None))
+        checkpoints = lister(
+            agent_id=child_task.owner_agent_id,
+            mailbox_id=mailbox_id,
+            task_id=child_task.id,
+            limit=20,
+        )
+        for checkpoint in checkpoints:
+            if str(getattr(checkpoint, "checkpoint_kind", "") or "") == "task-result":
+                return checkpoint
+        return None
+
+    def _checkpoint_result_payload(
+        self,
+        checkpoint: object | None,
+    ) -> dict[str, object] | None:
+        snapshot_payload = getattr(checkpoint, "snapshot_payload", None)
+        if not isinstance(snapshot_payload, dict):
+            return None
+        result = snapshot_payload.get("result")
+        if not isinstance(result, dict):
+            return None
+        return dict(result)
+
+    def _checkpoint_result_phase(
+        self,
+        checkpoint_result: dict[str, object] | None,
+    ) -> str | None:
+        if checkpoint_result is None:
+            return None
+        output_payload = checkpoint_result.get("output")
+        if isinstance(output_payload, dict):
+            phase = _canonical_child_result_phase(output_payload.get("dispatch_status"))
+            if phase is not None:
+                return phase
+            phase = _canonical_child_result_phase(output_payload.get("phase"))
+            if phase is not None:
+                return phase
+            phase = _canonical_child_result_phase(output_payload.get("status"))
+            if phase is not None:
+                return phase
+        phase = _canonical_child_result_phase(checkpoint_result.get("dispatch_status"))
+        if phase is not None:
+            return phase
+        phase = _canonical_child_result_phase(checkpoint_result.get("phase"))
+        if phase is not None:
+            return phase
+        return _canonical_child_result_phase(checkpoint_result.get("status"))
 
     def _refresh_mailbox_item(self, mailbox_item: object | None) -> object | None:
         mailbox_id = getattr(mailbox_item, "id", None)

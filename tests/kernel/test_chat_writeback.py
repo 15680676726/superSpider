@@ -102,6 +102,27 @@ class _FakeStructuredDecisionModel:
         )
 
 
+class _FakeMalformedStructuredDecisionModel:
+    stream = False
+
+    async def __call__(self, *, messages, structured_model=None, **kwargs):
+        _ = (messages, kwargs)
+        assert structured_model is not None
+        return SimpleNamespace(
+            metadata=structured_model(
+                intent_kind="execute-task",
+                intent_confidence=0.93,
+                intent_signals=["model-actionable"],
+                should_writeback=True,
+                approved_targets=["status-query"],
+                kickoff_allowed=True,
+                team_role_gap_action="",
+                confidence=0.93,
+                rationale="malformed-but-recoverable",
+            ),
+        )
+
+
 def test_actionable_content_creation_request_does_not_degrade_into_plain_chat(
     monkeypatch,
 ) -> None:
@@ -122,6 +143,28 @@ def test_actionable_content_creation_request_does_not_degrade_into_plain_chat(
     assert decision.should_writeback is True
     assert "backlog" in decision.approved_targets
     assert decision.kickoff_allowed is True
+
+
+def test_chat_writeback_decision_sanitizes_malformed_model_enum_values(
+    monkeypatch,
+) -> None:
+    writeback_module.clear_chat_writeback_decision_cache()
+    monkeypatch.setattr(
+        writeback_module,
+        "_CHAT_WRITEBACK_DECISION_MODEL_FACTORY",
+        lambda: _FakeMalformedStructuredDecisionModel(),
+        raising=False,
+    )
+
+    decision = writeback_module.resolve_chat_writeback_model_decision_sync(
+        text="现在去写一篇短篇小说，保存成实际文件，并且完成后主动告诉我结果。",
+    )
+
+    assert decision is not None
+    assert decision.intent_kind == "execute-task"
+    assert decision.should_writeback is True
+    assert decision.approved_targets == []
+    assert decision.team_role_gap_action is None
 
 
 def test_chat_writeback_decision_prefers_model_for_actionable_creation_request(
@@ -174,6 +217,10 @@ class _SlowStructuredDecisionModel:
         _ = (messages, structured_model, kwargs)
         await asyncio.sleep(0.05)
         return SimpleNamespace(metadata={})
+
+
+def test_chat_writeback_model_timeout_default_is_80_seconds() -> None:
+    assert writeback_module._CHAT_WRITEBACK_MODEL_TIMEOUT_SECONDS == 80.0
 
 
 def test_actionable_request_raises_when_chat_writeback_model_times_out(

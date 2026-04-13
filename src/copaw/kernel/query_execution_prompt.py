@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import sys
+import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -10,6 +12,7 @@ from .query_execution_shared import *  # noqa: F401,F403
 
 
 _PROMPT_TIME_ZONE = ZoneInfo("Asia/Shanghai")
+_INDUSTRY_INSTANCE_UNSET = object()
 _PROMPT_WEEKDAY_LABELS = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
 
 
@@ -81,6 +84,15 @@ class _QueryExecutionPromptMixin:
         chat_writeback_summary: dict[str, Any] | None = None,
         team_role_gap_summary: dict[str, Any] | None = None,
     ) -> str | None:
+        timings: dict[str, float] = {}
+
+        def _timed(name: str, factory):
+            started_at = time.perf_counter()
+            result = factory()
+            timings[name] = time.perf_counter() - started_at
+            return result
+
+        appendix_started_at = time.perf_counter()
         profile = agent_profile
         industry_instance_id = _first_non_empty(
             getattr(request, "industry_instance_id", None),
@@ -99,17 +111,41 @@ class _QueryExecutionPromptMixin:
                 or industry_role_id == EXECUTION_CORE_ROLE_ID
             )
         )
+        industry_instance: Any = _INDUSTRY_INSTANCE_UNSET
+
+        def _resolve_industry_instance_once() -> Any | None:
+            nonlocal industry_instance
+            if industry_instance is _INDUSTRY_INSTANCE_UNSET:
+                industry_instance = (
+                    _timed(
+                        "resolve_industry_instance",
+                        lambda: self._get_industry_instance(industry_instance_id),
+                    )
+                    if industry_instance_id
+                    else None
+                )
+            return industry_instance
+
+        if is_execution_core_runtime:
+            _resolve_industry_instance_once()
         execution_core_identity = (
-            self._resolve_execution_core_identity_payload(
-                industry_instance_id=industry_instance_id,
+            _timed(
+                "resolve_execution_core_identity",
+                lambda: self._resolve_execution_core_identity_payload(
+                    industry_instance_id=industry_instance_id,
+                    industry_instance=industry_instance,
+                ),
             )
             if is_execution_core_runtime
             else {}
         )
         strategy_memory = (
-            self._resolve_active_strategy_memory_payload(
-                industry_instance_id=industry_instance_id,
-                owner_agent_id=owner_agent_id,
+            _timed(
+                "resolve_strategy_memory",
+                lambda: self._resolve_active_strategy_memory_payload(
+                    industry_instance_id=industry_instance_id,
+                    owner_agent_id=owner_agent_id,
+                ),
             )
             if is_execution_core_runtime
             else {}
@@ -138,6 +174,8 @@ class _QueryExecutionPromptMixin:
         ]
         if profile is None and not execution_core_identity:
             return "\n".join(lines)
+        if industry_instance_id:
+            _resolve_industry_instance_once()
         name = getattr(profile, "name", None) if profile is not None else None
         role_name = getattr(profile, "role_name", None) if profile is not None else None
         role_summary = (
@@ -206,14 +244,17 @@ class _QueryExecutionPromptMixin:
             evidence_expectations = _string_list(
                 strategy_memory.get("evidence_requirements"),
             ) or evidence_expectations
-        execution_feedback = self._resolve_recent_execution_feedback(
-            goal_id=_first_non_empty(
-                current_focus_id if current_focus_kind == "goal" else None,
-            ),
-            task_id=_first_non_empty(
-                getattr(request, "task_id", None),
-                current_task_id,
-                kernel_task_id,
+        execution_feedback = _timed(
+            "resolve_execution_feedback",
+            lambda: self._resolve_recent_execution_feedback(
+                goal_id=_first_non_empty(
+                    current_focus_id if current_focus_kind == "goal" else None,
+                ),
+                task_id=_first_non_empty(
+                    getattr(request, "task_id", None),
+                    current_task_id,
+                    kernel_task_id,
+                ),
             ),
         )
         if name:
@@ -261,7 +302,10 @@ class _QueryExecutionPromptMixin:
             lines.append(f"- Current focus: {focus_text}")
         if current_task_id:
             lines.append(f"- Current task: {current_task_id}")
-        buddy_persona_lines = self._build_buddy_persona_lines(request=request)
+        buddy_persona_lines = _timed(
+            "buddy_persona_lines",
+            lambda: self._build_buddy_persona_lines(request=request),
+        )
         if buddy_persona_lines:
             lines.extend(["", *buddy_persona_lines])
         if task_segment:
@@ -289,108 +333,164 @@ class _QueryExecutionPromptMixin:
                 lines.append(
                     f"- Resume checkpoint: {resume_checkpoint.get('id')} / {checkpoint_summary}",
                 )
-        main_brain_runtime_lines = self._build_main_brain_runtime_lines(
-            main_brain_runtime=main_brain_runtime,
+        main_brain_runtime_lines = _timed(
+            "main_brain_runtime_lines",
+            lambda: self._build_main_brain_runtime_lines(
+                main_brain_runtime=main_brain_runtime,
+            ),
         )
         if main_brain_runtime_lines:
             lines.extend(["", "# Main Brain Runtime", *main_brain_runtime_lines])
-        industry_brief_lines = self._build_industry_brief_lines(
-            industry_instance_id=industry_instance_id,
+        industry_brief_lines = _timed(
+            "industry_brief_lines",
+            lambda: self._build_industry_brief_lines(
+                industry_instance_id=industry_instance_id,
+                industry_instance=industry_instance,
+            ),
         )
         if industry_brief_lines:
             lines.extend(["", "# Industry Brief", *industry_brief_lines])
-        execution_core_identity_lines = self._build_execution_core_identity_lines(
-            execution_core_identity=execution_core_identity,
+        execution_core_identity_lines = _timed(
+            "execution_core_identity_lines",
+            lambda: self._build_execution_core_identity_lines(
+                execution_core_identity=execution_core_identity,
+            ),
         )
         if execution_core_identity_lines:
             lines.extend(
                 ["", "# Execution Core Identity", *execution_core_identity_lines],
             )
-        strategy_memory_lines = self._build_strategy_memory_lines(
-            strategy_memory=strategy_memory,
+        strategy_memory_lines = _timed(
+            "strategy_memory_lines",
+            lambda: self._build_strategy_memory_lines(
+                strategy_memory=strategy_memory,
+            ),
         )
         if strategy_memory_lines:
             lines.extend(["", "# Strategy Memory", *strategy_memory_lines])
-        execution_feedback_lines = _execution_feedback_prompt_lines(execution_feedback)
+        execution_feedback_lines = _timed(
+            "execution_feedback_lines",
+            lambda: _execution_feedback_prompt_lines(execution_feedback),
+        )
         if execution_feedback_lines:
             lines.extend(["", "# Execution Feedback", *execution_feedback_lines])
-        chat_writeback_lines = self._build_chat_writeback_lines(
-            chat_writeback_summary=chat_writeback_summary,
+        chat_writeback_lines = _timed(
+            "chat_writeback_lines",
+            lambda: self._build_chat_writeback_lines(
+                chat_writeback_summary=chat_writeback_summary,
+            ),
         )
         if chat_writeback_lines:
             lines.extend(["", "# Formal Writeback", *chat_writeback_lines])
-        industry_kickoff_lines = self._build_industry_kickoff_lines(
-            industry_kickoff_summary=industry_kickoff_summary,
+        industry_kickoff_lines = _timed(
+            "industry_kickoff_lines",
+            lambda: self._build_industry_kickoff_lines(
+                industry_kickoff_summary=industry_kickoff_summary,
+            ),
         )
         if industry_kickoff_lines:
             lines.extend(["", "# Initial Kickoff", *industry_kickoff_lines])
-        team_role_gap_lines = self._build_team_role_gap_lines(
-            team_role_gap_summary=team_role_gap_summary,
+        team_role_gap_lines = _timed(
+            "team_role_gap_lines",
+            lambda: self._build_team_role_gap_lines(
+                team_role_gap_summary=team_role_gap_summary,
+            ),
         )
         if team_role_gap_lines:
             lines.extend(["", "# Team Gap Governance", *team_role_gap_lines])
-        team_roster_lines = self._build_team_roster_lines(
-            industry_instance_id=industry_instance_id,
-            owner_agent_id=owner_agent_id,
+        team_roster_lines = _timed(
+            "team_roster_lines",
+            lambda: self._build_team_roster_lines(
+                industry_instance_id=industry_instance_id,
+                owner_agent_id=owner_agent_id,
+                industry_instance=industry_instance,
+            ),
         )
         if team_roster_lines:
             lines.extend(["", "# Team Roster", *team_roster_lines])
-        delegation_policy_lines = self._build_delegation_policy_lines(
-            delegation_guard=delegation_guard,
+        delegation_policy_lines = _timed(
+            "delegation_policy_lines",
+            lambda: self._build_delegation_policy_lines(
+                delegation_guard=delegation_guard,
+            ),
         )
         if delegation_policy_lines:
             lines.extend(["", "# Delegation Policy", *delegation_policy_lines])
-        team_operating_lines = build_team_operating_model_lines(
-            has_team_context=bool(industry_instance_id or industry_role_id or reports_to),
-            is_execution_core_runtime=is_execution_core_runtime,
+        team_operating_lines = _timed(
+            "team_operating_lines",
+            lambda: build_team_operating_model_lines(
+                has_team_context=bool(industry_instance_id or industry_role_id or reports_to),
+                is_execution_core_runtime=is_execution_core_runtime,
+            ),
         )
         if team_operating_lines:
             lines.extend(["", "# Team Operating Model", *team_operating_lines])
-        role_contract_lines = build_role_execution_contract_lines(
-            role_id=industry_role_id,
-            is_execution_core_runtime=is_execution_core_runtime,
+        role_contract_lines = _timed(
+            "role_contract_lines",
+            lambda: build_role_execution_contract_lines(
+                role_id=industry_role_id,
+                is_execution_core_runtime=is_execution_core_runtime,
+            ),
         )
         if role_contract_lines:
             lines.extend(["", "# Role Contract", *role_contract_lines])
-        task_mode_contract_lines = build_task_mode_contract_lines(task_mode)
+        task_mode_contract_lines = _timed(
+            "task_mode_contract_lines",
+            lambda: build_task_mode_contract_lines(task_mode),
+        )
         if task_mode_contract_lines:
             lines.extend(["", "# Task Mode", *task_mode_contract_lines])
-        evidence_contract_lines = build_evidence_contract_lines(
-            task_mode=task_mode,
-            is_execution_core_runtime=is_execution_core_runtime,
+        evidence_contract_lines = _timed(
+            "evidence_contract_lines",
+            lambda: build_evidence_contract_lines(
+                task_mode=task_mode,
+                is_execution_core_runtime=is_execution_core_runtime,
+            ),
         )
         if evidence_contract_lines:
             lines.extend(["", "# Evidence Contract", *evidence_contract_lines])
-        knowledge_lines = self._build_retrieved_knowledge_lines(
-            msgs=msgs,
-            owner_agent_id=owner_agent_id,
-            industry_instance_id=industry_instance_id,
-            industry_role_id=industry_role_id,
-            owner_scope=owner_scope,
-            task_id=_first_non_empty(
-                getattr(request, "task_id", None),
-                current_task_id,
+        knowledge_lines = _timed(
+            "retrieved_knowledge_lines",
+            lambda: self._build_retrieved_knowledge_lines(
+                msgs=msgs,
+                owner_agent_id=owner_agent_id,
+                industry_instance_id=industry_instance_id,
+                industry_role_id=industry_role_id,
+                owner_scope=owner_scope,
+                task_id=_first_non_empty(
+                    getattr(request, "task_id", None),
+                    current_task_id,
+                ),
+                work_context_id=_first_non_empty(
+                    getattr(request, "work_context_id", None),
+                    (execution_context or {}).get("work_context_id"),
+                ),
+                session_kind=session_kind,
             ),
-            work_context_id=_first_non_empty(
-                getattr(request, "work_context_id", None),
-                (execution_context or {}).get("work_context_id"),
-            ),
-            session_kind=session_kind,
         )
         if knowledge_lines:
             lines.extend(["", *knowledge_lines])
-        execution_principle_lines = self._build_execution_principle_lines(
-            is_execution_core_runtime=is_execution_core_runtime,
+        execution_principle_lines = _timed(
+            "execution_principle_lines",
+            lambda: self._build_execution_principle_lines(
+                is_execution_core_runtime=is_execution_core_runtime,
+            ),
         )
         if execution_principle_lines:
             lines.extend(["", "# Execution Principles", *execution_principle_lines])
-        capability_projection = self._resolve_prompt_capability_projection(
-            owner_agent_id=owner_agent_id,
-            capabilities=capabilities,
-            capability_layers=capability_layers,
+        capability_projection = _timed(
+            "capability_projection",
+            lambda: self._resolve_prompt_capability_projection(
+                owner_agent_id=owner_agent_id,
+                capabilities=capabilities,
+                capability_layers=capability_layers,
+            ),
         )
-        capability_card_lines = self._build_capability_card_lines(
-            capability_projection=capability_projection,
+        capability_card_lines = _timed(
+            "capability_card_lines",
+            lambda: self._build_capability_card_lines(
+                capability_projection=capability_projection,
+            ),
         )
         if capability_card_lines:
             lines.extend(["", "# Role Capability Card", *capability_card_lines])
@@ -399,9 +499,12 @@ class _QueryExecutionPromptMixin:
             if len(capabilities) > 8:
                 preview = f"{preview}, ... (+{len(capabilities) - 8} more)"
             lines.append(f"- Mounted capabilities: {preview}")
-        capability_guardrails = self._build_capability_guardrail_lines(
-            capabilities,
-            desktop_actuation_available=desktop_actuation_available,
+        capability_guardrails = _timed(
+            "capability_guardrails",
+            lambda: self._build_capability_guardrail_lines(
+                capabilities,
+                desktop_actuation_available=desktop_actuation_available,
+            ),
         )
         if capability_guardrails:
             lines.extend(["", "# Capability Guardrails", *capability_guardrails])
@@ -415,6 +518,18 @@ class _QueryExecutionPromptMixin:
                 "- This runtime is part of a team; consult the roster and collaborate rather than claiming you are the only active agent.",
                 "- Do not describe this runtime as a generic sandbox; explain the actual mounted capabilities and missing surfaces instead.",
             ],
+        )
+        timings["total"] = time.perf_counter() - appendix_started_at
+        logger.info(
+            "Query runtime prompt appendix timings: task=%s owner=%s %s",
+            _first_non_empty(
+                kernel_task_id,
+                getattr(request, "task_id", None),
+                getattr(request, "session_id", None),
+                "<none>",
+            ),
+            owner_agent_id,
+            " ".join(f"{key}={value:.2f}s" for key, value in timings.items()),
         )
         return "\n".join(lines)
 
@@ -514,10 +629,15 @@ class _QueryExecutionPromptMixin:
         self,
         *,
         industry_instance_id: str | None,
+        industry_instance: Any = _INDUSTRY_INSTANCE_UNSET,
     ) -> dict[str, Any]:
         if not industry_instance_id:
             return {}
-        instance = self._get_industry_instance(industry_instance_id)
+        instance = (
+            self._get_industry_instance(industry_instance_id)
+            if industry_instance is _INDUSTRY_INSTANCE_UNSET
+            else industry_instance
+        )
         if instance is None:
             return {}
         return _mapping_value(
@@ -715,9 +835,6 @@ class _QueryExecutionPromptMixin:
         target_role_name = _first_non_empty(chat_writeback_summary.get("target_role_name"))
         if chat_writeback_summary.get("delegated") and target_role_name:
             lines.append(f"- This instruction has been delegated to: {target_role_name}.")
-        created_goal_titles = _string_list(chat_writeback_summary.get("created_goal_titles"))
-        for title in created_goal_titles[:3]:
-            lines.append(f"- Newly recorded goal: {title}")
         created_schedule_titles = _string_list(
             chat_writeback_summary.get("created_schedule_titles"),
         )
@@ -854,10 +971,15 @@ class _QueryExecutionPromptMixin:
         self,
         *,
         industry_instance_id: str | None,
+        industry_instance: Any = _INDUSTRY_INSTANCE_UNSET,
     ) -> list[str]:
         if not industry_instance_id or self._industry_service is None:
             return []
-        instance = self._get_industry_instance(industry_instance_id)
+        instance = (
+            self._get_industry_instance(industry_instance_id)
+            if industry_instance is _INDUSTRY_INSTANCE_UNSET
+            else industry_instance
+        )
         if instance is None:
             return []
         lines: list[str] = []
@@ -940,10 +1062,15 @@ class _QueryExecutionPromptMixin:
         *,
         industry_instance_id: str | None,
         owner_agent_id: str,
+        industry_instance: Any = _INDUSTRY_INSTANCE_UNSET,
     ) -> list[str]:
         if not industry_instance_id:
             return []
-        instance = self._get_industry_instance(industry_instance_id)
+        instance = (
+            self._get_industry_instance(industry_instance_id)
+            if industry_instance is _INDUSTRY_INSTANCE_UNSET
+            else industry_instance
+        )
         if instance is None:
             return []
         agents = _field_value(instance, "agents")
@@ -1317,6 +1444,15 @@ class _QueryExecutionPromptMixin:
         ):
             lines.append(
                 "- Desktop access is observation-only via screenshots; do not claim full mouse/keyboard control unless a dedicated desktop actuation capability is mounted.",
+            )
+        if "tool:execute_shell_command" in capability_ids and sys.platform == "win32":
+            lines.extend(
+                [
+                    "- Shell execution runs on the current Windows host.",
+                    "- Prefer PowerShell or other Windows-native commands first.",
+                    "- Do not start with Linux-only probing such as command -v, find, sed, or bash syntax.",
+                    "- For file/path discovery on Windows, prefer rg, Get-ChildItem, and Select-String.",
+                ],
             )
         if "tool:execute_shell_command" not in capability_ids:
             lines.append(

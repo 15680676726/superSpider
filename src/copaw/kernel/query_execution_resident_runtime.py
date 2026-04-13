@@ -21,12 +21,24 @@ class _QueryExecutionResidentRuntimeMixin:
         user_id: str,
         channel: str,
         owner_agent_id: str,
+        prompt_appendix: str | None,
+        extra_tool_functions: list[object] | None,
         create_agent,
     ) -> _ResidentQueryAgent:
         async with self._resident_agent_cache_lock:
             cached = self._resident_agents.get(cache_key)
             if cached is not None and cached.signature == signature:
-                cached.agent.rebuild_sys_prompt()
+                refresh_runtime_bindings = getattr(cached.agent, "refresh_runtime_bindings", None)
+                if callable(refresh_runtime_bindings):
+                    await refresh_runtime_bindings(
+                        prompt_appendix=prompt_appendix,
+                        extra_tool_functions=extra_tool_functions,
+                    )
+                else:
+                    set_prompt_appendix = getattr(cached.agent, "set_prompt_appendix", None)
+                    if callable(set_prompt_appendix):
+                        set_prompt_appendix(prompt_appendix)
+                    cached.agent.rebuild_sys_prompt()
                 return cached
             agent = create_agent()
             await agent.register_mcp_clients()
@@ -87,7 +99,6 @@ class _QueryExecutionResidentRuntimeMixin:
             "owner_agent_id": owner_agent_id,
             "actor_key": _first_non_empty(actor_key),
             "actor_fingerprint": _first_non_empty(actor_fingerprint),
-            "prompt_appendix": prompt_appendix or "",
             "tool_capability_ids": sorted(tool_capability_ids or []),
             "skill_names": sorted(skill_names or []),
             "mcp_client_keys": sorted(mcp_client_keys) if isinstance(mcp_client_keys, list) else None,
@@ -162,8 +173,7 @@ class _QueryExecutionResidentRuntimeMixin:
         if runtime is None:
             return False
         current_task_id = _first_non_empty(getattr(runtime, "current_task_id", None))
-        current_mailbox_id = _first_non_empty(getattr(runtime, "current_mailbox_id", None))
-        return current_task_id == task_id and current_mailbox_id is not None
+        return current_task_id == task_id
 
     def _heartbeat_actor_runtime_lease(self, lease: Any | None) -> None:
         if lease is None or self._environment_service is None:

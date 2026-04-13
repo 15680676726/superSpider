@@ -103,6 +103,117 @@ def test_resident_runtime_helpers_are_sourced_from_resident_module() -> None:
         assert getattr(KernelQueryExecutionService, helper_name).__module__ == expected_module
 
 
+def test_resident_agent_signature_ignores_prompt_appendix_text() -> None:
+    service = KernelQueryExecutionService(session_backend=object())
+
+    signature_a = service._resident_agent_signature(  # pylint: disable=protected-access
+        owner_agent_id="ops-agent",
+        actor_key="actor-key",
+        actor_fingerprint="actor-fingerprint",
+        prompt_appendix="# Current Time\n- 2026-04-12 23:35",
+        tool_capability_ids={"tool:read_file"},
+        skill_names={"demo-skill"},
+        mcp_client_keys=["desktop_windows"],
+        system_capability_ids={"system:dispatch_query"},
+    )
+    signature_b = service._resident_agent_signature(  # pylint: disable=protected-access
+        owner_agent_id="ops-agent",
+        actor_key="actor-key",
+        actor_fingerprint="actor-fingerprint",
+        prompt_appendix="# Current Time\n- 2026-04-12 23:36",
+        tool_capability_ids={"tool:read_file"},
+        skill_names={"demo-skill"},
+        mcp_client_keys=["desktop_windows"],
+        system_capability_ids={"system:dispatch_query"},
+    )
+
+    assert signature_a == signature_b
+
+
+def test_get_or_create_resident_agent_reuses_cached_agent_and_refreshes_runtime_bindings() -> None:
+    class _RecordingSessionBackend:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str]] = []
+
+        async def load_session_state(self, *, session_id: str, user_id: str, agent) -> None:
+            _ = agent
+            self.calls.append((session_id, user_id))
+
+    class _FakeAgent:
+        def __init__(
+            self,
+            prompt_appendix: str | None,
+            extra_tool_functions: list[object] | None,
+        ) -> None:
+            self.prompt_appendix = prompt_appendix
+            self.rebuild_calls = 0
+            self.console_enabled: bool | None = None
+            self.register_calls = 0
+            self.extra_tool_functions = list(extra_tool_functions or [])
+            self.refresh_calls = 0
+
+        async def register_mcp_clients(self) -> None:
+            self.register_calls += 1
+
+        def set_console_output_enabled(self, *, enabled: bool) -> None:
+            self.console_enabled = enabled
+
+        async def refresh_runtime_bindings(
+            self,
+            *,
+            prompt_appendix: str | None,
+            extra_tool_functions: list[object] | None,
+        ) -> None:
+            self.prompt_appendix = prompt_appendix
+            self.extra_tool_functions = list(extra_tool_functions or [])
+            self.refresh_calls += 1
+
+    async def _scenario() -> None:
+        session_backend = _RecordingSessionBackend()
+        service = KernelQueryExecutionService(session_backend=session_backend)
+        created: list[_FakeAgent] = []
+        first_tool = object()
+        second_tool = object()
+
+        resident = await service._get_or_create_resident_agent(  # pylint: disable=protected-access
+            cache_key="console:session:user:ops-agent",
+            signature="stable-signature",
+            session_id="session",
+            user_id="user",
+            channel="console",
+            owner_agent_id="ops-agent",
+            prompt_appendix="prompt-one",
+            extra_tool_functions=[first_tool],
+            create_agent=lambda: created.append(_FakeAgent("prompt-one", [first_tool])) or created[-1],
+        )
+        assert resident.agent.prompt_appendix == "prompt-one"
+        assert resident.agent.extra_tool_functions == [first_tool]
+        assert resident.agent.refresh_calls == 0
+        assert resident.agent.register_calls == 1
+        assert session_backend.calls == [("session", "user")]
+
+        reused = await service._get_or_create_resident_agent(  # pylint: disable=protected-access
+            cache_key="console:session:user:ops-agent",
+            signature="stable-signature",
+            session_id="session",
+            user_id="user",
+            channel="console",
+            owner_agent_id="ops-agent",
+            prompt_appendix="prompt-two",
+            extra_tool_functions=[second_tool],
+            create_agent=lambda: (_ for _ in ()).throw(AssertionError("cache miss")),
+        )
+
+        assert reused is resident
+        assert reused.agent.prompt_appendix == "prompt-two"
+        assert reused.agent.extra_tool_functions == [second_tool]
+        assert reused.agent.refresh_calls == 1
+        assert reused.agent.register_calls == 1
+        assert session_backend.calls == [("session", "user")]
+
+    asyncio.run(_scenario())
+
+
 def test_usage_runtime_helpers_are_sourced_from_usage_module() -> None:
     expected_module = "copaw.kernel.query_execution_usage_runtime"
     helper_names = (
@@ -196,6 +307,34 @@ def test_query_execution_runtime_resolves_execution_context_from_task_runtime_an
     assert resolved["main_brain_runtime"]["environment"]["ref"] == "desktop:request"
     assert resolved["main_brain_runtime"]["recovery"]["mode"] == "runtime-metadata"
     assert resolved["main_brain_runtime"]["recovery"]["reason"] == "request-bound"
+
+
+def test_query_execution_runtime_bypasses_actor_lease_when_same_task_is_already_current(
+    tmp_path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "query-runtime-lease-bypass.db")
+    runtime_repository = SqliteAgentRuntimeRepository(state_store)
+    runtime_repository.upsert_runtime(
+        AgentRuntimeRecord(
+            agent_id="ops-agent",
+            actor_key="industry-v1-ops:execution-core",
+            actor_fingerprint="fp-ops",
+            actor_class="industry-dynamic",
+            desired_state="active",
+            runtime_status="running",
+            current_task_id="ktask:same-task",
+            current_mailbox_id=None,
+        ),
+    )
+    service = KernelQueryExecutionService(
+        session_backend=object(),
+        agent_runtime_repository=runtime_repository,
+    )
+
+    assert service._should_bypass_actor_runtime_lease(  # pylint: disable=protected-access
+        agent_id="ops-agent",
+        task_id="ktask:same-task",
+    )
 
 
 def test_query_execution_runtime_marks_sidecar_memory_boundary_as_degraded_when_missing() -> None:
@@ -639,7 +778,6 @@ async def test_query_execution_runtime_requires_durable_kickoff_proof_before_mar
             return {
                 "applied": True,
                 "strategy_updated": True,
-                "created_goal_titles": ["Follow up on the latest operator request"],
             }
 
         async def kickoff_execution_from_chat(self, **kwargs):
@@ -888,7 +1026,6 @@ async def test_query_execution_runtime_persists_accepted_boundary_and_commit_out
             return {
                 "applied": True,
                 "strategy_updated": True,
-                "created_goal_titles": ["Follow up on the latest operator request"],
             }
 
         async def kickoff_execution_from_chat(self, **kwargs):

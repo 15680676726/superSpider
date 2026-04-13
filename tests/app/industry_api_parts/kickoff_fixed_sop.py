@@ -218,9 +218,11 @@ def test_industry_operating_cycle_closes_through_fixed_sop_report_and_strategy_s
     assert first_cycle["count"] == 1
     processed_instance = first_cycle["processed_instances"][0]
     assert processed_instance["started_cycle_id"] is not None
-    assert processed_instance["created_goal_ids"] == []
+    assert "created_goal_ids" not in processed_instance
     assert processed_instance["created_assignment_ids"]
     assert processed_instance["created_task_ids"]
+    assert processed_instance["auto_resumed_assignment_ids"]
+    assert processed_instance["auto_resumed_task_ids"]
     created_task = app.state.task_repository.get_task(
         processed_instance["created_task_ids"][0],
     )
@@ -228,6 +230,25 @@ def test_industry_operating_cycle_closes_through_fixed_sop_report_and_strategy_s
     assert created_task.goal_id is None
     assert created_task.assignment_id == processed_instance["created_assignment_ids"][0]
     assert created_task.task_type == "system:run_fixed_sop"
+    assert any(
+        report.assignment_id == processed_instance["created_assignment_ids"][0]
+        and report.processed
+        for report in app.state.industry_service._list_agent_report_records(
+            instance_id,
+            cycle_id=processed_instance["started_cycle_id"],
+            limit=None,
+        )
+    )
+    auto_resumed_tasks = [
+        task.id
+        for task in app.state.task_repository.list_tasks(
+            industry_instance_id=instance_id,
+            cycle_id=processed_instance["started_cycle_id"],
+            limit=None,
+        )
+        if task.assignment_id in processed_instance["auto_resumed_assignment_ids"]
+    ]
+    assert set(processed_instance["auto_resumed_task_ids"]) == set(auto_resumed_tasks)
 
     second_cycle = asyncio.run(
         app.state.industry_service.run_operating_cycle(
@@ -237,7 +258,6 @@ def test_industry_operating_cycle_closes_through_fixed_sop_report_and_strategy_s
         ),
     )
     assert second_cycle["count"] == 1
-    assert second_cycle["processed_instances"][0]["processed_report_ids"]
 
     refreshed = client.get(f"/runtime-center/industry/{instance_id}")
     assert refreshed.status_code == 200
@@ -260,6 +280,14 @@ def test_industry_operating_cycle_closes_through_fixed_sop_report_and_strategy_s
     assert report["metadata"]["fixed_sop_binding_id"] == binding.binding.binding_id
     assert "sop_binding_id" not in report["metadata"]
     assert report["evidence_ids"]
+    runtime_task_ids = [
+        item.get("task", {}).get("id")
+        for item in refreshed_payload["tasks"]
+        if item.get("task", {}).get("assignment_id")
+        == processed_instance["created_assignment_ids"][0]
+    ]
+    assert processed_instance["created_task_ids"][0] in runtime_task_ids
+    assert refreshed_payload["stats"]["task_count"] >= 1
 
     nodes = {node["node_id"]: node for node in refreshed_payload["main_chain"]["nodes"]}
     assert nodes["routine"]["truth_source"] == "FixedSopBindingRecord + WorkflowRunRecord + EvidenceRecord"

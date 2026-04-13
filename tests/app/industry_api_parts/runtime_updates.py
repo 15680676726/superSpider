@@ -6,6 +6,7 @@ from copaw.industry.chat_writeback import build_chat_writeback_plan
 from copaw.kernel.governance import GovernanceService
 from copaw.kernel.models import KernelTask
 from copaw.state import (
+    AgentRuntimeRecord,
     AgentReportRecord,
     AssignmentRecord,
     BacklogItemRecord,
@@ -412,6 +413,48 @@ def test_industry_runtime_sync_clears_terminal_assignment_focus(tmp_path) -> Non
     assert "current_assignment_status" not in metadata
 
 
+def test_role_runtime_sync_does_not_treat_goal_link_as_live_execution(tmp_path) -> None:
+    app = _build_industry_app(tmp_path)
+
+    owner_scope = "industry-v1-goal-link-runtime-status"
+    profile = normalize_industry_profile(
+        IndustryPreviewRequest(
+            industry="Industrial Automation",
+            company_name="Northwind Robotics",
+            product="inspection orchestration",
+            goals=["keep runtime status tied to live assignment truth"],
+        ),
+    )
+    draft = FakeIndustryDraftGenerator().build_draft(profile, owner_scope)
+    specialist = next(agent for agent in draft.team.agents if agent.agent_id != "copaw-agent-runner")
+    app.state.agent_runtime_repository.upsert_runtime(
+        AgentRuntimeRecord(
+            agent_id=specialist.agent_id,
+            actor_key=f"{draft.team.team_id}:{specialist.role_id}",
+            actor_class="industry-dynamic",
+            desired_state="active",
+            runtime_status="executing",
+            employment_mode=specialist.employment_mode,
+            activation_mode=specialist.activation_mode,
+            persistent=specialist.activation_mode != "on-demand",
+            industry_instance_id=draft.team.team_id,
+            industry_role_id=specialist.role_id,
+            queue_depth=0,
+            current_task_id=None,
+            current_mailbox_id=None,
+            metadata={},
+        ),
+    )
+
+    status = app.state.industry_service._resolve_role_runtime_sync_status(  # pylint: disable=protected-access
+        agent_id=specialist.agent_id,
+        primary_assignment=None,
+        goal_link=("goal-specialist", "Specialist goal"),
+    )
+
+    assert status == "idle"
+
+
 def test_industry_preview_returns_service_unavailable_when_chat_model_missing(
     tmp_path,
 ) -> None:
@@ -681,9 +724,9 @@ def test_industry_chat_writeback_routes_matching_specialist_goal_schedule_and_st
     assert result is not None
     assert result["applied"] is True
     assert result["strategy_updated"] is True
-    assert result["created_goal_ids"] == []
+    assert "created_goal_ids" not in result
     assert len(result["created_schedule_ids"]) == 1
-    assert result["goal_dispatches"] == []
+    assert "goal_dispatches" not in result
     assert result["delegated"] is False
     assert result["dispatch_deferred"] is True
     assert result["target_owner_agent_id"] != "copaw-agent-runner"
@@ -837,8 +880,8 @@ def test_industry_chat_writeback_keeps_unmatched_work_in_backlog_when_no_special
     assert result["target_industry_role_id"] is None
     assert result["supervisor_owner_agent_id"] == "copaw-agent-runner"
     assert result["supervisor_industry_role_id"] == "execution-core"
-    assert result["created_goal_ids"] == []
-    assert result["goal_dispatches"] == []
+    assert "created_goal_ids" not in result
+    assert "goal_dispatches" not in result
     assert result["created_backlog_ids"]
     assert "routing-pending" in result["classification"]
 
@@ -928,16 +971,27 @@ def test_industry_chat_writeback_auto_creates_temporary_seat_for_low_risk_local_
     assert result["delegated"] is False
     assert result["dispatch_deferred"] is True
     assert "temporary-seat-auto" in result["classification"]
-    assert result["created_goal_ids"] == []
-    assert result["goal_dispatches"] == []
+    assert "created_goal_ids" not in result
+    assert "goal_dispatches" not in result
+    assert result["delegation_state"] == "materialized"
+    assert result["materialized_cycle_id"]
+    assert result["materialized_assignment_ids"]
 
     detail = app.state.industry_service.get_instance_detail(instance_id)
     assert detail is not None
     assert any(agent.employment_mode == "temporary" for agent in detail.team.agents)
     backlog_item = app.state.backlog_item_repository.get_item(result["created_backlog_ids"][0])
     assert backlog_item is not None
+    assert backlog_item.status == "materialized"
     assert backlog_item.goal_id is None
-    assert backlog_item.assignment_id is None
+    assert backlog_item.assignment_id == result["materialized_assignment_ids"][0]
+
+    assignment = app.state.assignment_repository.get_assignment(
+        result["materialized_assignment_ids"][0],
+    )
+    assert assignment is not None
+    assert assignment.owner_agent_id == result["target_owner_agent_id"]
+    assert len(detail.assignments) > initial_assignment_count
 
 
 def test_industry_chat_writeback_auto_creates_temporary_local_ops_for_desktop_file_request(
@@ -1269,8 +1323,8 @@ def test_industry_chat_writeback_creates_governed_seat_proposal_for_high_risk_ga
     assert result["delegated"] is False
     assert result["dispatch_deferred"] is True
     assert "career-seat-proposal" in result["classification"]
-    assert result["created_goal_ids"] == []
-    assert result["goal_dispatches"] == []
+    assert "created_goal_ids" not in result
+    assert "goal_dispatches" not in result
     assert result["created_backlog_ids"]
     assert result["decision_request_id"]
 
@@ -1547,11 +1601,118 @@ def test_industry_chat_writeback_auto_closes_existing_browser_specialist_gap_bef
     assert "tool:browser_use" in capability_layers["role_prototype_capability_ids"]
 
 
+def test_live_chat_gap_recommendations_ignore_remote_skill_installs_on_runtime_gap(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    app = _build_industry_app(
+        tmp_path,
+        draft_generator=BrowserIndustryDraftGenerator(),
+    )
+    profile = normalize_industry_profile(
+        IndustryPreviewRequest(
+            industry="Writing Operations",
+            company_name="Northwind Stories",
+            product="serialized fiction publishing",
+            goals=["build a stable writing and publishing loop"],
+        ),
+    )
+    draft = BrowserIndustryDraftGenerator().build_draft(
+        profile,
+        "industry-v1-northwind-stories",
+    )
+    role = next(
+        agent
+        for agent in draft.team.agents
+        if agent.agent_class == "business" and agent.role_id != "execution-core"
+    )
+
+    install_template_recommendation = IndustryCapabilityRecommendation(
+        recommendation_id="browser-local-gap",
+        install_kind="builtin-runtime",
+        template_id="browser-local",
+        title="Browser Local Runtime",
+        default_client_key="browser-local-default",
+        capability_ids=["tool:browser_use"],
+        target_agent_ids=[role.agent_id],
+        risk_level="auto",
+        source_kind="install-template",
+    )
+    curated_skill_recommendation = IndustryCapabilityRecommendation(
+        recommendation_id="curated-reply-gap",
+        install_kind="hub-skill",
+        template_id="customer-service-reply",
+        title="Customer Service Reply",
+        capability_ids=["skill:customer-service-reply"],
+        target_agent_ids=[role.agent_id],
+        risk_level="auto",
+        source_kind="skillhub-curated",
+        source_url="https://example.com/customer-service-reply.zip",
+        version="1.0.0",
+    )
+    hub_skill_recommendation = IndustryCapabilityRecommendation(
+        recommendation_id="hub-codeconductor-gap",
+        install_kind="hub-skill",
+        template_id="codeconductor",
+        title="CodeConductor",
+        capability_ids=["skill:codeconductor"],
+        target_agent_ids=[role.agent_id],
+        risk_level="auto",
+        source_kind="hub-search",
+        source_url="https://example.com/codeconductor.zip",
+        version="1.0.0",
+    )
+
+    monkeypatch.setattr(
+        app.state.industry_service,
+        "_build_install_template_recommendations",
+        lambda **_kwargs: [install_template_recommendation],
+    )
+
+    async def _fake_build_curated_skill_recommendations(**_kwargs):
+        return [curated_skill_recommendation], []
+
+    async def _fake_build_hub_skill_recommendations(**_kwargs):
+        return [hub_skill_recommendation], []
+
+    monkeypatch.setattr(
+        app.state.industry_service,
+        "_build_curated_skill_recommendations",
+        _fake_build_curated_skill_recommendations,
+    )
+    monkeypatch.setattr(
+        app.state.industry_service,
+        "_build_hub_skill_recommendations",
+        _fake_build_hub_skill_recommendations,
+    )
+
+    recommendations = asyncio.run(
+        app.state.industry_service._build_live_chat_gap_recommendations(
+            profile=profile,
+            role=role,
+            goal_context_by_agent={role.agent_id: ["Need browser runtime for live work."]},
+        ),
+    )
+
+    assert [item.recommendation_id for item in recommendations] == ["browser-local-gap"]
+    assert [item.install_kind for item in recommendations] == ["builtin-runtime"]
+
+
 def test_industry_chat_writeback_approved_staffing_proposal_unblocks_materialization(
     tmp_path,
+    monkeypatch,
 ) -> None:
     app = _build_industry_app(tmp_path)
     client = TestClient(app)
+
+    async def _disable_existing_role_gap_autoclose(**_kwargs):
+        return []
+
+    monkeypatch.setattr(
+        app.state.industry_service,
+        "_auto_close_existing_role_capability_gap",
+        _disable_existing_role_gap_autoclose,
+    )
 
     profile = normalize_industry_profile(
         IndustryPreviewRequest(
@@ -1602,6 +1763,7 @@ def test_industry_chat_writeback_approved_staffing_proposal_unblocks_materializa
     assert result is not None
     decision_id = result["decision_request_id"]
     backlog_id = result["created_backlog_ids"][0]
+    assert "temporary-seat-proposal" in result["classification"]
     assert decision_id
 
     pending_detail = app.state.industry_service.get_instance_detail(instance_id)
@@ -1702,16 +1864,24 @@ def test_execution_chat_writeback_materialization_and_dispatch_attach_transition
     )
     assert accepted_evidence.id in list(backlog_item.evidence_ids or [])
 
-    cycle_result = asyncio.run(
-        app.state.industry_service.run_operating_cycle(
-            instance_id=instance_id,
-            actor="test:frontdoor-transition-evidence",
-            force=True,
-            backlog_item_ids=[backlog_id],
-            auto_dispatch_materialized_goals=False,
-        ),
+    assignment_id = next(
+        iter(writeback.get("materialized_assignment_ids") or []),
+        None,
     )
-    assignment_id = cycle_result["processed_instances"][0]["created_assignment_ids"][0]
+    if assignment_id is None:
+        cycle_result = asyncio.run(
+            app.state.industry_service.run_operating_cycle(
+                instance_id=instance_id,
+                actor="test:frontdoor-transition-evidence",
+                force=True,
+                backlog_item_ids=[backlog_id],
+                auto_dispatch_materialized_goals=False,
+            ),
+        )
+        assignment_id = cycle_result["processed_instances"][0]["created_assignment_ids"][0]
+    else:
+        assert writeback["materialized_cycle_id"]
+
     assignment = app.state.assignment_repository.get_assignment(assignment_id)
     assert assignment is not None
 
@@ -1918,9 +2088,19 @@ def test_bootstrap_researcher_schedule_report_keeps_main_brain_continuity(
 
 def test_staffed_assignment_failure_keeps_supervisor_chain_and_replan_truth(
     tmp_path,
+    monkeypatch,
 ) -> None:
     app = _build_industry_app(tmp_path)
     client = TestClient(app)
+
+    async def _disable_existing_role_gap_autoclose(**_kwargs):
+        return []
+
+    monkeypatch.setattr(
+        app.state.industry_service,
+        "_auto_close_existing_role_capability_gap",
+        _disable_existing_role_gap_autoclose,
+    )
 
     profile = normalize_industry_profile(
         IndustryPreviewRequest(
@@ -1971,6 +2151,7 @@ def test_staffed_assignment_failure_keeps_supervisor_chain_and_replan_truth(
     )
 
     assert result is not None
+    assert "temporary-seat-proposal" in result["classification"]
     decision_id = result["decision_request_id"]
     backlog_id = result["created_backlog_ids"][0]
     approved = client.post(
@@ -2296,9 +2477,19 @@ def test_runtime_detail_exposes_stable_main_brain_planning_surface_from_formal_s
 
 def test_governance_blocks_dispatch_when_pending_staffing_proposal_is_not_top_active_gap(
     tmp_path,
+    monkeypatch,
 ) -> None:
     app = _build_industry_app(tmp_path)
     client = TestClient(app)
+
+    async def _disable_existing_role_gap_autoclose(**_kwargs):
+        return []
+
+    monkeypatch.setattr(
+        app.state.industry_service,
+        "_auto_close_existing_role_capability_gap",
+        _disable_existing_role_gap_autoclose,
+    )
 
     profile = normalize_industry_profile(
         IndustryPreviewRequest(
@@ -2345,6 +2536,7 @@ def test_governance_blocks_dispatch_when_pending_staffing_proposal_is_not_top_ac
         ),
     )
     assert result is not None
+    assert "temporary-seat-proposal" in result["classification"]
     decision_id = result["decision_request_id"]
 
     app.state.backlog_service.record_chat_writeback(
@@ -2396,9 +2588,19 @@ def test_governance_blocks_dispatch_when_pending_staffing_proposal_is_not_top_ac
 
 def test_report_followup_backlog_wins_next_cycle_over_unrelated_open_backlog_when_handoff_and_staffing_are_live(
     tmp_path,
+    monkeypatch,
 ) -> None:
     app = _build_industry_app(tmp_path)
     client = TestClient(app)
+
+    async def _disable_existing_role_gap_autoclose(**_kwargs):
+        return []
+
+    monkeypatch.setattr(
+        app.state.industry_service,
+        "_auto_close_existing_role_capability_gap",
+        _disable_existing_role_gap_autoclose,
+    )
 
     profile = normalize_industry_profile(
         IndustryPreviewRequest(
@@ -2449,6 +2651,7 @@ def test_report_followup_backlog_wins_next_cycle_over_unrelated_open_backlog_whe
     )
     assert result is not None
     decision_id = result["decision_request_id"]
+    assert "temporary-seat-proposal" in result["classification"]
     assert decision_id is not None
     seed_backlog_id = result["created_backlog_ids"][0]
 
@@ -3322,7 +3525,7 @@ def test_main_brain_cognitive_surface_persists_across_rollover_and_clears_after_
     assert cognitive_surface["continuity"]["control_thread_ids"] == [control_thread_id]
     assert cognitive_surface["continuity"]["environment_refs"] == [environment_ref]
     assert planning_surface["replan"]["status"] == "needs-replan"
-    assert planning_surface["replan"]["source_report_ids"] == [failed_report.id]
+    assert failed_report.id in planning_surface["replan"]["source_report_ids"]
     assert runtime_payload["current_cycle"]["main_brain_planning"] == planning_surface
 
     followup_assignment = AssignmentRecord(
@@ -3561,7 +3764,7 @@ def test_industry_chat_writeback_uses_supplied_plan_without_reparsing(tmp_path) 
     assert result is not None
     assert result["applied"] is True
     assert result["fingerprint"] == approved_plan.fingerprint
-    assert result["created_goal_ids"] == []
+    assert "created_goal_ids" not in result
     assert len(result["created_schedule_ids"]) == 1
 
 

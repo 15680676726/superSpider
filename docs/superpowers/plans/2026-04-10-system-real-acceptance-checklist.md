@@ -27,6 +27,8 @@ This checklist should be read together with:
 - [TASK_STATUS.md](/D:/word/copaw/TASK_STATUS.md)
 - [2026-04-09-p0-runtime-gap-audit-ledger.md](/D:/word/copaw/docs/superpowers/specs/2026-04-09-p0-runtime-gap-audit-ledger.md)
 - [2026-04-09-runtime-gap-closure-priority-plan.md](/D:/word/copaw/docs/superpowers/plans/2026-04-09-runtime-gap-closure-priority-plan.md)
+- [2026-04-12-four-critical-tracks-acceptance-script.md](/D:/word/copaw/docs/superpowers/plans/2026-04-12-four-critical-tracks-acceptance-script.md)
+- [2026-04-12-system-real-acceptance-run-ledger.md](/D:/word/copaw/docs/superpowers/plans/2026-04-12-system-real-acceptance-run-ledger.md)
 
 ---
 

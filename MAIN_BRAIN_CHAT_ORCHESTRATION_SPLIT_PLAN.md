@@ -19,6 +19,12 @@
 - 旧假设：`/chat` 默认应直接进入统一执行内核
 - 新假设：`/chat` 默认应进入主脑对话前台的 `auto` 裁决链：多数消息走纯聊天；需要执行时主脑自动切入执行编排；主脑判断不了时问人类（同时保留“一次性强制下一条执行编排”覆盖入口）。
 
+`2026-04-12` 代码核对修正：
+
+- 这份计划里的核心拆分已经基本落地：`KernelTurnExecutor auto` 当前默认多数消息走 `MainBrainChatService`，只有显式 `requested_actions`、确认/恢复连续性、attached intake contract、Buddy 强执行态、明显直接执行请求等信号才会转去 `MainBrainOrchestrator`。
+- 因此，文中把“当前默认聊天仍是执行型 query runtime”当成现状的表述，现应视为历史背景，不再代表活代码。
+- 文中保留的 `dispatch_goal / dispatch_active_goals / task-thread` 等描述，也只能视为当时待清理的历史问题，不代表当前前台正式能力面。
+
 ---
 
 ## 0. 用户口径与非谈判约束
@@ -50,9 +56,9 @@
   - `src/copaw/kernel/turn_executor.py`
   - `src/copaw/kernel/query_execution_runtime.py`
 
-这意味着当前聊天前台虽然已经删掉旧 `task-thread` 外壳，但默认仍然不是“纯聊天”，而是“执行型 query runtime”。
+这段现已过时：当前聊天前台虽然继续共用 `/runtime-center/chat/run` 这个统一前门，但 `auto` 默认多数消息已经回到纯聊天链，而不是默认作为“执行型 query runtime”处理。
 
-### 1.2 主脑聊天态仍暴露执行编排工具
+### 1.2 本计划写作时，主脑聊天态仍暴露执行编排工具
 
 当前 execution-core 对外仍允许以下 system capability：
 
@@ -124,14 +130,14 @@
 - `Decision / Patch` 默认先由主脑裁决
 - `V7` 的 lane / backlog / cycle / assignment / report 主链已经建立
 
-但聊天前台仍缺一个正式分层：
+本计划写作时，聊天前台仍缺一个正式分层：
 
 - “主脑和人类沟通”没有从“主脑执行编排”里物理拆出来
 - “主脑知道团队结构”与“主脑能直接调用派工工具”混成一件事
 - “聊天需要记忆”与“聊天必须开放 memory_search 工具”混成一件事
 - “operator 要看见工具流”与“默认聊天就应该产生大量工具流”混成一件事
 
-因此本轮不是继续微调 prompt，而是把主脑聊天前台拆成两条正式链。
+因此本计划当时的目标，不是继续微调 prompt，而是把主脑聊天前台拆成两条正式链。
 
 ---
 

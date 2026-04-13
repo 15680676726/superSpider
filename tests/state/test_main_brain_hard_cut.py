@@ -6,12 +6,24 @@ import asyncio
 from fastapi.testclient import TestClient
 
 from copaw.industry import IndustryPreviewRequest, normalize_industry_profile
-from copaw.state import IndustryInstanceRecord, OperatingCycleRecord
+from copaw.state import (
+    AssignmentRecord,
+    AssignmentService,
+    GoalRecord,
+    IndustryInstanceRecord,
+    OperatingCycleRecord,
+    SQLiteStateStore,
+)
+from copaw.state.repositories import (
+    SqliteAssignmentRepository,
+    SqliteGoalRepository,
+    SqliteIndustryInstanceRepository,
+)
 from tests.app.industry_api_parts.runtime_updates import _build_test_chat_writeback_plan
 from tests.app.industry_api_parts.shared import FakeIndustryDraftGenerator, _build_industry_app
 
 
-def test_apply_execution_chat_writeback_keeps_matched_work_in_backlog_until_cycle(
+def test_apply_execution_chat_writeback_materializes_matched_work_without_legacy_goal(
     tmp_path,
 ) -> None:
     app = _build_industry_app(tmp_path)
@@ -62,8 +74,8 @@ def test_apply_execution_chat_writeback_keeps_matched_work_in_backlog_until_cycl
 
     assert result is not None
     assert result["created_backlog_ids"]
-    assert result["created_goal_ids"] == []
-    assert result["goal_dispatches"] == []
+    assert "created_goal_ids" not in result
+    assert "goal_dispatches" not in result
     assert result["delegated"] is False
     assert result["dispatch_deferred"] is True
 
@@ -76,8 +88,10 @@ def test_apply_execution_chat_writeback_keeps_matched_work_in_backlog_until_cycl
     backlog_item = app.state.backlog_item_repository.get_item(result["created_backlog_ids"][0])
     assert backlog_item is not None
     assert backlog_item.goal_id is None
-    assert backlog_item.assignment_id is None
-    assert backlog_item.status == "open"
+    assert result["materialized_assignment_ids"]
+    assert result["delegation_state"] == "materialized"
+    assert backlog_item.assignment_id == result["materialized_assignment_ids"][0]
+    assert backlog_item.status == "materialized"
 
 
 def test_runtime_center_delegate_endpoint_is_removed_after_hard_cut(tmp_path) -> None:
@@ -212,3 +226,57 @@ def test_operating_cycle_reconcile_uses_assignment_truth_only_after_hard_cut(
     )
 
     assert reconciled.status == "completed"
+
+
+def test_assignment_reconcile_does_not_derive_live_status_from_goal_status(
+    tmp_path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "assignment-reconcile.sqlite3")
+    industry_repository = SqliteIndustryInstanceRepository(state_store)
+    goal_repository = SqliteGoalRepository(state_store)
+    repository = SqliteAssignmentRepository(state_store)
+    service = AssignmentService(repository=repository)
+    industry_repository.upsert_instance(
+        IndustryInstanceRecord(
+            instance_id="industry-hard-cut",
+            label="Hard Cut Industry",
+            owner_scope="industry-hard-cut",
+        ),
+    )
+    goal_repository.upsert_goal(
+        GoalRecord(
+            id="goal-legacy-blocked",
+            title="Legacy blocked goal",
+            summary="Legacy goal status should not drive assignment live status.",
+            status="blocked",
+            industry_instance_id="industry-hard-cut",
+        ),
+    )
+    repository.upsert_assignment(
+        AssignmentRecord(
+            id="assignment-goal-decoupled",
+            industry_instance_id="industry-hard-cut",
+            goal_id="goal-legacy-blocked",
+            title="Keep assignment truth independent",
+            summary="Assignment status should stay on assignment/task/report truth.",
+            status="planned",
+        ),
+    )
+
+    reconciled = service.reconcile_assignments(
+        industry_instance_id="industry-hard-cut",
+        cycle_id=None,
+        goals_by_id={
+            "goal-legacy-blocked": GoalRecord(
+                id="goal-legacy-blocked",
+                title="Legacy blocked goal",
+                summary="Legacy goal status should not drive assignment live status.",
+                status="blocked",
+            ),
+        },
+        tasks_by_assignment_id={},
+        latest_reports_by_assignment_id={},
+    )
+
+    assert len(reconciled) == 1
+    assert reconciled[0].status == "planned"

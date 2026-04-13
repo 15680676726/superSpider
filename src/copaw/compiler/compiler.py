@@ -855,6 +855,9 @@ class SemanticCompiler:
         )
 
     def _dispatch_session_id(self, unit: CompilationUnit) -> str:
+        explicit_session_id = _string_context_value(unit.context.get("session_id"))
+        if explicit_session_id:
+            return explicit_session_id
         goal_id = unit.context.get("goal_id")
         if goal_id:
             return str(goal_id)

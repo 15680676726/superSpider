@@ -161,6 +161,29 @@ class TestSemanticCompiler:
         assert tasks[0].resume_point["phase"] == "compiled"
         assert tasks[0].resume_point["cursor"] == tasks[0].task_segment["segment_id"]
 
+    def test_compile_to_kernel_tasks_prefers_explicit_session_id_over_goal_id(self):
+        compiler = SemanticCompiler()
+        unit = CompilationUnit(
+            kind="goal",
+            source_text="Execute specialist assignment",
+            context={
+                "goal_id": "goal-1",
+                "owner_agent_id": "ops-agent",
+                "session_id": "industry-chat:industry-1:market-research",
+                "steps": ["Review market signals"],
+            },
+        )
+
+        tasks = compiler.compile_to_kernel_tasks(unit)
+
+        assert len(tasks) == 1
+        assert (
+            tasks[0].payload["request"]["session_id"]
+            == "industry-chat:industry-1:market-research"
+        )
+        assert tasks[0].payload["session_id"] == "industry-chat:industry-1:market-research"
+        assert tasks[0].payload["compiler"]["goal_id"] == "goal-1"
+
 
 # ── Learning engine tests ───────────────────────────────────────
 
@@ -669,8 +692,13 @@ def test_learning_service_links_to_persisted_compiler_context(tmp_path):
     assert patch.goal_id == "goal-1"
     assert patch.task_id == tasks[0].id
     assert patch.agent_id == "ops-agent"
+    assert patch.status == "approved"
     assert patch.source_evidence_id == "evidence-1"
-    assert patch.evidence_refs == ["evidence-1", "evidence-2"]
+    patch_evidence = evidence_ledger.list_by_task(patch.id)
+    assert len(patch_evidence) == 1
+    assert patch_evidence[0].capability_ref == "learning:patch-approved"
+    assert patch_evidence[0].actor_ref == "copaw-main-brain"
+    assert patch.evidence_refs == ["evidence-1", "evidence-2", patch_evidence[0].id]
 
 
 # ── Kernel adapter tests ───────────────────────────────────────

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
+from time import perf_counter
 from typing import Any
 
 from agentscope.message import Msg
@@ -15,6 +16,7 @@ from .main_brain_environment_coordinator import (
 from .main_brain_execution_planner import MainBrainExecutionPlanner
 from .main_brain_intake import (
     MainBrainIntakeContract,
+    materialize_requested_actions_main_brain_intake_contract,
     read_attached_main_brain_intake_contract,
     resolve_main_brain_intake_contract,
     resolve_request_main_brain_intake_contract,
@@ -22,8 +24,22 @@ from .main_brain_intake import (
 from .main_brain_recovery_coordinator import MainBrainRecoveryCoordinator
 from .main_brain_result_committer import MainBrainResultCommitter
 from .query_execution import KernelQueryExecutionService
+from .query_execution_writeback import (
+    ChatWritebackDecisionModelTimeoutError,
+    ChatWritebackDecisionModelUnavailableError,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _should_propagate_main_brain_intake_error(exc: Exception) -> bool:
+    return isinstance(
+        exc,
+        (
+            ChatWritebackDecisionModelTimeoutError,
+            ChatWritebackDecisionModelUnavailableError,
+        ),
+    )
 
 
 def _safe_mapping(value: object) -> dict[str, Any]:
@@ -334,31 +350,57 @@ class MainBrainOrchestrator:
         kernel_task_id: str | None = None,
         transient_input_message_ids: set[str] | None = None,
     ) -> MainBrainExecutionEnvelope:
+        timings: dict[str, float] = {}
+        started_at = perf_counter()
+
+        def _timed(name: str, factory):
+            stage_started_at = perf_counter()
+            result = factory()
+            timings[name] = perf_counter() - stage_started_at
+            return result
+
+        stage_started_at = perf_counter()
         intake_contract = await self._resolve_intake_contract(
             request=request,
             msgs=msgs,
         )
-        execution_plan = self._execution_planner.plan(
-            request=request,
-            intake_contract=intake_contract,
+        timings["resolve_intake_contract"] = perf_counter() - stage_started_at
+        execution_plan = _timed(
+            "execution_planner.plan",
+            lambda: self._execution_planner.plan(
+                request=request,
+                intake_contract=intake_contract,
+            ),
         )
-        environment_binding = self._environment_coordinator.coordinate(
-            request=request,
-            execution_plan=execution_plan,
+        environment_binding = _timed(
+            "environment_coordinator.coordinate",
+            lambda: self._environment_coordinator.coordinate(
+                request=request,
+                execution_plan=execution_plan,
+            ),
         )
-        recovery_state = self._recovery_coordinator.coordinate(
-            request=request,
-            environment_binding=environment_binding,
+        recovery_state = _timed(
+            "recovery_coordinator.coordinate",
+            lambda: self._recovery_coordinator.coordinate(
+                request=request,
+                environment_binding=environment_binding,
+            ),
         )
-        self._result_committer.commit_request_runtime_context(
-            request=request,
-            intake_contract=intake_contract,
-            execution_plan=execution_plan,
-            environment_binding=environment_binding,
-            recovery_state=recovery_state,
-            kernel_task_id=kernel_task_id,
+        _timed(
+            "commit_request_runtime_context",
+            lambda: self._result_committer.commit_request_runtime_context(
+                request=request,
+                intake_contract=intake_contract,
+                execution_plan=execution_plan,
+                environment_binding=environment_binding,
+                recovery_state=recovery_state,
+                kernel_task_id=kernel_task_id,
+            ),
         )
-        cognitive_surface = self.resolve_cognitive_surface(request=request)
+        cognitive_surface = _timed(
+            "resolve_cognitive_surface",
+            lambda: self.resolve_cognitive_surface(request=request),
+        )
         if cognitive_surface is not None:
             runtime_context = _safe_mapping(
                 getattr(request, "_copaw_main_brain_runtime_context", None),
@@ -372,6 +414,14 @@ class MainBrainOrchestrator:
                 setattr(request, "_copaw_main_brain_cognitive_surface", cognitive_surface)
             except Exception:
                 logger.debug("Failed to attach main-brain cognitive surface")
+        timings["total"] = perf_counter() - started_at
+        logger.info(
+            "Main-brain ingest timings: task=%s session=%s instance=%s %s",
+            kernel_task_id or "<none>",
+            getattr(request, "session_id", None),
+            getattr(request, "industry_instance_id", None),
+            " ".join(f"{key}={value:.2f}s" for key, value in timings.items()),
+        )
         return MainBrainExecutionEnvelope(
             msgs=msgs,
             request=request,
@@ -405,30 +455,102 @@ class MainBrainOrchestrator:
         request: Any,
         msgs: list[Any],
     ) -> MainBrainIntakeContract | None:
+        timings: dict[str, float] = {}
+        started_at = perf_counter()
+        branch = "none"
+
         attached = read_attached_main_brain_intake_contract(request=request)
+        timings["attached_lookup"] = perf_counter() - started_at
         if attached is not None:
+            branch = "attached"
+            timings["total"] = perf_counter() - started_at
+            logger.info(
+                "Main-brain intake resolution timings: session=%s branch=%s %s",
+                getattr(request, "session_id", None),
+                branch,
+                " ".join(f"{key}={value:.2f}s" for key, value in timings.items()),
+            )
             return attached
         resolver = self._intake_contract_resolver
         if resolver is None:
+            branch = "resolver-missing"
+            timings["total"] = perf_counter() - started_at
+            logger.info(
+                "Main-brain intake resolution timings: session=%s branch=%s %s",
+                getattr(request, "session_id", None),
+                branch,
+                " ".join(f"{key}={value:.2f}s" for key, value in timings.items()),
+            )
             return None
         try:
+            resolver_started_at = perf_counter()
             contract = await resolver(request=request, msgs=msgs)
+            timings["resolver.request"] = perf_counter() - resolver_started_at
+            branch = "resolver.request"
         except TypeError:
+            resolver_started_at = perf_counter()
             contract = await resolver(msgs=msgs)
-        except Exception:
+            timings["resolver.msgs"] = perf_counter() - resolver_started_at
+            branch = "resolver.msgs"
+        except Exception as exc:
+            if _should_propagate_main_brain_intake_error(exc):
+                raise
             logger.debug("Main-brain intake resolution failed during orchestration", exc_info=True)
+            branch = "resolver.error"
+            timings["total"] = perf_counter() - started_at
+            logger.info(
+                "Main-brain intake resolution timings: session=%s branch=%s %s",
+                getattr(request, "session_id", None),
+                branch,
+                " ".join(f"{key}={value:.2f}s" for key, value in timings.items()),
+            )
             return None
         if contract is None:
+            materialize_started_at = perf_counter()
+            contract = materialize_requested_actions_main_brain_intake_contract(
+                request=request,
+                msgs=msgs,
+            )
+            timings["materialize_requested_actions"] = (
+                perf_counter() - materialize_started_at
+            )
+            if contract is not None:
+                branch = "materialize_requested_actions"
+        if contract is None:
             try:
+                fallback_started_at = perf_counter()
                 contract = await resolve_main_brain_intake_contract(msgs=msgs)
-            except Exception:
+                timings["model_fallback"] = perf_counter() - fallback_started_at
+                branch = "model_fallback"
+            except Exception as exc:
+                if _should_propagate_main_brain_intake_error(exc):
+                    raise
                 logger.debug("Main-brain model intake fallback failed during orchestration", exc_info=True)
+                branch = "model_fallback.error"
+                timings["total"] = perf_counter() - started_at
+                logger.info(
+                    "Main-brain intake resolution timings: session=%s branch=%s %s",
+                    getattr(request, "session_id", None),
+                    branch,
+                    " ".join(f"{key}={value:.2f}s" for key, value in timings.items()),
+                )
                 return None
         if contract is not None:
             try:
+                attach_started_at = perf_counter()
                 setattr(request, "_copaw_main_brain_intake_contract", contract)
+                timings["attach_to_request"] = perf_counter() - attach_started_at
             except Exception:
                 logger.debug("Failed to attach main-brain intake contract to request")
+                timings["attach_to_request"] = 0.0
+                branch = f"{branch}.attach_failed"
+        timings["total"] = perf_counter() - started_at
+        logger.info(
+            "Main-brain intake resolution timings: session=%s branch=%s %s",
+            getattr(request, "session_id", None),
+            branch,
+            " ".join(f"{key}={value:.2f}s" for key, value in timings.items()),
+        )
         return contract
 
     async def _execute_envelope_stream(

@@ -70,7 +70,6 @@ def _resolve_downstream_record_id(result: Any) -> str | None:
         return record_id.strip()
     for key in (
         "created_backlog_ids",
-        "created_goal_ids",
         "created_schedule_ids",
         "started_assignment_ids",
     ):

@@ -299,6 +299,37 @@ def _task_compilation_snapshot(
         )
         if values:
             context[key] = values
+    request_context = _mapping(compiler.get("request_context"))
+    for key in (
+        "owner_scope",
+        "industry_instance_id",
+        "industry_role_id",
+        "industry_label",
+        "lane_id",
+        "cycle_id",
+        "assignment_id",
+        "work_context_id",
+        "report_back_mode",
+        "task_mode",
+        "session_id",
+        "environment_ref",
+    ):
+        value = request_context.get(key)
+        if value is not None and key not in context:
+            context[key] = value
+    request_role_name = _string(request_context.get("industry_role_name"))
+    if request_role_name is not None:
+        context.setdefault("industry_role_name", request_role_name)
+        context.setdefault("role_name", request_role_name)
+    for key in ("session_id", "control_thread_id", "thread_id", "environment_ref"):
+        value = _string(compiler.get(key))
+        if value is not None:
+            context[key] = value
+    if not context.get("steps"):
+        sidecar_plan = _mapping(compiler.get("assignment_sidecar_plan"))
+        checklist = _string_list(sidecar_plan.get("checklist"))
+        if checklist:
+            context["steps"] = checklist
     channel = request.get("channel")
     if isinstance(channel, str) and channel:
         context["channel"] = channel

@@ -9,6 +9,19 @@ from .main_brain_intake import (
 from .decision_policy import decision_chat_route, decision_chat_thread_id
 from .query_execution_shared import *  # noqa: F401,F403
 
+
+_DELEGATION_FIRST_BLOCKED_TOOL_NAMES = frozenset(
+    {
+        "read_file",
+        "write_file",
+        "edit_file",
+        "execute_shell_command",
+        "browser_use",
+        "desktop_actuation",
+    },
+)
+
+
 class _QueryExecutionTeamMixin:
     async def _handle_team_role_gap_chat_action(
         self,
@@ -392,6 +405,12 @@ class _QueryExecutionTeamMixin:
         agent_id: str,
         agent_payload: Any,
     ) -> bool:
+        allowed = _string_list(
+            _field_value(agent_payload, "allowed_capabilities", "capabilities"),
+        )
+        if allowed:
+            return "system:dispatch_query" in allowed
+
         service = self._capability_service
         lister = getattr(service, "list_accessible_capabilities", None)
         if callable(lister):
@@ -407,9 +426,6 @@ class _QueryExecutionTeamMixin:
                     str(getattr(mount, "id", "")) == "system:dispatch_query"
                     for mount in mounts
                 )
-        allowed = _string_list(
-            _field_value(agent_payload, "allowed_capabilities", "capabilities"),
-        )
         return not allowed or "system:dispatch_query" in allowed
 
     def _build_tool_preflight(
@@ -450,6 +466,27 @@ class _QueryExecutionTeamMixin:
             kwargs: dict[str, Any] | None = None,
         ) -> ToolResponse | None:
             kwargs = kwargs or {}
+            if (
+                delegation_guard is not None
+                and delegation_guard.locked
+                and tool_name in _DELEGATION_FIRST_BLOCKED_TOOL_NAMES
+            ):
+                error = (
+                    "Main-brain orchestration cannot execute local tools directly. "
+                    "Dispatch to a specialist teammate first."
+                    if main_brain_control_runtime
+                    else "Delegation-first policy is active. "
+                    "Dispatch to a teammate before running local tools directly."
+                )
+                return _json_tool_response(
+                    {
+                        "success": False,
+                        "error_code": "delegation_direct_tool_blocked",
+                        "error": error,
+                        "blocked_tool": tool_name,
+                        "teammates": delegation_guard.teammate_preview(),
+                    },
+                )
             if (
                 tool_name == "browser_use"
             ):
