@@ -529,9 +529,11 @@ class RuntimeCenterStateQueryService:
         target_scope_projection = {
             "target_scope": first_non_empty(serialized.get("target_scope")) or "seat",
             "target_role_id": first_non_empty(serialized.get("target_role_id")),
-            "target_agent_id": first_non_empty(serialized.get("target_agent_id")),
             "target_seat_ref": first_non_empty(serialized.get("target_seat_ref")),
         }
+        target_agent_id = self._candidate_target_agent_id(serialized)
+        if target_agent_id is not None:
+            target_scope_projection["target_agent_id"] = target_agent_id
         baseline_projection = {
             "is_baseline_import": (
                 first_non_empty(serialized.get("ingestion_mode")) == "baseline-import"
@@ -780,10 +782,7 @@ class RuntimeCenterStateQueryService:
         candidate_payload: Mapping[str, object],
     ) -> dict[str, object]:
         target_role_id = first_non_empty(candidate_payload.get("target_role_id"))
-        target_agent_id = first_non_empty(
-            candidate_payload.get("target_agent_id"),
-            target_role_id,
-        )
+        target_agent_id = self._candidate_target_agent_id(candidate_payload)
         target_seat_ref = first_non_empty(candidate_payload.get("target_seat_ref"))
         target_scope = first_non_empty(candidate_payload.get("target_scope")) or "seat"
         role_prototype_capability_ids: list[str] = []
@@ -820,10 +819,9 @@ class RuntimeCenterStateQueryService:
                 else None
             )
         )
-        return {
+        payload = {
             "target_scope": target_scope,
             "target_role_id": target_role_id,
-            "target_agent_id": target_agent_id,
             "target_seat_ref": target_seat_ref,
             "role_prototype_capability_ids": role_prototype_capability_ids,
             "seat_instance_capability_ids": seat_instance_capability_ids,
@@ -836,6 +834,20 @@ class RuntimeCenterStateQueryService:
                 else False
             ),
         }
+        if target_agent_id is not None:
+            payload["target_agent_id"] = target_agent_id
+        return payload
+
+    def _candidate_target_agent_id(
+        self,
+        candidate_payload: Mapping[str, object],
+    ) -> str | None:
+        metadata = self._mapping_payload(candidate_payload.get("metadata"))
+        return first_non_empty(
+            candidate_payload.get("target_agent_id"),
+            metadata.get("target_agent_id"),
+            metadata.get("seat_target_agent_id"),
+        )
 
     def list_work_contexts(self, limit: int | None = 5) -> list[dict[str, object]]:
         return self._work_context_projector.list_work_contexts(limit=limit)

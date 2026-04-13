@@ -24,6 +24,15 @@ from .models import (
     RuntimeCenterAppStateView,
     RuntimeCenterSurfaceInfo,
     RuntimeCenterSurfaceResponse,
+    RuntimeHumanCockpitAgent,
+    RuntimeHumanCockpitApproval,
+    RuntimeHumanCockpitCard,
+    RuntimeHumanCockpitMainBrain,
+    RuntimeHumanCockpitPayload,
+    RuntimeHumanCockpitReportBlock,
+    RuntimeHumanCockpitStageSummary,
+    RuntimeHumanCockpitSummaryField,
+    RuntimeHumanCockpitTrendPoint,
     RuntimeMainBrainGovernancePayload,
     RuntimeMainBrainPlanningPayload,
     RuntimeMainBrainResponse,
@@ -1120,7 +1129,7 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             surface=resolved_surface,
             automation=automation,
         )
-        return RuntimeMainBrainResponse(
+        response = RuntimeMainBrainResponse(
             surface=resolved_surface,
             strategy=strategy,
             carrier=carrier,
@@ -1159,6 +1168,740 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
                 "recovery_summary": recovery,
                 "automation_summary": automation,
             },
+        )
+        response.cockpit = await self._build_human_cockpit_payload(
+            app_state,
+            response,
+        )
+        return response
+
+    async def _build_human_cockpit_payload(
+        self,
+        app_state: RuntimeCenterAppStateView,
+        payload: RuntimeMainBrainResponse,
+    ) -> RuntimeHumanCockpitPayload:
+        approvals = self._build_human_cockpit_approvals(payload)
+        main_brain = RuntimeHumanCockpitMainBrain(
+            card=self._build_main_brain_human_card(payload, approvals),
+            summary_fields=self._build_main_brain_human_summary_fields(payload, approvals),
+            morning_report=self._build_main_brain_human_morning_report(payload),
+            evening_report=self._build_main_brain_human_evening_report(payload),
+            trend=self._build_main_brain_human_trend(payload, approvals),
+            approvals=approvals,
+            stage_summary=self._build_main_brain_human_stage_summary(payload),
+        )
+        agents = await self._build_human_cockpit_agents(app_state, payload)
+        return RuntimeHumanCockpitPayload(
+            main_brain=main_brain,
+            agents=agents,
+        )
+
+    async def _build_human_cockpit_agents(
+        self,
+        app_state: RuntimeCenterAppStateView,
+        payload: RuntimeMainBrainResponse,
+    ) -> list[RuntimeHumanCockpitAgent]:
+        industry_instance_id = self._string(payload.meta.get("industry_instance_id"))
+        agent_items = await self._list_human_cockpit_agents(
+            app_state.agent_profile_service,
+            industry_instance_id=industry_instance_id,
+        )
+        result: list[RuntimeHumanCockpitAgent] = []
+        for item in agent_items:
+            agent = dict(self._mapping(item) or {})
+            agent_id = self._string(agent.get("agent_id") or agent.get("id"))
+            if agent_id is None or self._is_main_brain_agent_payload(agent):
+                continue
+            related_assignments = [
+                record
+                for record in payload.assignments
+                if self._matches_human_cockpit_agent(record, agent_id)
+            ]
+            related_reports = [
+                record
+                for record in payload.reports
+                if self._matches_human_cockpit_agent(record, agent_id)
+            ]
+            result.append(
+                RuntimeHumanCockpitAgent(
+                    agent_id=agent_id,
+                    card=self._build_agent_human_card(
+                        agent,
+                        related_assignments=related_assignments,
+                        related_reports=related_reports,
+                    ),
+                    summary_fields=self._build_agent_human_summary_fields(
+                        agent,
+                        related_assignments=related_assignments,
+                        related_reports=related_reports,
+                    ),
+                    morning_report=self._build_agent_human_morning_report(
+                        agent,
+                        related_assignments=related_assignments,
+                    ),
+                    evening_report=self._build_agent_human_evening_report(
+                        related_reports=related_reports,
+                    ),
+                    trend=self._build_agent_human_trend(
+                        agent,
+                        related_assignments=related_assignments,
+                        related_reports=related_reports,
+                    ),
+                )
+            )
+        return result
+
+    async def _list_human_cockpit_agents(
+        self,
+        service: Any,
+        *,
+        industry_instance_id: str | None,
+    ) -> list[Any]:
+        list_agents = getattr(service, "list_agents", None)
+        if not callable(list_agents):
+            return []
+        attempts: list[dict[str, Any]] = []
+        if industry_instance_id is not None:
+            attempts.extend(
+                [
+                    {
+                        "limit": None,
+                        "view": "business",
+                        "industry_instance_id": industry_instance_id,
+                    },
+                    {
+                        "view": "business",
+                        "industry_instance_id": industry_instance_id,
+                    },
+                    {
+                        "limit": None,
+                        "industry_instance_id": industry_instance_id,
+                    },
+                    {
+                        "industry_instance_id": industry_instance_id,
+                    },
+                ]
+            )
+        attempts.extend(
+            [
+                {"limit": None, "view": "business"},
+                {"view": "business"},
+                {"limit": None},
+                {},
+            ]
+        )
+        for kwargs in attempts:
+            try:
+                payload = await self._maybe_await(list_agents(**kwargs))
+            except TypeError:
+                continue
+            except Exception:
+                logger.debug("runtime_center cockpit agent list failed", exc_info=True)
+                return []
+            return self._normalize_list(payload)
+        return []
+
+    def _build_main_brain_human_card(
+        self,
+        payload: RuntimeMainBrainResponse,
+        approvals: list[RuntimeHumanCockpitApproval],
+    ) -> RuntimeHumanCockpitCard:
+        status = "idle"
+        governance_status = (self._string(payload.governance.status) or "").strip().lower()
+        surface_status = (self._string(payload.surface.status) or "").strip().lower()
+        if surface_status == "degraded" or governance_status in {"blocked", "degraded"}:
+            status = "blocked"
+        elif approvals:
+            status = "reviewing"
+        elif payload.assignments or payload.reports or payload.evidence.count > 0:
+            status = "running"
+        buddy_summary = self._mapping(payload.buddy_summary) or {}
+        return RuntimeHumanCockpitCard(
+            id="main-brain",
+            name=self._first_human_cockpit_text(buddy_summary.get("buddy_name")) or "伙伴",
+            role="主脑",
+            status=status,
+            progress=(
+                min(
+                    96,
+                    40 + len(payload.reports) * 12 + self._int(payload.evidence.count, 0) * 8,
+                )
+                if payload.assignments or payload.reports or payload.evidence.count > 0
+                else self._human_cockpit_progress_from_status(status)
+            ),
+            needs_attention=status == "blocked" or bool(approvals),
+            is_main_brain=True,
+        )
+
+    def _build_main_brain_human_summary_fields(
+        self,
+        payload: RuntimeMainBrainResponse,
+        approvals: list[RuntimeHumanCockpitApproval],
+    ) -> list[RuntimeHumanCockpitSummaryField]:
+        current_cycle = self._mapping(payload.current_cycle) or {}
+        report_cognition = self._mapping(payload.report_cognition) or {}
+        next_action = self._mapping(report_cognition.get("next_action")) or {}
+        return [
+            RuntimeHumanCockpitSummaryField(
+                label="职责",
+                value=(
+                    self._first_human_cockpit_text(payload.strategy.get("summary"))
+                    or "负责统筹安排、跟进进度、收结果、把需要你决定的事情提出来。"
+                ),
+            ),
+            RuntimeHumanCockpitSummaryField(
+                label="当前重点",
+                value=(
+                    self._first_human_cockpit_text(
+                        next_action,
+                        current_cycle.get("title"),
+                        current_cycle.get("summary"),
+                    )
+                    or "今天还没有新的主脑重点。"
+                ),
+            ),
+            RuntimeHumanCockpitSummaryField(
+                label="今日进展",
+                value=(
+                    f"已派工 {len(payload.assignments)} 项，"
+                    f"已回收 {len(payload.reports)} 份汇报，"
+                    f"新增 {self._int(payload.evidence.count, 0)} 条证据。"
+                ),
+            ),
+            RuntimeHumanCockpitSummaryField(
+                label="需要你决定",
+                value=(
+                    f"当前有 {len(approvals)} 项待处理。"
+                    if approvals
+                    else "当前没有必须你立刻决定的事项。"
+                ),
+            ),
+        ]
+
+    def _build_main_brain_human_morning_report(
+        self,
+        payload: RuntimeMainBrainResponse,
+    ) -> RuntimeHumanCockpitReportBlock | None:
+        current_cycle = self._mapping(payload.current_cycle) or {}
+        report_cognition = self._mapping(payload.report_cognition) or {}
+        next_action = self._mapping(report_cognition.get("next_action")) or {}
+        return self._build_human_cockpit_report_block(
+            "早报",
+            [
+                self._first_human_cockpit_text(current_cycle.get("summary"), current_cycle.get("title")),
+                self._first_human_cockpit_text(next_action.get("summary"), next_action.get("title")),
+                f"今天主脑需要盯住 {len(payload.assignments)} 项执行任务。",
+            ],
+        )
+
+    def _build_main_brain_human_evening_report(
+        self,
+        payload: RuntimeMainBrainResponse,
+    ) -> RuntimeHumanCockpitReportBlock | None:
+        latest_report = self._latest_human_cockpit_record(payload.reports)
+        return self._build_human_cockpit_report_block(
+            "晚报",
+            [
+                self._first_human_cockpit_text(
+                    latest_report.get("headline"),
+                    latest_report.get("summary"),
+                ),
+                f"今天共收到 {len(payload.reports)} 份汇报。",
+                f"今天新增 {self._int(payload.evidence.count, 0)} 条证据。",
+                (
+                    f"还有 {self._int(payload.decisions.count, 0)} 项待你确认。"
+                    if self._int(payload.decisions.count, 0) > 0
+                    else None
+                ),
+            ],
+            generated_at=self._first_human_cockpit_text(latest_report.get("updated_at")),
+        )
+
+    def _build_main_brain_human_trend(
+        self,
+        payload: RuntimeMainBrainResponse,
+        approvals: list[RuntimeHumanCockpitApproval],
+    ) -> list[RuntimeHumanCockpitTrendPoint]:
+        approval_pressure = 92 if not approvals else max(30, 100 - len(approvals) * 18)
+        return [
+            self._build_human_cockpit_trend_point(
+                "派工",
+                len(payload.assignments),
+                78 if payload.assignments else 24,
+                82,
+            ),
+            self._build_human_cockpit_trend_point(
+                "汇报",
+                len(payload.reports),
+                84 if payload.reports else 28,
+                80,
+            ),
+            self._build_human_cockpit_trend_point(
+                "证据",
+                self._int(payload.evidence.count, 0),
+                88 if self._int(payload.evidence.count, 0) > 0 else 20,
+                approval_pressure,
+            ),
+        ]
+
+    def _build_main_brain_human_stage_summary(
+        self,
+        payload: RuntimeMainBrainResponse,
+    ) -> RuntimeHumanCockpitStageSummary | None:
+        current_cycle = self._mapping(payload.current_cycle) or {}
+        report_cognition = self._mapping(payload.report_cognition) or {}
+        judgment = self._mapping(report_cognition.get("judgment")) or {}
+        bullets = self._human_cockpit_text_list(
+            (
+                f"当前阶段已经派出 {len(payload.assignments)} 项执行任务。"
+                if payload.assignments
+                else None
+            ),
+            (
+                f"已回收 {len(payload.reports)} 份执行汇报。"
+                if payload.reports
+                else None
+            ),
+            (
+                f"已有 {self._int(payload.evidence.count, 0)} 条证据进入系统。"
+                if self._int(payload.evidence.count, 0) > 0
+                else None
+            ),
+            self._first_human_cockpit_text(
+                report_cognition.get("replan_reasons"),
+                judgment.get("summary"),
+            ),
+        )
+        if not bullets:
+            return None
+        return RuntimeHumanCockpitStageSummary(
+            title=self._first_human_cockpit_text(current_cycle.get("title")) or "当前阶段汇总",
+            period_label="当前周期",
+            summary=(
+                self._first_human_cockpit_text(
+                    current_cycle.get("summary"),
+                    payload.strategy.get("summary"),
+                    self._mapping(report_cognition.get("next_action")) or {},
+                )
+                or "主脑正在持续收口当前阶段结果。"
+            ),
+            bullets=bullets,
+        )
+
+    def _build_human_cockpit_approvals(
+        self,
+        payload: RuntimeMainBrainResponse,
+    ) -> list[RuntimeHumanCockpitApproval]:
+        approvals: list[RuntimeHumanCockpitApproval] = []
+        for entry in payload.decisions.entries:
+            record = self._mapping(entry) or {}
+            actions = self._mapping(record.get("actions")) or {}
+            status = (self._first_human_cockpit_text(record.get("status")) or "").strip().lower()
+            if "approve" not in actions and "reject" not in actions and status not in {
+                "open",
+                "pending",
+                "reviewing",
+                "waiting",
+                "blocked",
+            }:
+                continue
+            approval_id = self._first_human_cockpit_text(
+                record.get("id"),
+                record.get("decision_id"),
+                record.get("title"),
+            )
+            if approval_id is None:
+                continue
+            approvals.append(
+                RuntimeHumanCockpitApproval(
+                    id=approval_id,
+                    kind="decision",
+                    title=(
+                        self._first_human_cockpit_text(
+                            record.get("title"),
+                            record.get("headline"),
+                        )
+                        or "待处理事项"
+                    ),
+                    reason=(
+                        self._first_human_cockpit_text(
+                            record.get("summary"),
+                            record.get("reason"),
+                            record.get("detail"),
+                        )
+                        or "主脑判断这件事需要你拍板。"
+                    ),
+                    recommendation="建议先确认是否现在执行这项决定。",
+                    risk=(
+                        self._first_human_cockpit_text(
+                            record.get("risk"),
+                            record.get("impact"),
+                        )
+                        or "如果继续搁置，当前推进会继续往后顺延。"
+                    ),
+                    initiator=(
+                        self._first_human_cockpit_text(
+                            record.get("owner"),
+                            record.get("initiator"),
+                            record.get("requested_by"),
+                        )
+                        or "主脑"
+                    ),
+                    created_at=(
+                        self._first_human_cockpit_text(
+                            record.get("created_at"),
+                            record.get("updated_at"),
+                        )
+                        or "刚刚"
+                    ),
+                )
+            )
+        return approvals
+
+    def _build_agent_human_card(
+        self,
+        agent: dict[str, Any],
+        *,
+        related_assignments: list[dict[str, Any]],
+        related_reports: list[dict[str, Any]],
+    ) -> RuntimeHumanCockpitCard:
+        agent_id = self._string(agent.get("agent_id") or agent.get("id")) or "agent"
+        status = self._string(agent.get("status")) or "idle"
+        attention = self._human_cockpit_status_needs_attention(status) or any(
+            self._human_cockpit_status_needs_attention(
+                self._first_human_cockpit_text(report.get("status")),
+            )
+            for report in related_reports
+        )
+        progress = min(
+            100,
+            self._human_cockpit_progress_from_status(status)
+            + min(24, len(related_assignments) * 12 + len(related_reports) * 10),
+        )
+        return RuntimeHumanCockpitCard(
+            id=agent_id,
+            name=(
+                self._first_human_cockpit_text(agent.get("name"), agent_id)
+                or agent_id
+            ),
+            role=self._first_human_cockpit_text(agent.get("role_name")) or "职业智能体",
+            status=status,
+            progress=progress,
+            needs_attention=attention,
+        )
+
+    def _build_agent_human_summary_fields(
+        self,
+        agent: dict[str, Any],
+        *,
+        related_assignments: list[dict[str, Any]],
+        related_reports: list[dict[str, Any]],
+    ) -> list[RuntimeHumanCockpitSummaryField]:
+        related_assignment = self._latest_human_cockpit_record(related_assignments)
+        related_report = self._latest_human_cockpit_record(related_reports)
+        return [
+            RuntimeHumanCockpitSummaryField(
+                label="职业",
+                value=self._first_human_cockpit_text(agent.get("role_name")) or "职业智能体",
+            ),
+            RuntimeHumanCockpitSummaryField(
+                label="职责",
+                value=(
+                    self._first_human_cockpit_text(agent.get("role_summary"))
+                    or "负责对应岗位的执行与结果回传。"
+                ),
+            ),
+            RuntimeHumanCockpitSummaryField(
+                label="主要负责工作",
+                value=(
+                    self._first_human_cockpit_text(
+                        agent.get("current_focus"),
+                        related_assignment.get("summary"),
+                        related_assignment.get("title"),
+                        related_report.get("headline"),
+                    )
+                    or "当前还没有明确展示的工作重点。"
+                ),
+            ),
+            RuntimeHumanCockpitSummaryField(
+                label="当前状态",
+                value=self._human_cockpit_status_label(agent.get("status")),
+            ),
+        ]
+
+    def _build_agent_human_morning_report(
+        self,
+        agent: dict[str, Any],
+        *,
+        related_assignments: list[dict[str, Any]],
+    ) -> RuntimeHumanCockpitReportBlock | None:
+        related_assignment = self._latest_human_cockpit_record(related_assignments)
+        role_summary = self._first_human_cockpit_text(agent.get("role_summary"))
+        return self._build_human_cockpit_report_block(
+            "早报",
+            [
+                self._first_human_cockpit_text(agent.get("current_focus")),
+                self._first_human_cockpit_text(
+                    related_assignment.get("summary"),
+                    related_assignment.get("title"),
+                ),
+                f"今天继续推进：{role_summary}" if role_summary else None,
+            ],
+        )
+
+    def _build_agent_human_evening_report(
+        self,
+        *,
+        related_reports: list[dict[str, Any]],
+    ) -> RuntimeHumanCockpitReportBlock | None:
+        related_report = self._latest_human_cockpit_record(related_reports)
+        return self._build_human_cockpit_report_block(
+            "晚报",
+            [
+                self._first_human_cockpit_text(
+                    related_report.get("headline"),
+                    related_report.get("summary"),
+                ),
+                (
+                    "当前结果状态："
+                    + (
+                        self._first_human_cockpit_text(
+                            related_report.get("result"),
+                            related_report.get("status"),
+                        )
+                        or "推进中"
+                    )
+                    if related_report
+                    else None
+                ),
+                (
+                    "最近回传时间："
+                    + (
+                        self._first_human_cockpit_text(related_report.get("updated_at"))
+                        or ""
+                    )
+                    if self._first_human_cockpit_text(related_report.get("updated_at"))
+                    else None
+                ),
+            ],
+            generated_at=self._first_human_cockpit_text(related_report.get("updated_at")),
+        )
+
+    def _build_agent_human_trend(
+        self,
+        agent: dict[str, Any],
+        *,
+        related_assignments: list[dict[str, Any]],
+        related_reports: list[dict[str, Any]],
+    ) -> list[RuntimeHumanCockpitTrendPoint]:
+        completed_count = sum(
+            1
+            for record in related_assignments
+            if (self._first_human_cockpit_text(record.get("status")) or "").strip().lower()
+            == "completed"
+        )
+        base_completion = self._human_cockpit_progress_from_status(agent.get("status"))
+        feedback_quality = 84 if related_reports else 45
+        continuity = 42 if self._human_cockpit_status_needs_attention(agent.get("status")) else 88
+        return [
+            self._build_human_cockpit_trend_point(
+                "任务完成",
+                completed_count or len(related_assignments),
+                base_completion,
+                feedback_quality,
+            ),
+            self._build_human_cockpit_trend_point(
+                "结果回传",
+                len(related_reports),
+                82 if related_reports else 30,
+                feedback_quality,
+            ),
+            self._build_human_cockpit_trend_point(
+                "协作连贯",
+                1 if continuity >= 80 else 0,
+                continuity,
+                continuity,
+            ),
+        ]
+
+    def _build_human_cockpit_report_block(
+        self,
+        title: str,
+        items: list[str | None],
+        *,
+        generated_at: str | None = None,
+    ) -> RuntimeHumanCockpitReportBlock | None:
+        lines = self._human_cockpit_text_list(*items)[:3]
+        if not lines:
+            return None
+        return RuntimeHumanCockpitReportBlock(
+            title=title,
+            items=lines,
+            generated_at=generated_at,
+        )
+
+    def _build_human_cockpit_trend_point(
+        self,
+        label: str,
+        completed: int,
+        completion_rate: int,
+        quality: int,
+    ) -> RuntimeHumanCockpitTrendPoint:
+        return RuntimeHumanCockpitTrendPoint(
+            label=label,
+            completed=max(0, int(completed)),
+            completion_rate=max(0, min(100, int(round(completion_rate)))),
+            quality=max(0, min(100, int(round(quality)))),
+        )
+
+    def _human_cockpit_text_list(self, *values: Any) -> list[str]:
+        seen: set[str] = set()
+        result: list[str] = []
+        for value in values:
+            text = self._first_human_cockpit_text(value)
+            if text is None or text in seen:
+                continue
+            seen.add(text)
+            result.append(text)
+        return result
+
+    def _latest_human_cockpit_record(
+        self,
+        records: Sequence[Any] | None,
+    ) -> dict[str, Any]:
+        latest_record: dict[str, Any] = {}
+        latest_sort_key = ""
+        for raw in list(records or []):
+            record = self._mapping(raw) or {}
+            if not record:
+                continue
+            sort_key = self._first_human_cockpit_text(
+                record.get("updated_at"),
+                record.get("created_at"),
+                record.get("recorded_at"),
+                record.get("generated_at"),
+            ) or ""
+            if not latest_record or sort_key > latest_sort_key:
+                latest_record = record
+                latest_sort_key = sort_key
+        return latest_record
+
+    def _first_human_cockpit_text(self, *values: Any) -> str | None:
+        for value in values:
+            if value is None:
+                continue
+            mapping = self._mapping(value)
+            if mapping:
+                nested = self._first_human_cockpit_text(
+                    mapping.get("title"),
+                    mapping.get("headline"),
+                    mapping.get("label"),
+                    mapping.get("name"),
+                    mapping.get("summary"),
+                    mapping.get("description"),
+                    mapping.get("detail"),
+                    mapping.get("reason"),
+                    mapping.get("status"),
+                    mapping.get("value"),
+                )
+                if nested is not None:
+                    return nested
+                continue
+            if isinstance(value, str):
+                normalized = value.strip()
+                if normalized:
+                    return normalized
+                continue
+            if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+                nested = self._first_human_cockpit_text(*list(value))
+                if nested is not None:
+                    return nested
+                continue
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                return str(int(value)) if float(value).is_integer() else str(value)
+        return None
+
+    def _human_cockpit_status_needs_attention(self, status: Any) -> bool:
+        normalized = (self._string(status) or "").strip().lower()
+        return any(
+            token in normalized
+            for token in (
+                "blocked",
+                "error",
+                "failed",
+                "pending",
+                "open",
+                "reviewing",
+                "waiting",
+                "human-required",
+                "waiting-confirm",
+            )
+        )
+
+    def _human_cockpit_progress_from_status(self, status: Any) -> int:
+        normalized = (self._string(status) or "").strip().lower()
+        if normalized in {"completed", "done", "approved", "applied"}:
+            return 100
+        if normalized in {"running", "executing", "active", "claimed"}:
+            return 72
+        if normalized in {"queued", "assigned", "waiting", "open", "pending"}:
+            return 36
+        if normalized in {"reviewing", "paused"}:
+            return 54
+        if normalized in {"blocked", "error", "failed"}:
+            return 18
+        return 48
+
+    def _human_cockpit_status_label(self, status: Any) -> str:
+        normalized = (self._string(status) or "").strip().lower()
+        label_map = {
+            "running": "进行中",
+            "executing": "进行中",
+            "active": "进行中",
+            "claimed": "进行中",
+            "queued": "待开始",
+            "assigned": "已派工",
+            "waiting": "等待中",
+            "pending": "等待中",
+            "reviewing": "待处理",
+            "paused": "已暂停",
+            "blocked": "已卡住",
+            "error": "异常",
+            "failed": "失败",
+            "completed": "已完成",
+            "done": "已完成",
+            "approved": "已同意",
+            "rejected": "已拒绝",
+            "idle": "空闲",
+            "recorded": "已回收",
+        }
+        return label_map.get(normalized, self._string(status) or "空闲")
+
+    def _matches_human_cockpit_agent(
+        self,
+        record: Mapping[str, Any],
+        agent_id: str,
+    ) -> bool:
+        return (
+            self._first_human_cockpit_text(
+                record.get("owner_agent_id"),
+                record.get("agent_id"),
+                record.get("owner"),
+            )
+            == agent_id
+            or self._first_human_cockpit_text(record.get("owner_agent_name")) == agent_id
+        )
+
+    def _is_main_brain_agent_payload(self, payload: Mapping[str, Any]) -> bool:
+        agent_id = (self._string(payload.get("agent_id") or payload.get("id")) or "").strip()
+        agent_class = (self._string(payload.get("agent_class")) or "").strip().lower()
+        industry_role_id = (
+            self._string(payload.get("industry_role_id") or payload.get("role_id")) or ""
+        ).strip().lower()
+        return (
+            agent_id == "copaw-agent-runner"
+            or agent_class == "system"
+            or industry_role_id == "execution-core"
         )
 
     def _build_main_brain_operator_signal(

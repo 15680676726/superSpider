@@ -807,6 +807,310 @@ def test_runtime_center_main_brain_route_exposes_industry_stats():
     assert payload["signals"]["evidence"]["count"] == 4
 
 
+def test_runtime_center_main_brain_route_exposes_human_cockpit_surface():
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = FakeIndustryService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/surface?sections=main_brain")
+
+    assert response.status_code == 200
+    cockpit = response.json()["main_brain"]["cockpit"]
+
+    assert cockpit["main_brain"]["card"]["id"] == "main-brain"
+    assert cockpit["main_brain"]["card"]["is_main_brain"] is True
+    assert cockpit["main_brain"]["summary_fields"][0]["label"] == "职责"
+    assert cockpit["main_brain"]["morning_report"]["title"] == "早报"
+    assert cockpit["main_brain"]["stage_summary"]["title"]
+    assert cockpit["main_brain"]["approvals"][0]["id"] == "decision-1"
+    assert cockpit["main_brain"]["approvals"][0]["kind"] == "decision"
+
+    assert [item["agent_id"] for item in cockpit["agents"]] == ["ops-agent"]
+    assert cockpit["agents"][0]["card"]["role"] == "operator"
+    assert cockpit["agents"][0]["summary_fields"][0]["label"] == "职业"
+    assert cockpit["agents"][0]["morning_report"]["title"] == "早报"
+
+
+def test_runtime_center_human_cockpit_prefers_latest_reports_and_chinese_fallbacks():
+    class _MultiAgentProfileService(FakeAgentProfileService):
+        def list_agents(
+            self,
+            limit: int | None = 5,
+            view: str = "all",
+            industry_instance_id: str | None = None,
+        ):
+            _ = (limit, industry_instance_id)
+            agents = [
+                {
+                    "agent_id": "ops-agent",
+                    "name": "Ops Lead",
+                    "status": "running",
+                    "role_name": "Operations",
+                    "role_summary": "Push execution tasks and return results.",
+                    "current_focus": "Follow up key leads and close blockers",
+                    "industry_instance_id": "industry-v1-ops",
+                },
+                {
+                    "agent_id": "research-agent",
+                    "name": "Research Lead",
+                    "status": "completed",
+                    "role_name": "Research",
+                    "role_summary": "Collect intel and summarize decisions.",
+                    "current_focus": "Summarize competitor changes",
+                    "industry_instance_id": "industry-v1-ops",
+                },
+            ]
+            return agents if view in {"all", "business"} else []
+
+    class _MultiAgentIndustryService(FakeIndustryService):
+        def get_instance_detail(self, instance_id: str):
+            detail = super().get_instance_detail(instance_id)
+            payload = detail.model_dump(mode="json")
+            payload["current_cycle"]["summary"] = (
+                "\u5148\u7a33\u4ea4\u4ed8\uff0c\u518d\u8865\u589e\u957f\u3002"
+            )
+            payload["assignments"] = [
+                {
+                    "assignment_id": "assignment-1",
+                    "title": "Follow up key leads",
+                    "summary": "Get responses from high-priority leads and confirm the next step.",
+                    "status": "active",
+                    "owner_agent_id": "ops-agent",
+                    "updated_at": "2026-03-09T10:00:00+00:00",
+                },
+                {
+                    "assignment_id": "assignment-2",
+                    "title": "Summarize competitor changes",
+                    "summary": "Review pricing, campaigns, and risk deltas.",
+                    "status": "completed",
+                    "owner_agent_id": "research-agent",
+                    "updated_at": "2026-03-09T11:00:00+00:00",
+                },
+            ]
+            payload["agent_reports"] = [
+                {
+                    "report_id": "report-ops-older",
+                    "report_kind": "status",
+                    "headline": "Ops older report",
+                    "summary": "Older ops progress summary.",
+                    "status": "recorded",
+                    "result": "older-result",
+                    "processed": True,
+                    "needs_followup": False,
+                    "owner_agent_id": "ops-agent",
+                    "updated_at": "2026-03-09T09:20:00+00:00",
+                },
+                {
+                    "report_id": "report-research-latest",
+                    "report_kind": "status",
+                    "headline": "Research latest report",
+                    "summary": "Latest global report should appear in main brain evening report.",
+                    "status": "completed",
+                    "result": "research-result",
+                    "processed": True,
+                    "needs_followup": False,
+                    "owner_agent_id": "research-agent",
+                    "updated_at": "2026-03-09T11:40:00+00:00",
+                },
+                {
+                    "report_id": "report-ops-latest",
+                    "report_kind": "status",
+                    "headline": "Ops latest report",
+                    "summary": "Latest ops report should appear in ops evening report.",
+                    "status": "completed",
+                    "result": "ops-result",
+                    "processed": True,
+                    "needs_followup": False,
+                    "owner_agent_id": "ops-agent",
+                    "updated_at": "2026-03-09T10:20:00+00:00",
+                },
+            ]
+            return type(
+                "IndustryDetail",
+                (),
+                {
+                    "model_dump": lambda self, mode="json": payload,
+                },
+            )()
+
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = _MultiAgentProfileService()
+    app.state.industry_service = _MultiAgentIndustryService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/surface?sections=main_brain")
+
+    assert response.status_code == 200
+    cockpit = response.json()["main_brain"]["cockpit"]
+    main_brain = cockpit["main_brain"]
+    agents = {item["agent_id"]: item for item in cockpit["agents"]}
+
+    clear_next_action = (
+        "\u5f53\u524d\u6ca1\u6709\u660e\u786e\u7684\u6c47\u62a5\u7efc\u5408\u963b\u585e\uff0c"
+        "\u53ef\u4ee5\u7ee7\u7eed\u63a8\u8fdb\u672c\u8f6e\u5468\u671f\u3002"
+    )
+    clear_judgment = (
+        "\u6700\u65b0\u6c47\u62a5\u5df2\u7ecf\u6d88\u5316\u5b8c\u6bd5\uff0c"
+        "\u5f53\u524d\u6ca1\u6709\u660e\u786e\u7684\u91cd\u6392\u538b\u529b\u3002"
+    )
+
+    assert main_brain["evening_report"]["items"][0] == "Research latest report"
+    assert main_brain["morning_report"]["items"][1] == clear_next_action
+    assert (
+        main_brain["stage_summary"]["bullets"][-1]
+        == clear_judgment
+    )
+    assert agents["ops-agent"]["evening_report"]["items"][0] == "Ops latest report"
+    assert agents["research-agent"]["evening_report"]["items"][0] == "Research latest report"
+
+
+def test_runtime_center_human_cockpit_prefers_latest_unconsumed_report_for_main_brain_focus():
+    class _UnconsumedIndustryService(FakeIndustryService):
+        def get_instance_detail(self, instance_id: str):
+            detail = super().get_instance_detail(instance_id)
+            payload = detail.model_dump(mode="json")
+            payload["agent_reports"] = [
+                {
+                    "report_id": "report-older",
+                    "report_kind": "status",
+                    "headline": "Older pending report",
+                    "summary": "Older pending summary.",
+                    "status": "recorded",
+                    "processed": False,
+                    "needs_followup": False,
+                    "owner_agent_id": "ops-agent",
+                    "updated_at": "2026-03-09T08:20:00+00:00",
+                },
+                {
+                    "report_id": "report-latest",
+                    "report_kind": "status",
+                    "headline": "Newest pending report",
+                    "summary": "Newest pending summary.",
+                    "status": "recorded",
+                    "processed": False,
+                    "needs_followup": False,
+                    "owner_agent_id": "ops-agent",
+                    "updated_at": "2026-03-09T10:20:00+00:00",
+                },
+            ]
+            return type(
+                "IndustryDetail",
+                (),
+                {
+                    "model_dump": lambda self, mode="json": payload,
+                },
+            )()
+
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = _UnconsumedIndustryService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/surface?sections=main_brain")
+
+    assert response.status_code == 200
+    cockpit = response.json()["main_brain"]["cockpit"]
+
+    assert cockpit["main_brain"]["summary_fields"][1]["value"] == "Newest pending report"
+
+
+def test_runtime_center_human_cockpit_prefers_latest_assignment_for_agent_focus_and_morning_report():
+    class _LatestAssignmentProfileService(FakeAgentProfileService):
+        def list_agents(
+            self,
+            limit: int | None = 5,
+            view: str = "all",
+            industry_instance_id: str | None = None,
+        ):
+            _ = (limit, industry_instance_id)
+            return [
+                {
+                    "agent_id": "ops-agent",
+                    "name": "Ops Lead",
+                    "status": "running",
+                    "role_name": "Operations",
+                    "role_summary": "Push execution tasks and return results.",
+                    "current_focus": None,
+                    "industry_instance_id": "industry-v1-ops",
+                },
+            ]
+
+    class _LatestAssignmentIndustryService(FakeIndustryService):
+        def get_instance_detail(self, instance_id: str):
+            detail = super().get_instance_detail(instance_id)
+            payload = detail.model_dump(mode="json")
+            payload["assignments"] = [
+                {
+                    "assignment_id": "assignment-older",
+                    "title": "Older assignment",
+                    "summary": "Older assignment summary.",
+                    "status": "active",
+                    "owner_agent_id": "ops-agent",
+                    "updated_at": "2026-03-09T08:00:00+00:00",
+                },
+                {
+                    "assignment_id": "assignment-latest",
+                    "title": "Latest assignment",
+                    "summary": "Newest assignment summary.",
+                    "status": "active",
+                    "owner_agent_id": "ops-agent",
+                    "updated_at": "2026-03-09T10:30:00+00:00",
+                },
+            ]
+            payload["agent_reports"] = []
+            return type(
+                "IndustryDetail",
+                (),
+                {
+                    "model_dump": lambda self, mode="json": payload,
+                },
+            )()
+
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = _LatestAssignmentProfileService()
+    app.state.industry_service = _LatestAssignmentIndustryService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/surface?sections=main_brain")
+
+    assert response.status_code == 200
+    cockpit = response.json()["main_brain"]["cockpit"]
+    agent = cockpit["agents"][0]
+    summary_fields = {item["label"]: item["value"] for item in agent["summary_fields"]}
+
+    assert summary_fields["主要负责工作"] == "Newest assignment summary."
+    assert agent["morning_report"]["items"][0] == "Newest assignment summary."
+
+
 def test_runtime_center_main_brain_route_exposes_report_cognition_surface():
     app = build_runtime_center_app()
     app.state.state_query_service = FakeStateQueryService()
@@ -834,7 +1138,11 @@ def test_runtime_center_main_brain_route_exposes_report_cognition_surface():
     assert cognition["decision_kind"] == "lane_reweight"
     assert cognition["judgment"]["status"] == "attention"
     assert cognition["judgment"]["decision_kind"] == "lane_reweight"
-    assert "decide whether to dispatch follow-up work" in cognition["judgment"]["summary"]
+    assert (
+        cognition["judgment"]["summary"]
+        == "\u4e3b\u8111\u9700\u8981\u6bd4\u5bf9\u8fd8\u6ca1\u6536\u53e3\u7684\u6c47\u62a5\uff0c"
+        "\u5e76\u51b3\u5b9a\u662f\u5426\u7ee7\u7eed\u6d3e\u53d1\u8ddf\u8fdb\u4efb\u52a1\u3002"
+    )
     assert cognition["next_action"]["kind"] == "followup-backlog"
     assert cognition["next_action"]["decision_kind"] == "lane_reweight"
     assert cognition["next_action"]["title"] == "Resolve handoff return evidence gap"
@@ -919,7 +1227,7 @@ def test_runtime_center_industry_detail_rejects_unsupported_focus_queries():
         assert response.json() == {
             "detail": (
                 "Unsupported runtime-center industry focus; "
-                "only assignment/backlog focus is supported."
+                "only assignment/backlog/report focus is supported."
             )
         }
 

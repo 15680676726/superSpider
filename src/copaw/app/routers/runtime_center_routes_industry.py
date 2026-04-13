@@ -88,7 +88,7 @@ async def get_industry_instance_detail(
             400,
             detail=(
                 "Unsupported runtime-center industry focus; "
-                "only assignment/backlog focus is supported."
+                "only assignment/backlog/report focus is supported."
             ),
         )
     if focus_id is not None and focus_kind is None:

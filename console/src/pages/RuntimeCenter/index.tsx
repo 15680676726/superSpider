@@ -1,219 +1,579 @@
+import { Alert, Button, Card, Empty, Space, Tag, message } from "antd";
+import { RefreshCw } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+
+import { api } from "../../api";
+import type {
+  RuntimeHumanCockpitApproval,
+  RuntimeHumanCockpitCard,
+  RuntimeHumanCockpitReportBlock,
+  RuntimeHumanCockpitStageSummary,
+  RuntimeHumanCockpitSummaryField,
+  RuntimeHumanCockpitTrendPoint,
+  RuntimeMainBrainRecord,
+  RuntimeMainBrainResponse,
+} from "../../api/modules/runtimeCenter";
+import { PageHeader } from "../../components/PageHeader";
+import { normalizeDisplayChinese } from "../../text";
 import {
-  Alert,
-  Button,
-  Card,
-  Checkbox,
-  Descriptions,
-  Empty,
-  Input,
-  Space,
-  Spin,
-  Switch,
-  Tabs,
-  Row,
-  Col,
-  Tag,
-  Typography,
-} from "antd";
-import { useCallback, useMemo } from "react";
-import {
-  Activity,
-  Bot,
-  RefreshCw,
-  RotateCcw,
-  ShieldAlert,
-  ShieldCheck,
-  Waypoints,
-} from "lucide-react";
-import { useNavigate, useSearchParams } from "react-router-dom";
-import AutomationTab from "./AutomationTab";
-import CapabilityOptimizationPanel from "./CapabilityOptimizationPanel";
+  presentExecutionActorName,
+  presentRuntimeStatusLabel,
+} from "../../runtime/executionPresentation";
+import { runtimeStatusColor } from "../../runtime/tagSemantics";
+import AgentCardStrip, { type AgentCardStripItem } from "./AgentCardStrip";
+import AgentWorkPanel, {
+  type CockpitReportBlock,
+  type CockpitSummaryField,
+  type CockpitTrendPoint,
+  type DayMode,
+} from "./AgentWorkPanel";
+import MainBrainCockpitPanel, {
+  type MainBrainStageSummary,
+  type PendingApprovalItem,
+} from "./MainBrainCockpitPanel";
+import MainBrainSystemManagement from "./MainBrainSystemManagement";
 import styles from "./index.module.less";
 import {
-  type RuntimeCenterAgentSummary,
-  type RuntimeCardStatus,
   useRuntimeCenter,
+  type RuntimeCenterAgentSummary,
 } from "./useRuntimeCenter";
-import { localizeRuntimeText, RUNTIME_CENTER_TEXT } from "./text";
-import {
-  type RuntimeCenterTab,
-  useRuntimeCenterAdminState,
-} from "./useRuntimeCenterAdminState";
-import {
-  surfaceTagColor,
-  cardStatusColor,
-  translateRuntimeStatus,
-  translateRuntimeEntryKind,
-  translateRuntimeCardTitle,
-  translateRuntimeCardSummary,
-  translateRuntimeEntryTitle,
-  translateRuntimeEntrySummary,
-  translateRuntimeFieldLabel,
-  formatTimestamp,
-  primitiveValue,
-  routeTitle,
-  renderDetailDrawer,
-  renderEntry,
-  summaryRows,
-  toggleSelection,
-} from "./viewHelpers";
-import MainBrainCockpitPanel from "./MainBrainCockpitPanel";
-import { runtimeStatusColor } from "../../runtime/tagSemantics";
-import { presentExecutionActorName } from "../../runtime/executionPresentation";
-import { PageHeader } from "../../components/PageHeader";
+import { formatTimestamp, renderDetailDrawer } from "./viewHelpers";
 
-const { Text } = Typography;
-const { TextArea } = Input;
+const MAIN_BRAIN_ID = "main-brain";
 
-const LEGACY_OVERVIEW_CARD_KEYS = new Set(["goals", "schedules", "main-brain"]);
-const MAIN_BRAIN_AGENT_IDS = new Set(["copaw-agent-runner"]);
-const MAIN_BRAIN_AGENT_CLASSES = new Set(["system"]);
-const MAIN_BRAIN_ROLE_IDS = new Set(["execution-core"]);
-
-function agentHeadline(agent: RuntimeCenterAgentSummary | null | undefined): string {
-  if (!agent) {
-    return "当前还没有新的执行摘要。";
-  }
-  return (
-    localizeRuntimeText(
-      agent.current_focus || agent.role_summary || agent.role_name || agent.name || "",
-    ) || "当前还没有新的焦点摘要。"
-  );
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function readRecordText(
-  record: Record<string, unknown> | null | undefined,
-  keys: string[],
-): string | null {
-  if (!record) {
-    return null;
-  }
-  for (const key of keys) {
-    const value = record[key];
+function firstText(...values: unknown[]): string | null {
+  for (const value of values) {
     if (typeof value === "string" && value.trim()) {
-      return value;
+      return normalizeDisplayChinese(value.trim());
+    }
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return String(value);
+    }
+    if (isRecord(value)) {
+      const nested = firstText(
+        value.title,
+        value.headline,
+        value.label,
+        value.name,
+        value.summary,
+        value.description,
+        value.detail,
+        value.reason,
+        value.status,
+        value.value,
+      );
+      if (nested) {
+        return nested;
+      }
     }
   }
   return null;
 }
 
-function agentMetaText(
-  meta: Record<string, unknown> | undefined,
-  key: string,
-): string | null {
-  if (!meta) {
-    return null;
-  }
-  const value = meta[key];
-  return typeof value === "string" && value.trim() ? value.trim() : null;
+function buildList(...values: Array<string | null | undefined>): string[] {
+  return Array.from(
+    new Set(values.map((item) => item?.trim()).filter((item): item is string => Boolean(item))),
+  );
 }
 
-function deriveAgentsFromOverview(
-  overview: ReturnType<typeof useRuntimeCenter>["data"] | null,
-): RuntimeCenterAgentSummary[] {
-  const agentsCard = overview?.cards.find((card) => card.key === "agents");
-  if (!agentsCard) {
+function resolveDayMode(now = new Date()): DayMode {
+  const hour = now.getHours();
+  return hour >= 18 || hour < 6 ? "night" : "day";
+}
+
+function statusNeedsAttention(status?: string | null): boolean {
+  const normalized = typeof status === "string" ? status.trim().toLowerCase() : "";
+  return [
+    "blocked",
+    "error",
+    "failed",
+    "pending",
+    "open",
+    "reviewing",
+    "waiting",
+    "human-required",
+    "waiting-confirm",
+  ].some((token) => normalized.includes(token));
+}
+
+function progressFromStatus(status?: string | null): number {
+  const normalized = typeof status === "string" ? status.trim().toLowerCase() : "";
+  if (["completed", "done", "approved", "applied"].includes(normalized)) {
+    return 100;
+  }
+  if (["running", "executing", "active", "claimed"].includes(normalized)) {
+    return 72;
+  }
+  if (["queued", "assigned", "waiting", "open", "pending"].includes(normalized)) {
+    return 36;
+  }
+  if (["reviewing", "paused"].includes(normalized)) {
+    return 54;
+  }
+  if (["blocked", "error", "failed"].includes(normalized)) {
+    return 18;
+  }
+  return 48;
+}
+
+function reportBlock(title: string, items: Array<string | null | undefined>): CockpitReportBlock | null {
+  const lines = buildList(...items).slice(0, 3);
+  if (lines.length === 0) {
+    return null;
+  }
+  return {
+    title,
+    items: lines,
+  };
+}
+
+function metricPoint(
+  label: string,
+  completed: number,
+  completionRate: number,
+  quality: number,
+): CockpitTrendPoint {
+  return {
+    label,
+    completed,
+    completionRate: Math.max(0, Math.min(100, Math.round(completionRate))),
+    quality: Math.max(0, Math.min(100, Math.round(quality))),
+  };
+}
+
+function matchesAgent(record: RuntimeMainBrainRecord, agentId: string): boolean {
+  return (
+    firstText(record.owner_agent_id, record.agent_id, record.owner) === agentId ||
+    firstText(record.owner_agent_name) === agentId
+  );
+}
+
+function pickLatestRecord<T extends RuntimeMainBrainRecord>(
+  records: T[] | null | undefined,
+): T | undefined {
+  let latest: T | undefined;
+  let latestSortKey = "";
+  for (const record of records ?? []) {
+    const sortKey =
+      firstText(
+        record.updated_at,
+        record.created_at,
+        record.recorded_at,
+        record.generated_at,
+      ) ?? "";
+    if (!latest || sortKey > latestSortKey) {
+      latest = record;
+      latestSortKey = sortKey;
+    }
+  }
+  return latest;
+}
+
+function buildMainBrainSummaryFields(
+  mainBrainData: RuntimeMainBrainResponse | null,
+  approvals: PendingApprovalItem[],
+): CockpitSummaryField[] {
+  if (!mainBrainData) {
+    return [
+      {
+        label: "职责",
+        value: "负责统筹安排、跟进进度、收结果、把需要你决定的事情提出来。",
+      },
+      {
+        label: "当前重点",
+        value: "正在等待主脑运行数据。",
+      },
+    ];
+  }
+
+  return [
+    {
+      label: "职责",
+      value:
+        firstText(mainBrainData.strategy?.summary) ||
+        "负责统筹安排、跟进进度、收结果、把需要你决定的事情提出来。",
+    },
+    {
+      label: "当前重点",
+      value:
+        firstText(
+          mainBrainData.report_cognition?.next_action?.title,
+          mainBrainData.report_cognition?.next_action?.summary,
+          mainBrainData.current_cycle?.title,
+          mainBrainData.current_cycle?.summary,
+        ) || "今天还没有新的主脑重点。",
+    },
+    {
+      label: "今日进展",
+      value: `已派工 ${mainBrainData.assignments.length} 项，已回收 ${mainBrainData.reports.length} 份汇报，新增 ${mainBrainData.evidence.count} 条证据。`,
+    },
+    {
+      label: "需要你决定",
+      value:
+        approvals.length > 0
+          ? `当前有 ${approvals.length} 项待处理。`
+          : "当前没有必须你立刻决定的事项。",
+    },
+  ];
+}
+
+function buildMainBrainReports(
+  mainBrainData: RuntimeMainBrainResponse | null,
+): { morningReport: CockpitReportBlock | null; eveningReport: CockpitReportBlock | null } {
+  if (!mainBrainData) {
+    return { morningReport: null, eveningReport: null };
+  }
+
+  const morningReport = reportBlock("早报", [
+    firstText(mainBrainData.current_cycle?.summary, mainBrainData.current_cycle?.title),
+    firstText(
+      mainBrainData.report_cognition?.next_action?.summary,
+      mainBrainData.report_cognition?.next_action?.title,
+    ),
+    `今天主脑需要盯住 ${mainBrainData.assignments.length} 项执行任务。`,
+  ]);
+
+  const latestReport = pickLatestRecord(mainBrainData.reports);
+  const eveningReport = reportBlock("晚报", [
+    firstText(latestReport?.headline, latestReport?.summary),
+    `今天共收到 ${mainBrainData.reports.length} 份汇报。`,
+    `今天新增 ${mainBrainData.evidence.count} 条证据。`,
+    mainBrainData.decisions.count > 0
+      ? `还有 ${mainBrainData.decisions.count} 项待你确认。`
+      : null,
+  ]);
+
+  return { morningReport, eveningReport };
+}
+
+function buildMainBrainTrend(
+  mainBrainData: RuntimeMainBrainResponse | null,
+  approvals: PendingApprovalItem[],
+): CockpitTrendPoint[] {
+  if (!mainBrainData) {
     return [];
   }
-  return agentsCard.entries.map((entry) => ({
-    agent_id: entry.id,
-    name: entry.title || entry.id,
-    role_name: agentMetaText(entry.meta, "role_name") ?? entry.owner ?? null,
-    role_summary: entry.summary ?? null,
-    agent_class: agentMetaText(entry.meta, "agent_class"),
-    status: entry.status ?? null,
-    current_focus: agentMetaText(entry.meta, "current_focus"),
-    current_focus_kind: agentMetaText(entry.meta, "current_focus_kind"),
-    current_focus_id: agentMetaText(entry.meta, "current_focus_id"),
-    reports_to: agentMetaText(entry.meta, "reports_to"),
-    industry_role_id: agentMetaText(entry.meta, "industry_role_id"),
+
+  const approvalPressure = approvals.length === 0 ? 92 : Math.max(30, 100 - approvals.length * 18);
+  return [
+    metricPoint(
+      "派工",
+      mainBrainData.assignments.length,
+      mainBrainData.assignments.length > 0 ? 78 : 24,
+      82,
+    ),
+    metricPoint(
+      "汇报",
+      mainBrainData.reports.length,
+      mainBrainData.reports.length > 0 ? 84 : 28,
+      80,
+    ),
+    metricPoint(
+      "证据",
+      mainBrainData.evidence.count,
+      mainBrainData.evidence.count > 0 ? 88 : 20,
+      approvalPressure,
+    ),
+  ];
+}
+
+function buildStageSummary(mainBrainData: RuntimeMainBrainResponse | null): MainBrainStageSummary | null {
+  if (!mainBrainData) {
+    return null;
+  }
+
+  const bullets = buildList(
+    mainBrainData.assignments.length > 0
+      ? `当前阶段已经派出 ${mainBrainData.assignments.length} 项执行任务。`
+      : null,
+    mainBrainData.reports.length > 0
+      ? `已回收 ${mainBrainData.reports.length} 份执行汇报。`
+      : null,
+    mainBrainData.evidence.count > 0
+      ? `已有 ${mainBrainData.evidence.count} 条证据进入系统。`
+      : null,
+    firstText(
+      mainBrainData.report_cognition?.replan_reasons?.[0],
+      mainBrainData.report_cognition?.judgment?.summary,
+    ),
+  );
+
+  if (bullets.length === 0) {
+    return null;
+  }
+
+  return {
+    title: firstText(mainBrainData.current_cycle?.title) || "当前阶段汇总",
+    periodLabel: "当前周期",
+    summary:
+      firstText(
+        mainBrainData.current_cycle?.summary,
+        mainBrainData.strategy?.summary,
+        mainBrainData.report_cognition?.next_action?.summary,
+      ) || "主脑正在持续收口当前阶段结果。",
+    bullets,
+  };
+}
+
+function buildApprovalItems(mainBrainData: RuntimeMainBrainResponse | null): PendingApprovalItem[] {
+  if (!mainBrainData) {
+    return [];
+  }
+
+  return (mainBrainData.decisions.entries ?? [])
+    .map((entry) => {
+      const route = firstText(entry.route);
+      const kind: "decision" | "patch" =
+        route?.includes("patch") || firstText(entry.kind)?.toLowerCase() === "patch"
+          ? "patch"
+          : "decision";
+      const id =
+        firstText(entry.id, entry.decision_id, entry.patch_id, entry.title) ??
+        `${kind}-${Math.random().toString(36).slice(2, 8)}`;
+      return {
+        id,
+        kind,
+        title: firstText(entry.title, entry.headline) || "待处理事项",
+        reason:
+          firstText(entry.summary, entry.reason, entry.detail) || "主脑判断这件事需要你拍板。",
+        recommendation:
+          kind === "patch"
+            ? "建议先确认是否允许应用这次变更。"
+            : "建议先确认是否现在执行这项决定。",
+        risk:
+          firstText(entry.risk, entry.impact) || "如果继续搁置，当前推进会继续往后顺延。",
+        initiator: firstText(entry.owner, entry.initiator) || "主脑",
+        createdAt: firstText(entry.created_at, entry.updated_at) || "刚刚",
+      };
+    })
+    .filter((item) => item.title);
+}
+
+function buildMainBrainCard(
+  mainBrainData: RuntimeMainBrainResponse | null,
+  pendingApprovals: PendingApprovalItem[],
+  buddyName?: string | null,
+  loading?: boolean,
+  error?: string | null,
+  unavailable?: boolean,
+): AgentCardStripItem {
+  let status = "running";
+  if (error) {
+    status = "blocked";
+  } else if (loading) {
+    status = "queued";
+  } else if (unavailable) {
+    status = "idle";
+  } else if (pendingApprovals.length > 0) {
+    status = "reviewing";
+  }
+
+  const progress =
+    mainBrainData == null
+      ? progressFromStatus(status)
+      : Math.min(96, 40 + mainBrainData.reports.length * 12 + mainBrainData.evidence.count * 8);
+
+  return {
+    id: MAIN_BRAIN_ID,
+    name: normalizeDisplayChinese(buddyName || "伙伴"),
+    role: "主脑",
+    status,
+    progress,
+    needsAttention: Boolean(error) || pendingApprovals.length > 0,
+    isMainBrain: true,
+  };
+}
+
+function buildAgentCard(agent: RuntimeCenterAgentSummary, mainBrainData: RuntimeMainBrainResponse | null): AgentCardStripItem {
+  const reports =
+    mainBrainData?.reports.filter((record) => matchesAgent(record, agent.agent_id)) ?? [];
+  const assignments =
+    mainBrainData?.assignments.filter((record) => matchesAgent(record, agent.agent_id)) ?? [];
+
+  const attention = statusNeedsAttention(agent.status) || reports.some((item) => statusNeedsAttention(firstText(item.status)));
+  const progressBase = progressFromStatus(agent.status);
+  const progressBoost = Math.min(24, assignments.length * 12 + reports.length * 10);
+
+  return {
+    id: agent.agent_id,
+    name: presentExecutionActorName(agent.agent_id, agent.name),
+    role: normalizeDisplayChinese(agent.role_name || "职业智能体"),
+    status: agent.status || "idle",
+    progress: Math.min(100, progressBase + progressBoost),
+    needsAttention: attention,
+  };
+}
+
+function buildAgentSummaryFields(
+  agent: RuntimeCenterAgentSummary,
+  mainBrainData: RuntimeMainBrainResponse | null,
+): CockpitSummaryField[] {
+  const relatedAssignment = pickLatestRecord(
+    mainBrainData?.assignments.filter((record) => matchesAgent(record, agent.agent_id)),
+  );
+  const relatedReport = pickLatestRecord(
+    mainBrainData?.reports.filter((record) => matchesAgent(record, agent.agent_id)),
+  );
+
+  return [
+    {
+      label: "职业",
+      value: agent.role_name || "职业智能体",
+    },
+    {
+      label: "职责",
+      value: agent.role_summary || "负责对应岗位的执行与结果回传。",
+    },
+    {
+      label: "主要负责工作",
+      value:
+        firstText(
+          agent.current_focus,
+          relatedAssignment?.summary,
+          relatedAssignment?.title,
+          relatedReport?.headline,
+        ) || "当前还没有明确展示的工作重点。",
+    },
+    {
+      label: "当前状态",
+      value: presentRuntimeStatusLabel(agent.status),
+    },
+  ];
+}
+
+function buildAgentReports(
+  agent: RuntimeCenterAgentSummary,
+  mainBrainData: RuntimeMainBrainResponse | null,
+): { morningReport: CockpitReportBlock | null; eveningReport: CockpitReportBlock | null } {
+  const relatedAssignment = pickLatestRecord(
+    mainBrainData?.assignments.filter((record) => matchesAgent(record, agent.agent_id)),
+  );
+  const relatedReport = pickLatestRecord(
+    mainBrainData?.reports.filter((record) => matchesAgent(record, agent.agent_id)),
+  );
+
+  const morningReport = reportBlock("早报", [
+    firstText(agent.current_focus),
+    firstText(relatedAssignment?.summary, relatedAssignment?.title),
+    agent.role_summary ? `今天继续推进：${agent.role_summary}` : null,
+  ]);
+
+  const eveningReport = reportBlock("晚报", [
+    firstText(relatedReport?.headline, relatedReport?.summary),
+    relatedReport ? `当前结果状态：${firstText(relatedReport.result, relatedReport.status) || "推进中"}` : null,
+    relatedReport && firstText(relatedReport.updated_at)
+      ? `最后回传时间：${firstText(relatedReport.updated_at)}`
+      : null,
+  ]);
+
+  return { morningReport, eveningReport };
+}
+
+function buildAgentTrend(
+  agent: RuntimeCenterAgentSummary,
+  mainBrainData: RuntimeMainBrainResponse | null,
+): CockpitTrendPoint[] {
+  const relatedAssignments =
+    mainBrainData?.assignments.filter((record) => matchesAgent(record, agent.agent_id)) ?? [];
+  const relatedReports =
+    mainBrainData?.reports.filter((record) => matchesAgent(record, agent.agent_id)) ?? [];
+  const completedCount = relatedAssignments.filter(
+    (record) => firstText(record.status)?.toLowerCase() === "completed",
+  ).length;
+
+  const baseCompletion = progressFromStatus(agent.status);
+  const feedbackQuality = relatedReports.length > 0 ? 84 : 45;
+  const continuity = statusNeedsAttention(agent.status) ? 42 : 88;
+
+  return [
+    metricPoint("任务完成", completedCount || relatedAssignments.length, baseCompletion, feedbackQuality),
+    metricPoint("结果回传", relatedReports.length, relatedReports.length > 0 ? 82 : 30, feedbackQuality),
+    metricPoint("协作连贯", continuity >= 80 ? 1 : 0, continuity, continuity),
+  ];
+}
+
+function mapCockpitCard(card: RuntimeHumanCockpitCard): AgentCardStripItem {
+  return {
+    id: card.id,
+    name: card.name,
+    role: card.role,
+    status: card.status,
+    progress: card.progress,
+    needsAttention: card.needs_attention,
+    isMainBrain: card.is_main_brain,
+  };
+}
+
+function mapCockpitSummaryFields(
+  fields: RuntimeHumanCockpitSummaryField[] | undefined,
+): CockpitSummaryField[] {
+  return (fields ?? []).map((field) => ({
+    label: field.label,
+    value: field.value,
+    hint: field.hint ?? undefined,
   }));
 }
 
-function mainBrainHeadline(
-  mainBrainData: ReturnType<typeof useRuntimeCenter>["mainBrainData"],
-  options: {
-    loading: boolean;
-    error: string | null;
-    unavailable: boolean;
-  },
-): string {
-  if (options.error) {
-    return options.error;
+function mapCockpitReportBlock(
+  block: RuntimeHumanCockpitReportBlock | null | undefined,
+): CockpitReportBlock | null {
+  if (!block) {
+    return null;
   }
-  if (options.loading) {
-    return "正在汇总主脑今日运行简报。";
-  }
-  if (options.unavailable || !mainBrainData) {
-    return "主脑正在收口当前周期、派工与证据回流。";
-  }
-
-  const currentCycleTitle = readRecordText(mainBrainData.current_cycle, [
-    "title",
-    "cycle_title",
-  ]);
-  const nextAction = readRecordText(
-    mainBrainData.report_cognition?.next_action as Record<string, unknown> | undefined,
-    ["title", "summary"],
-  );
-  const fragments = [
-    currentCycleTitle
-      ? `当前周期：${localizeRuntimeText(currentCycleTitle)}`
-      : null,
-    nextAction ? `下一步：${localizeRuntimeText(nextAction)}` : null,
-    `派工 ${mainBrainData.assignments.length} / 汇报 ${mainBrainData.reports.length}`,
-  ];
-  return fragments.filter(Boolean).join(" · ");
+  return {
+    title: block.title,
+    items: block.items,
+    generatedAt: block.generated_at ?? undefined,
+  };
 }
 
-function isProfessionalAgent(agent: RuntimeCenterAgentSummary | null | undefined): boolean {
-  if (!agent) {
-    return false;
-  }
-  return !(
-    MAIN_BRAIN_AGENT_IDS.has(agent.agent_id) ||
-    MAIN_BRAIN_AGENT_CLASSES.has(agent.agent_class ?? "") ||
-    MAIN_BRAIN_ROLE_IDS.has(agent.industry_role_id ?? "")
-  );
+function mapCockpitTrend(
+  trend: RuntimeHumanCockpitTrendPoint[] | undefined,
+): CockpitTrendPoint[] {
+  return (trend ?? []).map((item) => ({
+    label: item.label,
+    completed: item.completed,
+    completionRate: item.completion_rate,
+    quality: item.quality,
+  }));
 }
 
-function presentSurfaceState(status: RuntimeCardStatus | null | undefined): string {
-  switch (status) {
-    case "state-service":
-      return "系统已接入";
-    case "degraded":
-      return "部分受限";
-    default:
-      return "暂未接入";
-  }
+function mapCockpitApprovals(
+  approvals: RuntimeHumanCockpitApproval[] | undefined,
+): PendingApprovalItem[] {
+  return (approvals ?? []).map((item) => ({
+    id: item.id,
+    kind: item.kind,
+    title: item.title,
+    reason: item.reason,
+    recommendation: item.recommendation,
+    risk: item.risk,
+    initiator: item.initiator,
+    createdAt: item.created_at,
+  }));
 }
 
-function presentAgentState(status: string | null | undefined): string {
-  const normalized = typeof status === "string" ? status.trim().toLowerCase() : "";
-  switch (normalized) {
-    case "active":
-    case "running":
-      return "推进中";
-    case "queued":
-    case "pending":
-    case "waiting-resource":
-      return "待推进";
-    case "blocked":
-    case "error":
-    case "failed":
-    case "human-required":
-      return "需关注";
-    case "completed":
-    case "done":
-      return "已完成";
-    default:
-      return "待命";
+function mapCockpitStageSummary(
+  summary: RuntimeHumanCockpitStageSummary | null | undefined,
+): MainBrainStageSummary | null {
+  if (!summary) {
+    return null;
   }
+  return {
+    title: summary.title,
+    periodLabel: summary.period_label ?? undefined,
+    summary: summary.summary,
+    bullets: summary.bullets ?? [],
+  };
 }
 
 export default function RuntimeCenterPage() {
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
   const {
     data,
     loading,
@@ -225,525 +585,315 @@ export default function RuntimeCenterPage() {
     mainBrainLoading,
     mainBrainUnavailable,
     businessAgents,
-    busyActionId,
     detail,
     detailLoading,
     detailError,
     reload,
-    invokeAction,
     openDetail,
     closeDetail,
   } = useRuntimeCenter();
 
-  const rawTab = searchParams.get("tab");
-  const activeTab: RuntimeCenterTab =
-    rawTab === "governance" || rawTab === "recovery" || rawTab === "automation"
-      ? rawTab
-      : "overview";
-  const focusScope = searchParams.get("scope");
-  const overviewData = useMemo(
+  const [selectedId, setSelectedId] = useState(MAIN_BRAIN_ID);
+  const dayMode = useMemo(() => resolveDayMode(), []);
+
+  const cockpit = mainBrainData?.cockpit ?? null;
+  const cockpitMainBrain = cockpit?.main_brain ?? null;
+  const cockpitAgents = cockpit?.agents ?? [];
+
+  const approvals = useMemo(
     () =>
-      data
-        ? {
-            ...data,
-            cards: data.cards.filter((card) => !LEGACY_OVERVIEW_CARD_KEYS.has(card.key)),
-          }
-        : null,
-    [data],
+      cockpitMainBrain
+        ? mapCockpitApprovals(cockpitMainBrain.approvals)
+        : buildApprovalItems(mainBrainData),
+    [cockpitMainBrain, mainBrainData],
   );
-  const surface = overviewData?.surface;
-  const canonicalAgents = useMemo(() => {
-    const derivedAgents = deriveAgentsFromOverview(overviewData);
-    return derivedAgents.length > 0 ? derivedAgents : businessAgents;
-  }, [businessAgents, overviewData]);
-  const professionalAgents = useMemo(
-    () => canonicalAgents.filter((agent) => isProfessionalAgent(agent)),
-    [canonicalAgents],
+  const mainBrainCard = useMemo(
+    () =>
+      cockpitMainBrain
+        ? mapCockpitCard(cockpitMainBrain.card)
+        : buildMainBrainCard(
+            mainBrainData,
+            approvals,
+            buddySummary?.buddy_name,
+            mainBrainLoading,
+            mainBrainError,
+            mainBrainUnavailable,
+          ),
+    [
+      cockpitMainBrain,
+      approvals,
+      buddySummary?.buddy_name,
+      mainBrainData,
+      mainBrainError,
+      mainBrainLoading,
+      mainBrainUnavailable,
+    ],
   );
-  const agentStripLoading = loading && !overviewData;
-  const agentStripError = !overviewData ? error : null;
-  const overviewCards = overviewData?.cards ?? [];
 
-  const decisionEntries = useMemo(
-    () => overviewData?.cards.find((card) => card.key === "decisions")?.entries ?? [],
-    [overviewData],
+  const agentCards = useMemo<AgentCardStripItem[]>(
+    () =>
+      cockpitAgents.length > 0
+        ? [mainBrainCard, ...cockpitAgents.map((agent) => mapCockpitCard(agent.card))]
+        : [
+            mainBrainCard,
+            ...businessAgents.map((agent) => buildAgentCard(agent, mainBrainData)),
+          ],
+    [businessAgents, cockpitAgents, mainBrainCard, mainBrainData],
   );
-  const patchEntries = useMemo(
-    () => overviewData?.cards.find((card) => card.key === "patches")?.entries ?? [],
-    [overviewData],
-  );
-  const {
-    governanceStatus,
-    governanceLoading,
-    governanceError,
-    governanceBusyKey,
-    capabilityOptimizationOverview,
-    capabilityOptimizationLoading,
-    capabilityOptimizationError,
-    capabilityOptimizationBusyId,
-    recoverySummary,
-    selfCheck,
-    recoveryLoading,
-    recoveryError,
-    recoveryBusyKey,
-    operatorActor,
-    setOperatorActor,
-    governanceResolution,
-    setGovernanceResolution,
-    emergencyReason,
-    setEmergencyReason,
-    resumeReason,
-    setResumeReason,
-    executeApprovedDecisions,
-    setExecuteApprovedDecisions,
-    selectedDecisionIds,
-    setSelectedDecisionIds,
-    selectedPatchIds,
-    setSelectedPatchIds,
-    handleDecisionBatch,
-    handlePatchBatch,
-    handleCapabilityOptimizationExecute,
-    handleEmergencyStop,
-    handleResumeRuntime,
-    handleRecoveryRefresh,
-    handleSelfCheck,
-    refreshActiveTabData,
-  } = useRuntimeCenterAdminState({
-    activeTab,
-    dataGeneratedAt: data?.generated_at,
-    decisionEntries,
-    patchEntries,
-    reload,
-    navigate,
-  });
 
-  const handleTabChange = (nextTab: string) => {
-    const nextParams = new URLSearchParams(searchParams);
-    if (nextTab === "overview") {
-      nextParams.delete("tab");
-      nextParams.delete("scope");
-    } else {
-      nextParams.set("tab", nextTab);
-      if (nextTab !== "automation") {
-        nextParams.delete("scope");
-      }
+  useEffect(() => {
+    const validIds = new Set(agentCards.map((item) => item.id));
+    if (!validIds.has(selectedId)) {
+      setSelectedId(MAIN_BRAIN_ID);
     }
-    setSearchParams(nextParams, { replace: true });
-  };
+  }, [agentCards, selectedId]);
 
-  const openSurfaceRoute = useCallback(
-    async (route: string, title: string) => {
-      if (route.startsWith("/api/")) {
-        await openDetail(route, title);
-        return;
-      }
-      navigate(route);
-    },
-    [navigate, openDetail],
+  const selectedLegacyAgent = useMemo(
+    () => businessAgents.find((agent) => agent.agent_id === selectedId) ?? null,
+    [businessAgents, selectedId],
   );
+  const selectedCockpitAgent = useMemo(
+    () => cockpitAgents.find((agent) => agent.agent_id === selectedId) ?? null,
+    [cockpitAgents, selectedId],
+  );
+  const visibleAgentCount = cockpitAgents.length > 0 ? cockpitAgents.length : businessAgents.length;
 
-  const openAgentWorkbench = useCallback(
-    (agentId: string) => {
-      const nextParams = new URLSearchParams();
-      nextParams.set("agent", agentId);
-      navigate(`/runtime-center?${nextParams.toString()}`);
-    },
-    [navigate],
-  );
-
-  const recoveryRows = summaryRows(recoverySummary);
-  const healthHighlights = useMemo(
-    () => (selfCheck?.checks ?? []).slice(0, 4),
-    [selfCheck],
-  );
-  const mainBrainStripSummary = useMemo(
-    () =>
-      mainBrainHeadline(mainBrainData, {
-        loading: mainBrainLoading,
-        error: mainBrainError,
-        unavailable: mainBrainUnavailable,
-    }),
-    [mainBrainData, mainBrainError, mainBrainLoading, mainBrainUnavailable],
-  );
-  const pendingAttentionCount =
-    (governanceStatus?.pending_decisions ?? mainBrainData?.governance?.pending_decisions ?? 0) +
-    (governanceStatus?.pending_patches ?? mainBrainData?.governance?.pending_patches ?? 0);
   const headerStats = useMemo(
     () => [
       {
-        label: "执行中",
-        value: String(mainBrainData?.assignments.length ?? professionalAgents.length).padStart(
-          2,
-          "0",
-        ),
+        label: "今日推进",
+        value: String(mainBrainData?.assignments.length ?? visibleAgentCount).padStart(2, "0"),
       },
       {
-        label: "需关注",
-        value: String(pendingAttentionCount).padStart(2, "0"),
+        label: "待你决定",
+        value: String(approvals.length).padStart(2, "0"),
       },
       {
-        label: "今日新增",
-        value: String(
-          (mainBrainData?.reports.length ?? 0) + (mainBrainData?.evidence?.count ?? 0),
-        ).padStart(2, "0"),
+        label: "结果回传",
+        value: String((mainBrainData?.reports.length ?? 0) + (mainBrainData?.evidence.count ?? 0)).padStart(2, "0"),
       },
     ],
-    [
-      mainBrainData?.assignments.length,
-      mainBrainData?.evidence?.count,
-      mainBrainData?.reports.length,
-      pendingAttentionCount,
-      professionalAgents.length,
-    ],
+    [approvals.length, mainBrainData?.assignments.length, mainBrainData?.evidence.count, mainBrainData?.reports.length, visibleAgentCount],
   );
+
+  const mainBrainSummaryFields = useMemo(
+    () =>
+      cockpitMainBrain
+        ? mapCockpitSummaryFields(cockpitMainBrain.summary_fields)
+        : buildMainBrainSummaryFields(mainBrainData, approvals),
+    [approvals, cockpitMainBrain, mainBrainData],
+  );
+  const mainBrainReports = useMemo(
+    () =>
+      cockpitMainBrain
+        ? {
+            morningReport: mapCockpitReportBlock(cockpitMainBrain.morning_report),
+            eveningReport: mapCockpitReportBlock(cockpitMainBrain.evening_report),
+          }
+        : buildMainBrainReports(mainBrainData),
+    [cockpitMainBrain, mainBrainData],
+  );
+  const mainBrainTrend = useMemo(
+    () =>
+      cockpitMainBrain
+        ? mapCockpitTrend(cockpitMainBrain.trend)
+        : buildMainBrainTrend(mainBrainData, approvals),
+    [approvals, cockpitMainBrain, mainBrainData],
+  );
+  const stageSummary = useMemo(
+    () =>
+      cockpitMainBrain
+        ? mapCockpitStageSummary(cockpitMainBrain.stage_summary)
+        : buildStageSummary(mainBrainData),
+    [cockpitMainBrain, mainBrainData],
+  );
+
+  const openSurfaceRoute = async (route: string, title: string) => {
+    if (route.startsWith("/api/")) {
+      await openDetail(route, title);
+      return;
+    }
+    navigate(route);
+  };
+
+  const handleApprovalAction = async (
+    approvalId: string,
+    action: "approve" | "reject",
+  ) => {
+    const target = approvals.find((item) => item.id === approvalId);
+    if (!target) {
+      return;
+    }
+
+    try {
+      if (target.kind === "patch") {
+        if (action === "approve") {
+          await api.approveRuntimePatches({ patch_ids: [approvalId], actor: "runtime-center" });
+        } else {
+          await api.rejectRuntimePatches({ patch_ids: [approvalId], actor: "runtime-center" });
+        }
+      } else if (action === "approve") {
+        await api.approveRuntimeDecisions({
+          decision_ids: [approvalId],
+          actor: "runtime-center",
+          resolution: "驾驶舱批准",
+          execute: true,
+        });
+      } else {
+        await api.rejectRuntimeDecisions({
+          decision_ids: [approvalId],
+          actor: "runtime-center",
+          resolution: "驾驶舱拒绝",
+        });
+      }
+
+      message.success(action === "approve" ? "已提交同意" : "已提交拒绝");
+      await reload();
+    } catch (actionError) {
+      message.error(
+        normalizeDisplayChinese(
+          actionError instanceof Error ? actionError.message : String(actionError),
+        ),
+      );
+    }
+  };
+
+  const renderSelectedPanel = () => {
+    if (selectedId === MAIN_BRAIN_ID) {
+      return (
+        <MainBrainCockpitPanel
+          title={`${mainBrainCard.name}（主脑）`}
+          summaryFields={mainBrainSummaryFields}
+          morningReport={mainBrainReports.morningReport}
+          eveningReport={mainBrainReports.eveningReport}
+          trend={mainBrainTrend}
+          approvals={approvals}
+          stageSummary={stageSummary}
+          dayMode={dayMode}
+          systemManagement={
+            <MainBrainSystemManagement
+              refreshSignal={data?.generated_at ?? null}
+              onOpenDetail={(route, title) => {
+                void openSurfaceRoute(route, title);
+              }}
+              onRuntimeChanged={() => {
+                void reload();
+              }}
+            />
+          }
+          onApproveApproval={(approvalId) => {
+            void handleApprovalAction(approvalId, "approve");
+          }}
+          onRejectApproval={(approvalId) => {
+            void handleApprovalAction(approvalId, "reject");
+          }}
+          onOpenChat={() => {
+            navigate("/chat");
+          }}
+        />
+      );
+    }
+
+    if (!selectedCockpitAgent && !selectedLegacyAgent) {
+      return (
+        <Card className="baize-card">
+          <div className={styles.cockpitEmptyWrap}>
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂时找不到这个智能体。" />
+          </div>
+        </Card>
+      );
+    }
+
+    if (selectedCockpitAgent) {
+      return (
+        <AgentWorkPanel
+          title={selectedCockpitAgent.card.name}
+          summaryFields={mapCockpitSummaryFields(selectedCockpitAgent.summary_fields)}
+          morningReport={mapCockpitReportBlock(selectedCockpitAgent.morning_report)}
+          eveningReport={mapCockpitReportBlock(selectedCockpitAgent.evening_report)}
+          trend={mapCockpitTrend(selectedCockpitAgent.trend)}
+          dayMode={dayMode}
+        />
+      );
+    }
+
+    const legacyAgent = selectedLegacyAgent;
+    if (!legacyAgent) {
+      return null;
+    }
+
+    const summaryFields = buildAgentSummaryFields(legacyAgent, mainBrainData);
+    const reports = buildAgentReports(legacyAgent, mainBrainData);
+    const trend = buildAgentTrend(legacyAgent, mainBrainData);
+
+    return (
+      <AgentWorkPanel
+        title={presentExecutionActorName(legacyAgent.agent_id, legacyAgent.name)}
+        summaryFields={summaryFields}
+        morningReport={reports.morningReport}
+        eveningReport={reports.eveningReport}
+        trend={trend}
+        dayMode={dayMode}
+      />
+    );
+  };
 
   return (
     <div className={`${styles.page} page-container`}>
       <PageHeader
-        eyebrow="运行中心"
-        title={RUNTIME_CENTER_TEXT.pageTitle}
-        description={
-          activeTab === "governance"
-            ? RUNTIME_CENTER_TEXT.tabGovernanceDescription
-            : activeTab === "recovery"
-              ? RUNTIME_CENTER_TEXT.tabRecoveryDescription
-              : activeTab === "automation"
-                ? RUNTIME_CENTER_TEXT.automationPageDescription
-                : RUNTIME_CENTER_TEXT.pageDescription
-        }
+        eyebrow="主脑驾驶舱"
+        title="运行中心"
+        description="先看今天谁在推进、推进到了哪、有没有需要你决定的事情。"
         stats={headerStats}
-        aside={(
+        aside={
           <span style={{ fontSize: 12, color: "var(--baize-text-muted)" }}>
-            {data?.generated_at
-              ? RUNTIME_CENTER_TEXT.generatedAt(formatTimestamp(data.generated_at))
-              : RUNTIME_CENTER_TEXT.waitingForData}
+            {data?.generated_at ? formatTimestamp(data.generated_at) : "等待运行数据"}
           </span>
-        )}
-        actions={(
+        }
+        actions={
           <Space size={12} wrap>
-            <Tag
-              color={surfaceTagColor(surface?.status ?? "unavailable")}
-              style={{ borderRadius: "999px", fontWeight: 600, padding: "4px 12px" }}
-            >
-              {presentSurfaceState(surface?.status ?? "unavailable")}
+            <Tag color={runtimeStatusColor(mainBrainCard.status)}>
+              {presentRuntimeStatusLabel(mainBrainCard.status)}
             </Tag>
             <Button
               className="baize-btn baize-btn-primary"
               icon={<RefreshCw size={16} />}
-              loading={refreshing || governanceLoading || recoveryLoading}
+              loading={refreshing || loading || mainBrainLoading}
               onClick={() => {
-                void refreshActiveTabData();
+                void reload();
               }}
             >
               刷新
             </Button>
           </Space>
-        )}
+        }
       />
 
-      <section className={styles.tabBar}>
-        <Tabs
-          activeKey={activeTab}
-          onChange={handleTabChange}
-          items={[
-            { key: "overview", label: RUNTIME_CENTER_TEXT.tabOverview },
-            { key: "governance", label: RUNTIME_CENTER_TEXT.tabGovernance },
-            { key: "recovery", label: RUNTIME_CENTER_TEXT.tabRecovery },
-            { key: "automation", label: RUNTIME_CENTER_TEXT.tabAutomation },
-          ]}
-        />
-      </section>
+      {!data && error ? <Alert showIcon type="error" message={error} /> : null}
+      {mainBrainError ? <Alert showIcon type="warning" message={mainBrainError} /> : null}
 
-      {activeTab === "overview" ? (
-        <>
-          <Space direction="vertical" size={24} style={{ width: "100%", marginBottom: 32 }}>
-          <MainBrainCockpitPanel
-            data={overviewData}
-            loading={loading}
-            refreshing={refreshing}
-            error={error}
-            buddySummary={buddySummary}
-            mainBrainData={mainBrainData}
-            mainBrainError={mainBrainError}
-            mainBrainLoading={mainBrainLoading}
-            mainBrainUnavailable={mainBrainUnavailable}
-            onRefresh={() => {
-              void refreshActiveTabData();
-            }}
-            onOpenRoute={(route, title) => {
-                void openSurfaceRoute(route, title);
-              }}
-            />
-          <Card className="baize-card">
-            <div className={styles.panelHeader}>
-              <div>
-                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
-                  <div style={{ width: 4, height: 22, background: "#D4AF37", borderRadius: 2, boxShadow: "0 0 10px rgba(212, 175, 55, 0.5)" }} />
-                  <h2 className={styles.cardTitle} style={{ borderLeft: "none", paddingLeft: 0 }}>主脑与职业智能体</h2>
-                </div>
-                <p className={styles.cardSummary}>
-                  首页先看主脑今天要推进什么，再看职业执行位当前负责的具体工作。
-                </p>
-              </div>
-              <Space size={8} wrap>
-                {agentStripLoading ? <Tag>加载中</Tag> : null}
-                {agentStripError ? <Tag color="warning">智能体摘要暂不可用</Tag> : null}
-                {professionalAgents.length > 0 ? (
-                  <Tag>{`执行位 ${professionalAgents.length}`}</Tag>
-                ) : null}
-              </Space>
-            </div>
-            {agentStripError ? (
-              <Alert
-                showIcon
-                type="warning"
-                message={agentStripError}
-                style={{ marginBottom: 16 }}
-              />
-            ) : null}
-            <div className={styles.agentStrip}>
-              <Card
-                className={`${styles.agentStripCard} ${styles.agentStripCardPrimary}`}
-                hoverable
-                size="small"
-              >
-                <button
-                  type="button"
-                  className={styles.agentStripButton}
-                  onClick={() => {
-                    void openSurfaceRoute(
-                      "/api/runtime-center/surface?sections=main_brain",
-                      "主脑驾驶舱",
-                    );
-                  }}
-                >
-                  <div className={styles.agentStripHeader}>
-                    <div className={styles.agentStripTitleRow}>
-                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                        <div style={{ width: 6, height: 6, background: "#D4AF37", borderRadius: "50%", boxShadow: "0 0 8px #D4AF37" }}></div>
-                        <Text strong className={styles.agentStripName} style={{ color: "#FFF", fontSize: 16 }}>
-                        主脑
-                      </Text>
-                      </div>
-                      <Tag
-                        color={
-                          mainBrainError
-                            ? "error"
-                            : mainBrainUnavailable
-                              ? "default"
-                              : mainBrainLoading
-                                ? "processing"
-                                : "success"
-                        }
-                      >
-                        {mainBrainError
-                          ? "需关注"
-                          : mainBrainUnavailable
-                            ? "未接入"
-                            : mainBrainLoading
-                              ? "加载中"
-                              : "推进中"}
-                      </Tag>
-                    </div>
-                    <p className={styles.selectionSummary}>{mainBrainStripSummary}</p>
-                  </div>
-                </button>
-              </Card>
-              {professionalAgents.map((agent) => (
-                <Card
-                  key={agent.agent_id}
-                  className={styles.agentStripCard}
-                  hoverable
-                  size="small"
-                >
-                  <button
-                    type="button"
-                    className={styles.agentStripButton}
-                    onClick={() => {
-                      openAgentWorkbench(agent.agent_id);
-                    }}
-                  >
-                    <div className={styles.agentStripHeader}>
-                      <div className={styles.agentStripTitleRow}>
-                        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                          <div style={{ width: 6, height: 6, background: "rgba(255,255,255,0.4)", borderRadius: "50%" }}></div>
-                          <Text strong className={styles.agentStripName} style={{ color: "#E2E8F0", fontSize: 16 }}>
-                          {presentExecutionActorName(agent.agent_id, agent.name)}
-                        </Text>
-                        </div>
-                        <Tag color="default">
-                          {localizeRuntimeText(agent.role_name || "职业智能体")}
-                        </Tag>
-                        <Tag color={runtimeStatusColor(agent.status ?? "unknown")}>
-                          {presentAgentState(agent.status ?? "unknown")}
-                        </Tag>
-                      </div>
-                      <p className={styles.selectionSummary}>{agentHeadline(agent)}</p>
-                    </div>
-                  </button>
-                </Card>
-              ))}
-            </div>
-            {!agentStripLoading && professionalAgents.length === 0 ? (
-              <div className={styles.emptyWrap}>
-                <Empty
-                  image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  description="暂无职业智能体执行摘要"
-                />
-              </div>
-            ) : null}
-          </Card>
+      <Card className="baize-card">
+        <div className={styles.panelHeader}>
+          <div>
+            <h2 className={styles.cardTitle}>今日协作总览</h2>
+            <p className={styles.cardSummary}>
+              上面选智能体，下面直接看它的简介、日报和统计。默认先看主脑。
+            </p>
+          </div>
+          <Space size={8} wrap>
+            <Tag>{`职业智能体 ${visibleAgentCount}`}</Tag>
+            {approvals.length > 0 ? <Tag color="gold">{`待处理 ${approvals.length}`}</Tag> : null}
           </Space>
-          {overviewData ? (
-            <section className={styles.grid}>
-              {overviewCards.map((card) => (
-                <Card key={card.key} className="baize-card">
-                  <div className={styles.cardHeader}>
-                    <div>
-                      <div className={styles.cardTitleRow}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                          <div style={{ width: 3, height: 18, background: "#D4AF37", borderRadius: 2 }} />
-                          <h2 className={styles.cardTitle} style={{ borderLeft: "none", paddingLeft: 0 }}>{translateRuntimeCardTitle(card.key, card.title)}</h2>
-                        </div>
-                        <Tag color={cardStatusColor(card.status)}>{presentSurfaceState(card.status)}</Tag>
-                      </div>
-                      <p className={styles.cardSummary}>{translateRuntimeCardSummary(card.key, card.summary)}</p>
-                    </div>
-                    <div className={styles.cardSide}><Tag>{`共 ${card.count} 项`}</Tag></div>
-                  </div>
-                  {card.entries.length > 0 ? (
-                    <div className={styles.entryList}>
-                      {card.entries.map((entry) =>
-                        renderEntry(card, entry, busyActionId, invokeAction, openDetail, {
-                          userFacing: true,
-                        }),
-                      )}
-                    </div>
-                  ) : (
-                    <div className={styles.emptyWrap}><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={RUNTIME_CENTER_TEXT.cardEmpty(translateRuntimeCardTitle(card.key, card.title))} /></div>
-                  )}
-                </Card>
-                ))}
-            </section>
-          ) : null}
-        </>
-      ) : null}
-
-      {activeTab === "governance" ? (
-        <div className={styles.tabStack}>
-          <section className={styles.metrics}>
-            <Card className={styles.metricCard}><div className={styles.metricIcon}>{governanceStatus?.emergency_stop_active ? <ShieldAlert size={18} /> : <ShieldCheck size={18} />}</div><div><div className={styles.metricLabel}>{RUNTIME_CENTER_TEXT.governanceState}</div><div className={styles.metricValueSmall}>{governanceStatus?.emergency_stop_active ? RUNTIME_CENTER_TEXT.runtimePaused : RUNTIME_CENTER_TEXT.runtimeAccepting}</div></div></Card>
-            <Card className={styles.metricCard}><div className={styles.metricIcon}><Waypoints size={18} /></div><div><div className={styles.metricLabel}>{RUNTIME_CENTER_TEXT.pendingDecisions}</div><div className={styles.metricValue}>{governanceStatus?.pending_decisions ?? decisionEntries.length}</div></div></Card>
-            <Card className={styles.metricCard}><div className={styles.metricIcon}><RotateCcw size={18} /></div><div><div className={styles.metricLabel}>{RUNTIME_CENTER_TEXT.pendingPatches}</div><div className={styles.metricValue}>{governanceStatus?.pending_patches ?? patchEntries.length}</div></div></Card>
-            <Card className={styles.metricCard}><div className={styles.metricIcon}><Bot size={18} /></div><div><div className={styles.metricLabel}>{RUNTIME_CENTER_TEXT.pausedSchedules}</div><div className={styles.metricValue}>{governanceStatus?.paused_schedule_ids.length ?? 0}</div></div></Card>
-            <Card className={styles.metricCard}><div className={styles.metricIcon}><RefreshCw size={18} /></div><div><div className={styles.metricLabel}>待处理优化</div><div className={styles.metricValue}>{capabilityOptimizationOverview?.summary.actionable_count ?? 0}</div></div></Card>
-          </section>
-          <section className={styles.panelGrid}>
-            <Card className="baize-card">
-              <div className={styles.panelHeader}><div><h2 className={styles.cardTitle}>{RUNTIME_CENTER_TEXT.governanceControls}</h2><p className={styles.cardSummary}>{RUNTIME_CENTER_TEXT.governanceControlsSummary}</p></div><Tag color={governanceStatus?.emergency_stop_active ? "error" : "success"}>{governanceStatus?.emergency_stop_active ? RUNTIME_CENTER_TEXT.runtimePaused : RUNTIME_CENTER_TEXT.runtimeAccepting}</Tag></div>
-              {governanceError ? <Alert showIcon type="error" message={governanceError} style={{ marginBottom: 24 }} /> : null}
-              <Row gutter={[24, 24]}>
-                <Col xs={24} lg={12}>
-                  <div className={styles.controlCard} style={{ height: "100%" }}>
-                    <Space direction="vertical" size={16} style={{ width: "100%" }}>
-                      <div className={styles.fieldStack}><Text strong>{RUNTIME_CENTER_TEXT.operatorActor}</Text><Input value={operatorActor} onChange={(event) => setOperatorActor(event.target.value)} /></div>
-                      <div className={styles.fieldStack}><Text strong>{RUNTIME_CENTER_TEXT.emergencyReason}</Text><TextArea rows={3} value={emergencyReason} onChange={(event) => setEmergencyReason(event.target.value)} /></div>
-                      <div className={styles.actionStrip}>
-                        <Button danger type="primary" loading={governanceBusyKey === "emergency-stop"} onClick={() => { void handleEmergencyStop(); }}>{RUNTIME_CENTER_TEXT.emergencyStop}</Button>
-                        <Button loading={governanceBusyKey === "resume"} onClick={() => { void handleResumeRuntime(); }}>{RUNTIME_CENTER_TEXT.resumeRuntime}</Button>
-                      </div>
-                    </Space>
-                  </div>
-                </Col>
-                <Col xs={24} lg={12}>
-                  <div className={styles.controlCard} style={{ height: "100%" }}>
-                    <Space direction="vertical" size={16} style={{ width: "100%" }}>
-                      <div className={styles.fieldStack}><Text strong>{RUNTIME_CENTER_TEXT.resumeReason}</Text><TextArea rows={3} value={resumeReason} onChange={(event) => setResumeReason(event.target.value)} /></div>
-                      <Descriptions size="small" column={1} bordered items={[
-                        { key: "blocked", label: RUNTIME_CENTER_TEXT.blockedCapabilities, children: (governanceStatus?.blocked_capability_refs ?? []).join(", ") || "-" },
-                        { key: "shutdown", label: RUNTIME_CENTER_TEXT.channelShutdown, children: String(governanceStatus?.channel_shutdown_applied ?? false) },
-                        { key: "updated", label: RUNTIME_CENTER_TEXT.updatedAt, children: formatTimestamp(governanceStatus?.updated_at) },
-                      ]} />
-                    </Space>
-                  </div>
-                </Col>
-              </Row>
-            </Card>
-            <CapabilityOptimizationPanel
-              loading={capabilityOptimizationLoading}
-              error={capabilityOptimizationError}
-              overview={capabilityOptimizationOverview}
-              busyRecommendationId={capabilityOptimizationBusyId}
-              onExecute={(item) => {
-                void handleCapabilityOptimizationExecute(item);
-              }}
-              onOpenRoute={(route, title) => {
-                void openSurfaceRoute(route, title || routeTitle(route));
-              }}
-            />
-            <Card className="baize-card">
-              <div className={styles.panelHeader}><div><h2 className={styles.cardTitle}>{RUNTIME_CENTER_TEXT.decisionBatchTitle}</h2><p className={styles.cardSummary}>{RUNTIME_CENTER_TEXT.decisionBatchSummary}</p></div><Tag>{decisionEntries.length}</Tag></div>
-              <div className={styles.fieldStack}><Text strong>{RUNTIME_CENTER_TEXT.batchResolution}</Text><TextArea rows={3} value={governanceResolution} onChange={(event) => setGovernanceResolution(event.target.value)} /><div className={styles.inlineControl}><Switch checked={executeApprovedDecisions} onChange={setExecuteApprovedDecisions} /><span>{RUNTIME_CENTER_TEXT.executeApprovedDecisions}</span></div></div>
-              <div className={styles.actionStrip}>
-                <Button size="small" onClick={() => setSelectedDecisionIds(decisionEntries.map((entry) => entry.id))}>{RUNTIME_CENTER_TEXT.selectAll}</Button>
-                <Button size="small" onClick={() => setSelectedDecisionIds([])}>{RUNTIME_CENTER_TEXT.clearSelection}</Button>
-                <Button type="primary" loading={governanceBusyKey === "decisions-approve"} onClick={() => { void handleDecisionBatch("approve"); }}>{RUNTIME_CENTER_TEXT.batchApprove}</Button>
-                <Button danger loading={governanceBusyKey === "decisions-reject"} onClick={() => { void handleDecisionBatch("reject"); }}>{RUNTIME_CENTER_TEXT.batchReject}</Button>
-              </div>
-              {governanceLoading && !governanceStatus ? <Spin /> : decisionEntries.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={RUNTIME_CENTER_TEXT.noPendingDecisions} /> : <div className={styles.selectionList}>{decisionEntries.map((entry) => { const localizedTitle = translateRuntimeEntryTitle("decisions", entry.title); const localizedSummary = translateRuntimeEntrySummary("decisions", entry.summary); return <div key={entry.id} className={styles.selectionRow}><Checkbox checked={selectedDecisionIds.includes(entry.id)} onChange={() => toggleSelection(selectedDecisionIds, entry.id, setSelectedDecisionIds)} /><div className={styles.selectionBody}><button type="button" className={styles.entryTitleButton} onClick={() => { if (entry.route) { void openSurfaceRoute(entry.route, localizedTitle); } }}>{localizedTitle}</button><div className={styles.selectionMeta}><Tag color={runtimeStatusColor(entry.status)}>{translateRuntimeStatus(entry.status)}</Tag>{entry.owner ? <span>{localizeRuntimeText(entry.owner)}</span> : null}<span>{formatTimestamp(entry.updated_at)}</span></div>{localizedSummary ? <p className={styles.selectionSummary}>{localizedSummary}</p> : null}</div></div>; })}</div>}
-            </Card>
-            <Card className="baize-card">
-              <div className={styles.panelHeader}><div><h2 className={styles.cardTitle}>{RUNTIME_CENTER_TEXT.patchBatchTitle}</h2><p className={styles.cardSummary}>{RUNTIME_CENTER_TEXT.patchBatchSummary}</p></div><Tag>{patchEntries.length}</Tag></div>
-              <div className={styles.actionStrip}>
-                <Button size="small" onClick={() => setSelectedPatchIds(patchEntries.map((entry) => entry.id))}>{RUNTIME_CENTER_TEXT.selectAll}</Button>
-                <Button size="small" onClick={() => setSelectedPatchIds([])}>{RUNTIME_CENTER_TEXT.clearSelection}</Button>
-                <Button type="primary" loading={governanceBusyKey === "patches-approve"} onClick={() => { void handlePatchBatch("approve"); }}>{RUNTIME_CENTER_TEXT.batchApprove}</Button>
-                <Button loading={governanceBusyKey === "patches-apply"} onClick={() => { void handlePatchBatch("apply"); }}>{RUNTIME_CENTER_TEXT.batchApply}</Button>
-                <Button loading={governanceBusyKey === "patches-rollback"} onClick={() => { void handlePatchBatch("rollback"); }}>{RUNTIME_CENTER_TEXT.batchRollback}</Button>
-                <Button danger loading={governanceBusyKey === "patches-reject"} onClick={() => { void handlePatchBatch("reject"); }}>{RUNTIME_CENTER_TEXT.batchReject}</Button>
-              </div>
-              {patchEntries.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={RUNTIME_CENTER_TEXT.noVisiblePatches} /> : <div className={styles.selectionList}>{patchEntries.map((entry) => { const localizedTitle = translateRuntimeEntryTitle("patches", entry.title); const localizedSummary = translateRuntimeEntrySummary("patches", entry.summary); return <div key={entry.id} className={styles.selectionRow}><Checkbox checked={selectedPatchIds.includes(entry.id)} onChange={() => toggleSelection(selectedPatchIds, entry.id, setSelectedPatchIds)} /><div className={styles.selectionBody}><button type="button" className={styles.entryTitleButton} onClick={() => { if (entry.route) { void openSurfaceRoute(entry.route, localizedTitle); } }}>{localizedTitle}</button><div className={styles.selectionMeta}><Tag color={runtimeStatusColor(entry.status)}>{translateRuntimeStatus(entry.status)}</Tag><Tag>{translateRuntimeEntryKind(entry.kind)}</Tag>{entry.owner ? <span>{localizeRuntimeText(entry.owner)}</span> : null}<span>{formatTimestamp(entry.updated_at)}</span></div>{localizedSummary ? <p className={styles.selectionSummary}>{localizedSummary}</p> : null}</div></div>; })}</div>}
-            </Card>
-          </section>
         </div>
-      ) : null}
 
-      {activeTab === "recovery" ? (
-        <div className={styles.tabStack}>
-          <section className={styles.metrics}>
-            <Card className={styles.metricCard}><div className={styles.metricIcon}><RotateCcw size={18} /></div><div><div className={styles.metricLabel}>{RUNTIME_CENTER_TEXT.recoveryReason}</div><div className={styles.metricValueSmall}>{localizeRuntimeText(String(recoverySummary?.reason ?? "startup"))}</div></div></Card>
-            <Card className={styles.metricCard}><div className={styles.metricIcon}><ShieldCheck size={18} /></div><div><div className={styles.metricLabel}>{RUNTIME_CENTER_TEXT.selfCheckStatus}</div><div className={styles.metricValueSmall}>{translateRuntimeStatus(selfCheck?.overall_status ?? "pending")}</div></div></Card>
-            <Card className={styles.metricCard}><div className={styles.metricIcon}><Activity size={18} /></div><div><div className={styles.metricLabel}>{RUNTIME_CENTER_TEXT.recoveryItems}</div><div className={styles.metricValue}>{recoveryRows.length}</div></div></Card>
-            <Card className={styles.metricCard}><div className={styles.metricIcon}><Bot size={18} /></div><div><div className={styles.metricLabel}>{RUNTIME_CENTER_TEXT.selfCheckChecks}</div><div className={styles.metricValue}>{selfCheck?.checks.length ?? 0}</div></div></Card>
-          </section>
-          {recoveryError ? <Alert showIcon type="error" message={recoveryError} /> : null}
-          <section className={styles.panelGrid}>
-            <Row gutter={[24, 24]}>
-              <Col xs={24} lg={10}>
-                <Card className="baize-card" style={{ height: "100%" }}>
-                  <div className={styles.panelHeader}><div><h2 className={styles.cardTitle}>{RUNTIME_CENTER_TEXT.recoveryLedger}</h2><p className={styles.cardSummary}>{RUNTIME_CENTER_TEXT.recoveryLedgerSummary}</p></div><Space size={8}><Button size="small" loading={recoveryBusyKey === "recovery-refresh"} onClick={() => { void handleRecoveryRefresh(); }}>{"刷新"}</Button><Button size="small" onClick={() => { void openSurfaceRoute("/api/runtime-center/recovery/latest", RUNTIME_CENTER_TEXT.recoveryLedger); }}>{RUNTIME_CENTER_TEXT.openDetail}</Button></Space></div>
-                  {recoveryLoading && !recoverySummary ? <Spin /> : recoveryRows.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={RUNTIME_CENTER_TEXT.noRecoverySummary} /> : <Descriptions size="small" column={1} bordered items={recoveryRows.map(([label, value]) => ({ key: label, label, children: value }))} />}
-                </Card>
-              </Col>
-              <Col xs={24} lg={14}>
-                <Card className="baize-card" style={{ height: "100%" }}>
-                  <div className={styles.panelHeader}><div><h2 className={styles.cardTitle}>{RUNTIME_CENTER_TEXT.selfCheckPanel}</h2><p className={styles.cardSummary}>{RUNTIME_CENTER_TEXT.selfCheckPanelSummary}</p></div><Space size={8}><Tag color={runtimeStatusColor(selfCheck?.overall_status ?? "pending")}>{translateRuntimeStatus(selfCheck?.overall_status ?? "pending")}</Tag><Button size="small" loading={recoveryBusyKey === "self-check"} onClick={() => { void handleSelfCheck(); }}>{RUNTIME_CENTER_TEXT.runSelfCheck}</Button></Space></div>
-                  {!selfCheck ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={RUNTIME_CENTER_TEXT.noSelfCheck} /> : <><div className={styles.metrics} style={{ marginBottom: 16 }}>{healthHighlights.map((check) => <Card key={check.name} className={styles.metricCard}><div className={styles.metricIcon}><ShieldCheck size={18} /></div><div><div className={styles.metricLabel}>{translateRuntimeFieldLabel(check.name)}</div><div className={styles.metricValueSmall}>{translateRuntimeStatus(check.status)}</div><div className={styles.selectionSummary}>{localizeRuntimeText(check.summary)}</div></div></Card>)}</div><div className={styles.checkList}>{selfCheck.checks.map((check) => <div key={check.name} className={styles.checkRow}><div className={styles.checkHeader}><div><div className={styles.checkTitle}>{translateRuntimeFieldLabel(check.name)}</div><div className={styles.selectionSummary}>{localizeRuntimeText(check.summary)}</div></div><Tag color={runtimeStatusColor(check.status)}>{translateRuntimeStatus(check.status)}</Tag></div>{Object.keys(check.meta).length > 0 ? <pre className={styles.detailPre}>{primitiveValue(check.meta)}</pre> : null}</div>)}</div></>}
-                </Card>
-              </Col>
-            </Row>
-          </section>
-        </div>
-      ) : null}
-
-      {activeTab === "automation" ? (
-        <AutomationTab
-          focusScope={focusScope}
-          refreshSignal={data?.generated_at}
-          openDetail={(route, title) => openSurfaceRoute(route, title || routeTitle(route))}
-          onRuntimeChanged={() => reload()}
+        <AgentCardStrip
+          agents={agentCards}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
         />
-      ) : null}
+      </Card>
+
+      {renderSelectedPanel()}
 
       {renderDetailDrawer(
         detail,
@@ -751,10 +901,9 @@ export default function RuntimeCenterPage() {
         detailError,
         closeDetail,
         (route, title) => {
-          void openSurfaceRoute(route, title || routeTitle(route));
+          void openSurfaceRoute(route, title);
         },
       )}
     </div>
   );
 }
-

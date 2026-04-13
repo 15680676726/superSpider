@@ -737,6 +737,100 @@ class RuntimeMainBrainGovernancePayload(BaseModel):
         return compact
 
 
+class RuntimeHumanCockpitCard(BaseModel):
+    """Compact agent/main-brain card payload for the human cockpit surface."""
+
+    id: str
+    name: str
+    role: str
+    status: str
+    progress: int = 0
+    needs_attention: bool = False
+    is_main_brain: bool = False
+
+
+class RuntimeHumanCockpitSummaryField(BaseModel):
+    """Human-readable summary field displayed in cockpit summary tabs."""
+
+    label: str
+    value: str
+    hint: str | None = None
+
+
+class RuntimeHumanCockpitReportBlock(BaseModel):
+    """Structured morning/evening report block for the cockpit UI."""
+
+    title: str
+    items: list[str] = Field(default_factory=list)
+    generated_at: str | None = None
+
+
+class RuntimeHumanCockpitTrendPoint(BaseModel):
+    """Lightweight trend item rendered by the cockpit stats tab."""
+
+    label: str
+    completed: int = 0
+    completion_rate: int = 0
+    quality: int = 0
+
+
+class RuntimeHumanCockpitApproval(BaseModel):
+    """Pending approval item shown in the main-brain approval tab."""
+
+    id: str
+    kind: Literal["decision", "patch"] = "decision"
+    title: str
+    reason: str
+    recommendation: str
+    risk: str
+    initiator: str
+    created_at: str
+
+
+class RuntimeHumanCockpitStageSummary(BaseModel):
+    """Main-brain stage summary tab payload."""
+
+    title: str
+    period_label: str | None = None
+    summary: str
+    bullets: list[str] = Field(default_factory=list)
+
+
+class RuntimeHumanCockpitAgent(BaseModel):
+    """Human-readable cockpit payload for one execution agent."""
+
+    agent_id: str
+    card: RuntimeHumanCockpitCard
+    summary_fields: list[RuntimeHumanCockpitSummaryField] = Field(default_factory=list)
+    morning_report: RuntimeHumanCockpitReportBlock | None = None
+    evening_report: RuntimeHumanCockpitReportBlock | None = None
+    trend: list[RuntimeHumanCockpitTrendPoint] = Field(default_factory=list)
+
+
+class RuntimeHumanCockpitMainBrain(BaseModel):
+    """Human-readable cockpit payload for the main brain panel."""
+
+    card: RuntimeHumanCockpitCard = Field(default_factory=lambda: RuntimeHumanCockpitCard(
+        id="main-brain",
+        name="伙伴",
+        role="主脑",
+        status="idle",
+    ))
+    summary_fields: list[RuntimeHumanCockpitSummaryField] = Field(default_factory=list)
+    morning_report: RuntimeHumanCockpitReportBlock | None = None
+    evening_report: RuntimeHumanCockpitReportBlock | None = None
+    trend: list[RuntimeHumanCockpitTrendPoint] = Field(default_factory=list)
+    approvals: list[RuntimeHumanCockpitApproval] = Field(default_factory=list)
+    stage_summary: RuntimeHumanCockpitStageSummary | None = None
+
+
+class RuntimeHumanCockpitPayload(BaseModel):
+    """Dedicated human-readable cockpit contract for the Runtime Center page."""
+
+    main_brain: RuntimeHumanCockpitMainBrain = Field(default_factory=RuntimeHumanCockpitMainBrain)
+    agents: list[RuntimeHumanCockpitAgent] = Field(default_factory=list)
+
+
 class RuntimeMainBrainResponse(BaseModel):
     """Dedicated main-brain cockpit payload for Runtime Center."""
 
@@ -766,5 +860,6 @@ class RuntimeMainBrainResponse(BaseModel):
     evidence: RuntimeMainBrainSection = Field(default_factory=RuntimeMainBrainSection)
     decisions: RuntimeMainBrainSection = Field(default_factory=RuntimeMainBrainSection)
     patches: RuntimeMainBrainSection = Field(default_factory=RuntimeMainBrainSection)
+    cockpit: RuntimeHumanCockpitPayload = Field(default_factory=RuntimeHumanCockpitPayload)
     signals: dict[str, Any] = Field(default_factory=dict)
     meta: dict[str, Any] = Field(default_factory=dict)

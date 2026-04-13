@@ -391,6 +391,77 @@ export interface RuntimeMainBrainSection {
   [key: string]: unknown;
 }
 
+export interface RuntimeHumanCockpitCard {
+  id: string;
+  name: string;
+  role: string;
+  status: string;
+  progress: number;
+  needs_attention: boolean;
+  is_main_brain?: boolean;
+}
+
+export interface RuntimeHumanCockpitSummaryField {
+  label: string;
+  value: string;
+  hint?: string | null;
+}
+
+export interface RuntimeHumanCockpitReportBlock {
+  title: string;
+  items: string[];
+  generated_at?: string | null;
+}
+
+export interface RuntimeHumanCockpitTrendPoint {
+  label: string;
+  completed: number;
+  completion_rate: number;
+  quality: number;
+}
+
+export interface RuntimeHumanCockpitApproval {
+  id: string;
+  kind: "decision" | "patch";
+  title: string;
+  reason: string;
+  recommendation: string;
+  risk: string;
+  initiator: string;
+  created_at: string;
+}
+
+export interface RuntimeHumanCockpitStageSummary {
+  title: string;
+  period_label?: string | null;
+  summary: string;
+  bullets?: string[];
+}
+
+export interface RuntimeHumanCockpitAgent {
+  agent_id: string;
+  card: RuntimeHumanCockpitCard;
+  summary_fields: RuntimeHumanCockpitSummaryField[];
+  morning_report?: RuntimeHumanCockpitReportBlock | null;
+  evening_report?: RuntimeHumanCockpitReportBlock | null;
+  trend: RuntimeHumanCockpitTrendPoint[];
+}
+
+export interface RuntimeHumanCockpitMainBrain {
+  card: RuntimeHumanCockpitCard;
+  summary_fields: RuntimeHumanCockpitSummaryField[];
+  morning_report?: RuntimeHumanCockpitReportBlock | null;
+  evening_report?: RuntimeHumanCockpitReportBlock | null;
+  trend: RuntimeHumanCockpitTrendPoint[];
+  approvals: RuntimeHumanCockpitApproval[];
+  stage_summary?: RuntimeHumanCockpitStageSummary | null;
+}
+
+export interface RuntimeHumanCockpitPayload {
+  main_brain: RuntimeHumanCockpitMainBrain;
+  agents: RuntimeHumanCockpitAgent[];
+}
+
 export interface RuntimeMainBrainMeta {
   control_chain: RuntimeMainBrainSignal[];
   agent_reports?: RuntimeMainBrainRecord | null;
@@ -439,6 +510,7 @@ export interface RuntimeMainBrainResponse {
   evidence: RuntimeMainBrainSection;
   decisions: RuntimeMainBrainSection;
   patches: RuntimeMainBrainSection;
+  cockpit?: RuntimeHumanCockpitPayload | null;
   signals: Record<string, RuntimeMainBrainSignal>;
   meta: RuntimeMainBrainMeta;
 }

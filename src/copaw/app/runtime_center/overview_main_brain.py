@@ -20,6 +20,27 @@ class RuntimeCenterMainBrainAssembly:
     def _is_missing(self, value: Any) -> bool:
         return value is getattr(self._support, "_missing_sentinel", None)
 
+    def _latest_timed_mapping(
+        self,
+        items: Sequence[Any] | None,
+    ) -> dict[str, Any]:
+        latest_item: dict[str, Any] = {}
+        latest_sort_key = ""
+        for raw in list(items or []):
+            payload = self._mapping(raw)
+            if not payload:
+                continue
+            sort_key = self._string(
+                payload.get("updated_at")
+                or payload.get("created_at")
+                or payload.get("recorded_at")
+                or payload.get("generated_at")
+            ) or ""
+            if not latest_item or sort_key > latest_sort_key:
+                latest_item = dict(payload)
+                latest_sort_key = sort_key
+        return latest_item
+
     async def build_main_brain_card(self, app_state: Any) -> RuntimeOverviewCard:
         exception_absorption = self.resolve_exception_absorption_meta(app_state)
         strategy_items = await self._call_list_method(
@@ -348,7 +369,7 @@ class RuntimeCenterMainBrainAssembly:
                 "count": case_count,
                 "human_required_case_count": human_required_case_count,
                 "detail": self._string(exception_absorption.get("summary"))
-                or "Main brain is currently handling internal execution pressure.",
+                or "主脑当前正在处理中枢内部执行压力。",
                 "route": industry_route or first_entry.route,
                 "status": self._string(exception_absorption.get("status")) or "clear",
             }
@@ -733,75 +754,79 @@ class RuntimeCenterMainBrainAssembly:
             or followup_backlog
         )
         unresolved_count = len(conflicts) + len(holes) + len(unconsumed_reports) + len(followup_backlog)
+        latest_followup_backlog = self._latest_timed_mapping(followup_backlog)
+        latest_unconsumed_report = self._latest_timed_mapping(unconsumed_reports)
         if needs_replan:
             judgment_status = "attention"
             judgment_summary = (
-                "Main brain must compare unresolved reports and decide whether to dispatch follow-up work."
+                "主脑需要比对还没收口的汇报，并决定是否继续派发跟进任务。"
             )
         elif unconsumed_reports:
             judgment_status = "review"
             judgment_summary = (
-                "Main brain still has unconsumed reports to synthesize before closing the cycle."
+                "主脑还有未消化的汇报，需要先综合后再结束当前周期。"
             )
         else:
             judgment_status = "clear"
-            judgment_summary = "Latest reports are consumed and no explicit replan pressure remains."
-        if followup_backlog:
+            judgment_summary = "最新汇报已经消化完毕，当前没有明确的重排压力。"
+        if latest_followup_backlog:
             next_action = {
                 "kind": "followup-backlog",
                 "decision_kind": self._string(replan.get("decision_kind")) or "follow_up_backlog",
-                "title": self._string(followup_backlog[0].get("title")) or "Review follow-up backlog",
-                "summary": self._string(followup_backlog[0].get("summary"))
-                or "Dispatch the formal follow-up backlog created from the current report synthesis.",
-                "route": self._string(followup_backlog[0].get("route")) or current_cycle_route,
+                "title": self._string(latest_followup_backlog.get("title")) or "查看跟进待办",
+                "summary": self._string(latest_followup_backlog.get("summary"))
+                or "先处理当前汇报综合后形成的正式跟进待办。",
+                "route": self._string(latest_followup_backlog.get("route")) or current_cycle_route,
             }
-        elif unconsumed_reports:
+        elif latest_unconsumed_report:
             next_action = {
                 "kind": "consume-report",
                 "decision_kind": self._string(replan.get("decision_kind")) or "clear",
-                "title": self._string(unconsumed_reports[0].get("headline"))
-                or self._string(unconsumed_reports[0].get("title"))
-                or "Consume report",
-                "summary": "Consume the latest unconsumed report before dispatching more work.",
-                "route": self._string(unconsumed_reports[0].get("route")) or current_cycle_route,
+                "title": self._string(latest_unconsumed_report.get("headline"))
+                or self._string(latest_unconsumed_report.get("title"))
+                or "先处理最新汇报",
+                "summary": "先消化最新一条未处理汇报，再决定是否继续派工。",
+                "route": self._string(latest_unconsumed_report.get("route")) or current_cycle_route,
             }
         elif self._string(replan.get("decision_kind")) == "strategy_review_required":
             next_action = {
                 "kind": "strategy-review",
                 "decision_kind": "strategy_review_required",
-                "title": "Trigger strategy review",
+                "title": "发起策略复核",
                 "summary": self._string(replan.get("summary"))
-                or "Escalate this cycle pressure into a strategy review.",
+                or "把这轮周期压力上提到策略复核。",
                 "route": current_cycle_route,
             }
         elif self._string(replan.get("decision_kind")) == "cycle_rebalance":
             next_action = {
                 "kind": "cycle-rebalance",
                 "decision_kind": "cycle_rebalance",
-                "title": "Rebalance current cycle",
+                "title": "重排当前周期",
                 "summary": self._string(replan.get("summary"))
-                or "Rebalance the current cycle before dispatching more work.",
+                or "先重排当前周期，再继续派工。",
                 "route": current_cycle_route,
             }
         elif self._string(replan.get("decision_kind")) == "lane_reweight":
             next_action = {
                 "kind": "lane-reweight",
                 "decision_kind": "lane_reweight",
-                "title": "Reweight lane priorities",
+                "title": "调整车道优先级",
                 "summary": self._string(replan.get("summary"))
-                or "Reweight lane priorities before planning the next cycle.",
+                or "先调整车道优先级，再规划下一轮任务。",
                 "route": current_cycle_route,
             }
         else:
+            latest_followup_backlog = self._latest_timed_mapping(followup_backlog)
+            latest_unconsumed_report = self._latest_timed_mapping(unconsumed_reports)
             next_action = {
                 "kind": "review-cycle-synthesis" if needs_replan else "continue-cycle",
                 "decision_kind": self._string(replan.get("decision_kind")) or "clear",
-                "title": "Review cycle synthesis" if needs_replan else "Continue current cycle",
+                "title": "复核周期综合" if needs_replan else "继续当前周期",
                 "summary": (
                     self._string(replan.get("summary"))
-                    or "Review the cycle synthesis and decide the next operating step."
+                    or "先复核周期综合结果，再决定下一步动作。"
                     if needs_replan
-                    else "No explicit report cognition pressure is blocking the cycle."
+                    else "当前没有明确的汇报综合阻塞，可以继续推进本轮周期。"
                 ),
                 "route": current_cycle_route,
             }
