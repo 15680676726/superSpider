@@ -277,8 +277,8 @@ def test_industry_draft_generator_uses_runtime_provider_facade_by_default(
         ),
     )
     monkeypatch.setattr(
-        "copaw.industry.draft_generator.get_runtime_provider_facade",
-        lambda provider_manager=None: runtime_provider,
+        "copaw.industry.draft_generator.build_compat_runtime_provider_facade",
+        lambda: runtime_provider,
     )
     generator = IndustryDraftGenerator()
     profile = normalize_industry_profile(

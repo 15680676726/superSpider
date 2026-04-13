@@ -34,6 +34,13 @@ def _build_runtime_state():
     app.state.governance_service = FakeGovernanceService()
     app.state.routine_service = FakeRoutineService()
     app.state.prediction_service = FakePredictionService()
+    app.state.query_execution_service = type(
+        "_FakeQueryExecutionService",
+        (),
+        {"get_query_runtime_entropy_contract": staticmethod(lambda: None)},
+    )()
+    app.state.actor_worker_runtime_contract = {}
+    app.state.actor_supervisor_runtime_contract = {}
     return app.state
 
 

@@ -92,6 +92,7 @@ def test_build_runtime_bootstrap_assembles_domain_services_via_domain_builder(
     actor_supervisor = _ActorSupervisor()
     repositories = SimpleNamespace(
         work_context_repository=object(),
+        schedule_repository=object(),
         industry_instance_repository=SimpleNamespace(list_instances=lambda limit=None: []),
         human_assist_task_repository=object(),
         external_runtime_repository=SimpleNamespace(list_runtimes=lambda **kwargs: []),

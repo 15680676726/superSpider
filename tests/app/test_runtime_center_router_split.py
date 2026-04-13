@@ -7,7 +7,7 @@ import importlib
 def test_runtime_center_overview_routes_live_in_overview_module() -> None:
     module = importlib.import_module("copaw.app.routers.runtime_center_routes_overview")
 
-    assert hasattr(module, "get_runtime_overview")
+    assert hasattr(module, "get_runtime_surface")
     assert hasattr(module, "stream_runtime_events")
 
 
