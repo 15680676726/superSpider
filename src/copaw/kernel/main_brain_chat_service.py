@@ -763,6 +763,26 @@ def _format_truth_first_profile(
     )
 
 
+def _merge_system_prompt_messages(
+    prompt_messages: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    system_chunks: list[str] = []
+    merged_messages: list[dict[str, str]] = []
+    for item in prompt_messages:
+        if item.get("role") == "system":
+            content = str(item.get("content") or "").strip()
+            if content:
+                system_chunks.append(content)
+            continue
+        merged_messages.append(dict(item))
+    if not system_chunks:
+        return [dict(item) for item in prompt_messages]
+    return [
+        {"role": "system", "content": "\n\n".join(system_chunks)},
+        *merged_messages,
+    ]
+
+
 @dataclass
 class _PureChatSessionCacheEntry:
     snapshot: dict[str, Any]
@@ -1443,6 +1463,7 @@ class MainBrainChatService:
         prompt_messages: list[dict[str, str]],
         force_non_stream: bool,
     ) -> object:
+        model_messages = _merge_system_prompt_messages(prompt_messages)
         original_stream = getattr(model, "stream", None)
         stream_overridden = isinstance(original_stream, bool)
         if force_non_stream and stream_overridden:
@@ -1452,9 +1473,9 @@ class MainBrainChatService:
                 stream_overridden = False
         try:
             try:
-                response = await model(messages=prompt_messages, **_PURE_CHAT_MODEL_KWARGS)
+                response = await model(messages=model_messages, **_PURE_CHAT_MODEL_KWARGS)
             except TypeError:
-                response = await model(messages=prompt_messages)
+                response = await model(messages=model_messages)
             return response
         finally:
             if force_non_stream and stream_overridden:

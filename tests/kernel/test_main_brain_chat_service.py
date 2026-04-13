@@ -1228,7 +1228,9 @@ async def test_main_brain_chat_service_skips_lexical_recall_for_short_followup_t
     ]
 
     assert len(recall_service.calls) == 1
-    context_prompt = model.calls[-1][1]["content"]
+    context_prompt = "\n".join(
+        item["content"] for item in model.calls[-1] if item["role"] == "system"
+    )
     assert "## Truth-First Lexical Recall" in context_prompt
     assert "short follow-up turn" in context_prompt
     timing = getattr(request, "_copaw_main_brain_timing", None)
@@ -1270,7 +1272,9 @@ async def test_main_brain_chat_service_keeps_lexical_recall_for_short_explicit_h
     ]
 
     assert len(recall_service.calls) == 2
-    context_prompt = model.calls[-1][1]["content"]
+    context_prompt = "\n".join(
+        item["content"] for item in model.calls[-1] if item["role"] == "system"
+    )
     assert "Lexical fallback note" in context_prompt
     timing = getattr(request, "_copaw_main_brain_timing", None)
     assert timing is not None
@@ -1529,6 +1533,41 @@ def test_main_brain_chat_service_prompt_does_not_expose_execution_only_tool_name
     assert "dispatch_goal" not in joined_prompt
     assert "dispatch_active_goals" not in joined_prompt
     assert "memory_search" not in joined_prompt
+
+
+@pytest.mark.asyncio
+async def test_main_brain_chat_service_merges_system_prompts_before_model_call():
+    backend = _FakeSessionBackend()
+    model = _PromptCapturingResponseModel("ok")
+    service = MainBrainChatService(
+        session_backend=backend,
+        model_factory=lambda: model,
+    )
+    request = SimpleNamespace(
+        session_id="industry-chat:industry-v1-demo:solution-lead",
+        user_id="solution-lead-agent",
+        industry_instance_id="industry-v1-demo",
+        industry_role_id="solution-lead",
+        session_kind="industry-agent-chat",
+        work_context_id=None,
+        agent_id="solution-lead-agent",
+    )
+    msgs = [Msg(name="user", role="user", content="Reply with the single word OK.")]
+
+    streamed = [item async for item in service.execute_stream(msgs=msgs, request=request)]
+
+    assert streamed[-1][0].get_text_content() == "ok"
+    assert len(model.calls) == 1
+    prompt_messages = model.calls[0]
+    system_messages = [item for item in prompt_messages if item["role"] == "system"]
+    assert len(system_messages) == 1
+    merged_system_prompt = system_messages[0]["content"]
+    assert "Spider Mesh" in merged_system_prompt
+    assert "当前时间" in merged_system_prompt
+    assert "北京时间" in merged_system_prompt
+    assert "Front-Door Reply Shell" in merged_system_prompt
+    assert prompt_messages[-1]["role"] == "user"
+    assert prompt_messages[-1]["content"] == "Reply with the single word OK."
 
 
 def test_main_brain_chat_service_loads_merged_session_snapshot_when_available() -> None:
