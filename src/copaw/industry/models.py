@@ -851,6 +851,7 @@ class IndustryInstanceDetail(IndustryInstanceSummary):
     execution: IndustryExecutionSummary | None = None
     main_chain: IndustryMainChainGraph | None = None
     main_brain_planning: IndustryMainBrainPlanningSurface | None = None
+    optimization_closure: dict[str, Any] = Field(default_factory=dict)
     focus_selection: IndustryDetailFocusSelection | None = None
     reports: dict[str, IndustryReportSnapshot] = Field(default_factory=dict)
     media_analyses: list[MediaAnalysisSummary] = Field(default_factory=list)

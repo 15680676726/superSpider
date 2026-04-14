@@ -1105,7 +1105,11 @@ Windows-first 约束：
 - `goal_id`
 - `task_id`
 - `agent_id`
+- `workflow_template_id`
+- `workflow_run_id`
+- `workflow_step_id`
 - `diff_summary`
+- `patch_payload`
 - `evidence_refs`
 - `source_evidence_id`
 - `applied_by`
@@ -1124,6 +1128,7 @@ Windows-first 约束：
 - `role_patch`
 - `capability_patch`
 - `plan_patch`
+- `workflow_patch`
 - `config_patch`
 
 ### 状态建议
@@ -1138,6 +1143,22 @@ Windows-first 约束：
 
 - learning 持久化模型当前已经显式支持 `goal_id / task_id / agent_id / source_evidence_id`
 - `capability_patch / profile_patch / role_patch / plan_patch` 当前都会进入持久化执行器并产生真实副作用
+- `workflow_patch` 已成为正式 typed patch：
+  - 当前稳定目标面是 `workflow_template`
+  - 当前稳定字段包括 `workflow_template_id / workflow_run_id / workflow_step_id / patch_payload`
+  - 当前真实副作用是直接更新 `WorkflowTemplateRecord.step_specs`，并通过 patch-owned backup 支持 rollback
+
+### runtime optimization closure 补充
+
+- `IndustryInstanceDetail` 现在应显式携带 `optimization_closure`
+- `optimization_closure` 是 industry runtime detail 的 canonical optimization read model，而不是第二真相源
+- 当前建议结构：
+  - `counts.proposals / counts.patches / counts.growth / counts.decisions`
+  - `links[]`
+    - 主锚点：`task_id`
+    - 辅助锚点：`assignment_id / backlog_item_id / agent_id`
+    - optimization refs：`proposal_ids / patch_ids / growth_ids / decision_ids`
+    - workflow refs：`workflow_run_ids / workflow_step_ids`
 
 ---
 
@@ -1771,6 +1792,12 @@ treated as formal product-contract objects rather than planning-only notes:
 Current V4-A2 / A3-min boundary:
 
 - workflow launch still materializes into canonical `GoalService` and `ScheduleRecord`; no parallel workflow executor exists
+- workflow-created compatibility leaves are now explicit:
+  - workflow-created `GoalRecord` should use `goal_class="workflow-step-goal"`
+  - corresponding `GoalOverrideRecord.compiler_context` should carry `materialization_path="workflow-leaf-compatibility"`
+- bootstrap-created compatibility goals should also stay explicit:
+  - bootstrap compatibility `GoalRecord` should use `goal_class="compatibility-bootstrap-goal"`
+  - corresponding `GoalOverrideRecord.compiler_context` should carry `compatibility_materialization=True`
 - workflow run cancel currently archives goals, pauses schedules, and updates the run anchor; it does not yet hard-cancel in-flight runtime tasks
 - workflow preview/launch now enforce per-agent assignment-gap and budget blockers before materialization
 - install-link is no longer only a preview/detail product chain; install completion can now auto-assign target agents and auto-return into workflow preview/launch without creating a parallel runtime path
@@ -2024,6 +2051,7 @@ Current activation-derived carry-over fields now include:
 Current additionally-landed Runtime Center surfaces:
 
 - `GET /runtime-center/memory/activation`
+- `GET /runtime-center/memory/surface` dedicated operator-facing activation/relation surface
 - `GET /runtime-center/memory/profiles*` with opt-in `include_activation + query`
 - `GET /runtime-center/memory/episodes` with opt-in `include_activation + query`
 - Runtime Center task list/detail read payloads with compact `activation` summaries
@@ -2048,7 +2076,7 @@ Hard boundary:
 
 - activation remains derived from existing `StrategyMemory / KnowledgeChunk / FactIndex / reflection views`
 - no graph database or separate durable activation store has been introduced
-- dedicated activation visualization beyond current Runtime Center route/read-surface payloads remains a follow-up integration phase
+- dedicated operator-facing activation/relation visualization now lands through `GET /runtime-center/memory/surface` and the Knowledge page first-class read surface, without introducing a second durable store
 
 `2026-04-01` phase 4 supplement:
 
@@ -2059,13 +2087,53 @@ Current additionally-landed derived relation objects/read surfaces:
 - `DerivedMemoryIndexService.list_relation_views(...)`
 - `DerivedMemoryIndexService.rebuild_relation_views(...)`
 - `GET /runtime-center/memory/relations`
+- `POST /runtime-center/memory/rebuild` now also auto-rebuilds relation views inside the same operator rebuild flow
 
 Current hard boundary after phase 4:
 
 - persisted relation views are derived-only and rebuildable from existing `MemoryFactIndexRecord + MemoryEntityViewRecord + MemoryOpinionViewRecord`
 - persisted relation views remain SQLite-backed compiled read models, not a second durable memory truth source
 - no graph database or graph-native execution write path has been introduced
-- generic `rebuild_all` / `POST /runtime-center/memory/rebuild` does not yet auto-rebuild relation views; relation rebuild currently remains an explicit derived-index operation
+- generic `rebuild_all` / `POST /runtime-center/memory/rebuild` now auto-rebuilds relation views for the same scope as part of the unified operator rebuild path
+
+`2026-04-15` sleep-layer `B+` design supplement:
+
+The approved next memory step is a model-steered sleep layer over canonical
+truth, not a new durable memory source.
+
+Current design-only scope:
+
+- first landing scopes: `industry`, `work_context`
+- private `ConversationCompactionService` remains excluded from the formal sleep path
+
+Derived objects reserved for this layer:
+
+- `MemorySleepJob`
+- `MemoryScopeDigest`
+- `MemoryAliasMap`
+- `MemoryMergeResult`
+- `MemorySoftRule`
+- `MemoryConflictProposal`
+
+Next-day read-order target:
+
+- canonical object / graph truth
+- sleep `digest / alias / merge / soft-rule`
+- raw text memory
+- lexical fallback
+
+Auto-apply boundary:
+
+- model may directly author `digest / alias / merge / display wording`
+- low-risk `MemorySoftRule` may auto-apply, but must remain rollbackable
+- high-risk conflict conclusions / long-term rule changes remain proposal-only
+
+Hard boundary remains:
+
+- sleep outputs are derived and rebuildable from canonical `state / evidence / graph projection / strategy / formal memory`
+- no private conversation compaction input becomes canonical shared sleep truth
+- no model write may overwrite raw `EvidenceRecord / KnowledgeChunkRecord / Assignment / AgentReport` facts
+- this section records the approved contract; runtime landing is still pending
 ---
 
 ## 12.7 2026-03-19 media analysis ingest boundary

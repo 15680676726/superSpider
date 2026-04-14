@@ -13,6 +13,8 @@ from ..state.repositories import (
     SqliteAgentProfileOverrideRepository,
     SqliteCapabilityOverrideRepository,
     SqliteGoalOverrideRepository,
+    SqliteWorkflowRunRepository,
+    SqliteWorkflowTemplateRepository,
 )
 from .models import Patch
 
@@ -26,6 +28,8 @@ class PatchExecutor:
         capability_override_repository: SqliteCapabilityOverrideRepository | None = None,
         agent_profile_override_repository: SqliteAgentProfileOverrideRepository | None = None,
         goal_override_repository: SqliteGoalOverrideRepository | None = None,
+        workflow_template_repository: SqliteWorkflowTemplateRepository | None = None,
+        workflow_run_repository: SqliteWorkflowRunRepository | None = None,
         override_repository: SqliteCapabilityOverrideRepository | None = None,
     ) -> None:
         self._capability_override_repo = (
@@ -33,12 +37,16 @@ class PatchExecutor:
         )
         self._agent_profile_override_repo = agent_profile_override_repository
         self._goal_override_repo = goal_override_repository
+        self._workflow_template_repo = workflow_template_repository
+        self._workflow_run_repo = workflow_run_repository
 
     def apply(self, patch: Patch, *, actor: str) -> dict[str, object]:
         if patch.kind == "capability_patch":
             return self._apply_capability_patch(patch, actor=actor)
         if patch.kind in {"profile_patch", "role_patch"}:
             return self._apply_agent_profile_patch(patch, actor=actor)
+        if patch.kind == "workflow_patch":
+            return self._apply_workflow_patch(patch, actor=actor)
         if patch.kind == "plan_patch":
             return self._apply_goal_patch(patch, actor=actor)
         return {
@@ -52,6 +60,8 @@ class PatchExecutor:
             return self._rollback_capability_patch(patch, actor=actor)
         if patch.kind in {"profile_patch", "role_patch"}:
             return self._rollback_agent_profile_patch(patch, actor=actor)
+        if patch.kind == "workflow_patch":
+            return self._rollback_workflow_patch(patch, actor=actor)
         if patch.kind == "plan_patch":
             return self._rollback_goal_patch(patch, actor=actor)
         return {
@@ -336,6 +346,218 @@ class PatchExecutor:
             "actor": actor,
         }
 
+    def _apply_workflow_patch(
+        self,
+        patch: Patch,
+        *,
+        actor: str,
+    ) -> dict[str, object]:
+        if self._workflow_template_repo is None:
+            return {
+                "success": False,
+                "summary": "Workflow template repository is missing.",
+                "error": "Workflow template repository is missing.",
+            }
+        patch_payload = _workflow_patch_payload(patch)
+        target_surface = _normalize_text(patch_payload.get("target_surface"))
+        if target_surface != "workflow_template":
+            return {
+                "success": False,
+                "summary": (
+                    "Only workflow_template target_surface is supported for workflow_patch."
+                ),
+                "error": (
+                    "Unsupported workflow patch target_surface "
+                    f"'{target_surface or 'unknown'}'."
+                ),
+            }
+        template_id = _normalize_text(
+            patch.workflow_template_id or patch_payload.get("workflow_template_id"),
+        )
+        workflow_step_id = _normalize_text(
+            patch.workflow_step_id or patch_payload.get("workflow_step_id"),
+        )
+        if not template_id:
+            return _missing_target("workflow_template_id", patch.kind)
+        if not workflow_step_id:
+            return _missing_target("workflow_step_id", patch.kind)
+        step_updates = patch_payload.get("step_updates")
+        if not isinstance(step_updates, dict) or not step_updates:
+            return {
+                "success": False,
+                "summary": "workflow_patch requires non-empty step_updates.",
+                "error": "Missing workflow step_updates payload.",
+            }
+        template = self._workflow_template_repo.get_template(template_id)
+        if template is None:
+            return {
+                "success": False,
+                "summary": f"Workflow template '{template_id}' not found.",
+                "error": f"Workflow template '{template_id}' not found.",
+            }
+        step_specs = [dict(item) for item in list(template.step_specs or [])]
+        step_index = next(
+            (
+                index
+                for index, item in enumerate(step_specs)
+                if _normalize_text(item.get("id") or item.get("step_id"))
+                == workflow_step_id
+            ),
+            None,
+        )
+        if step_index is None:
+            return {
+                "success": False,
+                "summary": (
+                    f"Workflow step '{workflow_step_id}' not found in template '{template_id}'."
+                ),
+                "error": (
+                    f"Workflow step '{workflow_step_id}' not found in template "
+                    f"'{template_id}'."
+                ),
+            }
+        original_step = dict(step_specs[step_index])
+        updated_step = dict(original_step)
+        updated_step.update(step_updates)
+        step_specs[step_index] = updated_step
+
+        metadata = dict(template.metadata or {})
+        backups = _workflow_patch_backups(metadata)
+        backups[patch.id] = {
+            "target_surface": "workflow_template",
+            "workflow_template_id": template_id,
+            "workflow_step_id": workflow_step_id,
+            "step_index": step_index,
+            "original_fields": {
+                key: original_step.get(key)
+                for key in step_updates.keys()
+                if isinstance(key, str)
+            },
+            "missing_fields": [
+                key
+                for key in step_updates.keys()
+                if isinstance(key, str) and key not in original_step
+            ],
+            "updated_by": actor,
+        }
+        metadata["workflow_patch_backups"] = backups
+        updated_template = template.model_copy(
+            update={
+                "step_specs": step_specs,
+                "metadata": metadata,
+                "updated_at": datetime.now(timezone.utc),
+            },
+        )
+        self._workflow_template_repo.upsert_template(updated_template)
+        return {
+            "success": True,
+            "summary": (
+                f"Workflow template '{template_id}' step '{workflow_step_id}' updated."
+            ),
+            "workflow_template_id": template_id,
+            "workflow_step_id": workflow_step_id,
+            "target_surface": "workflow_template",
+            "actor": actor,
+        }
+
+    def _rollback_workflow_patch(
+        self,
+        patch: Patch,
+        *,
+        actor: str,
+    ) -> dict[str, object]:
+        if self._workflow_template_repo is None:
+            return {
+                "success": False,
+                "summary": "Workflow template repository is missing.",
+                "error": "Workflow template repository is missing.",
+            }
+        patch_payload = _workflow_patch_payload(patch)
+        template_id = _normalize_text(
+            patch.workflow_template_id or patch_payload.get("workflow_template_id"),
+        )
+        workflow_step_id = _normalize_text(
+            patch.workflow_step_id or patch_payload.get("workflow_step_id"),
+        )
+        if not template_id:
+            return _missing_target("workflow_template_id", patch.kind)
+        if not workflow_step_id:
+            return _missing_target("workflow_step_id", patch.kind)
+        template = self._workflow_template_repo.get_template(template_id)
+        if template is None:
+            return {
+                "success": False,
+                "summary": f"Workflow template '{template_id}' not found.",
+                "error": f"Workflow template '{template_id}' not found.",
+            }
+        metadata = dict(template.metadata or {})
+        backups = _workflow_patch_backups(metadata)
+        backup = backups.get(patch.id)
+        if not isinstance(backup, dict):
+            return {
+                "success": True,
+                "summary": f"No workflow patch backup found for {patch.id}; nothing to rollback.",
+                "workflow_template_id": template_id,
+                "workflow_step_id": workflow_step_id,
+                "actor": actor,
+            }
+        step_specs = [dict(item) for item in list(template.step_specs or [])]
+        step_index_value = backup.get("step_index")
+        step_index = step_index_value if isinstance(step_index_value, int) else None
+        if step_index is None or step_index < 0 or step_index >= len(step_specs):
+            step_index = next(
+                (
+                    index
+                    for index, item in enumerate(step_specs)
+                    if _normalize_text(item.get("id") or item.get("step_id"))
+                    == workflow_step_id
+                ),
+                None,
+            )
+        if step_index is None:
+            return {
+                "success": False,
+                "summary": (
+                    f"Workflow step '{workflow_step_id}' not found in template '{template_id}'."
+                ),
+                "error": (
+                    f"Workflow step '{workflow_step_id}' not found in template "
+                    f"'{template_id}'."
+                ),
+            }
+        restored_step = dict(step_specs[step_index])
+        original_fields = backup.get("original_fields")
+        if isinstance(original_fields, dict):
+            for key, value in original_fields.items():
+                if isinstance(key, str):
+                    restored_step[key] = value
+        missing_fields = backup.get("missing_fields")
+        if isinstance(missing_fields, list):
+            for key in missing_fields:
+                if isinstance(key, str):
+                    restored_step.pop(key, None)
+        step_specs[step_index] = restored_step
+        backups.pop(patch.id, None)
+        metadata["workflow_patch_backups"] = backups
+        updated_template = template.model_copy(
+            update={
+                "step_specs": step_specs,
+                "metadata": metadata,
+                "updated_at": datetime.now(timezone.utc),
+            },
+        )
+        self._workflow_template_repo.upsert_template(updated_template)
+        return {
+            "success": True,
+            "summary": (
+                f"Workflow template '{template_id}' step '{workflow_step_id}' restored."
+            ),
+            "workflow_template_id": template_id,
+            "workflow_step_id": workflow_step_id,
+            "target_surface": "workflow_template",
+            "actor": actor,
+        }
+
 
 def _missing_target(field_name: str, patch_kind: str) -> dict[str, object]:
     return {
@@ -437,6 +659,23 @@ def _parse_int(value: str | None) -> int | None:
         return int(value)
     except ValueError:
         return None
+
+
+def _normalize_text(value: object | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _workflow_patch_payload(patch: Patch) -> dict[str, object]:
+    payload = patch.patch_payload if isinstance(patch.patch_payload, dict) else {}
+    return dict(payload)
+
+
+def _workflow_patch_backups(metadata: dict[str, object]) -> dict[str, object]:
+    payload = metadata.get("workflow_patch_backups")
+    return dict(payload) if isinstance(payload, dict) else {}
 
 
 __all__ = ["PatchExecutor"]

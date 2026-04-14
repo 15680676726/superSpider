@@ -18,7 +18,13 @@ from pydantic import BaseModel, Field
 from ..industry.models import IndustryBootstrapInstallItem, IndustryBootstrapInstallResult
 
 
-PatchKind = Literal["profile_patch", "role_patch", "capability_patch", "plan_patch"]
+PatchKind = Literal[
+    "profile_patch",
+    "role_patch",
+    "capability_patch",
+    "plan_patch",
+    "workflow_patch",
+]
 PatchStatus = Literal["proposed", "approved", "applied", "rejected", "rolled_back"]
 ProposalStatus = Literal["open", "accepted", "rejected", "deferred"]
 AcquisitionKind = Literal["install-capability", "create-sop-binding"]
@@ -61,9 +67,13 @@ class Patch(BaseModel):
     goal_id: str | None = None
     task_id: str | None = None
     agent_id: str | None = None
+    workflow_template_id: str | None = None
+    workflow_run_id: str | None = None
+    workflow_step_id: str | None = None
     title: str
     description: str
     diff_summary: str = ""
+    patch_payload: dict[str, Any] = Field(default_factory=dict)
     evidence_refs: list[str] = Field(default_factory=list)
     source_evidence_id: str | None = None
     risk_level: str = "auto"

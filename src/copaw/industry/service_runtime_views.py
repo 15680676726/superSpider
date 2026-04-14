@@ -2359,6 +2359,168 @@ class _IndustryRuntimeViewsMixin:
             updated_at=updated_at,
         )
 
+    def _runtime_view_record_mapping(self, value: object) -> dict[str, Any]:
+        if isinstance(value, Mapping):
+            return dict(value)
+        model_dump = getattr(value, "model_dump", None)
+        if callable(model_dump):
+            payload = model_dump(mode="json")
+            if isinstance(payload, Mapping):
+                return dict(payload)
+        return {}
+
+    def _collect_instance_learning_records(
+        self,
+        *,
+        goal_ids: set[str],
+        task_ids: set[str],
+        agent_ids: set[str],
+        patches_by_id: dict[str, dict[str, Any]],
+        growth_by_id: dict[str, dict[str, Any]],
+    ) -> None:
+        if self._learning_service is None:
+            return
+        query_filters: list[dict[str, str]] = []
+        query_filters.extend({"task_id": task_id} for task_id in sorted(task_ids))
+        query_filters.extend({"goal_id": goal_id} for goal_id in sorted(goal_ids))
+        query_filters.extend({"agent_id": agent_id} for agent_id in sorted(agent_ids))
+        if not query_filters:
+            query_filters.append({})
+        for filter_kwargs in query_filters:
+            for patch in self._learning_service.list_patches(
+                limit=None,
+                **filter_kwargs,
+            ) or []:
+                payload = self._runtime_view_record_mapping(patch)
+                patch_id = _string(payload.get("id"))
+                if patch_id is not None:
+                    patches_by_id[patch_id] = payload
+            for growth in self._learning_service.list_growth(
+                limit=None,
+                **filter_kwargs,
+            ) or []:
+                payload = self._runtime_view_record_mapping(growth)
+                growth_id = _string(payload.get("id"))
+                if growth_id is not None:
+                    growth_by_id[growth_id] = payload
+
+    def _build_optimization_closure(
+        self,
+        *,
+        assignments: list[dict[str, Any]],
+        proposals: list[dict[str, Any]],
+        patches: list[dict[str, Any]],
+        growth: list[dict[str, Any]],
+        decisions: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        assignments_by_task_id = {
+            _string(item.get("task_id")): item
+            for item in assignments
+            if _string(item.get("task_id"))
+        }
+        links_by_key: dict[str, dict[str, Any]] = {}
+
+        def _append_unique(link: dict[str, Any], key: str, value: object | None) -> None:
+            normalized = _string(value)
+            if normalized is None:
+                return
+            link[key] = _unique_strings(link.get(key, []), [normalized])
+
+        def _ensure_link(payload: dict[str, Any]) -> dict[str, Any]:
+            task_id = _string(payload.get("task_id"))
+            assignment = assignments_by_task_id.get(task_id) if task_id is not None else None
+            assignment_id = _string(payload.get("assignment_id")) or (
+                _string(assignment.get("assignment_id"))
+                if isinstance(assignment, dict)
+                else None
+            )
+            backlog_item_id = _string(payload.get("backlog_item_id")) or (
+                _string(assignment.get("backlog_item_id"))
+                if isinstance(assignment, dict)
+                else None
+            )
+            agent_id = _string(payload.get("agent_id")) or (
+                _string(assignment.get("owner_agent_id"))
+                if isinstance(assignment, dict)
+                else None
+            )
+            key = (
+                f"task:{task_id}"
+                if task_id is not None
+                else (
+                    f"assignment:{assignment_id}"
+                    if assignment_id is not None
+                    else (
+                        f"agent:{agent_id}"
+                        if agent_id is not None
+                        else (
+                            f"workflow:{_string(payload.get('workflow_run_id'))}"
+                            if _string(payload.get("workflow_run_id")) is not None
+                            else f"item:{_string(payload.get('id')) or 'unlinked'}"
+                        )
+                    )
+                )
+            )
+            link = links_by_key.get(key)
+            if link is None:
+                link = {
+                    "task_id": task_id,
+                    "assignment_id": assignment_id,
+                    "backlog_item_id": backlog_item_id,
+                    "agent_id": agent_id,
+                    "proposal_ids": [],
+                    "patch_ids": [],
+                    "growth_ids": [],
+                    "decision_ids": [],
+                    "workflow_run_ids": [],
+                    "workflow_step_ids": [],
+                }
+                links_by_key[key] = link
+            else:
+                if link.get("assignment_id") is None and assignment_id is not None:
+                    link["assignment_id"] = assignment_id
+                if link.get("backlog_item_id") is None and backlog_item_id is not None:
+                    link["backlog_item_id"] = backlog_item_id
+                if link.get("agent_id") is None and agent_id is not None:
+                    link["agent_id"] = agent_id
+            return link
+
+        for proposal in proposals:
+            payload = self._runtime_view_record_mapping(proposal)
+            link = _ensure_link(payload)
+            _append_unique(link, "proposal_ids", payload.get("id"))
+        for patch in patches:
+            payload = self._runtime_view_record_mapping(patch)
+            link = _ensure_link(payload)
+            _append_unique(link, "patch_ids", payload.get("id"))
+            _append_unique(link, "workflow_run_ids", payload.get("workflow_run_id"))
+            _append_unique(link, "workflow_step_ids", payload.get("workflow_step_id"))
+        for growth_entry in growth:
+            payload = self._runtime_view_record_mapping(growth_entry)
+            link = _ensure_link(payload)
+            _append_unique(link, "growth_ids", payload.get("id"))
+        for decision in decisions:
+            payload = self._runtime_view_record_mapping(decision)
+            link = _ensure_link(payload)
+            _append_unique(link, "decision_ids", payload.get("id"))
+
+        return {
+            "counts": {
+                "proposals": len(proposals),
+                "patches": len(patches),
+                "growth": len(growth),
+                "decisions": len(decisions),
+            },
+            "links": sorted(
+                links_by_key.values(),
+                key=lambda item: (
+                    _string(item.get("task_id")) or "",
+                    _string(item.get("assignment_id")) or "",
+                    _string(item.get("agent_id")) or "",
+                ),
+            ),
+        }
+
     def _build_instance_detail(
 
         self,
@@ -2929,7 +3091,9 @@ class _IndustryRuntimeViewsMixin:
 
 
 
-        for goal_id in self._resolve_instance_goal_ids(record, team=team):
+        instance_goal_ids = self._resolve_instance_goal_ids(record, team=team)
+
+        for goal_id in instance_goal_ids:
 
             goal = self._goal_service.get_goal(goal_id)
 
@@ -3249,14 +3413,39 @@ class _IndustryRuntimeViewsMixin:
             for agent in agents
         ]
 
+        task_ids.update(
+            task_id
+            for task_id in (
+                _string(item.get("task_id"))
+                for item in assignments
+            )
+            if task_id is not None
+        )
+        task_ids.update(
+            task_id
+            for task_id in (
+                _string(item.get("task_id"))
+                for item in agent_reports
+            )
+            if task_id is not None
+        )
+
         proposals = self._list_instance_proposals(
 
-            goal_ids=set(self._resolve_instance_goal_ids(record, team=team)),
+            goal_ids=set(instance_goal_ids),
 
             task_ids=task_ids,
 
             agent_ids=agent_ids,
 
+        )
+
+        self._collect_instance_learning_records(
+            goal_ids=set(instance_goal_ids),
+            task_ids=task_ids,
+            agent_ids=agent_ids,
+            patches_by_id=patches_by_id,
+            growth_by_id=growth_by_id,
         )
 
         acquisition_proposals = self._list_instance_acquisition_proposals(
@@ -3285,6 +3474,13 @@ class _IndustryRuntimeViewsMixin:
 
             decisions=list(decisions_by_id.values()),
 
+        )
+        optimization_closure = self._build_optimization_closure(
+            assignments=assignments,
+            proposals=proposals,
+            patches=list(patches_by_id.values()),
+            growth=list(growth_by_id.values()),
+            decisions=list(decisions_by_id.values()),
         )
 
         staffing = self._build_instance_staffing(
@@ -3691,6 +3887,7 @@ class _IndustryRuntimeViewsMixin:
 
             main_chain=main_chain,
             main_brain_planning=main_brain_planning,
+            optimization_closure=optimization_closure,
 
             focus_selection=focus_selection,
 

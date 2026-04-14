@@ -341,6 +341,56 @@
 
 ---
 
+## 1.3.1 `2026-04-15` 记忆睡眠整理层 `B+` 设计补充
+
+- 已新增正式设计文档：
+  - `docs/superpowers/specs/2026-04-15-memory-sleep-layer-b-plus-design.md`
+- 当前口径已收死为：
+  - 共享正式记忆继续坚持 `truth-first` 与 `no-vector formal memory`
+  - 下一步不是重写 memory truth，而是在 canonical `state / evidence / graph projection / strategy / formal memory` 之上新增 `B+` 睡眠整理层
+  - 私有 `ConversationCompactionService` 明确排除在这轮之外，只保留线程内私有压缩
+- `B+` 这轮已确定的正式对象：
+  - `MemorySleepJob`
+  - `MemoryScopeDigest`
+  - `MemoryAliasMap`
+  - `MemoryMergeResult`
+  - `MemorySoftRule`
+  - `MemoryConflictProposal`
+- 第二天正式主读链目标已定为：
+  - `canonical object / graph truth`
+  - `sleep digest / alias / merge / soft-rule`
+  - `raw text memory`
+  - `lexical fallback`
+- 模型权限边界已定为：
+  - `digest / alias / merge / 次日展示口径` 可由模型直接决定
+  - 低风险 `soft-rule` 可自动生效，但必须可回滚
+  - 高风险冲突结论、长期规则变更、审批/资金/外部动作类约束只允许生成提案
+- 状态说明：
+  - 当前完成的是“正式设计收口”，不是代码已落地
+  - 本轮实现范围已限定为 `industry / work_context` 两类 scope；`C` 只保留路线规划，不在本轮实现
+
+---
+
+## 1.3.2 `2026-04-15` Chat 结果可见化正式生产链补充
+
+- Chat `turn_reply_done` 的 `tool_use_summary.result_items` 不再只依赖 compaction / 前端保守派生。
+- 当前正式主链已补到真实 tool evidence 生产点：
+  - `KernelToolBridge` 在产出 file artifact / shell replay evidence 后，会直接生成正式 `result_items`
+  - `query_execution_runtime` 的 evidence sink 会把这份结果写入 `query_runtime_state.tool_use_summary`
+  - session snapshot 会同步持久化同一份 `query_runtime_state`
+- 当前正式 `result_items` 字段已支持：
+  - `ref`
+  - `kind`
+  - `label`
+  - `summary`
+  - `route`
+- 当前已真实直出的结果类型：
+  - file artifact -> `文件`
+  - shell replay -> `回放`
+- `ConversationCompactionService` 仍保留保守派生兜底，但它已退回 fallback 角色；正式优先级改为“真实 evidence 生产侧直出 > compaction fallback > 前端 fallback”。
+
+---
+
 ## 1.4 `2026-04-05` Group F 闭环证明口径纠偏（必读）
 
 - `collect-only` 只证明“被收集到哪些测试”，**不证明行为通过**、不证明“默认回归闭环”。
@@ -1016,7 +1066,8 @@
 - `2026-04-14` 补充：`recall / activation / Runtime Center memory surface` 现统一走 `retrieval_budget`，按固定 related-scope 顺序 `work_context -> task -> agent -> industry -> global` 读取，并施加显式 fetch budget；formal durable text memory 也已补上 `canonical_compaction`，重复稳定文本 anchor 会合并成 canonical 内容，不再无限 append。
 - `2026-04-14` 补充：旧 `src/copaw/agents/memory/memory_manager.py` 兼容壳已物理删除；`agents.memory` 不再导出该别名，runtime/agent/hook 现统一只认 `ConversationCompactionService`。它现在只负责私有会话压缩，不再承担正式记忆写入或召回职责。
 - `2026-04-14` 补充：旧 `memory_fact_index` 历史库自动补列/自动升级也已退出正式支持面；当前基线只保证 fresh canonical state schema。若本地还残留旧 memory db，按“删库重建”处理，不再继续扩写这条兼容链。
-- 硬边界：persisted relation view 仍然只是 derived-only read model，来源仍是 `MemoryFactIndexRecord + MemoryEntityViewRecord + MemoryOpinionViewRecord` 的派生组合，不是第二真相源，也不是 graph-native 写入主链。当前通用 `POST /runtime-center/memory/rebuild` 仍只负责 fact-index rebuild；relation rebuild 目前仍是显式 `DerivedMemoryIndexService.rebuild_relation_views(...)` 能力，而不是自动接入所有 memory rebuild 路径。
+- `2026-04-14` 补充：memory 正式操作面又收了一刀。`POST /runtime-center/memory/rebuild` 现在会在同一条 operator rebuild 链里自动连带 `relation views` 重建，并把 `relation_view_count` 回给前端；`GET /runtime-center/memory/surface` 也已成为 activation + relation 的正式聚合读面，Knowledge 页不再只能靠零散 payload 拼读。
+- 硬边界：persisted relation view 仍然只是 derived-only read model，来源仍是 `MemoryFactIndexRecord + MemoryEntityViewRecord + MemoryOpinionViewRecord` 的派生组合，不是第二真相源，也不是 graph-native 写入主链；本轮新增的是统一 rebuild/read surface，不是第二套 memory truth。
 
 结论：
 
@@ -1426,3 +1477,34 @@
   - `python -m pytest tests/app/test_learning_api.py -k "acquisition_run or acquisition_review_gate" -q` -> `6 passed, 10 deselected`
   - `python -m pytest tests/kernel/query_execution_environment_parts/dispatch.py -k "discover_capabilities" -q` -> `1 passed, 10 deselected`
   - `python -m pytest tests/app/test_prediction_mcp_optimization_flow.py::test_missing_mcp_recommendation_executes_into_optimization_closure -q` -> `1 passed`
+
+### 3.3.10 `2026-04-15` workflow compatibility / optimization closure hardening
+
+- workflow launch / resume 的 compatibility materialization 已显式化：
+  - workflow 叶子 `GoalRecord` 不再以通用 `goal` 类出现；
+  - workflow materialization 现在统一落成 `goal_class="workflow-step-goal"`；
+  - 对应 `GoalOverrideRecord.compiler_context` 会显式写入 `materialization_path="workflow-leaf-compatibility"`；
+  - 这意味着 workflow 仍复用 canonical `GoalService`，但兼容叶子的边界已从“隐式普通 goal”收口为“显式 workflow leaf compatibility artifact”。
+- bootstrap compatibility side-write 也已显式标注为历史桥接，而不是 live planning truth：
+  - bootstrap 兼容 goal 现在统一是 `goal_class="compatibility-bootstrap-goal"`；
+  - 对应 override 会带 `compatibility_materialization=True` 与 `compatibility_surface="bootstrap-goal-record"`；
+  - assignment/backlog/cycle 仍是 bootstrap 主链正式真相，compatibility goal 只是下游 leaf/detail artifact。
+- learning patch 正式新增 typed `workflow_patch`：
+  - patch 模型现在支持 `workflow_template_id / workflow_run_id / workflow_step_id / patch_payload`；
+  - workflow optimization 不再只能借 `plan_patch + diff_summary` 松散映射到 `GoalOverrideRecord`；
+  - 当前已落地的真实副作用边界是：`workflow_patch(target_surface="workflow_template")` 可直接更新 `WorkflowTemplateRecord.step_specs`，并支持 rollback 恢复。
+- 行业 runtime detail 现在新增 canonical `optimization_closure` 读投影：
+  - 会把 `Proposal / Patch / Growth / Decision` 收口到单一 closure block；
+  - link 以 `task_id` 为主锚，并继续保留 `assignment_id / backlog_item_id / agent_id / workflow_run_ids / workflow_step_ids`；
+  - 这意味着 optimization 读面不再只能散落在 proposals/patches/growth 列表里，而是有了单一闭环故事。
+- 本轮 fresh verification：
+  - focused contract：
+    - `python -m pytest tests/app/test_workflow_materialization_contracts.py tests/app/industry_api_parts/test_bootstrap_compatibility_contracts.py tests/kernel/test_learning_workflow_patch.py tests/industry/test_optimization_closure_projection.py -q -p no:cacheprovider` -> `5 passed`
+  - 真实闭环场景：
+    - `python -m pytest tests/app/test_workflow_industry_optimization_scenario.py -q -p no:cacheprovider` -> `1 passed`
+    - 场景覆盖：`/industry/v1/bootstrap -> workflow service launch -> workflow resume fallback -> workflow_patch apply/rollback -> /runtime-center/industry/{instance_id}`，并验证 bootstrap compatibility、workflow compatibility、typed patch、optimization closure 同时跑通。
+  - 相邻回归：
+    - `python -m pytest tests/app/test_workflow_templates_api.py -k "resume_uses_persisted_runtime_context_without_rehydrating_legacy_links or resume_uses_goal_override_context_without_recreating_legacy_goal_links or run_public_surface_hides_historical_goal_schedule_id_fields" -q -p no:cacheprovider` -> `3 passed, 44 deselected`
+    - `python -m pytest tests/app/industry_api_parts/bootstrap_lifecycle.py -k "public_bootstrap_hard_cuts_legacy_goal_schedule_response_surface or public_bootstrap_persists_draft_truth_and_uses_draft_goal_identity or kickoff_execution_from_chat_dispatches_bootstrap_assignments_without_goal_dispatch" -q -p no:cacheprovider` -> `3 passed, 51 deselected`
+    - `python -m pytest tests/kernel/test_compiler_learning.py::test_patch_executor_applies_profile_role_and_plan_side_effects tests/kernel/test_compiler_learning.py::test_learning_service_links_to_persisted_compiler_context -q -p no:cacheprovider` -> `2 passed`
+    - `python -m pytest tests/industry/test_runtime_views_split.py tests/app/test_prediction_mcp_optimization_flow.py -q -p no:cacheprovider` -> `17 passed`

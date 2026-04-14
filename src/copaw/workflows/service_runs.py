@@ -253,6 +253,47 @@ class _WorkflowServiceRunMixin:
             raise KeyError(f"Workflow template '{template_id}' not found")
         return self._build_preview(template, payload)
 
+    def _materialize_workflow_step_goal(
+        self,
+        *,
+        run: WorkflowRunRecord,
+        template: WorkflowTemplateRecord,
+        preview: WorkflowTemplatePreview,
+        step: WorkflowTemplateStepPreview,
+        step_payload: dict[str, Any],
+        status: str,
+        reason: str,
+        extra_compiler_context: dict[str, Any] | None = None,
+    ) -> GoalRecord:
+        goal = self._goal_service.create_goal(
+            title=step.title,
+            summary=step.summary,
+            status=status,
+            priority=3,
+            owner_scope=preview.owner_scope,
+            industry_instance_id=preview.industry_instance_id,
+            goal_class="workflow-step-goal",
+        )
+        if self._goal_override_repository is not None:
+            compiler_context = {
+                "workflow_run_id": run.run_id,
+                "workflow_template_id": template.template_id,
+                "workflow_step_id": step.step_id,
+                "workflow_execution_mode": step.execution_mode,
+                "industry_instance_id": preview.industry_instance_id,
+                "materialization_path": "workflow-leaf-compatibility",
+                **dict(extra_compiler_context or {}),
+            }
+            self._goal_override_repository.upsert_override(
+                GoalOverrideRecord(
+                    goal_id=goal.id,
+                    plan_steps=list(step_payload.get("plan_steps") or []),
+                    compiler_context=compiler_context,
+                    reason=reason,
+                ),
+            )
+        return goal
+
     async def launch_template(
         self,
         template_id: str,
@@ -336,28 +377,15 @@ class _WorkflowServiceRunMixin:
         for step in preview.steps:
             step_payload = dict(step.payload_preview or {})
             if step.kind == "goal":
-                goal = self._goal_service.create_goal(
-                    title=step.title,
-                    summary=step.summary,
+                goal = self._materialize_workflow_step_goal(
+                    run=run,
+                    template=template,
+                    preview=preview,
+                    step=step,
+                    step_payload=step_payload,
                     status="active" if payload.activate else "draft",
-                    priority=3,
-                    owner_scope=preview.owner_scope,
+                    reason=f"Workflow template launch: {template.template_id}",
                 )
-                if self._goal_override_repository is not None:
-                    self._goal_override_repository.upsert_override(
-                        GoalOverrideRecord(
-                            goal_id=goal.id,
-                            plan_steps=list(step_payload.get("plan_steps") or []),
-                            compiler_context={
-                                "workflow_run_id": run.run_id,
-                                "workflow_template_id": template.template_id,
-                                "workflow_step_id": step.step_id,
-                                "workflow_execution_mode": step.execution_mode,
-                                "industry_instance_id": preview.industry_instance_id,
-                            },
-                            reason=f"Workflow template launch: {template.template_id}",
-                        ),
-                    )
                 if payload.activate:
                     dispatch_context = {
                         "channel": "workflow-template",
@@ -576,30 +604,17 @@ class _WorkflowServiceRunMixin:
                         and not persisted_decision_ids
                         and not persisted_evidence_ids
                     ):
-                        goal = self._goal_service.create_goal(
-                            title=step.title,
-                            summary=step.summary,
+                        goal = self._materialize_workflow_step_goal(
+                            run=run,
+                            template=template,
+                            preview=preview,
+                            step=step,
+                            step_payload=step_payload,
                             status="active",
-                            priority=3,
-                            owner_scope=preview.owner_scope,
+                            reason=f"Workflow run resume: {template.template_id}",
+                            extra_compiler_context={"resume_actor": actor},
                         )
                         linked_goal_ids = [goal.id]
-                        if self._goal_override_repository is not None:
-                            self._goal_override_repository.upsert_override(
-                                GoalOverrideRecord(
-                                    goal_id=goal.id,
-                                    plan_steps=list(step_payload.get("plan_steps") or []),
-                                    compiler_context={
-                                        "workflow_run_id": run.run_id,
-                                        "workflow_template_id": template.template_id,
-                                        "workflow_step_id": step.step_id,
-                                        "workflow_execution_mode": step.execution_mode,
-                                        "industry_instance_id": preview.industry_instance_id,
-                                        "resume_actor": actor,
-                                    },
-                                    reason=f"Workflow run resume: {template.template_id}",
-                                ),
-                            )
                 for goal_id in linked_goal_ids:
                     goal = self._goal_service.get_goal(goal_id)
                     if goal is None or goal.status in {"completed", "archived"}:

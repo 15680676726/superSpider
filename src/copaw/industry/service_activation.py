@@ -264,7 +264,7 @@ class _IndustryActivationMixin:
                     "title": seed.title,
                     "summary": seed.summary,
                     "priority": goal_priority,
-                    "goal_class": "bootstrap-goal",
+                    "goal_class": "compatibility-bootstrap-goal",
                 },
             )
             self._upsert_agent_profile(
@@ -520,7 +520,7 @@ class _IndustryActivationMixin:
                 industry_instance_id=team_id,
                 lane_id=lane.id if lane is not None else None,
                 cycle_id=current_cycle.id if current_cycle is not None else None,
-                goal_class="bootstrap-goal",
+                goal_class="compatibility-bootstrap-goal",
             )
             override = self._goal_override_repository.upsert_override(
                 GoalOverrideRecord(
@@ -532,6 +532,8 @@ class _IndustryActivationMixin:
                         "industry_instance_id": team_id,
                         "lane_id": lane.id if lane is not None else None,
                         "report_back_mode": "summary",
+                        "compatibility_materialization": True,
+                        "compatibility_surface": "bootstrap-goal-record",
                         **seed.compiler_context,
                     },
                     reason=f"Industry bootstrap for {plan.profile.primary_label()}",

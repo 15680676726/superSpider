@@ -110,6 +110,10 @@
   - assembled root app 上的公开 `/goals` frontdoor 也已继续收口为 detail-only：`GET/POST /goals`、`GET/PATCH/DELETE /goals/{goal_id}` 与 `POST /goals/{goal_id}/compile` 不再挂到 root-router；如专项 app 仍需完整 `/goals` router，必须显式手工 include
   - `GET /goals/{goal_id}` 也已从 `goals` 公开 router 退役；public leaf read 只保留 `/goals/{goal_id}/detail`，不再继续暴露旧 `GoalRecord` 裸读面
   - `GET /runtime-center/industry/{instance_id}` 的正式 Current Focus 读面也已同步从 legacy goal 文本退场；当 live `assignment / backlog` 存在时，`execution.current_focus` 与 `main_chain.current_focus` 优先投影 live focus，节点 route 统一锚定到 `industry detail + assignment_id/backlog_item_id`，并通过 `focus_selection + selected assignment/backlog` 呈现 focused subview，不再回跳旧 goal detail
+  - `GET /runtime-center/industry/{instance_id}` 现在还应显式携带 `optimization_closure`：
+    - 以 `task_id` 为主锚点收口 `Proposal / Patch / Growth / Decision`
+    - link 内继续保留 `assignment_id / backlog_item_id / workflow_run_ids / workflow_step_ids`
+    - optimization 读面不再只依赖散落的 proposals/patches/growth 列表
   - `Runtime Center / /industry / 行业 kickoff prompt` 现也已把 `strategy / lanes / current cycle / assignments / agent reports` 升成正式 planning surface：`Runtime Center` 的行业 focus section 已新增 `Main-Brain Planning` 卡，`/industry` 已新增 `工作泳道` 正式展示，kickoff prompt 会显式带出 `lane/backlog/cycle/assignment/report` 计数与 lane 摘要
   - `AgentProfile / AgentProfileOverrideRecord / runtime chat meta` 已完成从 legacy `current_goal` 向 `current_focus_kind / current_focus_id / current_focus` 的正式收口；prompt appendix、Runtime Center conversations、overview agent meta、主脑 roster、Agent Workbench 与 Knowledge 前台现已统一消费 focus 字段，`current_goal / current_goal_id` 已从正式模型、仓储、服务与前台读面移除
   - `2026-04-14` 纠偏补充：此前这里对 industry runtime writer 的收口记录写早了；实际代码直到本日才真正删除 `industry/service_team_runtime.py` 中 `goal_id / goal_title -> current_focus_kind="goal"` 的 idle focus 写入。现在 bootstrap、lifecycle refresh 与 cleanup backfill 都不会再把空闲职业 agent 的 live runtime metadata 写成 `goal` 焦点；默认 system agent profile 也不再用静态 `current_focus_kind="goal"` 充当前台占位。legacy `goal_*` 仅剩 `AgentProfileService` 等兼容读口，不再属于 live runtime writer contract
@@ -126,6 +130,7 @@
   - `GET /goals/{goal_id}/detail` 已进一步收口为只读 leaf detail；detail 读取不再隐式触发 `reconcile_goal_status()`，状态推进必须显式走 reconcile/write 链，不允许“看详情顺手改状态”
   - CLI `goals dispatch` 已从命令面物理删除，不再保留 retired shell；CLI 仅保留 `goals list/compile`
   - `GoalRecord` 仍可作为执行层 phase/leaf object 存在，但 operator 主入口必须优先经过 `strategy / lane / backlog / cycle / assignment / report`
+  - bootstrap 仍允许 side-write compatibility `GoalRecord`，但该 leaf 必须显式标注为 `goal_class="compatibility-bootstrap-goal"`，并通过 override `compatibility_materialization=True` 暴露“这是 compatibility artifact，不是 bootstrap 主链真相”
 
 ---
 
@@ -522,6 +527,10 @@
   - `preview` 只返回 materialization diff，不直接执行
   - template `launch` / run `resume` 现只保留在 workflow service 内部能力边界，不再保留公开 HTTP 前门
   - `WorkflowRunRecord` 只做运行锚点，不替代 `Task / TaskRuntime`
+  - workflow materialization 继续复用 canonical `GoalService` / `ScheduleRecord`，但 compatibility leaf 必须显式标注：
+    - workflow-created compatibility goal 应使用 `goal_class="workflow-step-goal"`
+    - 对应 override 应带 `materialization_path="workflow-leaf-compatibility"`
+  - 这意味着 workflow launch/resume 仍不是平行前门，但 compatibility artifact 也不再伪装成普通 goal truth
 
 ---
 
@@ -798,6 +807,12 @@
   - `ConversationCompactionService` 只处理私有会话压缩，不再承担正式记忆写入/召回 owner
   - `QMD / LanceDB / vector` 不再作为正式 runtime/operator contract 目标保留；当前相关提法应视为 physically removed residuals，而不是待清理产品路径
   - 不允许把 sidecar、Markdown memory 文件或已退役 `MemoryManager` 重新升级为第二真相源
+  - `2026-04-15` 设计补充：shared memory 的下一步不再是恢复任何 manager shell，而是新增 derived `B+` sleep layer
+    - 目标对象：`MemorySleepJob / MemoryScopeDigest / MemoryAliasMap / MemoryMergeResult / MemorySoftRule / MemoryConflictProposal`
+    - 首轮 scope：`industry / work_context`
+    - 次日主读优先级目标：`canonical truth -> sleep artifacts -> raw text memory -> lexical fallback`
+    - `ConversationCompactionService` 明确排除在这条正式共享记忆链之外
+    - 当前状态是 design-approved / implementation pending，不应误写成已经落地
 
 ---
 
