@@ -204,6 +204,21 @@ class _WorkflowServicePreviewMixin:
         host_snapshot = self._resolve_host_snapshot_from_request(preview_request) or dict(
             dict(run.metadata or {}).get("host_snapshot") or {},
         )
+        return self._build_run_detail_from_preview(
+            run=run,
+            template=template,
+            preview=preview,
+            host_snapshot=host_snapshot,
+        )
+
+    def _build_run_detail_from_preview(
+        self,
+        *,
+        run: WorkflowRunRecord,
+        template: WorkflowTemplateRecord,
+        preview: WorkflowTemplatePreview,
+        host_snapshot: dict[str, Any],
+    ) -> WorkflowRunDetail:
         goals: list[dict[str, Any]] = []
         tasks: list[dict[str, Any]] = []
         decisions: list[dict[str, Any]] = []
@@ -244,20 +259,6 @@ class _WorkflowServicePreviewMixin:
             visible_goal_ids.update(goal_ids_by_step.get(step.step_id, []))
         runtime_goal_ids = _unique_strings(*goal_ids_by_step.values())
         goal_ids = sorted(_unique_strings(visible_goal_ids, runtime_goal_ids))
-        for goal_id in goal_ids:
-            detail = self._goal_service.get_goal_detail(goal_id)
-            if detail is None:
-                continue
-            goal_detail_by_id[goal_id] = detail
-            goals.append(detail.get("goal") or {})
-            tasks.extend(_workflow_goal_task_payloads(detail))
-            decisions.extend(list(detail.get("decisions") or []))
-            evidence.extend(list(detail.get("evidence") or []))
-        if self._task_repository is not None and runtime_goal_ids:
-            tasks.extend(
-                task.model_dump(mode="json")
-                for task in self._task_repository.list_tasks(goal_ids=runtime_goal_ids)
-            )
         persisted_task_ids = _unique_strings(
             *[
                 [
@@ -266,19 +267,6 @@ class _WorkflowServicePreviewMixin:
                     if str(item).strip()
                 ]
                 for seed in step_seed_items
-            ],
-        )
-        if self._task_repository is not None and persisted_task_ids:
-            tasks.extend(
-                task.model_dump(mode="json")
-                for task in self._task_repository.list_tasks(task_ids=persisted_task_ids)
-            )
-        task_ids_for_runtime_links = _unique_strings(
-            persisted_task_ids,
-            [
-                str(item.get("id") or "")
-                for item in tasks
-                if str(item.get("id") or "").strip()
             ],
         )
         persisted_decision_ids = _unique_strings(
@@ -291,19 +279,6 @@ class _WorkflowServicePreviewMixin:
                 for seed in step_seed_items
             ],
         )
-        if self._decision_request_repository is not None:
-            if task_ids_for_runtime_links:
-                decisions.extend(
-                    decision.model_dump(mode="json")
-                    for decision in self._decision_request_repository.list_decision_requests(
-                        task_ids=task_ids_for_runtime_links,
-                        limit=None,
-                    )
-                )
-            for decision_id in persisted_decision_ids:
-                decision = self._decision_request_repository.get_decision_request(decision_id)
-                if decision is not None:
-                    decisions.append(decision.model_dump(mode="json"))
         persisted_evidence_ids = _unique_strings(
             *[
                 [
@@ -314,16 +289,24 @@ class _WorkflowServicePreviewMixin:
                 for seed in step_seed_items
             ],
         )
-        if self._evidence_ledger is not None:
-            for task_id in task_ids_for_runtime_links:
-                evidence.extend(
-                    _workflow_serialize_evidence(record)
-                    for record in self._evidence_ledger.list_by_task(task_id)
-                )
-            for evidence_id in persisted_evidence_ids:
-                record = self._evidence_ledger.get_record(evidence_id)
-                if record is not None:
-                    evidence.append(_workflow_serialize_evidence(record))
+        (
+            goal_payload_by_id,
+            tasks,
+            decisions,
+            evidence,
+        ) = self._collect_workflow_goal_runtime_payloads(
+            goal_ids=goal_ids,
+            task_goal_ids=runtime_goal_ids,
+            persisted_task_ids=persisted_task_ids,
+            persisted_decision_ids=persisted_decision_ids,
+            persisted_evidence_ids=persisted_evidence_ids,
+        )
+        for goal_id in goal_ids:
+            payload = goal_payload_by_id.get(goal_id)
+            if payload is None:
+                continue
+            goal_detail_by_id[goal_id] = {"goal": payload}
+            goals.append(payload)
         schedules: list[dict[str, Any]] = []
         schedule_by_id: dict[str, dict[str, Any]] = {}
         schedule_ids = _workflow_schedule_ids_for_preview(run, preview)
@@ -392,6 +375,141 @@ class _WorkflowServicePreviewMixin:
                 ],
             },
         )
+
+    def _collect_workflow_goal_runtime_payloads(
+        self,
+        *,
+        goal_ids: list[str],
+        task_goal_ids: list[str],
+        persisted_task_ids: list[str],
+        persisted_decision_ids: list[str],
+        persisted_evidence_ids: list[str],
+    ) -> tuple[
+        dict[str, dict[str, Any]],
+        list[dict[str, Any]],
+        list[dict[str, Any]],
+        list[dict[str, Any]],
+    ]:
+        goal_payload_by_id: dict[str, dict[str, Any]] = {}
+        for goal_id in goal_ids:
+            goal = self._goal_service.get_goal(goal_id)
+            if goal is None:
+                continue
+            goal_payload_by_id[goal_id] = goal.model_dump(mode="json")
+
+        task_records_by_id: dict[str, Any] = {}
+        if self._task_repository is not None:
+            if task_goal_ids:
+                for task in self._task_repository.list_tasks(goal_ids=task_goal_ids):
+                    task_records_by_id[task.id] = task
+            if persisted_task_ids:
+                for task in self._task_repository.list_tasks(task_ids=persisted_task_ids):
+                    task_records_by_id[task.id] = task
+
+        return self._build_workflow_task_runtime_payloads(
+            list(task_records_by_id.values()),
+            persisted_decision_ids=persisted_decision_ids,
+            persisted_evidence_ids=persisted_evidence_ids,
+            goal_payload_by_id=goal_payload_by_id,
+        )
+
+    def _build_workflow_task_runtime_payloads(
+        self,
+        tasks: list[Any],
+        *,
+        persisted_decision_ids: list[str],
+        persisted_evidence_ids: list[str],
+        goal_payload_by_id: dict[str, dict[str, Any]],
+    ) -> tuple[
+        dict[str, dict[str, Any]],
+        list[dict[str, Any]],
+        list[dict[str, Any]],
+        list[dict[str, Any]],
+    ]:
+        task_runtime_repository = getattr(self._goal_service, "_task_runtime_repository", None)
+        runtime_frame_repository = getattr(self._goal_service, "_runtime_frame_repository", None)
+        task_ids = [task.id for task in tasks if getattr(task, "id", None) is not None]
+        runtime_map = (
+            {
+                runtime.task_id: runtime
+                for runtime in task_runtime_repository.list_runtimes(task_ids=task_ids)
+            }
+            if task_runtime_repository is not None and task_ids
+            else {}
+        )
+        task_decisions: dict[str, list[object]] = {}
+        if self._decision_request_repository is not None and task_ids:
+            for decision in self._decision_request_repository.list_decision_requests(
+                task_ids=task_ids,
+                limit=None,
+            ):
+                task_decisions.setdefault(decision.task_id, []).append(decision)
+        evidence_by_task: dict[str, list[object]] = {}
+        if self._evidence_ledger is not None:
+            for task_id in task_ids:
+                evidence_by_task[task_id] = list(self._evidence_ledger.list_by_task(task_id))
+
+        task_payloads: list[dict[str, Any]] = []
+        decision_map: dict[str, dict[str, Any]] = {}
+        evidence_map: dict[str, dict[str, Any]] = {}
+        for task in sorted(tasks, key=lambda item: item.updated_at, reverse=True):
+            runtime = runtime_map.get(task.id)
+            frames = (
+                runtime_frame_repository.list_frames(task.id, limit=3)
+                if runtime_frame_repository is not None
+                else []
+            )
+            decisions = task_decisions.get(task.id, [])
+            evidence = evidence_by_task.get(task.id, [])
+            task_payload = task.model_dump(mode="json")
+            runtime_payload = (
+                runtime.model_dump(mode="json")
+                if runtime is not None
+                else None
+            )
+            if runtime_payload:
+                task_payload["runtime"] = runtime_payload
+            if frames:
+                task_payload["frames"] = [frame.model_dump(mode="json") for frame in frames]
+            task_payload["decision_count"] = len(decisions)
+            task_payload["evidence_count"] = len(evidence)
+            task_payload["latest_evidence_id"] = (
+                evidence[-1].id
+                if evidence and evidence[-1].id is not None
+                else runtime.last_evidence_id
+                if runtime is not None
+                else None
+            )
+            task_payloads.append(task_payload)
+            for decision in decisions:
+                decision_map[decision.id] = decision.model_dump(mode="json")
+            for record in evidence:
+                if record.id is None:
+                    continue
+                evidence_map[record.id] = _workflow_serialize_evidence(record)
+
+        if self._decision_request_repository is not None:
+            for decision_id in persisted_decision_ids:
+                decision = self._decision_request_repository.get_decision_request(decision_id)
+                if decision is not None:
+                    decision_map[decision.id] = decision.model_dump(mode="json")
+        if self._evidence_ledger is not None:
+            for evidence_id in persisted_evidence_ids:
+                record = self._evidence_ledger.get_record(evidence_id)
+                if record is not None and record.id is not None:
+                    evidence_map[record.id] = _workflow_serialize_evidence(record)
+
+        decisions = sorted(
+            decision_map.values(),
+            key=lambda item: item.get("created_at") or "",
+            reverse=True,
+        )
+        evidence = sorted(
+            evidence_map.values(),
+            key=lambda item: item.get("created_at") or "",
+            reverse=True,
+        )
+        return goal_payload_by_id, task_payloads, decisions, evidence
 
     def _persist_run_step_runtime_links(
         self,
@@ -1199,6 +1317,7 @@ class _WorkflowServicePreviewMixin:
         capability_mounts_by_id: dict[str, Any | None] = {}
         installed_client_cache: dict[str, set[str]] = {}
         install_template_candidates_by_runtime: dict[bool, list[Any]] = {}
+        install_templates_by_id: dict[str, Any | None] = {}
         installed_client_keys = self._list_installed_mcp_client_keys(
             cached_values=installed_client_cache,
         )
@@ -1257,6 +1376,8 @@ class _WorkflowServicePreviewMixin:
                             install_template_candidates_by_runtime=(
                                 install_template_candidates_by_runtime
                             ),
+                            install_templates_by_id=install_templates_by_id,
+                            capability_mounts_by_id=capability_mounts_by_id,
                         ),
                     )
                     dependency_map[capability_id] = status
@@ -1326,9 +1447,20 @@ class _WorkflowServicePreviewMixin:
         budget_status_by_agent: list[WorkflowTemplateAgentBudgetStatus] = []
         effective_capabilities_by_agent: dict[str, set[str]] = {}
         assigned_capabilities_by_agent: dict[str, set[str]] = {}
+        agent_capability_surfaces_by_id: dict[str, dict[str, Any] | None] = {}
+
+        self._prefetch_agent_capability_surfaces(
+            sorted(required_capabilities_by_agent),
+            agent_capability_surfaces_by_id=agent_capability_surfaces_by_id,
+            capability_mounts_by_id=capability_mounts_by_id,
+        )
 
         for agent_id, required_capabilities in required_capabilities_by_agent.items():
-            capability_surface = self._get_agent_capability_surface(agent_id)
+            capability_surface = self._get_agent_capability_surface(
+                agent_id,
+                agent_capability_surfaces_by_id=agent_capability_surfaces_by_id,
+                capability_mounts_by_id=capability_mounts_by_id,
+            )
             profile = self._get_agent_profile(agent_id)
             effective_capabilities = set(
                 _unique_strings(

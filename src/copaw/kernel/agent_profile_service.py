@@ -415,6 +415,51 @@ class AgentProfileService:
         agent_id: str,
         *,
         decision_limit: int = 10,
+        capability_mounts_by_id: dict[str, object] | None = None,
+    ) -> dict[str, object] | None:
+        return self._build_capability_surface(
+            agent_id,
+            decision_limit=decision_limit,
+            capability_mounts_by_id=capability_mounts_by_id,
+        )
+
+    def get_capability_surfaces(
+        self,
+        agent_ids: list[str],
+        *,
+        decision_limit: int = 10,
+        capability_mounts_by_id: dict[str, object] | None = None,
+    ) -> dict[str, dict[str, object]]:
+        unique_agent_ids: list[str] = []
+        for item in agent_ids:
+            normalized_id = _coerce_non_empty_str(item)
+            if normalized_id is None or normalized_id in unique_agent_ids:
+                continue
+            unique_agent_ids.append(normalized_id)
+        if not unique_agent_ids:
+            return {}
+        shared_capability_mounts = (
+            capability_mounts_by_id
+            if capability_mounts_by_id is not None
+            else self._resolve_capability_mount_lookup()
+        )
+        payload: dict[str, dict[str, object]] = {}
+        for normalized_id in unique_agent_ids:
+            surface = self._build_capability_surface(
+                normalized_id,
+                decision_limit=decision_limit,
+                capability_mounts_by_id=shared_capability_mounts,
+            )
+            if surface is not None:
+                payload[normalized_id] = surface
+        return payload
+
+    def _build_capability_surface(
+        self,
+        agent_id: str,
+        *,
+        decision_limit: int,
+        capability_mounts_by_id: dict[str, object] | None = None,
     ) -> dict[str, object] | None:
         profile = self.get_agent(agent_id)
         if profile is None:
@@ -454,15 +499,8 @@ class AgentProfileService:
             recommended_capabilities,
             effective_capabilities,
         )
-        capability_mounts_by_id = (
-            {
-                str(mount.id): mount
-                for mount in self._capability_service.list_capabilities()
-                if getattr(mount, "id", None) is not None
-            }
-            if self._capability_service is not None
-            else {}
-        )
+        if capability_mounts_by_id is None:
+            capability_mounts_by_id = self._resolve_capability_mount_lookup()
         capability_items = [
             self._build_capability_surface_item(
                 capability_id,
@@ -516,6 +554,30 @@ class AgentProfileService:
                 "direct_assign": f"/api/runtime-center/agents/{agent_id}/capabilities",
                 "actor_direct_assign": f"/api/runtime-center/actors/{agent_id}/capabilities",
             },
+        }
+
+    def _resolve_capability_mount_lookup(self) -> dict[str, object]:
+        capability_mounts_by_id: dict[str, object] = {}
+        if self._capability_service is None:
+            return capability_mounts_by_id
+        lookup_reader = getattr(self._capability_service, "list_capability_lookup", None)
+        if callable(lookup_reader):
+            try:
+                lookup_payload = lookup_reader()
+            except Exception:
+                lookup_payload = None
+            if isinstance(lookup_payload, dict):
+                capability_mounts_by_id = {
+                    str(capability_id): mount
+                    for capability_id, mount in lookup_payload.items()
+                    if capability_id is not None
+                }
+        if capability_mounts_by_id:
+            return capability_mounts_by_id
+        return {
+            str(mount.id): mount
+            for mount in self._capability_service.list_capabilities()
+            if getattr(mount, "id", None) is not None
         }
 
     def get_prompt_capability_projection(

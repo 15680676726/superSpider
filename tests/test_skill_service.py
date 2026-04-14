@@ -313,3 +313,71 @@ def test_skill_service_list_all_skills_invalidates_cache_when_inventory_changes(
 
     assert [skill.name for skill in first] == ["builtin_skill"]
     assert [skill.name for skill in second] == ["builtin_skill", "custom_skill"]
+
+
+def test_skill_service_list_inventory_signature_reuses_warm_skill_cache_key(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    builtin_dir, customized_dir, active_dir = _patch_skill_dirs(monkeypatch, tmp_path)
+    _ = active_dir
+    (builtin_dir / "builtin_skill").mkdir()
+    (builtin_dir / "builtin_skill" / "SKILL.md").write_text(
+        "---\nname: builtin_skill\ndescription: Builtin skill\n---\n# Builtin\n",
+        encoding="utf-8",
+    )
+    (customized_dir / "custom_skill").mkdir()
+    (customized_dir / "custom_skill" / "SKILL.md").write_text(
+        "---\nname: custom_skill\ndescription: Custom skill\n---\n# Custom\n",
+        encoding="utf-8",
+    )
+
+    with (
+        patch.object(
+            skill_service_module,
+            "sync_skills_from_active_to_customized",
+            return_value=(0, 0),
+        ),
+        patch.object(
+            skill_service_module,
+            "_list_all_skills_cache_key",
+            wraps=skill_service_module._list_all_skills_cache_key,
+        ) as wrapped_cache_key,
+    ):
+        SkillService.list_all_skills()
+        signature = SkillService.list_inventory_signature()
+
+    assert signature
+    assert wrapped_cache_key.call_count == 2
+
+
+def test_skill_service_list_inventory_signature_invalidates_after_create_skill(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    builtin_dir, customized_dir, active_dir = _patch_skill_dirs(monkeypatch, tmp_path)
+    _ = customized_dir, active_dir
+    (builtin_dir / "builtin_skill").mkdir()
+    (builtin_dir / "builtin_skill" / "SKILL.md").write_text(
+        "---\nname: builtin_skill\ndescription: Builtin skill\n---\n# Builtin\n",
+        encoding="utf-8",
+    )
+
+    with patch.object(
+        skill_service_module,
+        "sync_skills_from_active_to_customized",
+        return_value=(0, 0),
+    ):
+        SkillService.list_all_skills()
+        before = SkillService.list_inventory_signature()
+
+    created = SkillService.create_skill(
+        name="research",
+        content="---\nname: research\ndescription: Research skill\n---\n# Research\n",
+    )
+
+    assert created is True
+
+    after = SkillService.list_inventory_signature()
+
+    assert before != after

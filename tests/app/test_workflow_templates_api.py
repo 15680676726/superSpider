@@ -18,7 +18,10 @@ from copaw.app.routers.workflow_templates import (
     run_router as workflow_runs_router,
 )
 from copaw.capabilities import CapabilityService
-from copaw.capabilities.install_templates import CapabilityInstallTemplateSpec
+from copaw.capabilities.install_templates import (
+    CapabilityInstallTemplateSpec,
+    InstallTemplateManifest,
+)
 from copaw.evidence import EvidenceLedger
 from copaw.evidence.models import EvidenceRecord
 from copaw.goals import GoalService
@@ -468,6 +471,7 @@ def _grant_capability_to_agent(
     agent_profile_service = client.app.state.agent_profile_service
     original_get_capability = capability_service.get_capability
     original_get_surface = agent_profile_service.get_capability_surface
+    original_get_surfaces = getattr(agent_profile_service, "get_capability_surfaces", None)
     granted = set(capability_ids)
 
     def patched_get_capability(capability_id: str):
@@ -494,8 +498,22 @@ def _grant_capability_to_agent(
         payload["baseline_capabilities"] = sorted(baseline)
         return payload
 
+    def patched_get_capability_surfaces(agent_ids: list[str], *args, **kwargs):
+        if callable(original_get_surfaces):
+            payload = dict(original_get_surfaces(agent_ids, *args, **kwargs) or {})
+        else:
+            payload = {
+                str(target_agent_id): patched_get_capability_surface(str(target_agent_id))
+                for target_agent_id in agent_ids
+            }
+        if agent_id in payload:
+            payload[agent_id] = patched_get_capability_surface(agent_id)
+        return payload
+
     capability_service.get_capability = patched_get_capability
     agent_profile_service.get_capability_surface = patched_get_capability_surface
+    if callable(original_get_surfaces):
+        agent_profile_service.get_capability_surfaces = patched_get_capability_surfaces
 
 
 def _desktop_host_preflight_detail(
@@ -942,7 +960,7 @@ def test_workflow_preview_exposes_install_template_routes(tmp_path) -> None:
         assert "mcp:desktop_windows" in payload["missing_capability_ids"]
 
 
-def test_workflow_preview_reuses_install_template_listing_with_multiple_dependencies(
+def test_workflow_preview_reuses_explicit_install_template_lookup_with_multiple_dependencies(
     tmp_path,
 ) -> None:
     client = TestClient(_build_workflow_app(tmp_path))
@@ -982,25 +1000,33 @@ def test_workflow_preview_reuses_install_template_listing_with_multiple_dependen
             },
         ),
     )
-    install_templates = [
-        CapabilityInstallTemplateSpec(
+    install_templates = {
+        "desktop-windows": CapabilityInstallTemplateSpec(
             id="desktop-windows",
             name="Windows Desktop Host",
             default_client_key="desktop_windows",
             capability_tags=["desktop"],
         ),
-        CapabilityInstallTemplateSpec(
+        "browser-local": CapabilityInstallTemplateSpec(
             id="browser-local",
             name="Local Browser Runtime",
             default_client_key=None,
             capability_tags=["browser"],
         ),
-    ]
+    }
 
-    with patch(
-        "copaw.workflows.service_context.list_install_templates",
-        side_effect=lambda **kwargs: list(install_templates),
-    ) as mocked_list_install_templates:
+    with (
+        patch(
+            "copaw.workflows.service_context.list_install_templates",
+            side_effect=AssertionError(
+                "explicit dependency install-template mappings should avoid full template listing",
+            ),
+        ),
+        patch(
+            "copaw.workflows.service_context.get_install_template",
+            side_effect=lambda template_id, **kwargs: install_templates.get(template_id),
+        ) as mocked_get_install_template,
+    ):
         preview = client.post(
             "/workflow-templates/multi-install-template-preview-smoke/preview",
             json={"industry_instance_id": instance_id},
@@ -1009,7 +1035,481 @@ def test_workflow_preview_reuses_install_template_listing_with_multiple_dependen
     assert preview.status_code == 200
     payload = preview.json()
     assert len(payload["dependencies"]) == 2
-    assert mocked_list_install_templates.call_count == 1
+    assert mocked_get_install_template.call_count == 2
+
+
+def test_workflow_preview_prefers_capability_lookup_api_when_available(tmp_path) -> None:
+    client = TestClient(_build_workflow_app(tmp_path))
+    capability_service = client.app.state.capability_service
+    original_lookup = capability_service.list_capability_lookup
+
+    with (
+        patch.object(
+            capability_service,
+            "list_capability_lookup",
+            side_effect=original_lookup,
+        ) as wrapped_lookup,
+        patch.object(
+            capability_service,
+            "get_capability",
+            side_effect=AssertionError(
+                "workflow preview should prefer list_capability_lookup() when the capability service exposes it",
+            ),
+        ),
+    ):
+        preview = client.post(
+            "/workflow-templates/desktop-outreach-smoke/preview",
+            json={
+                "parameters": {
+                    "target_application": "Desktop app",
+                    "recipient_name": "Target contact",
+                    "message_text": "Draft message",
+                },
+            },
+        )
+
+    assert preview.status_code == 200
+    payload = preview.json()
+    assert payload["dependencies"]
+    assert wrapped_lookup.call_count >= 1
+
+
+def test_workflow_preview_with_explicit_install_template_mapping_builds_only_requested_templates(
+    tmp_path,
+) -> None:
+    client = TestClient(_build_workflow_app(tmp_path))
+    repository = client.app.state.workflow_template_repository
+    repository.upsert_template(
+        WorkflowTemplateRecord(
+            template_id="explicit-install-template-preview-smoke",
+            title="Explicit dependency preview",
+            summary="Resolve explicit dependency install-template refs without building unrelated templates.",
+            category="smoke",
+            status="active",
+            version="v1",
+            dependency_capability_ids=["tool:browser_use"],
+            suggested_role_ids=["solution-lead"],
+            owner_role_id="solution-lead",
+            step_specs=[
+                {
+                    "id": "browser-step",
+                    "kind": "goal",
+                    "execution_mode": "leaf",
+                    "owner_role_id": "solution-lead",
+                    "title": "Need browser surface",
+                    "summary": "Resolve the explicit browser install template only.",
+                    "required_capability_ids": ["tool:browser_use"],
+                }
+            ],
+            metadata={
+                "builtin": False,
+                "dependency_install_templates": {
+                    "tool:browser_use": ["browser-local"],
+                },
+            },
+        ),
+    )
+    browser_template = CapabilityInstallTemplateSpec(
+        id="browser-local",
+        name="Local Browser Runtime",
+        default_client_key=None,
+        capability_tags=["browser", "runtime"],
+    )
+
+    def _unexpected_builder(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError(
+            "explicit workflow dependency mapping should not build unrelated install templates",
+        )
+
+    with (
+        patch(
+            "copaw.capabilities.install_templates.list_desktop_mcp_templates",
+            return_value=[],
+        ),
+        patch(
+            "copaw.capabilities.install_templates._build_browser_install_template",
+            return_value=browser_template,
+        ) as browser_builder,
+        patch(
+            "copaw.capabilities.install_templates._build_browser_companion_install_template",
+            side_effect=_unexpected_builder,
+        ),
+        patch(
+            "copaw.capabilities.install_templates._build_document_bridge_install_template",
+            side_effect=_unexpected_builder,
+        ),
+        patch(
+            "copaw.capabilities.install_templates._build_host_watchers_install_template",
+            side_effect=_unexpected_builder,
+        ),
+        patch(
+            "copaw.capabilities.install_templates._build_windows_app_adapters_install_template",
+            side_effect=_unexpected_builder,
+        ),
+    ):
+        preview = client.post(
+            "/workflow-templates/explicit-install-template-preview-smoke/preview",
+            json={},
+        )
+
+    assert preview.status_code == 200
+    payload = preview.json()
+    dependency = next(
+        item for item in payload["dependencies"] if item["capability_id"] == "tool:browser_use"
+    )
+    assert dependency["install_templates"][0]["template_id"] == "browser-local"
+    browser_builder.assert_called_once()
+
+
+def test_workflow_preview_matches_install_template_from_candidate_manifest_without_rebuild(
+    tmp_path,
+) -> None:
+    client = TestClient(_build_workflow_app(tmp_path))
+    repository = client.app.state.workflow_template_repository
+    repository.upsert_template(
+        WorkflowTemplateRecord(
+            template_id="manifest-match-install-template-preview-smoke",
+            title="Manifest matched dependency preview",
+            summary="Resolve dependency install template refs from candidate manifests.",
+            category="smoke",
+            status="active",
+            version="v1",
+            dependency_capability_ids=["tool:browser_use"],
+            suggested_role_ids=["solution-lead"],
+            owner_role_id="solution-lead",
+            step_specs=[
+                {
+                    "id": "browser-step",
+                    "kind": "goal",
+                    "execution_mode": "leaf",
+                    "owner_role_id": "solution-lead",
+                    "title": "Need browser surface",
+                    "summary": "Resolve the browser install template through the candidate manifest.",
+                    "required_capability_ids": ["tool:browser_use"],
+                }
+            ],
+            metadata={"builtin": False},
+        ),
+    )
+    install_templates = [
+        CapabilityInstallTemplateSpec(
+            id="browser-local",
+            name="Local Browser Runtime",
+            default_client_key=None,
+            capability_tags=["browser", "runtime"],
+            manifest=InstallTemplateManifest(
+                template_id="browser-local",
+                version="builtin-v1",
+                install_kind="builtin-runtime",
+                source_kind="tool",
+                capability_ids=["tool:browser_use"],
+                supported_platforms=["cross-platform"],
+                environment_requirements=["browser"],
+                evidence_contract=["browser-action"],
+                tags=["browser", "runtime"],
+            ),
+        ),
+    ]
+
+    with (
+        patch(
+            "copaw.workflows.service_context.list_install_templates",
+            side_effect=lambda **kwargs: list(install_templates),
+        ),
+        patch(
+            "copaw.workflows.service_context.match_install_template_capability_ids",
+            side_effect=AssertionError(
+                "workflow preview should reuse candidate manifest metadata instead of rebuilding install templates",
+            ),
+        ),
+    ):
+        preview = client.post(
+            "/workflow-templates/manifest-match-install-template-preview-smoke/preview",
+            json={},
+        )
+
+    assert preview.status_code == 200
+    payload = preview.json()
+    dependency = next(
+        item for item in payload["dependencies"] if item["capability_id"] == "tool:browser_use"
+    )
+    assert dependency["install_templates"][0]["template_id"] == "browser-local"
+
+
+def test_workflow_preview_reuses_single_capability_lookup_across_preview_dependencies(
+    tmp_path,
+) -> None:
+    client = TestClient(_build_workflow_app(tmp_path))
+    capability_service = client.app.state.capability_service
+    original_lookup = capability_service.list_capability_lookup
+
+    with patch.object(
+        capability_service,
+        "list_capability_lookup",
+        side_effect=original_lookup,
+    ) as wrapped_lookup:
+        preview = client.post(
+            "/workflow-templates/desktop-outreach-smoke/preview",
+            json={
+                "parameters": {
+                    "target_application": "Desktop app",
+                    "recipient_name": "Target contact",
+                    "message_text": "Draft message",
+                },
+            },
+        )
+
+    assert preview.status_code == 200
+    payload = preview.json()
+    assert payload["dependencies"]
+    assert wrapped_lookup.call_count == 1
+
+
+def test_workflow_preview_prefers_batch_agent_capability_surfaces_when_available(
+    tmp_path,
+) -> None:
+    client = TestClient(_build_workflow_app(tmp_path))
+    agent_profile_service = client.app.state.agent_profile_service
+    original_batch = agent_profile_service.get_capability_surfaces
+
+    with (
+        patch.object(
+            agent_profile_service,
+            "get_capability_surfaces",
+            side_effect=original_batch,
+        ) as wrapped_batch,
+        patch.object(
+            agent_profile_service,
+            "get_capability_surface",
+            side_effect=AssertionError(
+                "workflow preview should prefer get_capability_surfaces() when the agent profile service exposes it",
+            ),
+        ),
+    ):
+        preview = client.post(
+            "/workflow-templates/desktop-outreach-smoke/preview",
+            json={
+                "parameters": {
+                    "target_application": "Desktop app",
+                    "recipient_name": "Target contact",
+                    "message_text": "Draft message",
+                },
+            },
+        )
+
+    assert preview.status_code == 200
+    payload = preview.json()
+    assert payload["dependencies"]
+    assert wrapped_batch.call_count >= 1
+
+
+def test_workflow_launch_reuses_initial_preview_instead_of_rebuilding_detail_preview(
+    tmp_path,
+) -> None:
+    client = TestClient(_build_workflow_app(tmp_path))
+    instance_id = _bootstrap_industry(client)
+    service = client.app.state.workflow_template_service
+    original_build_preview = service._build_preview
+
+    with patch.object(
+        service,
+        "_build_preview",
+        side_effect=original_build_preview,
+    ) as wrapped_build_preview:
+        launched = _launch_workflow_via_service(
+            client,
+            template_id="industry-weekly-research-synthesis",
+            industry_instance_id=instance_id,
+            parameters={
+                "focus_area": "channel conversion",
+                "weekly_review_cron": "0 12 * * 2",
+                "timezone": "UTC",
+            },
+        )
+
+    assert launched.run["run_id"]
+    assert wrapped_build_preview.call_count == 1
+
+
+def test_workflow_step_detail_does_not_require_full_run_detail(
+    tmp_path,
+) -> None:
+    client = TestClient(_build_workflow_app(tmp_path))
+    instance_id = _bootstrap_industry(client)
+    launched = _launch_workflow_via_service(
+        client,
+        template_id="industry-weekly-research-synthesis",
+        industry_instance_id=instance_id,
+        parameters={
+            "focus_area": "channel conversion",
+            "weekly_review_cron": "0 12 * * 2",
+            "timezone": "UTC",
+        },
+    )
+    run_id = launched.run["run_id"]
+    goal_step = next(
+        item
+        for item in launched.step_execution
+        if item.kind == "goal"
+    )
+    service = client.app.state.workflow_template_service
+
+    with patch.object(
+        service,
+        "get_run_detail",
+        side_effect=AssertionError(
+            "workflow step detail should build its payload without requiring full run detail",
+        ),
+    ):
+        response = client.get(f"/workflow-runs/{run_id}/steps/{goal_step.step_id}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["step"]["step_id"] == goal_step.step_id
+    assert payload["linked_goals"]
+
+
+def test_workflow_step_detail_does_not_require_goal_detail_projection(
+    tmp_path,
+) -> None:
+    client = TestClient(_build_workflow_app(tmp_path))
+    instance_id = _bootstrap_industry(client)
+    launched = _launch_workflow_via_service(
+        client,
+        template_id="industry-weekly-research-synthesis",
+        industry_instance_id=instance_id,
+        parameters={
+            "focus_area": "channel conversion",
+            "weekly_review_cron": "0 12 * * 2",
+            "timezone": "UTC",
+        },
+    )
+    goal_step = next(
+        item
+        for item in launched.step_execution
+        if item.kind == "goal"
+    )
+    goal_service = client.app.state.goal_service
+
+    with patch.object(
+        goal_service,
+        "get_goal_detail",
+        side_effect=AssertionError(
+            "workflow step detail should use workflow-specific runtime aggregation instead of goal detail projection",
+        ),
+    ):
+        response = client.get(f"/workflow-runs/{launched.run['run_id']}/steps/{goal_step.step_id}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["step"]["step_id"] == goal_step.step_id
+    assert payload["linked_goals"]
+    assert payload["linked_tasks"]
+
+
+def test_workflow_step_detail_reuses_stored_preview_without_refresh(
+    tmp_path,
+) -> None:
+    client = TestClient(_build_workflow_app(tmp_path))
+    instance_id = _bootstrap_industry(client)
+    launched = _launch_workflow_via_service(
+        client,
+        template_id="industry-weekly-research-synthesis",
+        industry_instance_id=instance_id,
+        parameters={
+            "focus_area": "channel conversion",
+            "weekly_review_cron": "0 12 * * 2",
+            "timezone": "UTC",
+        },
+    )
+    goal_step = next(
+        item
+        for item in launched.step_execution
+        if item.kind == "goal"
+    )
+    service = client.app.state.workflow_template_service
+
+    with patch.object(
+        service,
+        "_refresh_run_preview",
+        side_effect=AssertionError(
+            "workflow step detail should reuse stored preview instead of rebuilding preview",
+        ),
+    ):
+        response = client.get(f"/workflow-runs/{launched.run['run_id']}/steps/{goal_step.step_id}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["step"]["step_id"] == goal_step.step_id
+    assert payload["linked_goals"]
+
+
+def test_workflow_resume_does_not_require_full_run_detail(
+    tmp_path,
+) -> None:
+    client = TestClient(_build_workflow_app(tmp_path))
+    instance_id = _bootstrap_industry(client)
+    launched = _launch_workflow_via_service(
+        client,
+        template_id="industry-weekly-research-synthesis",
+        industry_instance_id=instance_id,
+        parameters={
+            "focus_area": "channel conversion",
+            "weekly_review_cron": "0 12 * * 2",
+            "timezone": "UTC",
+        },
+    )
+    service = client.app.state.workflow_template_service
+
+    with patch.object(
+        service,
+        "get_run_detail",
+        side_effect=AssertionError(
+            "workflow resume should not require full run detail",
+        ),
+    ):
+        resumed = asyncio.run(
+            service.resume_run(
+                launched.run["run_id"],
+                actor="copaw-operator",
+            ),
+        )
+
+    assert resumed.run["run_id"] == launched.run["run_id"]
+    assert (dict(resumed.run or {}).get("metadata") or {}).get("resume_count") == 1
+
+
+def test_workflow_run_detail_does_not_require_goal_detail_projection(
+    tmp_path,
+) -> None:
+    client = TestClient(_build_workflow_app(tmp_path))
+    instance_id = _bootstrap_industry(client)
+    launched = _launch_workflow_via_service(
+        client,
+        template_id="industry-weekly-research-synthesis",
+        industry_instance_id=instance_id,
+        parameters={
+            "focus_area": "channel conversion",
+            "weekly_review_cron": "0 12 * * 2",
+            "timezone": "UTC",
+        },
+    )
+    goal_service = client.app.state.goal_service
+
+    with patch.object(
+        goal_service,
+        "get_goal_detail",
+        side_effect=AssertionError(
+            "workflow run detail should use workflow-specific runtime aggregation instead of goal detail projection",
+        ),
+    ):
+        response = client.get(f"/workflow-runs/{launched.run['run_id']}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["goals"]
+    assert payload["tasks"]
 
 
 def test_workflow_presets_can_be_created_and_applied(tmp_path) -> None:

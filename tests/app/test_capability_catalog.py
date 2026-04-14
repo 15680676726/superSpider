@@ -590,6 +590,232 @@ def test_capability_catalog_uses_config_signature_reader_without_loading_config_
     assert load_config_calls["count"] == 0
 
 
+def test_capability_catalog_get_capability_reuses_resolved_mount_snapshot_when_inputs_are_stable() -> None:
+    skill_service = SimpleNamespace(
+        list_all_skills=lambda: [],
+        list_available_skill_names=lambda: [],
+        list_available_skills=lambda: [],
+        read_skill_package_binding=lambda _skill: {
+            "package_ref": None,
+            "package_kind": None,
+            "package_version": None,
+        },
+        enable_skill=lambda _name: None,
+        disable_skill=lambda _name: None,
+        delete_skill=lambda _name: True,
+        list_inventory_signature=lambda: (
+            ("builtin", ("skill-a", 1)),
+            ("customized", ()),
+            ("active", ()),
+        ),
+    )
+    registry = CapabilityRegistry()
+    facade = CapabilityCatalogFacade(
+        registry=registry,
+        load_config_fn=lambda: SimpleNamespace(
+            mcp=SimpleNamespace(clients={}),
+            external_capability_packages={},
+        ),
+        save_config_fn=lambda _config: None,
+        skill_service=skill_service,
+        config_signature_fn=lambda: ("config", 1),
+        override_repository=_OverrideRepository(
+            [_Override("tool:b", enabled=False, forced_risk_level="confirm")],
+        ),
+    )
+    real_apply = facade._apply_overrides
+
+    with (
+        patch.object(
+            registry,
+            "list_capabilities",
+            return_value=[
+                CapabilityMount(
+                    id="tool:a",
+                    name="a",
+                    summary="A",
+                    kind="local-tool",
+                    source_kind="tool",
+                    risk_level="auto",
+                    enabled=True,
+                ),
+                CapabilityMount(
+                    id="tool:b",
+                    name="b",
+                    summary="B",
+                    kind="local-tool",
+                    source_kind="tool",
+                    risk_level="auto",
+                    enabled=True,
+                ),
+            ],
+        ) as wrapped_registry_list,
+        patch.object(facade, "_apply_overrides", wraps=real_apply) as wrapped_apply,
+    ):
+        first = facade.get_capability("tool:a")
+        second = facade.get_capability("tool:b")
+
+    assert first is not None and first.id == "tool:a"
+    assert second is not None and second.id == "tool:b"
+    assert second.enabled is False
+    assert second.risk_level == "confirm"
+    assert wrapped_registry_list.call_count == 1
+    assert wrapped_apply.call_count == 1
+
+
+def test_capability_catalog_list_mcp_client_infos_reuses_resolved_mount_snapshot_when_inputs_are_stable() -> None:
+    skill_service = SimpleNamespace(
+        list_all_skills=lambda: [],
+        list_available_skill_names=lambda: [],
+        list_available_skills=lambda: [],
+        read_skill_package_binding=lambda _skill: {
+            "package_ref": None,
+            "package_kind": None,
+            "package_version": None,
+        },
+        enable_skill=lambda _name: None,
+        disable_skill=lambda _name: None,
+        delete_skill=lambda _name: True,
+        list_inventory_signature=lambda: (
+            ("builtin", ("skill-a", 1)),
+            ("customized", ()),
+            ("active", ()),
+        ),
+    )
+    config = SimpleNamespace(
+        mcp=SimpleNamespace(
+            clients={
+                "desktop_windows": SimpleNamespace(
+                    name="Windows Desktop Host",
+                    description="Desktop automation host",
+                    enabled=True,
+                    transport="stdio",
+                    url="",
+                    headers={},
+                    command="python",
+                    args=["-m", "copaw.adapters.desktop.windows_mcp_server"],
+                    env={},
+                    cwd="",
+                    registry=None,
+                ),
+            }
+        ),
+        external_capability_packages={},
+    )
+    registry = CapabilityRegistry()
+    facade = CapabilityCatalogFacade(
+        registry=registry,
+        load_config_fn=lambda: config,
+        save_config_fn=lambda _config: None,
+        skill_service=skill_service,
+        config_signature_fn=lambda: ("config", 1),
+    )
+    real_apply = facade._apply_overrides
+
+    with (
+        patch.object(
+            registry,
+            "list_capabilities",
+            return_value=[
+                CapabilityMount(
+                    id="mcp:desktop_windows",
+                    name="desktop_windows",
+                    summary="Desktop host",
+                    kind="remote-mcp",
+                    source_kind="mcp",
+                    risk_level="guarded",
+                    enabled=True,
+                ),
+            ],
+        ) as wrapped_registry_list,
+        patch.object(facade, "_apply_overrides", wraps=real_apply) as wrapped_apply,
+    ):
+        first = facade.list_mcp_client_infos()
+        second = facade.list_mcp_client_infos()
+
+    assert [item["key"] for item in first] == ["desktop_windows"]
+    assert [item["key"] for item in second] == ["desktop_windows"]
+    assert wrapped_registry_list.call_count == 1
+    assert wrapped_apply.call_count == 1
+
+
+def test_capability_catalog_list_mcp_client_infos_reuses_cached_payload_when_inputs_are_stable() -> None:
+    load_config_calls = {"count": 0}
+    skill_service = SimpleNamespace(
+        list_all_skills=lambda: [],
+        list_available_skill_names=lambda: [],
+        list_available_skills=lambda: [],
+        read_skill_package_binding=lambda _skill: {
+            "package_ref": None,
+            "package_kind": None,
+            "package_version": None,
+        },
+        enable_skill=lambda _name: None,
+        disable_skill=lambda _name: None,
+        delete_skill=lambda _name: True,
+        list_inventory_signature=lambda: (
+            ("builtin", ("skill-a", 1)),
+            ("customized", ()),
+            ("active", ()),
+        ),
+    )
+    config = SimpleNamespace(
+        mcp=SimpleNamespace(
+            clients={
+                "desktop_windows": SimpleNamespace(
+                    name="Windows Desktop Host",
+                    description="Desktop automation host",
+                    enabled=True,
+                    transport="stdio",
+                    url="",
+                    headers={},
+                    command="python",
+                    args=["-m", "copaw.adapters.desktop.windows_mcp_server"],
+                    env={},
+                    cwd="",
+                    registry=None,
+                ),
+            }
+        ),
+        external_capability_packages={},
+    )
+
+    def _load_config():
+        load_config_calls["count"] += 1
+        return config
+
+    registry = CapabilityRegistry()
+    facade = CapabilityCatalogFacade(
+        registry=registry,
+        load_config_fn=_load_config,
+        save_config_fn=lambda _config: None,
+        skill_service=skill_service,
+        config_signature_fn=lambda: ("config", 1),
+    )
+
+    with patch.object(
+        registry,
+        "list_capabilities",
+        return_value=[
+            CapabilityMount(
+                id="mcp:desktop_windows",
+                name="desktop_windows",
+                summary="Desktop host",
+                kind="remote-mcp",
+                source_kind="mcp",
+                risk_level="guarded",
+                enabled=True,
+            ),
+        ],
+    ):
+        first = facade.list_mcp_client_infos()
+        second = facade.list_mcp_client_infos()
+
+    assert [item["key"] for item in first] == ["desktop_windows"]
+    assert [item["key"] for item in second] == ["desktop_windows"]
+    assert load_config_calls["count"] == 2
+
+
 def test_build_skill_capabilities_reuses_cached_snapshot_when_inventory_is_stable() -> None:
     skill = SimpleNamespace(
         name="research",

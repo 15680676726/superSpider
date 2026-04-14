@@ -17,6 +17,54 @@ def _workflow_mapping(value: object) -> dict[str, Any]:
     return dict(value) if isinstance(value, dict) else {}
 
 
+def _workflow_goal_task_payloads(detail: dict[str, Any]) -> list[dict[str, Any]]:
+    payloads: list[dict[str, Any]] = []
+    entries = detail.get("tasks")
+    if not isinstance(entries, list):
+        return payloads
+    for entry in list(entries):
+        if not isinstance(entry, dict):
+            continue
+        task_payload = _workflow_mapping(entry.get("task"))
+        if not task_payload:
+            continue
+        runtime_payload = _workflow_mapping(entry.get("runtime"))
+        if runtime_payload:
+            task_payload["runtime"] = runtime_payload
+        frames = entry.get("frames")
+        if isinstance(frames, list) and frames:
+            task_payload["frames"] = [dict(item) for item in frames if isinstance(item, dict)]
+        for key in ("decision_count", "evidence_count", "latest_evidence_id"):
+            if key in entry:
+                task_payload[key] = entry.get(key)
+        payloads.append(task_payload)
+    return payloads
+
+
+def _workflow_serialize_evidence(record: object) -> dict[str, Any]:
+    if isinstance(record, dict):
+        return dict(record)
+    return {
+        "id": getattr(record, "id", None),
+        "task_id": getattr(record, "task_id", None),
+        "actor_ref": getattr(record, "actor_ref", None),
+        "environment_ref": getattr(record, "environment_ref", None),
+        "capability_ref": getattr(record, "capability_ref", None),
+        "risk_level": getattr(record, "risk_level", None),
+        "action_summary": getattr(record, "action_summary", None),
+        "result_summary": getattr(record, "result_summary", None),
+        "created_at": (
+            getattr(record, "created_at").isoformat()
+            if getattr(record, "created_at", None) is not None
+            else None
+        ),
+        "status": getattr(record, "status", None),
+        "metadata": dict(getattr(record, "metadata", {}) or {}),
+        "artifact_count": len(tuple(getattr(record, "artifacts", ()) or ())),
+        "replay_count": len(tuple(getattr(record, "replay_pointers", ()) or ())),
+    }
+
+
 def _resolve_canonical_host_identity(
     host_payload: dict[str, Any] | None,
     *,
@@ -381,7 +429,12 @@ class _WorkflowServiceRunMixin:
             },
         )
         self._workflow_run_repository.upsert_run(persisted)
-        return self.get_run_detail(persisted.run_id)
+        return self._build_run_detail_from_preview(
+            run=persisted,
+            template=template,
+            preview=preview,
+            host_snapshot=dict(host_snapshot or {}),
+        )
 
     async def cancel_run(
         self,
@@ -443,15 +496,33 @@ class _WorkflowServiceRunMixin:
         template = self._workflow_template_repository.get_template(run.template_id)
         if template is None:
             raise KeyError(f"Workflow template '{run.template_id}' not found")
-        detail = self.get_run_detail(run_id)
-        if not detail.diagnosis.can_resume:
-            raise ValueError(detail.diagnosis.summary or "Workflow run cannot resume")
+        stored_preview = WorkflowTemplatePreview.model_validate(run.preview_payload or {})
+        preview_request = self._build_run_preview_request(
+            run=run,
+            preview=stored_preview,
+        )
+        preview = self._refresh_run_preview(
+            template=template,
+            preview=stored_preview,
+            request=preview_request,
+        )
+        blocking_codes = [item.code for item in preview.launch_blockers]
+        can_resume = run.status in {"planned", "running"} and not blocking_codes
+        if not can_resume:
+            summary = (
+                "Workflow run has active launch or governance blockers."
+                if blocking_codes
+                else "Workflow run cannot resume"
+            )
+            raise ValueError(summary)
         execute_flag = (
             execute
             if execute is not None
             else str(dict(run.metadata or {}).get("launch_mode") or "").strip() == "execute"
         )
-        host_snapshot = dict(detail.diagnosis.host_snapshot or {})
+        host_snapshot = self._resolve_host_snapshot_from_request(preview_request) or dict(
+            dict(run.metadata or {}).get("host_snapshot") or {},
+        )
         metadata = dict(run.metadata or {})
         step_seed_items = list(dict(run.metadata or {}).get("step_execution_seed") or [])
         step_seed_by_id = {
@@ -463,7 +534,7 @@ class _WorkflowServiceRunMixin:
             run,
             goal_override_repository=self._goal_override_repository,
         )
-        for step in detail.preview.steps:
+        for step in preview.steps:
             step_payload = dict(step.payload_preview or {})
             step_seed = step_seed_by_id.get(step.step_id)
             if step.kind == "goal":
@@ -510,7 +581,7 @@ class _WorkflowServiceRunMixin:
                             summary=step.summary,
                             status="active",
                             priority=3,
-                            owner_scope=detail.preview.owner_scope,
+                            owner_scope=preview.owner_scope,
                         )
                         linked_goal_ids = [goal.id]
                         if self._goal_override_repository is not None:
@@ -523,7 +594,7 @@ class _WorkflowServiceRunMixin:
                                         "workflow_template_id": template.template_id,
                                         "workflow_step_id": step.step_id,
                                         "workflow_execution_mode": step.execution_mode,
-                                        "industry_instance_id": detail.preview.industry_instance_id,
+                                        "industry_instance_id": preview.industry_instance_id,
                                         "resume_actor": actor,
                                     },
                                     reason=f"Workflow run resume: {template.template_id}",
@@ -577,7 +648,7 @@ class _WorkflowServiceRunMixin:
                     schedule_meta = self._build_schedule_host_meta(
                         run=run,
                         template=template,
-                        preview=detail.preview,
+                        preview=preview,
                         step=step,
                         host_snapshot=host_snapshot,
                     )
@@ -614,7 +685,7 @@ class _WorkflowServiceRunMixin:
                         schedule_meta = self._build_schedule_host_meta(
                             run=run,
                             template=template,
-                            preview=detail.preview,
+                            preview=preview,
                             step=step,
                             host_snapshot=host_snapshot,
                         )
@@ -692,7 +763,12 @@ class _WorkflowServiceRunMixin:
             },
         )
         self._workflow_run_repository.upsert_run(persisted)
-        return self.get_run_detail(run_id)
+        return self._build_run_detail_from_preview(
+            run=persisted,
+            template=template,
+            preview=preview,
+            host_snapshot=dict(host_snapshot or {}),
+        )
 
     def _resolve_host_identity_from_snapshot(
         self,
@@ -822,36 +898,98 @@ class _WorkflowServiceRunMixin:
         run_id: str,
         step_id: str,
     ) -> WorkflowStepExecutionDetail:
-        detail = self.get_run_detail(run_id)
         run = self._workflow_run_repository.get_run(run_id)
         if run is None:
             raise KeyError(f"Workflow run '{run_id}' not found")
-        step = next(
-            (item for item in detail.step_execution if item.step_id == step_id),
-            None,
-        )
-        if step is None:
-            raise KeyError(f"Workflow step '{step_id}' not found in run '{run_id}'")
-        preview_step = next(
-            (item for item in detail.preview.steps if item.step_id == step_id),
-            None,
-        )
+        template = self._workflow_template_repository.get_template(run.template_id)
+        if template is None:
+            raise KeyError(f"Workflow template '{run.template_id}' not found")
+        stored_preview = WorkflowTemplatePreview.model_validate(run.preview_payload or {})
+        preview = stored_preview
+        preview_step = next((item for item in preview.steps if item.step_id == step_id), None)
         if preview_step is None:
             raise KeyError(f"Workflow step '{step_id}' preview missing in run '{run_id}'")
         seed = _workflow_step_seed_by_id(run).get(step_id)
         persisted_task_ids, persisted_decision_ids, persisted_evidence_ids = (
             _workflow_step_persisted_runtime_ids(seed)
         )
-        goal_ids_from_context = list(
-            _workflow_goal_ids_by_step(
-                run,
-                goal_override_repository=self._goal_override_repository,
-            ).get(step_id, []),
+        goal_ids_by_step = _workflow_goal_ids_by_step(
+            run,
+            goal_override_repository=self._goal_override_repository,
         )
-        linked_goal_ids = (
-            []
-            if persisted_decision_ids or persisted_evidence_ids
-            else goal_ids_from_context
+        goal_ids_from_context = list(goal_ids_by_step.get(step_id, []))
+        goal_detail_by_id: dict[str, dict[str, Any]] = {}
+        (
+            goal_payload_by_id,
+            tasks,
+            decisions,
+            evidence,
+        ) = self._collect_workflow_goal_runtime_payloads(
+            goal_ids=goal_ids_from_context,
+            task_goal_ids=goal_ids_from_context,
+            persisted_task_ids=persisted_task_ids,
+            persisted_decision_ids=persisted_decision_ids,
+            persisted_evidence_ids=persisted_evidence_ids,
+        )
+        for goal_id in goal_ids_from_context:
+            payload = goal_payload_by_id.get(goal_id)
+            if payload is None:
+                continue
+            goal_detail_by_id[goal_id] = {"goal": payload}
+        tasks = list({str(item.get("id")): item for item in tasks if item.get("id")}.values())
+        linked_tasks = [
+            item
+            for item in tasks
+            if str(item.get("goal_id") or "") in set(goal_ids_from_context)
+            or str(item.get("id") or "") in set(persisted_task_ids)
+        ]
+        linked_task_ids = _unique_strings(
+            [
+                *persisted_task_ids,
+                *(
+                    str(item.get("id") or "")
+                    for item in linked_tasks
+                    if str(item.get("id") or "").strip()
+                ),
+            ],
+        )
+        decisions = list(
+            {str(item.get("id")): item for item in decisions if item.get("id")}.values(),
+        )
+        linked_decisions = [
+            item
+            for item in decisions
+            if str(item.get("task_id") or "") in set(linked_task_ids)
+            or str(item.get("id") or "") in set(persisted_decision_ids)
+        ]
+        linked_decision_ids = _unique_strings(
+            [
+                *persisted_decision_ids,
+                *(
+                    str(item.get("id") or "")
+                    for item in linked_decisions
+                    if str(item.get("id") or "").strip()
+                ),
+            ],
+        )
+        evidence = list(
+            {str(item.get("id")): item for item in evidence if item.get("id")}.values(),
+        )
+        linked_evidence = [
+            item
+            for item in evidence
+            if str(item.get("task_id") or "") in set(linked_task_ids)
+            or str(item.get("id") or "") in set(persisted_evidence_ids)
+        ]
+        linked_evidence_ids = _unique_strings(
+            [
+                *persisted_evidence_ids,
+                *(
+                    str(item.get("id") or "")
+                    for item in linked_evidence
+                    if str(item.get("id") or "").strip()
+                ),
+            ],
         )
         linked_schedule_ids = _workflow_step_schedule_ids(
             run,
@@ -859,32 +997,82 @@ class _WorkflowServiceRunMixin:
             step_id=step_id,
             payload_preview=dict(preview_step.payload_preview or {}),
         )
+        linked_schedules: list[dict[str, Any]] = []
+        if self._schedule_repository is not None:
+            for schedule_id in linked_schedule_ids:
+                schedule = self._schedule_repository.get_schedule(schedule_id)
+                if schedule is not None:
+                    linked_schedules.append(schedule.model_dump(mode="json"))
+        linked_goal_ids_for_status = (
+            []
+            if persisted_task_ids or persisted_decision_ids or persisted_evidence_ids
+            else goal_ids_from_context
+        )
+        linked_goals_for_status = [
+            detail.get("goal") or {}
+            for goal_id, detail in goal_detail_by_id.items()
+            if goal_id in linked_goal_ids_for_status
+        ]
+        blocker = next(
+            (
+                item
+                for item in preview.launch_blockers
+                if step_id in item.step_ids
+            ),
+            None,
+        )
+        last_event_at = self._latest_timestamp(
+            [
+                *(str(item.get("updated_at") or "") for item in linked_goals_for_status),
+                *(str(item.get("updated_at") or "") for item in linked_schedules),
+                *(str(item.get("updated_at") or "") for item in linked_tasks),
+                *(str(item.get("created_at") or "") for item in linked_decisions),
+                *(str(item.get("created_at") or "") for item in linked_evidence),
+            ],
+        )
+        step = WorkflowStepExecutionRecord(
+            step_id=preview_step.step_id,
+            title=preview_step.title,
+            kind=preview_step.kind,
+            execution_mode=preview_step.execution_mode,
+            status=self._infer_step_status(
+                run_status=run.status,
+                linked_goals=linked_goals_for_status,
+                linked_schedules=linked_schedules,
+                linked_tasks=linked_tasks,
+                blocker=blocker,
+            ),
+            owner_role_id=preview_step.owner_role_id,
+            owner_role_candidates=list(preview_step.owner_role_candidates or []),
+            owner_agent_id=preview_step.owner_agent_id,
+            linked_task_ids=linked_task_ids,
+            linked_decision_ids=linked_decision_ids,
+            linked_evidence_ids=linked_evidence_ids,
+            blocked_reason_code=blocker.code if blocker is not None else None,
+            blocked_reason_message=blocker.message if blocker is not None else None,
+            summary=preview_step.summary,
+            last_event_at=last_event_at,
+            routes={},
+        )
+        self._persist_run_step_runtime_links(
+            run=run,
+            step_execution=[step],
+        )
+        linked_goal_ids = (
+            []
+            if persisted_decision_ids or persisted_evidence_ids
+            else goal_ids_from_context
+        )
         return WorkflowStepExecutionDetail(
             step=step,
             linked_goals=[
-                item
-                for item in detail.goals
-                if str(item.get("id") or "") in set(linked_goal_ids)
+                goal_detail_by_id[goal_id].get("goal") or {}
+                for goal_id in linked_goal_ids
+                if goal_id in goal_detail_by_id
             ],
-            linked_schedules=[
-                item
-                for item in detail.schedules
-                if str(item.get("id") or "") in set(linked_schedule_ids)
-            ],
-            linked_tasks=[
-                item
-                for item in detail.tasks
-                if str(item.get("id") or "") in set(step.linked_task_ids)
-            ],
-            linked_decisions=[
-                item
-                for item in detail.decisions
-                if str(item.get("id") or "") in set(step.linked_decision_ids)
-            ],
-            linked_evidence=[
-                item
-                for item in detail.evidence
-                if str(item.get("id") or "") in set(step.linked_evidence_ids)
-            ],
+            linked_schedules=list(linked_schedules),
+            linked_tasks=list(linked_tasks),
+            linked_decisions=list(linked_decisions),
+            linked_evidence=list(linked_evidence),
             routes={},
         )

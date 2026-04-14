@@ -318,6 +318,182 @@ def test_agent_profile_service_capability_surface_reuses_mount_lookup_instead_of
     assert capability_service.get_capability_calls == 0
 
 
+def test_agent_profile_service_capability_surface_prefers_capability_lookup_api_when_available(
+    tmp_path,
+) -> None:
+    store = SQLiteStateStore(tmp_path / "state.db")
+    runtime_repo = SqliteAgentRuntimeRepository(store)
+    runtime_repo.upsert_runtime(
+        AgentRuntimeRecord(
+            agent_id="agent-1",
+            actor_key="industry-v1-ops:operator",
+            actor_fingerprint="fp-agent-1",
+            actor_class="industry-dynamic",
+            desired_state="active",
+            runtime_status="idle",
+            industry_instance_id="industry-v1-ops",
+            industry_role_id="operator",
+            display_name="Ops Agent",
+            role_name="Operations",
+        ),
+    )
+
+    class _LookupCapabilityService:
+        def __init__(self) -> None:
+            self.list_capability_lookup_calls = 0
+            self.list_capabilities_calls = 0
+            self._mounts = [
+                SimpleNamespace(
+                    id="system:dispatch_query",
+                    name="dispatch_query",
+                    summary="Dispatch query",
+                    kind="system",
+                    source_kind="system",
+                    risk_level="auto",
+                    enabled=True,
+                    role_access_policy=[],
+                    tags=["system"],
+                    environment_requirements=[],
+                    evidence_contract=["decision"],
+                ),
+                SimpleNamespace(
+                    id="tool:browser_use",
+                    name="browser_use",
+                    summary="Browser tool",
+                    kind="tool",
+                    source_kind="tool",
+                    risk_level="guarded",
+                    enabled=True,
+                    role_access_policy=[],
+                    tags=["tool"],
+                    environment_requirements=["browser"],
+                    evidence_contract=["screenshot"],
+                ),
+            ]
+
+        def list_capability_lookup(self):
+            self.list_capability_lookup_calls += 1
+            return {mount.id: mount for mount in self._mounts}
+
+        def list_capabilities(self, *, kind=None, enabled_only=False):
+            del kind, enabled_only
+            self.list_capabilities_calls += 1
+            raise AssertionError(
+                "get_capability_surface should prefer list_capability_lookup() when the capability service exposes it",
+            )
+
+    capability_service = _LookupCapabilityService()
+    service = AgentProfileService(
+        agent_runtime_repository=runtime_repo,
+        capability_service=capability_service,
+    )
+
+    surface = service.get_capability_surface("agent-1")
+
+    assert surface is not None
+    item_ids = {item["id"] for item in surface["items"]}
+    assert {"system:dispatch_query", "tool:browser_use"} <= item_ids
+    assert capability_service.list_capability_lookup_calls == 1
+    assert capability_service.list_capabilities_calls == 0
+
+
+def test_agent_profile_service_capability_surfaces_batch_reuses_lookup_once(
+    tmp_path,
+) -> None:
+    store = SQLiteStateStore(tmp_path / "state.db")
+    runtime_repo = SqliteAgentRuntimeRepository(store)
+    runtime_repo.upsert_runtime(
+        AgentRuntimeRecord(
+            agent_id="agent-1",
+            actor_key="industry-v1-ops:operator",
+            actor_fingerprint="fp-agent-1",
+            actor_class="industry-dynamic",
+            desired_state="active",
+            runtime_status="idle",
+            industry_instance_id="industry-v1-ops",
+            industry_role_id="operator",
+            display_name="Ops Agent",
+            role_name="Operations",
+        ),
+    )
+    runtime_repo.upsert_runtime(
+        AgentRuntimeRecord(
+            agent_id="agent-2",
+            actor_key="industry-v1-ops:runner",
+            actor_fingerprint="fp-agent-2",
+            actor_class="industry-dynamic",
+            desired_state="active",
+            runtime_status="idle",
+            industry_instance_id="industry-v1-ops",
+            industry_role_id="operator",
+            display_name="Ops Agent 2",
+            role_name="Operations",
+        ),
+    )
+
+    class _LookupCapabilityService:
+        def __init__(self) -> None:
+            self.list_capability_lookup_calls = 0
+            self.list_capabilities_calls = 0
+            self._mounts = [
+                SimpleNamespace(
+                    id="system:dispatch_query",
+                    name="dispatch_query",
+                    summary="Dispatch query",
+                    kind="system",
+                    source_kind="system",
+                    risk_level="auto",
+                    enabled=True,
+                    role_access_policy=[],
+                    tags=["system"],
+                    environment_requirements=[],
+                    evidence_contract=["decision"],
+                ),
+                SimpleNamespace(
+                    id="tool:browser_use",
+                    name="browser_use",
+                    summary="Browser tool",
+                    kind="tool",
+                    source_kind="tool",
+                    risk_level="guarded",
+                    enabled=True,
+                    role_access_policy=[],
+                    tags=["tool"],
+                    environment_requirements=["browser"],
+                    evidence_contract=["screenshot"],
+                ),
+            ]
+
+        def list_capability_lookup(self):
+            self.list_capability_lookup_calls += 1
+            return {mount.id: mount for mount in self._mounts}
+
+        def list_capabilities(self, *, kind=None, enabled_only=False):
+            del kind, enabled_only
+            self.list_capabilities_calls += 1
+            raise AssertionError(
+                "get_capability_surfaces should reuse a single list_capability_lookup() call",
+            )
+
+    capability_service = _LookupCapabilityService()
+    service = AgentProfileService(
+        agent_runtime_repository=runtime_repo,
+        capability_service=capability_service,
+    )
+
+    surfaces = service.get_capability_surfaces(["agent-1", "agent-2"])
+
+    assert set(surfaces) == {"agent-1", "agent-2"}
+    assert {"system:dispatch_query", "tool:browser_use"} <= {
+        item["id"] for item in surfaces["agent-1"]["items"]
+    }
+    assert {"system:dispatch_query", "tool:browser_use"} <= {
+        item["id"] for item in surfaces["agent-2"]["items"]
+    }
+    assert capability_service.list_capability_lookup_calls == 1
+    assert capability_service.list_capabilities_calls == 0
+
+
 def test_agent_profile_service_builds_prompt_capability_projection(tmp_path) -> None:
     store = SQLiteStateStore(tmp_path / "state.db")
     override_repo = SqliteAgentProfileOverrideRepository(store)

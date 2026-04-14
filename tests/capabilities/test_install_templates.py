@@ -98,3 +98,124 @@ def test_list_install_templates_reuses_capability_mount_lookup_per_capability_id
         "system:host_watchers_runtime": 1,
         "system:windows_app_adapter_runtime": 1,
     }
+
+
+def test_list_install_templates_prefers_capability_lookup_api_when_available() -> None:
+    mounts = {
+        capability_id: SimpleNamespace(id=capability_id, enabled=True)
+        for capability_id in (
+            "tool:browser_use",
+            "system:browser_companion_runtime",
+            "system:document_bridge_runtime",
+            "system:host_watchers_runtime",
+            "system:windows_app_adapter_runtime",
+        )
+    }
+
+    class _LookupCapabilityService:
+        def __init__(self) -> None:
+            self.list_capability_lookup_calls = 0
+            self.get_capability_calls = 0
+
+        def list_capability_lookup(self):
+            self.list_capability_lookup_calls += 1
+            return dict(mounts)
+
+        def list_mcp_client_infos(self) -> list[dict[str, object]]:
+            return []
+
+        def get_capability(self, capability_id: str):
+            del capability_id
+            self.get_capability_calls += 1
+            raise AssertionError(
+                "install template listing should prefer list_capability_lookup() when available",
+            )
+
+    capability_service = _LookupCapabilityService()
+
+    with (
+        patch(
+            "copaw.capabilities.install_templates.list_desktop_mcp_templates",
+            return_value=[],
+        ),
+        patch(
+            "copaw.capabilities.install_templates.get_browser_support_snapshot",
+            return_value={"playwright_ready": True},
+        ),
+    ):
+        templates = list_install_templates(
+            capability_service=capability_service,
+            include_runtime=False,
+        )
+
+    assert {template.id for template in templates} == {
+        "browser-local",
+        "browser-companion",
+        "document-office-bridge",
+        "host-watchers",
+        "windows-app-adapters",
+    }
+    assert capability_service.list_capability_lookup_calls == 1
+    assert capability_service.get_capability_calls == 0
+
+
+def test_list_install_templates_reuses_pending_decision_listing_once() -> None:
+    mounts = {
+        capability_id: SimpleNamespace(id=capability_id, enabled=True)
+        for capability_id in (
+            "tool:browser_use",
+            "system:browser_companion_runtime",
+            "system:document_bridge_runtime",
+            "system:host_watchers_runtime",
+            "system:windows_app_adapter_runtime",
+        )
+    }
+
+    class _LookupCapabilityService:
+        def list_capability_lookup(self):
+            return dict(mounts)
+
+        def list_mcp_client_infos(self) -> list[dict[str, object]]:
+            return []
+
+    class _CountingDecisionRequestRepository:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def list_decision_requests(self):
+            self.calls += 1
+            if self.calls > 1:
+                raise AssertionError(
+                    "install template listing should reuse one pending decision snapshot per listing",
+                )
+            return [
+                SimpleNamespace(status="open", summary="browser runtime approval"),
+                SimpleNamespace(status="reviewing", summary="desktop host review"),
+            ]
+
+    decision_request_repository = _CountingDecisionRequestRepository()
+
+    with (
+        patch(
+            "copaw.capabilities.install_templates.list_desktop_mcp_templates",
+            return_value=[],
+        ),
+        patch(
+            "copaw.capabilities.install_templates.get_browser_support_snapshot",
+            return_value={"playwright_ready": True},
+        ),
+    ):
+        templates = list_install_templates(
+            capability_service=_LookupCapabilityService(),
+            decision_request_repository=decision_request_repository,
+            include_runtime=False,
+        )
+
+    assert {template.id for template in templates} == {
+        "browser-local",
+        "browser-companion",
+        "document-office-bridge",
+        "host-watchers",
+        "windows-app-adapters",
+    }
+    assert decision_request_repository.calls == 1

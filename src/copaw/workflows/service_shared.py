@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from ..capabilities.install_templates import (
+    get_install_template,
     list_install_templates,
     match_install_template_capability_ids,
 )

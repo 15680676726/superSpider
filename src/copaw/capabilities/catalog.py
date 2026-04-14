@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from copy import deepcopy
 import logging
 from threading import RLock
 from time import perf_counter
@@ -62,6 +63,13 @@ class CapabilityCatalogFacade:
         self._base_mounts_cache_lock = RLock()
         self._base_mounts_cache_key: tuple[object, ...] | None = None
         self._base_mounts_cache_mounts: tuple[CapabilityMount, ...] = ()
+        self._resolved_mounts_cache_lock = RLock()
+        self._resolved_mounts_cache_key: tuple[object, ...] | None = None
+        self._resolved_mounts_cache_mounts: tuple[CapabilityMount, ...] = ()
+        self._resolved_mounts_cache_lookup: dict[str, CapabilityMount] = {}
+        self._mcp_client_infos_cache_lock = RLock()
+        self._mcp_client_infos_cache_key: tuple[object, ...] | None = None
+        self._mcp_client_infos_cache_value: tuple[dict[str, object], ...] = ()
 
     def set_override_repository(
         self,
@@ -85,6 +93,13 @@ class CapabilityCatalogFacade:
         with self._base_mounts_cache_lock:
             self._base_mounts_cache_key = None
             self._base_mounts_cache_mounts = ()
+        with self._resolved_mounts_cache_lock:
+            self._resolved_mounts_cache_key = None
+            self._resolved_mounts_cache_mounts = ()
+            self._resolved_mounts_cache_lookup = {}
+        with self._mcp_client_infos_cache_lock:
+            self._mcp_client_infos_cache_key = None
+            self._mcp_client_infos_cache_value = ()
         with self._skill_mount_rebind_cache_lock:
             self._skill_mount_rebind_cache_key = None
             self._skill_mount_rebind_cache_mounts = ()
@@ -102,13 +117,11 @@ class CapabilityCatalogFacade:
         started_at = perf_counter()
 
         stage_started_at = perf_counter()
-        base_mounts, base_cache_state, base_timings = self._cached_base_mounts()
-        timings["resolve_base_mounts"] = perf_counter() - stage_started_at
-        timings.update(base_timings)
-        stage_started_at = perf_counter()
-        overridden_mounts = self._apply_overrides(base_mounts)
-        timings["apply_overrides"] = perf_counter() - stage_started_at
-        mounts = overridden_mounts
+        mounts, base_cache_state, resolved_cache_state, resolved_timings = (
+            self._cached_resolved_mounts()
+        )
+        timings["resolve_mounts"] = perf_counter() - stage_started_at
+        timings.update(resolved_timings)
         if kind:
             stage_started_at = perf_counter()
             mounts = [mount for mount in mounts if mount.kind == kind]
@@ -119,11 +132,12 @@ class CapabilityCatalogFacade:
             timings["filter_enabled"] = perf_counter() - stage_started_at
         timings["total"] = perf_counter() - started_at
         logger.info(
-            "Capability catalog list_capabilities timings: kind=%s enabled_only=%s count=%d base_cache=%s %s",
+            "Capability catalog list_capabilities timings: kind=%s enabled_only=%s count=%d base_cache=%s resolved_cache=%s %s",
             kind,
             enabled_only,
             len(mounts),
             base_cache_state,
+            resolved_cache_state,
             " ".join(f"{key}={value:.2f}s" for key, value in timings.items()),
         )
         return mounts
@@ -150,7 +164,19 @@ class CapabilityCatalogFacade:
         return mounts, summarize_capability_mounts(mounts)
 
     def get_capability(self, capability_id: str) -> CapabilityMount | None:
-        for mount in self.list_capabilities():
+        cache_key = self._resolved_mounts_cache_key_for_inputs()
+        if cache_key is not None:
+            with self._resolved_mounts_cache_lock:
+                if self._resolved_mounts_cache_key == cache_key:
+                    mount = self._resolved_mounts_cache_lookup.get(capability_id)
+                    return mount.model_copy(deep=True) if mount is not None else None
+        mounts, _base_cache_state, _resolved_cache_state, _timings = self._cached_resolved_mounts()
+        if cache_key is not None:
+            with self._resolved_mounts_cache_lock:
+                if self._resolved_mounts_cache_key == cache_key:
+                    mount = self._resolved_mounts_cache_lookup.get(capability_id)
+                    return mount.model_copy(deep=True) if mount is not None else None
+        for mount in mounts:
             if mount.id == capability_id:
                 return mount
         return None
@@ -160,6 +186,29 @@ class CapabilityCatalogFacade:
         if mount is None or not _is_public_mount(mount):
             return None
         return mount
+
+    def list_capability_lookup(self) -> dict[str, CapabilityMount]:
+        cache_key = self._resolved_mounts_cache_key_for_inputs()
+        if cache_key is not None:
+            with self._resolved_mounts_cache_lock:
+                if self._resolved_mounts_cache_key == cache_key:
+                    return {
+                        capability_id: mount.model_copy(deep=True)
+                        for capability_id, mount in self._resolved_mounts_cache_lookup.items()
+                    }
+        mounts, _base_cache_state, _resolved_cache_state, _timings = self._cached_resolved_mounts()
+        if cache_key is not None:
+            with self._resolved_mounts_cache_lock:
+                if self._resolved_mounts_cache_key == cache_key:
+                    return {
+                        capability_id: mount.model_copy(deep=True)
+                        for capability_id, mount in self._resolved_mounts_cache_lookup.items()
+                    }
+        return {
+            str(mount.id): mount
+            for mount in mounts
+            if getattr(mount, "id", None) is not None
+        }
 
     def summarize(self) -> CapabilitySummary:
         return summarize_capability_mounts(self.list_capabilities())
@@ -344,10 +393,17 @@ class CapabilityCatalogFacade:
         return self._dedupe_skill_specs(payload)
 
     def list_mcp_client_infos(self) -> list[dict[str, object]]:
+        cache_key = self._mcp_client_infos_cache_key_for_inputs()
+        if cache_key is not None:
+            with self._mcp_client_infos_cache_lock:
+                if self._mcp_client_infos_cache_key == cache_key:
+                    return deepcopy(list(self._mcp_client_infos_cache_value))
         config = self._load_config()
+        mounts, _base_cache_state, _resolved_cache_state, _timings = self._cached_resolved_mounts()
         bound_mounts = {
             _capability_name_from_id(mount.id, prefix="mcp:"): mount
-            for mount in self.list_capabilities(kind="remote-mcp")
+            for mount in mounts
+            if mount.kind == "remote-mcp"
         }
         allowed_keys = set(bound_mounts)
         payload: list[dict[str, object]] = []
@@ -381,7 +437,12 @@ class CapabilityCatalogFacade:
                     ),
                 },
             )
-        return payload
+        if cache_key is None:
+            return payload
+        with self._mcp_client_infos_cache_lock:
+            self._mcp_client_infos_cache_key = cache_key
+            self._mcp_client_infos_cache_value = tuple(deepcopy(item) for item in payload)
+            return deepcopy(list(self._mcp_client_infos_cache_value))
 
     def get_mcp_client_info(self, client_key: str) -> dict[str, object] | None:
         for client in self.list_mcp_client_infos():
@@ -546,6 +607,43 @@ class CapabilityCatalogFacade:
             )
             return self._clone_mounts(self._base_mounts_cache_mounts), "miss", timings
 
+    def _cached_resolved_mounts(
+        self,
+    ) -> tuple[list[CapabilityMount], str, str, dict[str, float]]:
+        base_mounts, base_cache_state, timings = self._cached_base_mounts()
+        cache_key = self._resolved_mounts_cache_key_for_inputs()
+        if cache_key is not None:
+            with self._resolved_mounts_cache_lock:
+                if self._resolved_mounts_cache_key == cache_key:
+                    return (
+                        self._clone_mounts(self._resolved_mounts_cache_mounts),
+                        base_cache_state,
+                        "hit",
+                        timings,
+                    )
+
+        stage_started_at = perf_counter()
+        resolved_mounts = self._apply_overrides(base_mounts)
+        timings["apply_overrides"] = perf_counter() - stage_started_at
+
+        if cache_key is None:
+            return resolved_mounts, base_cache_state, "off", timings
+
+        with self._resolved_mounts_cache_lock:
+            self._resolved_mounts_cache_key = cache_key
+            self._resolved_mounts_cache_mounts = tuple(
+                mount.model_copy(deep=True) for mount in resolved_mounts
+            )
+            self._resolved_mounts_cache_lookup = {
+                mount.id: mount for mount in self._resolved_mounts_cache_mounts
+            }
+            return (
+                self._clone_mounts(self._resolved_mounts_cache_mounts),
+                base_cache_state,
+                "miss",
+                timings,
+            )
+
     def _base_mounts_cache_key_for_inputs(self) -> tuple[object, ...] | None:
         if type(self._registry) is not CapabilityRegistry:
             return None
@@ -560,6 +658,18 @@ class CapabilityCatalogFacade:
                 exc_info=True,
             )
             return None
+
+    def _resolved_mounts_cache_key_for_inputs(self) -> tuple[object, ...] | None:
+        base_key = self._base_mounts_cache_key_for_inputs()
+        if base_key is None:
+            return None
+        override_signature = self._override_signature()
+        if override_signature is None:
+            return None
+        return (base_key, override_signature)
+
+    def _mcp_client_infos_cache_key_for_inputs(self) -> tuple[object, ...] | None:
+        return self._resolved_mounts_cache_key_for_inputs()
 
     def _cached_skill_map(self) -> dict[str, Any]:
         cache_key = self._skill_inventory_signature()
@@ -612,6 +722,27 @@ class CapabilityCatalogFacade:
             _stable_signature_value(
                 getattr(config, "external_capability_packages", {}),
             ),
+        )
+
+    def _override_signature(self) -> object | None:
+        if self._override_repository is None:
+            return ()
+        try:
+            overrides = list(self._override_repository.list_overrides() or [])
+        except Exception:
+            logger.debug(
+                "capability catalog failed to compute override signature",
+                exc_info=True,
+            )
+            return None
+        return tuple(
+            sorted(
+                (
+                    str(getattr(override, "capability_id", "") or ""),
+                    _stable_signature_value(override),
+                )
+                for override in overrides
+            )
         )
 
     @staticmethod

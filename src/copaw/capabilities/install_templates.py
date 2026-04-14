@@ -92,9 +92,21 @@ def _fetch_capability_mount(
 
 
 class _InstallTemplateCapabilityLookup:
-    def __init__(self, capability_service: object | None) -> None:
+    def __init__(
+        self,
+        capability_service: object | None,
+        *,
+        prefetched_capability_mounts_by_id: dict[str, object | None] | None = None,
+    ) -> None:
         self._capability_service = capability_service
-        self._capability_mounts_by_id: dict[str, object | None] = {}
+        self._capability_mounts_by_id: dict[str, object | None] = {
+            str(capability_id): mount
+            for capability_id, mount in dict(prefetched_capability_mounts_by_id or {}).items()
+            if capability_id is not None
+        }
+        self._prefetched_capability_lookup_loaded = bool(
+            prefetched_capability_mounts_by_id,
+        )
         self._installed_mcp_clients: dict[str, bool] | None = None
 
     def list_installed_mcp_clients(self) -> dict[str, bool]:
@@ -105,12 +117,76 @@ class _InstallTemplateCapabilityLookup:
         return dict(self._installed_mcp_clients)
 
     def get_capability_mount(self, capability_id: str) -> object | None:
+        self._ensure_prefetched_capability_lookup()
         if capability_id not in self._capability_mounts_by_id:
             self._capability_mounts_by_id[capability_id] = _fetch_capability_mount(
                 self._capability_service,
                 capability_id,
             )
         return self._capability_mounts_by_id[capability_id]
+
+    def _ensure_prefetched_capability_lookup(self) -> None:
+        if self._prefetched_capability_lookup_loaded:
+            return
+        self._prefetched_capability_lookup_loaded = True
+        if self._capability_service is None:
+            return
+        reader = getattr(self._capability_service, "list_capability_lookup", None)
+        if not callable(reader):
+            return
+        try:
+            payload = reader()
+        except Exception:
+            return
+        if not isinstance(payload, dict):
+            return
+        for capability_id, mount in payload.items():
+            normalized_id = str(capability_id or "").strip()
+            if normalized_id and normalized_id not in self._capability_mounts_by_id:
+                self._capability_mounts_by_id[normalized_id] = mount
+
+
+class _InstallTemplatePendingDecisionLookup:
+    def __init__(self, decision_request_repository: object | None) -> None:
+        self._decision_request_repository = decision_request_repository
+        self._decision_requests_loaded = False
+        self._decision_requests: list[object] = []
+        self._pending_counts_by_tokens: dict[tuple[str, ...], int] = {}
+
+    def count_pending_decisions(self, *tokens: str) -> int:
+        normalized_tokens = tuple(token.strip().lower() for token in tokens if token.strip())
+        if normalized_tokens in self._pending_counts_by_tokens:
+            return self._pending_counts_by_tokens[normalized_tokens]
+        pending = 0
+        for decision in self._load_decision_requests():
+            status = str(getattr(decision, "status", "") or "").strip().lower()
+            if status not in {"open", "reviewing"}:
+                continue
+            summary = str(getattr(decision, "summary", "") or "").lower()
+            if normalized_tokens and not any(token in summary for token in normalized_tokens):
+                continue
+            pending += 1
+        self._pending_counts_by_tokens[normalized_tokens] = pending
+        return pending
+
+    def _load_decision_requests(self) -> list[object]:
+        if self._decision_requests_loaded:
+            return list(self._decision_requests)
+        self._decision_requests_loaded = True
+        if self._decision_request_repository is None:
+            self._decision_requests = []
+            return []
+        lister = getattr(self._decision_request_repository, "list_decision_requests", None)
+        if not callable(lister):
+            self._decision_requests = []
+            return []
+        try:
+            payload = lister()
+        except Exception:
+            self._decision_requests = []
+            return []
+        self._decision_requests = list(payload or [])
+        return list(self._decision_requests)
 
 
 def _list_installed_mcp_clients(
@@ -153,7 +229,10 @@ def _mount_enabled(
 def _count_pending_decisions(
     decision_request_repository: object | None,
     *tokens: str,
+    pending_decision_lookup: _InstallTemplatePendingDecisionLookup | None = None,
 ) -> int:
+    if pending_decision_lookup is not None:
+        return pending_decision_lookup.count_pending_decisions(*tokens)
     if decision_request_repository is None:
         return 0
     lister = getattr(decision_request_repository, "list_decision_requests", None)
@@ -918,8 +997,15 @@ def list_install_templates(
     browser_runtime_service: BrowserRuntimeService | None = None,
     environment_service: object | None = None,
     include_runtime: bool = False,
+    prefetched_capability_mounts_by_id: dict[str, object | None] | None = None,
 ) -> list[CapabilityInstallTemplateSpec]:
-    capability_lookup = _InstallTemplateCapabilityLookup(capability_service)
+    capability_lookup = _InstallTemplateCapabilityLookup(
+        capability_service,
+        prefetched_capability_mounts_by_id=prefetched_capability_mounts_by_id,
+    )
+    pending_decision_lookup = _InstallTemplatePendingDecisionLookup(
+        decision_request_repository,
+    )
     installed_clients = _list_installed_mcp_clients(
         capability_service,
         capability_lookup=capability_lookup,
@@ -931,6 +1017,7 @@ def list_install_templates(
                 template,
                 installed_clients=installed_clients,
                 decision_request_repository=decision_request_repository,
+                pending_decision_lookup=pending_decision_lookup,
                 include_runtime=include_runtime,
             ),
         )
@@ -938,6 +1025,7 @@ def list_install_templates(
         _build_browser_install_template(
             capability_service=capability_service,
             decision_request_repository=decision_request_repository,
+            pending_decision_lookup=pending_decision_lookup,
             browser_runtime_service=browser_runtime_service,
             include_runtime=include_runtime,
             capability_lookup=capability_lookup,
@@ -948,6 +1036,7 @@ def list_install_templates(
             _build_browser_companion_install_template(
                 capability_service=capability_service,
                 decision_request_repository=decision_request_repository,
+                pending_decision_lookup=pending_decision_lookup,
                 browser_runtime_service=browser_runtime_service,
                 environment_service=environment_service,
                 include_runtime=include_runtime,
@@ -956,6 +1045,7 @@ def list_install_templates(
             _build_document_bridge_install_template(
                 capability_service=capability_service,
                 decision_request_repository=decision_request_repository,
+                pending_decision_lookup=pending_decision_lookup,
                 environment_service=environment_service,
                 include_runtime=include_runtime,
                 capability_lookup=capability_lookup,
@@ -963,6 +1053,7 @@ def list_install_templates(
             _build_host_watchers_install_template(
                 capability_service=capability_service,
                 decision_request_repository=decision_request_repository,
+                pending_decision_lookup=pending_decision_lookup,
                 environment_service=environment_service,
                 include_runtime=include_runtime,
                 capability_lookup=capability_lookup,
@@ -970,6 +1061,7 @@ def list_install_templates(
             _build_windows_app_adapters_install_template(
                 capability_service=capability_service,
                 decision_request_repository=decision_request_repository,
+                pending_decision_lookup=pending_decision_lookup,
                 environment_service=environment_service,
                 include_runtime=include_runtime,
                 capability_lookup=capability_lookup,
@@ -987,8 +1079,15 @@ def get_install_template(
     browser_runtime_service: BrowserRuntimeService | None = None,
     environment_service: object | None = None,
     include_runtime: bool = True,
+    prefetched_capability_mounts_by_id: dict[str, object | None] | None = None,
 ) -> CapabilityInstallTemplateSpec | None:
-    capability_lookup = _InstallTemplateCapabilityLookup(capability_service)
+    capability_lookup = _InstallTemplateCapabilityLookup(
+        capability_service,
+        prefetched_capability_mounts_by_id=prefetched_capability_mounts_by_id,
+    )
+    pending_decision_lookup = _InstallTemplatePendingDecisionLookup(
+        decision_request_repository,
+    )
     installed_clients = _list_installed_mcp_clients(
         capability_service,
         capability_lookup=capability_lookup,
@@ -1000,12 +1099,14 @@ def get_install_template(
             desktop_template,
             installed_clients=installed_clients,
             decision_request_repository=decision_request_repository,
+            pending_decision_lookup=pending_decision_lookup,
             include_runtime=include_runtime,
         )
     if template_id == "browser-local":
         return _build_browser_install_template(
             capability_service=capability_service,
             decision_request_repository=decision_request_repository,
+            pending_decision_lookup=pending_decision_lookup,
             browser_runtime_service=browser_runtime_service,
             include_runtime=include_runtime,
             capability_lookup=capability_lookup,
@@ -1014,6 +1115,7 @@ def get_install_template(
         return _build_browser_companion_install_template(
             capability_service=capability_service,
             decision_request_repository=decision_request_repository,
+            pending_decision_lookup=pending_decision_lookup,
             browser_runtime_service=browser_runtime_service,
             environment_service=environment_service,
             include_runtime=include_runtime,
@@ -1023,6 +1125,7 @@ def get_install_template(
         return _build_document_bridge_install_template(
             capability_service=capability_service,
             decision_request_repository=decision_request_repository,
+            pending_decision_lookup=pending_decision_lookup,
             environment_service=environment_service,
             include_runtime=include_runtime,
             capability_lookup=capability_lookup,
@@ -1031,6 +1134,7 @@ def get_install_template(
         return _build_host_watchers_install_template(
             capability_service=capability_service,
             decision_request_repository=decision_request_repository,
+            pending_decision_lookup=pending_decision_lookup,
             environment_service=environment_service,
             include_runtime=include_runtime,
             capability_lookup=capability_lookup,
@@ -1039,6 +1143,7 @@ def get_install_template(
         return _build_windows_app_adapters_install_template(
             capability_service=capability_service,
             decision_request_repository=decision_request_repository,
+            pending_decision_lookup=pending_decision_lookup,
             environment_service=environment_service,
             include_runtime=include_runtime,
             capability_lookup=capability_lookup,
@@ -1176,6 +1281,7 @@ def _build_desktop_install_template(
     *,
     installed_clients: dict[str, bool],
     decision_request_repository: object | None = None,
+    pending_decision_lookup: _InstallTemplatePendingDecisionLookup | None = None,
     include_runtime: bool = False,
 ) -> CapabilityInstallTemplateSpec:
     enabled = installed_clients.get(template.default_client_key)
@@ -1188,6 +1294,7 @@ def _build_desktop_install_template(
         template.template_id,
         template.default_client_key,
         f"mcp:{template.default_client_key}",
+        pending_decision_lookup=pending_decision_lookup,
     )
     return CapabilityInstallTemplateSpec(
         id=template.template_id,
@@ -1294,6 +1401,7 @@ def _build_browser_install_template(
     *,
     capability_service: object | None = None,
     decision_request_repository: object | None = None,
+    pending_decision_lookup: _InstallTemplatePendingDecisionLookup | None = None,
     browser_runtime_service: BrowserRuntimeService | None = None,
     include_runtime: bool = False,
     capability_lookup: _InstallTemplateCapabilityLookup | None = None,
@@ -1328,6 +1436,7 @@ def _build_browser_install_template(
         "browser-local",
         "tool:browser_use",
         "browser",
+        pending_decision_lookup=pending_decision_lookup,
     )
     return CapabilityInstallTemplateSpec(
         id="browser-local",
@@ -1494,6 +1603,7 @@ def _build_browser_companion_install_template(
     *,
     capability_service: object | None = None,
     decision_request_repository: object | None = None,
+    pending_decision_lookup: _InstallTemplatePendingDecisionLookup | None = None,
     browser_runtime_service: BrowserRuntimeService | None = None,
     environment_service: object | None = None,
     include_runtime: bool = False,
@@ -1540,6 +1650,7 @@ def _build_browser_companion_install_template(
         "browser-companion",
         "system:browser_companion_runtime",
         "browser companion",
+        pending_decision_lookup=pending_decision_lookup,
     )
     return CapabilityInstallTemplateSpec(
         id="browser-companion",
@@ -1658,6 +1769,7 @@ def _build_document_bridge_install_template(
     *,
     capability_service: object | None = None,
     decision_request_repository: object | None = None,
+    pending_decision_lookup: _InstallTemplatePendingDecisionLookup | None = None,
     environment_service: object | None = None,
     include_runtime: bool = False,
     capability_lookup: _InstallTemplateCapabilityLookup | None = None,
@@ -1692,6 +1804,7 @@ def _build_document_bridge_install_template(
         "system:document_bridge_runtime",
         "document bridge",
         "office bridge",
+        pending_decision_lookup=pending_decision_lookup,
     )
     return CapabilityInstallTemplateSpec(
         id="document-office-bridge",
@@ -1803,6 +1916,7 @@ def _build_host_watchers_install_template(
     *,
     capability_service: object | None = None,
     decision_request_repository: object | None = None,
+    pending_decision_lookup: _InstallTemplatePendingDecisionLookup | None = None,
     environment_service: object | None = None,
     include_runtime: bool = False,
     capability_lookup: _InstallTemplateCapabilityLookup | None = None,
@@ -1835,6 +1949,7 @@ def _build_host_watchers_install_template(
         "host-watchers",
         "system:host_watchers_runtime",
         "host watcher",
+        pending_decision_lookup=pending_decision_lookup,
     )
     return CapabilityInstallTemplateSpec(
         id="host-watchers",
@@ -1946,6 +2061,7 @@ def _build_windows_app_adapters_install_template(
     *,
     capability_service: object | None = None,
     decision_request_repository: object | None = None,
+    pending_decision_lookup: _InstallTemplatePendingDecisionLookup | None = None,
     environment_service: object | None = None,
     include_runtime: bool = False,
     capability_lookup: _InstallTemplateCapabilityLookup | None = None,
@@ -1978,6 +2094,7 @@ def _build_windows_app_adapters_install_template(
         "windows-app-adapters",
         "system:windows_app_adapter_runtime",
         "windows app adapter",
+        pending_decision_lookup=pending_decision_lookup,
     )
     return CapabilityInstallTemplateSpec(
         id="windows-app-adapters",

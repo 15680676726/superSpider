@@ -193,6 +193,9 @@ class CapabilityService:
     def get_public_capability(self, capability_id: str) -> CapabilityMount | None:
         return self._catalog.get_public_capability(capability_id)
 
+    def list_capability_lookup(self) -> dict[str, CapabilityMount]:
+        return self._catalog.list_capability_lookup()
+
     def summarize(self) -> CapabilitySummary:
         return self._catalog.summarize()
 

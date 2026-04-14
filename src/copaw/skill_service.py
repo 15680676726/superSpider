@@ -381,6 +381,8 @@ def sync_skills_to_working_dir(
                 e,
             )
 
+    if synced_count > 0:
+        _invalidate_skill_list_cache()
     return synced_count, skipped_count
 
 
@@ -485,6 +487,8 @@ def sync_skills_from_active_to_customized(
                 e,
             )
 
+    if synced_count > 0:
+        _invalidate_skill_list_cache()
     return synced_count, skipped_count
 
 
@@ -744,6 +748,9 @@ class SkillService:
 
     @staticmethod
     def list_inventory_signature() -> tuple[object, ...]:
+        with _SKILL_LIST_CACHE_LOCK:
+            if _SKILL_LIST_CACHE_KEY is not None:
+                return _SKILL_LIST_CACHE_KEY
         return _list_all_skills_cache_key()
 
     @staticmethod
@@ -899,6 +906,7 @@ class SkillService:
                 )
 
             logger.debug("Created skill '%s' in customized_skills.", name)
+            _invalidate_skill_list_cache()
             return True
         except Exception as e:
             logger.error(
@@ -932,6 +940,7 @@ class SkillService:
         try:
             shutil.rmtree(skill_dir)
             logger.debug("Disabled skill '%s' from active_skills.", name)
+            _invalidate_skill_list_cache()
             return True
         except Exception as e:
             logger.error(
@@ -990,6 +999,7 @@ class SkillService:
                 "Deleted skill '%s' from customized_skills.",
                 name,
             )
+            _invalidate_skill_list_cache()
             return True
         except Exception as e:
             logger.error(

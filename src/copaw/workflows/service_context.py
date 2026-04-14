@@ -4,6 +4,46 @@ from __future__ import annotations
 from .service_shared import *  # noqa: F401,F403
 
 
+def _candidate_matches_install_template_capability_ids(
+    candidate: Any,
+    *,
+    capability_ids: list[str],
+) -> bool:
+    normalized_targets = {item.strip().lower() for item in capability_ids if item.strip()}
+    if not normalized_targets:
+        return False
+    manifest = getattr(candidate, "manifest", None)
+    if manifest is None:
+        return match_install_template_capability_ids(
+            template_id=str(getattr(candidate, "id", "") or ""),
+            capability_ids=capability_ids,
+        )
+    normalized_capabilities = {
+        str(item).strip().lower()
+        for item in list(getattr(manifest, "capability_ids", []) or [])
+        if str(item).strip()
+    }
+    if normalized_capabilities & normalized_targets:
+        return True
+    normalized_tags = {
+        str(item).strip().lower()
+        for item in [
+            *(list(getattr(candidate, "capability_tags", []) or [])),
+            *(list(getattr(manifest, "tags", []) or [])),
+        ]
+        if str(item).strip()
+    }
+    for capability_id in normalized_targets:
+        tokens = {
+            token
+            for token in capability_id.replace(":", " ").replace("_", " ").split()
+            if token
+        }
+        if tokens & normalized_tags:
+            return True
+    return False
+
+
 class _WorkflowServiceContextMixin:
     def _resolve_owner_agent_id(
         self,
@@ -298,17 +338,79 @@ class _WorkflowServiceContextMixin:
         except Exception:
             return None
 
-    def _get_agent_capability_surface(self, agent_id: str) -> dict[str, Any] | None:
+    def _get_agent_capability_surface(
+        self,
+        agent_id: str,
+        *,
+        agent_capability_surfaces_by_id: dict[str, dict[str, Any] | None] | None = None,
+        capability_mounts_by_id: dict[str, Any | None] | None = None,
+    ) -> dict[str, Any] | None:
+        if (
+            agent_capability_surfaces_by_id is not None
+            and agent_id in agent_capability_surfaces_by_id
+        ):
+            return agent_capability_surfaces_by_id[agent_id]
         if self._agent_profile_service is None:
             return None
         getter = getattr(self._agent_profile_service, "get_capability_surface", None)
         if not callable(getter):
             return None
         try:
-            payload = getter(agent_id)
+            payload = (
+                getter(
+                    agent_id,
+                    capability_mounts_by_id=capability_mounts_by_id,
+                )
+                if capability_mounts_by_id is not None
+                else getter(agent_id)
+            )
         except Exception:
             return None
-        return payload if isinstance(payload, dict) else None
+        normalized = payload if isinstance(payload, dict) else None
+        if agent_capability_surfaces_by_id is not None:
+            agent_capability_surfaces_by_id[agent_id] = normalized
+        return normalized
+
+    def _prefetch_agent_capability_surfaces(
+        self,
+        agent_ids: list[str],
+        *,
+        agent_capability_surfaces_by_id: dict[str, dict[str, Any] | None],
+        capability_mounts_by_id: dict[str, Any | None] | None = None,
+    ) -> None:
+        if self._agent_profile_service is None or not agent_ids:
+            return
+        reader = getattr(self._agent_profile_service, "get_capability_surfaces", None)
+        if not callable(reader):
+            return
+        unresolved_agent_ids = [
+            normalized_id
+            for normalized_id in (_string(agent_id) for agent_id in agent_ids)
+            if normalized_id is not None
+            and normalized_id not in agent_capability_surfaces_by_id
+        ]
+        if not unresolved_agent_ids:
+            return
+        try:
+            payload = (
+                reader(
+                    unresolved_agent_ids,
+                    capability_mounts_by_id=capability_mounts_by_id,
+                )
+                if capability_mounts_by_id is not None
+                else reader(unresolved_agent_ids)
+            )
+        except Exception:
+            return
+        if not isinstance(payload, dict):
+            return
+        for agent_id, surface in payload.items():
+            normalized_id = _string(agent_id)
+            if normalized_id is None:
+                continue
+            agent_capability_surfaces_by_id[normalized_id] = (
+                dict(surface) if isinstance(surface, dict) else None
+            )
 
     def _summarize_launch_blockers(
         self,
@@ -332,6 +434,8 @@ class _WorkflowServiceContextMixin:
         *,
         capability_mounts_by_id: dict[str, Any | None] | None = None,
     ):
+        if capability_mounts_by_id is not None and not capability_mounts_by_id:
+            self._prefetch_capability_mount_lookup(capability_mounts_by_id)
         if capability_mounts_by_id is not None and capability_id in capability_mounts_by_id:
             return capability_mounts_by_id[capability_id]
         if self._capability_service is None:
@@ -347,6 +451,26 @@ class _WorkflowServiceContextMixin:
         if capability_mounts_by_id is not None:
             capability_mounts_by_id[capability_id] = mount
         return mount
+
+    def _prefetch_capability_mount_lookup(
+        self,
+        capability_mounts_by_id: dict[str, Any | None],
+    ) -> None:
+        if self._capability_service is None:
+            return
+        reader = getattr(self._capability_service, "list_capability_lookup", None)
+        if not callable(reader):
+            return
+        try:
+            payload = reader()
+        except Exception:
+            return
+        if not isinstance(payload, dict):
+            return
+        for capability_id, mount in payload.items():
+            normalized_id = _string(capability_id)
+            if normalized_id is not None and normalized_id not in capability_mounts_by_id:
+                capability_mounts_by_id[normalized_id] = mount
 
     def _has_capability(
         self,
@@ -396,30 +520,50 @@ class _WorkflowServiceContextMixin:
         capability_id: str,
         installed_client_keys: set[str],
         install_template_candidates_by_runtime: dict[bool, list[Any]] | None = None,
+        install_templates_by_id: dict[str, Any | None] | None = None,
+        capability_mounts_by_id: dict[str, Any | None] | None = None,
     ) -> list[WorkflowTemplateInstallTemplateRef]:
         mappings = template.metadata.get("dependency_install_templates")
         explicit_template_ids = _unique_strings(
             mappings.get(capability_id) if isinstance(mappings, dict) else [],
         )
-        candidates = (
-            install_template_candidates_by_runtime.get(False)
-            if install_template_candidates_by_runtime is not None
-            else None
-        )
-        if candidates is None:
-            candidates = list_install_templates(
-                capability_service=self._capability_service,
-                decision_request_repository=self._decision_request_repository,
-                include_runtime=False,
+        if explicit_template_ids:
+            candidates = []
+            for template_id in explicit_template_ids:
+                if install_templates_by_id is not None and template_id in install_templates_by_id:
+                    candidate = install_templates_by_id[template_id]
+                else:
+                    candidate = get_install_template(
+                        template_id,
+                        capability_service=self._capability_service,
+                        decision_request_repository=self._decision_request_repository,
+                        include_runtime=False,
+                        prefetched_capability_mounts_by_id=capability_mounts_by_id,
+                    )
+                    if install_templates_by_id is not None:
+                        install_templates_by_id[template_id] = candidate
+                if candidate is not None:
+                    candidates.append(candidate)
+        else:
+            candidates = (
+                install_template_candidates_by_runtime.get(False)
+                if install_template_candidates_by_runtime is not None
+                else None
             )
-            if install_template_candidates_by_runtime is not None:
-                install_template_candidates_by_runtime[False] = list(candidates)
-        if not explicit_template_ids:
+            if candidates is None:
+                candidates = list_install_templates(
+                    capability_service=self._capability_service,
+                    decision_request_repository=self._decision_request_repository,
+                    include_runtime=False,
+                    prefetched_capability_mounts_by_id=capability_mounts_by_id,
+                )
+                if install_template_candidates_by_runtime is not None:
+                    install_template_candidates_by_runtime[False] = list(candidates)
             explicit_template_ids = [
                 candidate.id
                 for candidate in candidates
-                if match_install_template_capability_ids(
-                    template_id=candidate.id,
+                if _candidate_matches_install_template_capability_ids(
+                    candidate,
                     capability_ids=[capability_id],
                 )
             ]
