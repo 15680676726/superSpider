@@ -517,7 +517,7 @@
 - `2026-03-25` 补充：`Runtime Center` 路由已继续按域拆出 `overview / memory / knowledge / reports / industry` 模块，`runtime_center_routes_core.py` 不再继续承载这些域；同时已删除 retired `TaskDelegationRequest` 与死掉的 delegation shared helper。
 - `2026-03-25` 补充：`state/models.py` 已收成兼容 re-export 面，`goals_tasks / agents_runtime / governance / workflows / prediction / reporting / industry / core` 分层模块已经落位，旧导入链继续可用但真正定义不再堆在单文件里。
 - `2026-03-25` 补充：`EnvironmentService` 已降为稳定 façade；环境包已拆出 `session_service / lease_service / replay_service / artifact_service / health_service`，session/resource/actor lease、runtime recovery、environment detail 与 replay/artifact 读面不再继续堆在单个 1400+ 行服务里。
-- `2026-03-25` 补充：`ProviderManager` 已降为 compat façade；`providers` 包已拆出 `provider_registry / provider_storage / provider_resolution_service / provider_chat_model_factory / provider_fallback_service`，runtime/query/industry 等可注入调用点优先改走显式实例，残余 `get_instance()` 已收口到 bootstrapping、router/CLI、`memory_manager` 兼容链与 façade 静态入口。
+- `2026-03-25` 补充：`ProviderManager` 已降为 compat façade；`providers` 包已拆出 `provider_registry / provider_storage / provider_resolution_service / provider_chat_model_factory / provider_fallback_service`，runtime/query/industry 等可注入调用点优先改走显式实例，残余 `get_instance()` 已收口到 bootstrapping、router/CLI 与 façade 静态入口；旧 `memory_manager` 兼容链已在 `2026-04-14` 物理删除。
 - `2026-03-25` 补充：`POST /api/runtime-center/tasks/{task_id}/delegate` 已从 runtime-center router 物理删除；人类前台不再保留 direct delegate API，assignment/delegation 只留在内核与 system capability 内部。
 - `2026-03-25` 补充：`dispatch_active_goals` 与旧 goal-dispatch 文案已从前台 capability / insights surface 删除；残留 `GoalRecord` 与 goal service 只作为执行层 phase/leaf object 保留，不再代表主脑规划真相。
 - `2026-03-25` 补充：execution-core 的正式能力基线、runtime query system tools、prompt capability projection、Runtime Center actor capability surface 与 automation loop 已全部摘掉 `dispatch_active_goals`；主脑/Runtime Center 不再把它当成正式派工入口，后续残留边界也只允许继续向 history-only 的 recommendation 识别/归一化收口。
@@ -1012,6 +1012,10 @@
 - `2026-04-01` 补充：`AgentWorkbench` 前台已停止展示 `GoalSelector / GoalDetailPanel`，也不再主动请求 `/goals/{goal_id}/detail`；执行条文案已把 `目标` 收成 `焦点`，`Predictions` 里的 `目标状态面 / 目标 delta` 也已改成 `焦点` 口径，避免继续把 operator 拉回旧 `goal-era` 心智。
 - `2026-04-01` 补充：`P0-4` 已新增正式 gate 入口 `scripts/run_p0_runtime_terminal_gate.py`，把后端主链回归、长跑与删旧回归、控制台定向回归和控制台构建收口成一个仓库级可执行门槛；`scripts/README.md` 已同步写明用法。
 - `2026-04-01` 补充：`Knowledge Activation Layer Phase 4` 已补上最小 persisted relation-view 边界。`MemoryRelationViewRecord`、SQLite-backed `memory_relation_views`、`SqliteMemoryRelationViewRepository` 与 runtime bootstrap wiring 已落地；`DerivedMemoryIndexService` 已具备显式 `list_relation_views(...) / rebuild_relation_views(...)`；`Runtime Center` 也已新增 `GET /runtime-center/memory/relations` 读面，并支持按 `scope / relation_kind / source_node_id / target_node_id` 过滤。
+- `2026-04-14` 补充：formal text memory 第二轮收口已真实落地。`MemoryRetainService` 现统一通过 `text_memory_policy` 做 selective ingestion 与 scope routing：低价值 chat noise 不再进入正式记忆，工作连续性文本优先落 `work_context`，共享行业知识优先落 `industry`。
+- `2026-04-14` 补充：`recall / activation / Runtime Center memory surface` 现统一走 `retrieval_budget`，按固定 related-scope 顺序 `work_context -> task -> agent -> industry -> global` 读取，并施加显式 fetch budget；formal durable text memory 也已补上 `canonical_compaction`，重复稳定文本 anchor 会合并成 canonical 内容，不再无限 append。
+- `2026-04-14` 补充：旧 `src/copaw/agents/memory/memory_manager.py` 兼容壳已物理删除；`agents.memory` 不再导出该别名，runtime/agent/hook 现统一只认 `ConversationCompactionService`。它现在只负责私有会话压缩，不再承担正式记忆写入或召回职责。
+- `2026-04-14` 补充：旧 `memory_fact_index` 历史库自动补列/自动升级也已退出正式支持面；当前基线只保证 fresh canonical state schema。若本地还残留旧 memory db，按“删库重建”处理，不再继续扩写这条兼容链。
 - 硬边界：persisted relation view 仍然只是 derived-only read model，来源仍是 `MemoryFactIndexRecord + MemoryEntityViewRecord + MemoryOpinionViewRecord` 的派生组合，不是第二真相源，也不是 graph-native 写入主链。当前通用 `POST /runtime-center/memory/rebuild` 仍只负责 fact-index rebuild；relation rebuild 目前仍是显式 `DerivedMemoryIndexService.rebuild_relation_views(...)` 能力，而不是自动接入所有 memory rebuild 路径。
 
 结论：

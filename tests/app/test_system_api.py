@@ -32,26 +32,6 @@ class FakeProviderManager:
         return list(self._fallback)
 
 
-class FakeMemoryManager:
-    def runtime_health_payload(self) -> dict[str, object]:
-        return {
-            "vector_enabled": False,
-            "vector_disable_reason_code": "missing_embedding_model_name",
-            "vector_disable_reason": (
-                "Vector search disabled. EMBEDDING_API_KEY is configured, "
-                "but EMBEDDING_MODEL_NAME is missing and no provider "
-                "default could be inferred."
-            ),
-            "embedding_model_name": "",
-            "embedding_model_inferred": False,
-            "embedding_base_url": "https://example.com/v1",
-            "embedding_api_key_configured": True,
-            "embedding_follow_active_provider": True,
-            "fts_enabled": True,
-            "memory_store_backend": "local",
-        }
-
-
 class FakeLoopTask:
     def __init__(
         self,
@@ -105,7 +85,6 @@ def build_app(tmp_path: Path) -> FastAPI:
     app.state.runtime_event_bus = object()
     app.state.governance_service = object()
     app.state.cron_manager = object()
-    app.state.memory_manager = FakeMemoryManager()
     app.state.startup_recovery_summary = {"reason": "startup", "hydrated_tasks": 2}
     app.state.runtime_provider = FakeProviderManager()
     return app

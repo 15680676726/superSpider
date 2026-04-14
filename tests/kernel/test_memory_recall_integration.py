@@ -551,6 +551,71 @@ def test_retain_chat_writeback_isolates_same_source_ref_across_work_contexts(tmp
     assert hits_b[0].scope_id == "ctx-b"
 
 
+def test_truth_first_recall_uses_related_scope_fallback_chain(tmp_path) -> None:
+    store = SQLiteStateStore(tmp_path / "memory.sqlite3")
+    store.initialize()
+    knowledge_repo = SqliteKnowledgeChunkRepository(store)
+    strategy_repo = SqliteStrategyMemoryRepository(store)
+    fact_repo = SqliteMemoryFactIndexRepository(store)
+    entity_repo = SqliteMemoryEntityViewRepository(store)
+    opinion_repo = SqliteMemoryOpinionViewRepository(store)
+    reflection_repo = SqliteMemoryReflectionRunRepository(store)
+    derived = DerivedMemoryIndexService(
+        fact_index_repository=fact_repo,
+        entity_view_repository=entity_repo,
+        opinion_view_repository=opinion_repo,
+        reflection_run_repository=reflection_repo,
+        knowledge_repository=knowledge_repo,
+        strategy_repository=strategy_repo,
+    )
+    reflection = MemoryReflectionService(
+        derived_index_service=derived,
+        entity_view_repository=entity_repo,
+        opinion_view_repository=opinion_repo,
+        reflection_run_repository=reflection_repo,
+    )
+    knowledge = StateKnowledgeService(
+        repository=knowledge_repo,
+        derived_index_service=derived,
+        reflection_service=reflection,
+    )
+    recall = MemoryRecallService(derived_index_service=derived)
+
+    knowledge.remember_fact(
+        title="Current work context note",
+        content="This work context is focused on partner follow-up sequencing.",
+        scope_type="work_context",
+        scope_id="ctx-fallback",
+        role_bindings=["execution-core"],
+        tags=["follow-up"],
+    )
+    knowledge.remember_fact(
+        title="Industry fallback note",
+        content="Only approve outbound after evidence review completes.",
+        scope_type="industry",
+        scope_id="industry-1",
+        role_bindings=["execution-core"],
+        tags=["policy"],
+    )
+
+    hits = recall.recall(
+        query="approve outbound after evidence review",
+        work_context_id="ctx-fallback",
+        industry_instance_id="industry-1",
+        role="execution-core",
+        include_related_scopes=True,
+        limit=5,
+    ).hits
+
+    assert hits
+    assert hits[0].scope_type == "work_context"
+    assert hits[0].source_type == "memory_profile"
+    assert any(
+        item.scope_type == "industry" and item.title == "Industry fallback note"
+        for item in hits
+    )
+
+
 @pytest.mark.asyncio
 async def test_media_analysis_followup_updates_existing_analysis_work_context(tmp_path) -> None:
     store = SQLiteStateStore(tmp_path / "state.sqlite3")

@@ -12,6 +12,7 @@ from agentscope.agent._react_agent import _MemoryMark, ReActAgent
 
 from copaw.config import load_config
 from copaw.constant import MEMORY_COMPACT_KEEP_RECENT
+from ...memory.conversation_compaction_service import ConversationCompactionService
 from ..utils import (
     check_valid_messages,
     safe_count_message_tokens,
@@ -19,7 +20,6 @@ from ..utils import (
 )
 
 if TYPE_CHECKING:
-    from ..memory import MemoryManager
     from reme.memory.file_based import ReMeInMemoryMemory
 
 logger = logging.getLogger(__name__)
@@ -33,13 +33,16 @@ class MemoryCompactionHook:
     messages while summarizing older conversation history.
     """
 
-    def __init__(self, memory_manager: "MemoryManager"):
+    def __init__(
+        self,
+        conversation_compaction_service: ConversationCompactionService,
+    ):
         """Initialize memory compaction hook.
 
         Args:
-            memory_manager: Memory manager instance for compaction
+            conversation_compaction_service: Private conversation compaction service
         """
-        self.memory_manager = memory_manager
+        self.conversation_compaction_service = conversation_compaction_service
 
     async def __call__(
         self,
@@ -65,7 +68,7 @@ class MemoryCompactionHook:
         """
         try:
             memory: "ReMeInMemoryMemory" = agent.memory
-            token_counter = getattr(self.memory_manager, "token_counter", None)
+            token_counter = getattr(self.conversation_compaction_service, "token_counter", None)
 
             system_prompt = getattr(agent, "sys_prompt", "") or ""
             compressed_summary = memory.get_compressed_summary()
@@ -113,20 +116,20 @@ class MemoryCompactionHook:
             if (
                 enable_tool_result_compact
                 and tool_result_compact_keep_n > 0
-                and hasattr(self.memory_manager, "compact_tool_result")
+                and hasattr(self.conversation_compaction_service, "compact_tool_result")
             ):
                 compact_msgs = messages[:-tool_result_compact_keep_n]
-                await self.memory_manager.compact_tool_result(compact_msgs)
+                await self.conversation_compaction_service.compact_tool_result(compact_msgs)
 
             memory_compact_reserve = int(
                 getattr(running_config, "memory_compact_reserve", 0),
             )
-            if hasattr(self.memory_manager, "check_context"):
+            if hasattr(self.conversation_compaction_service, "check_context"):
                 (
                     messages_to_compact,
                     _,
                     is_valid,
-                ) = await self.memory_manager.check_context(
+                ) = await self.conversation_compaction_service.check_context(
                     messages=messages,
                     memory_compact_threshold=left_compact_threshold,
                     memory_compact_reserve=memory_compact_reserve,
@@ -163,7 +166,7 @@ class MemoryCompactionHook:
             if not messages_to_compact:
                 return None
 
-            compact_content = await self.memory_manager.compact_memory(
+            compact_content = await self.conversation_compaction_service.compact_memory(
                 messages=messages_to_compact,
                 previous_summary=memory.get_compressed_summary(),
             )

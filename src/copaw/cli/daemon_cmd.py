@@ -23,7 +23,7 @@ from ..constant import WORKING_DIR
 def _context() -> DaemonContext:
     return DaemonContext(
         working_dir=WORKING_DIR,
-        memory_manager=None,
+        conversation_compaction_service=None,
         restart_callback=None,
     )
 
@@ -35,7 +35,7 @@ def daemon_group() -> None:
 
 @daemon_group.command("status")
 def status_cmd() -> None:
-    """Show daemon status (config, working dir, memory manager)."""
+    """Show daemon status (config, working dir, conversation compaction)."""
     ctx = _context()
     click.echo(run_daemon_status(ctx))
 

@@ -1859,7 +1859,7 @@ def test_kernel_turn_executor_syncs_shared_query_execution_service_dependencies(
     assert query_execution_service.synced["kernel_dispatcher"] is kernel_dispatcher
 
 
-def test_kernel_turn_executor_syncs_conversation_compaction_service_without_legacy_memory_manager() -> None:
+def test_kernel_turn_executor_syncs_conversation_compaction_service_without_legacy_memory_alias() -> None:
     conversation_compaction_service = object()
     query_execution_service = FakeQueryExecutionService()
     executor = KernelTurnExecutor(
@@ -1895,21 +1895,21 @@ def test_runtime_host_syncs_turn_executor_session_backend() -> None:
 
 
 @pytest.mark.asyncio
-async def test_runtime_host_starts_conversation_compaction_service_without_memory_manager(
+async def test_runtime_host_starts_conversation_compaction_service_without_legacy_memory_alias(
     monkeypatch,
 ) -> None:
-    memory_manager_started: list[str] = []
+    legacy_alias_started: list[str] = []
     compaction_service_started: list[object] = []
 
-    class FakeMemoryManager:
+    class FakeLegacyMemoryAlias:
         def __init__(self, **_kwargs) -> None:
-            memory_manager_started.append("created")
+            legacy_alias_started.append("created")
 
         async def start(self) -> None:
-            memory_manager_started.append("started")
+            legacy_alias_started.append("started")
 
         async def close(self) -> None:
-            memory_manager_started.append("closed")
+            legacy_alias_started.append("closed")
 
     class FakeConversationCompactionService:
         def __init__(self, **_kwargs) -> None:
@@ -1923,7 +1923,7 @@ async def test_runtime_host_starts_conversation_compaction_service_without_memor
 
     monkeypatch.setattr(
         "copaw.app.runtime_host.MemoryManager",
-        FakeMemoryManager,
+        FakeLegacyMemoryAlias,
         raising=False,
     )
     monkeypatch.setattr(
@@ -1936,7 +1936,7 @@ async def test_runtime_host_starts_conversation_compaction_service_without_memor
     await host.start()
     await host.stop()
 
-    assert memory_manager_started == []
+    assert legacy_alias_started == []
     assert compaction_service_started[1:] == ["started", "closed"]
 
 

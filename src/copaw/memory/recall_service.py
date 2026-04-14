@@ -9,6 +9,12 @@ from .models import (
     MemoryScopeSelector,
 )
 from .profile_service import MemoryProfileService
+from .retrieval_budget import (
+    activation_fetch_limit,
+    clamp_recall_hit_limit,
+    ordered_scope_chain,
+    scope_priority_boost,
+)
 from ..state import MemoryFactIndexRecord
 
 
@@ -113,10 +119,18 @@ class MemoryRecallService:
         )
         requested_backend = str(backend or "").strip().lower() or None
         resolved_scope_type, resolved_scope_id = _resolve_scope(selector)
+        hit_limit = clamp_recall_hit_limit(limit)
+        entries = self._collect_budgeted_entries(
+            selector=selector,
+            role=role,
+            per_scope_limit=activation_fetch_limit(hit_limit),
+        )
         views = self._profile_service.build_views(
             scope_type=resolved_scope_type,
             scope_id=resolved_scope_id,
             role=role,
+            selector=selector,
+            entries=entries,
         )
         query_tokens = set(tokenize(query))
         fallback_reason = None
@@ -130,6 +144,11 @@ class MemoryRecallService:
         profile_text = views.profile.as_text()
         if profile_text:
             profile_score = 100.0 + _text_score(profile_text, query_tokens)
+            profile_score += scope_priority_boost(
+                selector=selector,
+                scope_type=views.profile.scope_type,
+                scope_id=views.profile.scope_id,
+            )
             hits.append(
                 (
                     profile_score,
@@ -171,6 +190,11 @@ class MemoryRecallService:
                 query_tokens,
             )
             score += 6.0 * _recency_score(entry)
+            score += scope_priority_boost(
+                selector=selector,
+                scope_type=entry.scope_type,
+                scope_id=entry.scope_id,
+            )
             hits.append((score, self._entry_to_hit(entry=entry, score=score)))
 
         for entry in views.history:
@@ -181,6 +205,11 @@ class MemoryRecallService:
                 query_tokens,
             )
             score += 3.0 * _recency_score(entry)
+            score += scope_priority_boost(
+                selector=selector,
+                scope_type=entry.scope_type,
+                scope_id=entry.scope_id,
+            )
             hits.append((score, self._entry_to_hit(entry=entry, score=score)))
 
         hits.sort(
@@ -190,7 +219,7 @@ class MemoryRecallService:
             ),
             reverse=True,
         )
-        limited_hits = [hit for _score, hit in hits[: max(1, int(limit))]]
+        limited_hits = [hit for _score, hit in hits[:hit_limit]]
         return MemoryRecallResponse(
             query=query,
             backend_requested=requested_backend,
@@ -198,6 +227,38 @@ class MemoryRecallService:
             fallback_reason=fallback_reason,
             hits=limited_hits,
         )
+
+    def _collect_budgeted_entries(
+        self,
+        *,
+        selector: MemoryScopeSelector,
+        role: str | None,
+        per_scope_limit: int,
+    ) -> list[MemoryFactIndexRecord]:
+        getter = getattr(self._derived_index_service, "list_fact_entries", None)
+        if not callable(getter):
+            return []
+        entries: list[MemoryFactIndexRecord] = []
+        seen_ids: set[str] = set()
+        for scope_type, scope_id in ordered_scope_chain(selector):
+            scoped_entries = list(
+                getter(
+                    scope_type=scope_type,
+                    scope_id=scope_id,
+                    limit=per_scope_limit,
+                )
+                or [],
+            )
+            for entry in scoped_entries:
+                entry_id = str(getattr(entry, "id", "") or "")
+                if entry_id and entry_id in seen_ids:
+                    continue
+                if not _role_matches(entry, role):
+                    continue
+                if entry_id:
+                    seen_ids.add(entry_id)
+                entries.append(entry)
+        return entries
 
     def _entry_to_hit(
         self,

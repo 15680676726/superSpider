@@ -59,7 +59,7 @@ class FakeMemory:
         return len(msg_ids)
 
 
-class FakeMemoryManager:
+class FakeConversationCompactionService:
     def __init__(self) -> None:
         self.summary_task_messages: list[list[FakeMsg]] = []
         self.compact_calls: list[dict[str, Any]] = []
@@ -143,9 +143,9 @@ async def test_compaction_triggers_on_total_context_budget(
         1,
     )
 
-    memory_manager = FakeMemoryManager()
+    conversation_compaction_service = FakeConversationCompactionService()
     hook = MemoryCompactionHook(
-        memory_manager=memory_manager,
+        conversation_compaction_service=conversation_compaction_service,
     )
 
     # message_tokens = 950 (at threshold),
@@ -162,8 +162,8 @@ async def test_compaction_triggers_on_total_context_budget(
 
     await hook(agent=agent, kwargs={})
 
-    assert memory_manager.compact_calls
-    assert not memory_manager.summary_task_messages
+    assert conversation_compaction_service.compact_calls
+    assert not conversation_compaction_service.summary_task_messages
     assert agent.memory.updated_summary == "compacted-summary"
     assert agent.memory.marked_ids == ["old-1", "old-2"]
     assert agent.formatter.calls == 1
@@ -193,9 +193,9 @@ async def test_compaction_not_triggered_when_total_under_threshold(
         1,
     )
 
-    memory_manager = FakeMemoryManager()
+    conversation_compaction_service = FakeConversationCompactionService()
     hook = MemoryCompactionHook(
-        memory_manager=memory_manager,
+        conversation_compaction_service=conversation_compaction_service,
     )
 
     # message_tokens = 800
@@ -211,8 +211,8 @@ async def test_compaction_not_triggered_when_total_under_threshold(
 
     await hook(agent=agent, kwargs={})
 
-    assert not memory_manager.compact_calls
-    assert not memory_manager.summary_task_messages
+    assert not conversation_compaction_service.compact_calls
+    assert not conversation_compaction_service.summary_task_messages
     assert agent.memory.updated_summary is None
     assert agent.memory.marked_ids == []
     assert agent.formatter.calls == 1
@@ -268,7 +268,7 @@ async def test_compaction_hook_accepts_conversation_compaction_service(
         list(messages),
     )
 
-    hook = MemoryCompactionHook(memory_manager=service)
+    hook = MemoryCompactionHook(conversation_compaction_service=service)
     messages = [
         FakeMsg(id="sys", role="system", token_count=250),
         FakeMsg(id="old-1", role="user", token_count=250),

@@ -4,7 +4,9 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .canonical_compaction import merge_canonical_text, select_canonical_text_anchor
 from .derived_index_service import normalize_scope_id, parse_memory_document_id
+from .text_memory_policy import decide_formal_text_write
 
 
 _NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
@@ -39,12 +41,22 @@ class MemoryRetainService:
     def retain_agent_report(self, report: object) -> object | None:
         industry_instance_id = str(getattr(report, "industry_instance_id", "") or "").strip()
         work_context_id = str(getattr(report, "work_context_id", "") or "").strip()
-        scope_type = "work_context" if work_context_id else "industry"
-        scope_id = work_context_id or industry_instance_id
-        if scope_id:
+        decision = decide_formal_text_write(
+            event_kind="agent_report",
+            title=str(getattr(report, "headline", "") or "Agent report"),
+            content=str(getattr(report, "summary", "") or ""),
+            tags=[
+                "agent-report",
+                str(getattr(report, "status", "") or "recorded"),
+                str(getattr(report, "result", "") or "unknown"),
+            ],
+            industry_instance_id=industry_instance_id or None,
+            work_context_id=work_context_id or None,
+        )
+        if decision.allow_formal_memory and decision.scope_id:
             self._upsert_memory_chunk(
                 chunk_id=f"retain:agent-report:{getattr(report, 'id', 'unknown')}",
-                document_id=f"memory:{scope_type}:{scope_id}",
+                document_id=f"memory:{decision.scope_type}:{decision.scope_id}",
                 title=str(getattr(report, "headline", "") or "Agent report"),
                 content="\n".join(
                     part
@@ -68,8 +80,8 @@ class MemoryRetainService:
             )
         self._derived_index_service.upsert_agent_report(report)
         self._reflect_scope(
-            scope_type=scope_type,
-            scope_id=scope_id or "runtime",
+            scope_type=decision.scope_type,
+            scope_id=decision.scope_id or "runtime",
             owner_agent_id=str(getattr(report, "owner_agent_id", "") or "").strip() or None,
             industry_instance_id=industry_instance_id or None,
             trigger_kind="retain-agent-report",
@@ -81,32 +93,45 @@ class MemoryRetainService:
             run=run,
             routine=routine,
         )
-        self._upsert_memory_chunk(
-            chunk_id=f"retain:routine-run:{getattr(run, 'id', 'unknown')}",
-            document_id=f"memory:{scope_type}:{scope_id}",
+        decision = decide_formal_text_write(
+            event_kind="routine_run",
             title=str(getattr(routine, "name", "") or "Routine run"),
-            content="\n".join(
-                part
-                for part in (
-                    f"Status: {getattr(run, 'status', '')}" if getattr(run, "status", None) else "",
-                    f"Failure: {getattr(run, 'failure_class', '')}" if getattr(run, "failure_class", None) else "",
-                    f"Fallback: {getattr(run, 'fallback_mode', '')}" if getattr(run, "fallback_mode", None) else "",
-                    str(getattr(run, "output_summary", "") or ""),
-                )
-                if part
-            ).strip(),
-            source_ref=f"routine-run:{getattr(run, 'id', '')}",
-            role_bindings=[],
+            content=str(getattr(run, "output_summary", "") or ""),
             tags=[
-                "retain",
                 "routine-run",
                 str(getattr(run, "status", "") or "unknown"),
             ],
-        )
-        self._derived_index_service.upsert_routine_run(run, routine=routine)
-        self._reflect_scope(
+            industry_instance_id=industry_instance_id,
             scope_type=scope_type,
             scope_id=scope_id,
+        )
+        if decision.allow_formal_memory:
+            self._upsert_memory_chunk(
+                chunk_id=f"retain:routine-run:{getattr(run, 'id', 'unknown')}",
+                document_id=f"memory:{decision.scope_type}:{decision.scope_id}",
+                title=str(getattr(routine, "name", "") or "Routine run"),
+                content="\n".join(
+                    part
+                    for part in (
+                        f"Status: {getattr(run, 'status', '')}" if getattr(run, "status", None) else "",
+                        f"Failure: {getattr(run, 'failure_class', '')}" if getattr(run, "failure_class", None) else "",
+                        f"Fallback: {getattr(run, 'fallback_mode', '')}" if getattr(run, "fallback_mode", None) else "",
+                        str(getattr(run, "output_summary", "") or ""),
+                    )
+                    if part
+                ).strip(),
+                source_ref=f"routine-run:{getattr(run, 'id', '')}",
+                role_bindings=[],
+                tags=[
+                    "retain",
+                    "routine-run",
+                    str(getattr(run, "status", "") or "unknown"),
+                ],
+            )
+        self._derived_index_service.upsert_routine_run(run, routine=routine)
+        self._reflect_scope(
+            scope_type=decision.scope_type,
+            scope_id=decision.scope_id,
             owner_agent_id=str(getattr(run, "owner_agent_id", "") or "").strip() or None,
             industry_instance_id=industry_instance_id,
             trigger_kind="retain-routine-run",
@@ -126,23 +151,29 @@ class MemoryRetainService:
     ) -> object | None:
         normalized_industry_instance_id = str(industry_instance_id or "").strip()
         normalized_work_context_id = str(work_context_id or "").strip() or None
-        scope_type = "work_context" if normalized_work_context_id else "industry"
-        scope_id = normalized_work_context_id or normalized_industry_instance_id
-        if not scope_id:
+        decision = decide_formal_text_write(
+            event_kind="chat_writeback",
+            title=title,
+            content=content,
+            tags=tags,
+            industry_instance_id=normalized_industry_instance_id or None,
+            work_context_id=normalized_work_context_id,
+        )
+        if not decision.allow_formal_memory or not decision.scope_id:
             return None
         normalized_source_ref = str(source_ref or "").strip()
         chunk_id = ":".join(
             [
                 "retain",
                 "chat-writeback",
-                _chunk_token(scope_type, fallback="scope"),
-                _chunk_token(scope_id, fallback="runtime"),
+                _chunk_token(decision.scope_type, fallback="scope"),
+                _chunk_token(decision.scope_id, fallback="runtime"),
                 _chunk_token(normalized_source_ref, fallback="source"),
             ],
         )
         self._upsert_memory_chunk(
             chunk_id=chunk_id,
-            document_id=f"memory:{scope_type}:{scope_id}",
+            document_id=f"memory:{decision.scope_type}:{decision.scope_id}",
             title=title,
             content=content,
             source_ref=normalized_source_ref or None,
@@ -150,27 +181,27 @@ class MemoryRetainService:
             tags=[
                 "retain",
                 "chat-writeback",
-                f"scope:{scope_type}",
-                f"scope-id:{normalize_scope_id(scope_id)}",
+                f"scope:{decision.scope_type}",
+                f"scope-id:{normalize_scope_id(decision.scope_id)}",
                 *(tags or []),
             ],
         )
         self._reflect_scope(
-            scope_type=scope_type,
-            scope_id=scope_id,
+            scope_type=decision.scope_type,
+            scope_id=decision.scope_id,
             industry_instance_id=normalized_industry_instance_id or None,
             trigger_kind="retain-chat-writeback",
         )
         self._mark_scope_snapshot_dirty(
-            scope_type=scope_type,
-            scope_id=scope_id,
+            scope_type=decision.scope_type,
+            scope_id=decision.scope_id,
             industry_instance_id=normalized_industry_instance_id or None,
         )
         return {
             "industry_instance_id": normalized_industry_instance_id,
             "work_context_id": normalized_work_context_id,
-            "scope_type": scope_type,
-            "scope_id": scope_id,
+            "scope_type": decision.scope_type,
+            "scope_id": decision.scope_id,
             "source_ref": normalized_source_ref,
         }
 
@@ -199,11 +230,24 @@ class MemoryRetainService:
         list_chunks = getattr(service, "list_chunks", None)
         if not callable(upsert_chunk):
             return None
+        related_chunks = list_chunks(document_id=document_id, limit=None) if callable(list_chunks) else []
         existing = get_chunk(chunk_id) if callable(get_chunk) else None
+        if existing is None and related_chunks:
+            existing = select_canonical_text_anchor(
+                related_chunks,
+                title=title,
+                content=content,
+                source_ref=source_ref,
+                tags=tags,
+            )
         if existing is not None:
+            chunk_id = str(getattr(existing, "id"))
+            content = merge_canonical_text(
+                existing_content=str(getattr(existing, "content", "") or ""),
+                incoming_content=content,
+            )
             chunk_index = int(getattr(existing, "chunk_index", 0) or 0)
-        elif callable(list_chunks):
-            related_chunks = list_chunks(document_id=document_id, limit=None)
+        elif related_chunks:
             chunk_index = max((int(getattr(item, "chunk_index", 0) or 0) for item in related_chunks), default=-1) + 1
         else:
             chunk_index = 0

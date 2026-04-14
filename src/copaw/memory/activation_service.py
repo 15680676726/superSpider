@@ -12,6 +12,7 @@ from .activation_models import (
     ActivationResult,
     KnowledgeNeuron,
 )
+from .retrieval_budget import activation_fetch_limit
 from .relation_traversal import pack_relation_paths, traversal_score
 from ..state.strategy_memory_service import resolve_strategy_payload
 
@@ -84,6 +85,7 @@ class MemoryActivationService:
         )
         resolved_scope_type = self._resolve_scope_type(activation_input)
         resolved_scope_id = self._resolve_scope_id(activation_input)
+        fetch_limit = activation_fetch_limit(limit)
         fact_entries = []
         list_fact_entries = getattr(self._derived_index_service, "list_fact_entries", None)
         if callable(list_fact_entries):
@@ -93,7 +95,7 @@ class MemoryActivationService:
                     scope_id=resolved_scope_id,
                     owner_agent_id=owner_agent_id,
                     industry_instance_id=industry_instance_id,
-                    limit=max(limit * 2, 12),
+                    limit=fetch_limit,
                 )
                 or [],
             )
@@ -103,7 +105,7 @@ class MemoryActivationService:
             scope_id=resolved_scope_id,
             owner_agent_id=owner_agent_id,
             industry_instance_id=industry_instance_id,
-            limit=max(limit, 12),
+            limit=fetch_limit,
         )
         opinion_views = self._list_derived_views(
             method_name="list_opinion_views",
@@ -111,7 +113,7 @@ class MemoryActivationService:
             scope_id=resolved_scope_id,
             owner_agent_id=owner_agent_id,
             industry_instance_id=industry_instance_id,
-            limit=max(limit, 12),
+            limit=fetch_limit,
         )
         relation_views = self._list_derived_views(
             method_name="list_relation_views",
@@ -119,7 +121,7 @@ class MemoryActivationService:
             scope_id=resolved_scope_id,
             owner_agent_id=owner_agent_id,
             industry_instance_id=industry_instance_id,
-            limit=max(limit, 12),
+            limit=fetch_limit,
         )
         strategy_payload = self._resolve_strategy_payload(
             activation_input=activation_input,

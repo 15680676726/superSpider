@@ -780,24 +780,24 @@
 
 ---
 
-### 5.8 `MemoryManager` -> `Knowledge/Evidence adjunct service`
+### 5.8 `MemoryManager` -> retired compatibility shell
 
-- 当前类：`src/copaw/agents/memory/memory_manager.py`
-- 当前职责：长期记忆与检索增强
-- 未来归属：
-  - `KnowledgeService`
-  - `MemoryRecallService`
-  - `MemoryReflectionService`
-  - `DerivedMemoryIndexService`
-  - `Evidence/Memory adjunct`
-- 策略：`bridge -> shrink`
+- 已退役类：`src/copaw/agents/memory/memory_manager.py`（`2026-04-14` 已物理删除）
+- 当前职责拆分归属：
+  - formal durable memory write: `MemoryRetainService` + `text_memory_policy`
+  - formal durable memory read: `MemoryRecallService`
+  - bounded activation/read surfaces: `MemoryActivationService` / `MemorySurfaceService` / `retrieval_budget`
+  - derived index / reflection: `DerivedMemoryIndexService` / `MemoryReflectionService`
+  - private transcript compaction only: `ConversationCompactionService`
+- 策略：`retired -> delete complete`
 - 说明：
-  - 记忆应继续存在
-  - 但不能替代统一运行真相和证据链
-  - durable truth 应继续落在 `StrategyMemoryRecord / KnowledgeChunkRecord / EvidenceRecord`
+  - 记忆仍然存在，但正式 durable truth 只允许落在 `StrategyMemoryRecord / KnowledgeChunkRecord / EvidenceRecord`
   - `2026-03-30` 起 memory 终态已锁定为 `truth-first` 与 `no-vector formal memory`
+  - `2026-04-14` 起 formal text memory 已补齐 selective ingestion、稳定 scope routing、bounded related-scope recall budget 与 canonical text compaction
+  - 旧 memory db 的 additive auto-upgrade 不再属于正式支持范围；当前按 fresh canonical state schema 作为基线
+  - `ConversationCompactionService` 只处理私有会话压缩，不再承担正式记忆写入/召回 owner
   - `QMD / LanceDB / vector` 不再作为正式 runtime/operator contract 目标保留；当前相关提法应视为 physically removed residuals，而不是待清理产品路径
-  - 不允许把 sidecar、Markdown memory 文件或 `MemoryManager` 自身重新升级为第二真相源
+  - 不允许把 sidecar、Markdown memory 文件或已退役 `MemoryManager` 重新升级为第二真相源
 
 ---
 

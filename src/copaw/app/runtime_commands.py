@@ -91,7 +91,7 @@ async def run_command_path(
     request,
     msgs,
     session_backend,
-    memory_manager,
+    conversation_compaction_service,
     restart_callback,
 ) -> AsyncIterator[tuple]:
     """Run daemon/conversation commands without entering the full query path."""
@@ -129,7 +129,7 @@ async def run_command_path(
             )
         context = DaemonContext(
             load_config_fn=load_config,
-            memory_manager=memory_manager,
+            conversation_compaction_service=conversation_compaction_service,
             restart_callback=restart_callback,
         )
         message = await handler.handle_daemon_command(query, context)
@@ -152,8 +152,8 @@ async def run_command_path(
     conversation_handler = CommandHandler(
         agent_name="Spider Mesh",
         memory=lightweight_agent.memory,
-        memory_manager=memory_manager,
-        enable_memory_manager=memory_manager is not None,
+        conversation_compaction_service=conversation_compaction_service,
+        enable_memory_compaction=conversation_compaction_service is not None,
     )
     try:
         response_msg = await conversation_handler.handle_conversation_command(query)

@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
+from ..memory.canonical_compaction import merge_canonical_text, select_canonical_text_anchor
 from ..industry.identity import normalize_industry_role_id
 from .models_knowledge import KnowledgeChunkRecord
 from .repositories import BaseKnowledgeChunkRepository
@@ -124,10 +125,31 @@ class StateKnowledgeService:
             scope_id=normalized_scope_id,
         )
         existing_chunks = self._repository.list_chunks(document_id=document_id)
+        merged_tags = _normalize_strings(["memory", "fact", *(tags or [])])
+        stable_anchor = _select_memory_anchor(
+            existing_chunks,
+            title=title,
+            content=content,
+            source_ref=source_ref,
+            tags=merged_tags,
+        )
+        if stable_anchor is not None:
+            return self.upsert_chunk(
+                chunk_id=stable_anchor.id,
+                document_id=document_id,
+                title=title,
+                content=merge_canonical_text(
+                    existing_content=stable_anchor.content,
+                    incoming_content=content,
+                ),
+                source_ref=source_ref,
+                chunk_index=stable_anchor.chunk_index,
+                role_bindings=role_bindings,
+                tags=merged_tags,
+            )
         next_chunk_index = (
             max((chunk.chunk_index for chunk in existing_chunks), default=-1) + 1
         )
-        merged_tags = _normalize_strings(["memory", "fact", *(tags or [])])
         return self.upsert_chunk(
             document_id=document_id,
             title=title,
@@ -169,16 +191,26 @@ class StateKnowledgeService:
             global_scope_id=global_scope_id,
             include_related_scopes=include_related_scopes,
         )
+        candidate_document_set = set(candidate_documents)
+        scope_priority = {
+            document_id: len(candidate_documents) - index
+            for index, document_id in enumerate(candidate_documents)
+        }
         chunks = [
             chunk
             for chunk in self._repository.list_chunks()
             if _is_memory_document_id(chunk.document_id)
             and (
-                not candidate_documents
-                or chunk.document_id in candidate_documents
+                not candidate_document_set
+                or chunk.document_id in candidate_document_set
             )
         ]
-        ranked = self._filter_and_rank(chunks, query=query, role=role)
+        ranked = self._filter_and_rank(
+            chunks,
+            query=query,
+            role=role,
+            scope_priority=scope_priority,
+        )
         return ranked if limit is None else ranked[:limit]
 
     def retrieve_memory(
@@ -233,6 +265,12 @@ class StateKnowledgeService:
     ) -> KnowledgeChunkRecord:
         now = datetime.now(timezone.utc)
         existing = self._repository.get_chunk(chunk_id) if chunk_id else None
+        if (
+            existing is not None
+            and existing.document_id != document_id
+            and _is_memory_document_id(existing.document_id)
+        ):
+            raise ValueError("Formal memory scope drift is not allowed for existing chunk")
         record = KnowledgeChunkRecord(
             id=chunk_id or (existing.id if existing is not None else str(uuid4())),
             document_id=document_id,
@@ -314,10 +352,11 @@ class StateKnowledgeService:
         *,
         query: str | None,
         role: str | None,
+        scope_priority: dict[str, int] | None = None,
     ) -> list[KnowledgeChunkRecord]:
         normalized_role = role.strip().lower() if isinstance(role, str) and role.strip() else None
         query_terms = _tokenize(query)
-        ranked: list[tuple[int, str, KnowledgeChunkRecord]] = []
+        ranked: list[tuple[int, float, str, KnowledgeChunkRecord]] = []
         for chunk in chunks:
             if normalized_role and not _matches_role(chunk, normalized_role):
                 continue
@@ -327,9 +366,10 @@ class StateKnowledgeService:
                     continue
             else:
                 score = 1
-            ranked.append((score, str(chunk.updated_at), chunk))
-        ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
-        return [item[2] for item in ranked]
+            priority = float((scope_priority or {}).get(chunk.document_id, 0))
+            ranked.append((priority, score, str(chunk.updated_at), chunk))
+        ranked.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+        return [item[3] for item in ranked]
 
     def _reflect_memory_scope(self, document_id: str) -> None:
         scope = _parse_memory_document_id(document_id)
@@ -521,6 +561,23 @@ def _parse_memory_document_id(document_id: str) -> dict[str, str] | None:
     }
 
 
+def _select_memory_anchor(
+    chunks: list[KnowledgeChunkRecord],
+    *,
+    title: str,
+    content: str,
+    source_ref: str | None,
+    tags: list[str] | None,
+) -> KnowledgeChunkRecord | None:
+    return select_canonical_text_anchor(
+        chunks,
+        title=title,
+        content=content,
+        source_ref=source_ref,
+        tags=tags,
+    )
+
+
 def _candidate_memory_document_ids(
     *,
     scope_type: str | None,
@@ -531,31 +588,39 @@ def _candidate_memory_document_ids(
     industry_instance_id: str | None,
     global_scope_id: str | None,
     include_related_scopes: bool,
-) -> set[str]:
-    candidates: set[str] = set()
-    if scope_type and scope_id:
-        candidates.add(_memory_document_id(scope_type=scope_type, scope_id=scope_id))
-        if not include_related_scopes:
-            return candidates
-    if not include_related_scopes:
-        return candidates
-    for candidate_scope_type, candidate_scope_id in (
-        ("task", task_id),
-        ("work_context", work_context_id),
-        ("agent", agent_id),
-        ("industry", industry_instance_id),
-        ("global", global_scope_id),
-    ):
+) -> list[str]:
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    def _add_candidate(candidate_scope_type: str, candidate_scope_id: str | None) -> None:
         normalized_scope_id = (
             str(candidate_scope_id).strip()
             if isinstance(candidate_scope_id, str)
             else ""
         )
-        if normalized_scope_id:
-            candidates.add(
-                _memory_document_id(
-                    scope_type=candidate_scope_type,
-                    scope_id=normalized_scope_id,
-                ),
-            )
+        if not normalized_scope_id:
+            return
+        document_id = _memory_document_id(
+            scope_type=candidate_scope_type,
+            scope_id=normalized_scope_id,
+        )
+        if document_id in seen:
+            return
+        seen.add(document_id)
+        candidates.append(document_id)
+
+    if scope_type and scope_id:
+        _add_candidate(scope_type, scope_id)
+        if not include_related_scopes:
+            return candidates
+    if not include_related_scopes:
+        return candidates
+    for candidate_scope_type, candidate_scope_id in (
+        ("work_context", work_context_id),
+        ("task", task_id),
+        ("agent", agent_id),
+        ("industry", industry_instance_id),
+        ("global", global_scope_id),
+    ):
+        _add_candidate(candidate_scope_type, candidate_scope_id)
     return candidates

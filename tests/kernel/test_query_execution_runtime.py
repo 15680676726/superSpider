@@ -238,7 +238,7 @@ def test_execution_context_runtime_helpers_are_sourced_from_context_module() -> 
         assert getattr(KernelQueryExecutionService, helper_name).__module__ == expected_module
 
 
-def test_query_execution_runtime_drops_legacy_memory_manager_alias() -> None:
+def test_query_execution_runtime_drops_legacy_memory_alias() -> None:
     assert not hasattr(KernelQueryExecutionService, "set_memory_manager")
 
 

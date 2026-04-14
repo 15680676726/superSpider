@@ -1811,18 +1811,6 @@ _ADDITIVE_SCHEMA_COLUMNS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = 
         ),
     ),
     (
-        "memory_fact_index",
-        (
-            ("memory_type", "TEXT NOT NULL DEFAULT 'fact'"),
-            ("relation_kind", "TEXT NOT NULL DEFAULT 'references'"),
-            ("supersedes_entry_id", "TEXT"),
-            ("is_latest", "INTEGER NOT NULL DEFAULT 1"),
-            ("valid_from", "TEXT"),
-            ("expires_at", "TEXT"),
-            ("confidence_tier", "TEXT NOT NULL DEFAULT 'standard'"),
-        ),
-    ),
-    (
         "schedules",
         (
             ("spec_payload_json", "TEXT NOT NULL DEFAULT '{}'"),

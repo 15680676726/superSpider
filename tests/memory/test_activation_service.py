@@ -460,6 +460,40 @@ def test_activation_service_activate_for_query_pulls_entity_and_opinion_views() 
     assert calls["opinion"][0]["owner_agent_id"] == "agent-main-brain"
 
 
+def test_activation_service_activate_for_query_uses_bounded_fetch_limits() -> None:
+    calls: dict[str, list[dict[str, object]]] = {
+        "fact": [],
+        "entity": [],
+        "opinion": [],
+        "relation": [],
+    }
+
+    service = MemoryActivationService(
+        derived_index_service=SimpleNamespace(
+            list_fact_entries=lambda **kwargs: calls["fact"].append(dict(kwargs)) or [],
+            list_entity_views=lambda **kwargs: calls["entity"].append(dict(kwargs)) or [],
+            list_opinion_views=lambda **kwargs: calls["opinion"].append(dict(kwargs)) or [],
+            list_relation_views=lambda **kwargs: calls["relation"].append(dict(kwargs)) or [],
+        ),
+        strategy_memory_service=SimpleNamespace(),
+    )
+
+    result = service.activate_for_query(
+        query="outbound approval blocked",
+        work_context_id="ctx-1",
+        industry_instance_id="industry-1",
+        include_strategy=False,
+        limit=2,
+    )
+
+    assert result.scope_type == "work_context"
+    assert result.scope_id == "ctx-1"
+    assert calls["fact"][0]["limit"] == 4
+    assert calls["entity"][0]["limit"] == 4
+    assert calls["opinion"][0]["limit"] == 4
+    assert calls["relation"][0]["limit"] == 4
+
+
 def test_activation_service_activate_for_query_uses_shared_strategy_resolver_and_relation_views() -> None:
     calls: dict[str, list[dict[str, object]]] = {
         "relation": [],

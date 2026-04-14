@@ -4,6 +4,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from .retrieval_budget import surface_snapshot_limit
+
 logger = logging.getLogger(__name__)
 
 _COMPACTION_VISIBILITY_KEYS = (
@@ -94,6 +96,7 @@ class MemorySurfaceService:
                 "latest_entries": [],
                 "history_entries": [],
             }
+        bounded_limit = surface_snapshot_limit(limit)
         try:
             entries = _sort_truth_first_entries(
                 list(
@@ -102,7 +105,7 @@ class MemorySurfaceService:
                         scope_id=scope_id,
                         owner_agent_id=owner_agent_id,
                         industry_instance_id=industry_instance_id,
-                        limit=limit,
+                        limit=bounded_limit,
                     )
                     or []
                 ),
@@ -146,4 +149,3 @@ class MemorySurfaceService:
                 if payload_mapping:
                     return _normalize_runtime_compaction_visibility(payload_mapping)
         return _normalize_runtime_compaction_visibility(visibility_source)
-

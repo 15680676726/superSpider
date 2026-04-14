@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import pytest
+
 from copaw.state import SQLiteStateStore
 from copaw.state.knowledge_service import StateKnowledgeService
 from copaw.state.repositories import SqliteKnowledgeChunkRepository
@@ -152,3 +154,99 @@ def test_knowledge_service_persists_memory_by_scope_and_retrieves_it(tmp_path) -
     )
     assert len(work_context_memory) == 1
     assert work_context_memory[0].document_id == "memory:work_context:ctx-customer-a"
+
+
+def test_knowledge_service_reuses_memory_anchor_for_same_scope_and_source_ref(tmp_path) -> None:
+    store = SQLiteStateStore(tmp_path / "state.db")
+    repository = SqliteKnowledgeChunkRepository(store)
+    service = StateKnowledgeService(repository=repository)
+
+    first = service.remember_fact(
+        title="Approval follow-up",
+        content="Evidence is required before outbound approval.",
+        scope_type="work_context",
+        scope_id="ctx-1",
+        source_ref="report:followup-1",
+        role_bindings=["execution-core"],
+        tags=["report"],
+    )
+    second = service.remember_fact(
+        title="Approval follow-up",
+        content="Evidence review is required before outbound approval.",
+        scope_type="work_context",
+        scope_id="ctx-1",
+        source_ref="report:followup-1",
+        role_bindings=["execution-core"],
+        tags=["report"],
+    )
+
+    chunks = service.list_chunks(document_id="memory:work_context:ctx-1", limit=None)
+    assert len(chunks) == 1
+    assert chunks[0].id == first.id
+    assert second.id == first.id
+    assert "Evidence review is required" in chunks[0].content
+
+
+def test_knowledge_service_rejects_cross_scope_drift_for_existing_memory_chunk(tmp_path) -> None:
+    store = SQLiteStateStore(tmp_path / "state.db")
+    repository = SqliteKnowledgeChunkRepository(store)
+    service = StateKnowledgeService(repository=repository)
+
+    chunk = service.remember_fact(
+        title="Industry policy",
+        content="Shared policy stays inside industry scope.",
+        scope_type="industry",
+        scope_id="industry-1",
+        source_ref="report:industry-policy-1",
+        role_bindings=["execution-core"],
+        tags=["policy"],
+    )
+
+    with pytest.raises(ValueError, match="scope drift"):
+        service.upsert_chunk(
+            chunk_id=chunk.id,
+            document_id="memory:agent:agent-1",
+            title="Industry policy",
+            content="This should not silently move into agent scope.",
+            source_ref="report:industry-policy-1",
+            chunk_index=chunk.chunk_index,
+            role_bindings=["execution-core"],
+            tags=["memory", "fact", "policy"],
+        )
+
+
+def test_knowledge_service_prefers_work_context_memory_before_broader_scopes(tmp_path) -> None:
+    store = SQLiteStateStore(tmp_path / "state.db")
+    repository = SqliteKnowledgeChunkRepository(store)
+    service = StateKnowledgeService(repository=repository)
+
+    service.remember_fact(
+        title="Onboarding cadence",
+        content="Customer A prefers weekly async check-ins during onboarding.",
+        scope_type="work_context",
+        scope_id="ctx-customer-a",
+        role_bindings=["execution-core"],
+        tags=["customer"],
+    )
+    service.remember_fact(
+        title="Onboarding cadence",
+        content="Customer A prefers weekly async check-ins during onboarding.",
+        scope_type="industry",
+        scope_id="industry-1",
+        role_bindings=["execution-core"],
+        tags=["customer"],
+    )
+
+    memory = service.retrieve_memory(
+        query="weekly async check-ins during onboarding",
+        scope_type="work_context",
+        scope_id="ctx-customer-a",
+        work_context_id="ctx-customer-a",
+        industry_instance_id="industry-1",
+        include_related_scopes=True,
+        role="execution-core",
+        limit=5,
+    )
+
+    assert len(memory) == 2
+    assert memory[0].document_id == "memory:work_context:ctx-customer-a"

@@ -65,15 +65,16 @@ class MemoryProfileService:
         scope_type: str,
         scope_id: str,
         role: str | None = None,
+        selector: MemoryScopeSelector | None = None,
         entries: list[MemoryFactIndexRecord] | None = None,
     ) -> SharedMemoryViews:
-        selector = MemoryScopeSelector(
+        effective_selector = selector or MemoryScopeSelector(
             scope_type=scope_type,
             scope_id=scope_id,
             include_related_scopes=True,
         )
         selected_entries = self._collect_entries(
-            selector=selector,
+            selector=effective_selector,
             entries=entries,
             role=role,
         )

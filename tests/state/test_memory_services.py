@@ -165,6 +165,135 @@ def test_memory_retain_service_turns_agent_report_into_canonical_memory(tmp_path
     assert fact_entries[0].industry_instance_id == "industry-1"
 
 
+def test_memory_retain_service_filters_low_value_chat_noise_from_formal_memory(tmp_path) -> None:
+    _store, knowledge, _strategy, retain, _recall, _reflection, derived = _build_memory_services(tmp_path)
+
+    result = retain.retain_chat_writeback(
+        industry_instance_id="industry-1",
+        title="Quick reply",
+        content="ok thanks",
+        source_ref="chat:thread-1:msg-1",
+        tags=["chat-noise", "small-talk"],
+    )
+
+    assert result is None
+    assert knowledge.list_chunks(document_id="memory:industry:industry-1", limit=None) == []
+    assert derived.list_fact_entries(scope_type="industry", scope_id="industry-1", limit=None) == []
+
+
+def test_memory_retain_service_routes_report_outcome_to_work_context_memory(tmp_path) -> None:
+    _store, knowledge, _strategy, retain, _recall, _reflection, _derived = _build_memory_services(tmp_path)
+
+    report = AgentReportRecord(
+        id="report-ctx-1",
+        industry_instance_id="industry-1",
+        work_context_id="ctx-1",
+        owner_agent_id="worker-1",
+        owner_role_id="researcher",
+        headline="Follow-up completed",
+        summary="The follow-up closed the blocker and confirmed the next check-in window.",
+        status="recorded",
+        result="completed",
+        evidence_ids=["evidence-1"],
+    )
+
+    retain.retain_agent_report(report)
+
+    work_context_chunks = knowledge.list_chunks(document_id="memory:work_context:ctx-1", limit=None)
+    industry_chunks = knowledge.list_chunks(document_id="memory:industry:industry-1", limit=None)
+    assert len(work_context_chunks) == 1
+    assert industry_chunks == []
+    assert "Result: completed" in work_context_chunks[0].content
+    assert "closed the blocker" in work_context_chunks[0].content
+
+
+def test_memory_retain_service_keeps_shared_writeback_in_industry_scope_without_work_context(tmp_path) -> None:
+    _store, knowledge, _strategy, retain, _recall, _reflection, _derived = _build_memory_services(tmp_path)
+
+    result = retain.retain_chat_writeback(
+        industry_instance_id="industry-1",
+        title="Shared operating note",
+        content="Evidence review stays mandatory before outbound approval.",
+        source_ref="report:industry-shared-1",
+        tags=["report-outcome", "shared-memory"],
+    )
+
+    assert result == {
+        "industry_instance_id": "industry-1",
+        "work_context_id": None,
+        "scope_type": "industry",
+        "scope_id": "industry-1",
+        "source_ref": "report:industry-shared-1",
+    }
+    industry_chunks = knowledge.list_chunks(document_id="memory:industry:industry-1", limit=None)
+    work_context_chunks = knowledge.list_chunks(document_id="memory:work_context:industry-1", limit=None)
+    assert len(industry_chunks) == 1
+    assert work_context_chunks == []
+    assert industry_chunks[0].document_id == "memory:industry:industry-1"
+
+
+def test_memory_retain_service_compacts_duplicate_shared_writebacks_into_one_text_anchor(tmp_path) -> None:
+    _store, knowledge, _strategy, retain, _recall, _reflection, _derived = _build_memory_services(tmp_path)
+
+    retain.retain_chat_writeback(
+        industry_instance_id="industry-1",
+        title="Shared operating note",
+        content="Evidence review stays mandatory before outbound approval.",
+        source_ref="chat:thread-1:msg-1",
+        tags=["shared-memory", "report-outcome"],
+    )
+    retain.retain_chat_writeback(
+        industry_instance_id="industry-1",
+        title="Shared operating note",
+        content="Evidence review stays mandatory before outbound approval.",
+        source_ref="chat:thread-1:msg-2",
+        tags=["shared-memory", "report-outcome"],
+    )
+
+    industry_chunks = knowledge.list_chunks(document_id="memory:industry:industry-1", limit=None)
+    assert len(industry_chunks) == 1
+    assert industry_chunks[0].title == "Shared operating note"
+    assert industry_chunks[0].content == "Evidence review stays mandatory before outbound approval."
+
+
+def test_memory_retain_service_merges_repeated_report_findings_without_dropping_source_truth(tmp_path) -> None:
+    _store, knowledge, _strategy, retain, _recall, _reflection, derived = _build_memory_services(tmp_path)
+
+    report_one = AgentReportRecord(
+        id="report-merge-1",
+        industry_instance_id="industry-1",
+        work_context_id="ctx-merge",
+        owner_agent_id="worker-1",
+        owner_role_id="researcher",
+        headline="Weekly review completed",
+        summary="Hold outbound until evidence is updated.",
+        status="recorded",
+        result="completed",
+        evidence_ids=["evidence-1"],
+    )
+    report_two = AgentReportRecord(
+        id="report-merge-2",
+        industry_instance_id="industry-1",
+        work_context_id="ctx-merge",
+        owner_agent_id="worker-1",
+        owner_role_id="researcher",
+        headline="Weekly review completed",
+        summary="Hold outbound until evidence review is fully updated.",
+        status="recorded",
+        result="completed",
+        evidence_ids=["evidence-2"],
+    )
+
+    retain.retain_agent_report(report_one)
+    retain.retain_agent_report(report_two)
+
+    work_context_chunks = knowledge.list_chunks(document_id="memory:work_context:ctx-merge", limit=None)
+    fact_entries = derived.list_fact_entries(source_type="agent_report", limit=None)
+    assert len(work_context_chunks) == 1
+    assert "evidence review is fully updated" in work_context_chunks[0].content
+    assert {item.source_ref for item in fact_entries} == {"report-merge-1", "report-merge-2"}
+
+
 def test_memory_package_does_not_export_qmd_runtime_symbols() -> None:
     assert not hasattr(memory_module, "QmdBackendConfig")
     assert not hasattr(memory_module, "QmdRecallBackend")

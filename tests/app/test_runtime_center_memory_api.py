@@ -259,6 +259,56 @@ def test_runtime_center_memory_recall_accepts_work_context_selector(tmp_path) ->
     assert any(item["title"] == "Control-thread note" for item in payload["hits"])
 
 
+def test_runtime_center_memory_recall_route_uses_related_scope_fallback_chain(tmp_path) -> None:
+    client = _build_client(tmp_path)
+
+    context_response = client.post(
+        "/runtime-center/knowledge/memory",
+        json={
+            "title": "Control-thread note",
+            "content": "This work context is focused on partner follow-up sequencing.",
+            "scope_type": "work_context",
+            "scope_id": "ctx-industry-control",
+            "role_bindings": ["execution-core"],
+            "tags": ["control-thread"],
+        },
+    )
+    assert context_response.status_code == 200
+
+    industry_response = client.post(
+        "/runtime-center/knowledge/memory",
+        json={
+            "title": "Industry fallback note",
+            "content": "Only approve outbound after evidence review completes.",
+            "scope_type": "industry",
+            "scope_id": "industry-1",
+            "role_bindings": ["execution-core"],
+            "tags": ["policy"],
+        },
+    )
+    assert industry_response.status_code == 200
+
+    recall_response = client.get(
+        "/runtime-center/memory/recall",
+        params={
+            "query": "approve outbound after evidence review",
+            "work_context_id": "ctx-industry-control",
+            "industry_instance_id": "industry-1",
+            "role": "execution-core",
+            "limit": 5,
+        },
+    )
+    assert recall_response.status_code == 200
+    payload = recall_response.json()
+    assert payload["hits"]
+    assert payload["hits"][0]["scope_type"] == "work_context"
+    assert payload["hits"][0]["title"] == "Shared Memory Profile"
+    assert any(
+        item["scope_type"] == "industry" and item["title"] == "Industry fallback note"
+        for item in payload["hits"]
+    )
+
+
 def _upsert_industry_strategy(client: TestClient, *, industry_instance_id: str = "industry-1") -> None:
     client.app.state.strategy_memory_service.upsert_strategy(
         StrategyMemoryRecord(

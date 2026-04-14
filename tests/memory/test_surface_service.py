@@ -101,3 +101,40 @@ def test_memory_surface_service_resolves_private_visibility_payload() -> None:
             "remaining_budget": 600,
         },
     }
+
+
+def test_memory_surface_service_caps_truth_first_snapshot_budget() -> None:
+    calls: list[dict[str, object]] = []
+
+    class _DerivedIndexService:
+        def list_fact_entries(self, **kwargs):
+            calls.append(dict(kwargs))
+            limit = int(kwargs.get("limit") or 0)
+            return [
+                SimpleNamespace(
+                    title=f"Entry {index}",
+                    summary=f"Summary {index}",
+                    content_excerpt=f"Summary {index}",
+                    content_text=f"Summary {index}",
+                    source_updated_at=None,
+                    updated_at=f"2026-04-{20 - index:02d}T08:00:00Z",
+                    created_at=f"2026-04-{20 - index:02d}T07:30:00Z",
+                )
+                for index in range(limit)
+            ]
+
+    recall_service = SimpleNamespace(_derived_index_service=_DerivedIndexService())
+    service = MemorySurfaceService(memory_recall_service=recall_service)
+
+    snapshot = service.resolve_truth_first_scope_snapshot(
+        scope_type="work_context",
+        scope_id="ctx-1",
+        owner_agent_id="ops-agent",
+        industry_instance_id="industry-1",
+        limit=20,
+    )
+
+    assert calls[0]["limit"] == 8
+    assert len(snapshot["entries"]) == 8
+    assert len(snapshot["latest_entries"]) == 2
+    assert len(snapshot["history_entries"]) == 2

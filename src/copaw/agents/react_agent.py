@@ -50,7 +50,6 @@ from .utils import process_file_and_media_blocks_in_message
 from ..constant import (
     MEMORY_COMPACT_RATIO,
 )
-from ..agents.memory import MemoryManager
 from ..memory.conversation_compaction_service import ConversationCompactionService
 
 logger = logging.getLogger(__name__)
@@ -424,10 +423,9 @@ class CoPawAgent(ReActAgent):
         self,
         env_context: Optional[str] = None,
         prompt_appendix: str | None = None,
-        enable_memory_manager: bool = True,
+        enable_conversation_compaction: bool = True,
         mcp_clients: Optional[List[Any]] = None,
         conversation_compaction_service: ConversationCompactionService | None = None,
-        memory_manager: MemoryManager | None = None,
         max_iters: int = 50,
         max_input_length: int = 128 * 1024,  # 128K = 131072 tokens
         namesake_strategy: NamesakeStrategy = "skip",
@@ -441,10 +439,9 @@ class CoPawAgent(ReActAgent):
         Args:
             env_context: Optional environment context to prepend to
                 system prompt
-            enable_memory_manager: Whether to enable memory manager
+            enable_conversation_compaction: Whether to enable private conversation compaction
             mcp_clients: Optional list of MCP clients for tool
                 integration
-            memory_manager: Optional memory manager instance
             max_iters: Maximum number of reasoning-acting iterations
                 (default: 50)
             max_input_length: Maximum input length in tokens for model
@@ -499,11 +496,10 @@ class CoPawAgent(ReActAgent):
             max_iters=max_iters,
         )
 
-        # Setup memory manager
-        self._setup_memory_manager(
-            enable_memory_manager,
+        # Setup private conversation compaction
+        self._setup_conversation_compaction(
+            enable_conversation_compaction,
             conversation_compaction_service,
-            memory_manager,
             namesake_strategy,
         )
 
@@ -511,8 +507,8 @@ class CoPawAgent(ReActAgent):
         self.command_handler = CommandHandler(
             agent_name=self.name,
             memory=self.memory,
-            memory_manager=self.memory_manager,
-            enable_memory_manager=self._enable_memory_manager,
+            conversation_compaction_service=self.conversation_compaction_service,
+            enable_memory_compaction=self._enable_conversation_compaction,
         )
 
         # Register hooks
@@ -601,38 +597,32 @@ class CoPawAgent(ReActAgent):
             sys_prompt = sys_prompt + "\n\n" + self._prompt_appendix
         return sys_prompt
 
-    def _setup_memory_manager(
+    def _setup_conversation_compaction(
         self,
-        enable_memory_manager: bool,
+        enable_conversation_compaction: bool,
         conversation_compaction_service: ConversationCompactionService | None,
-        memory_manager: MemoryManager | None,
         namesake_strategy: NamesakeStrategy,
     ) -> None:
-        """Setup memory manager and register memory search tool if enabled.
+        """Setup private conversation compaction and memory search if enabled.
 
         Args:
-            enable_memory_manager: Whether to enable memory manager
-            memory_manager: Optional memory manager instance
+            enable_conversation_compaction: Whether to enable private conversation compaction
             namesake_strategy: Strategy to handle namesake tool functions
         """
-        # Check env var: if ENABLE_MEMORY_MANAGER=false, disable memory manager
-        env_enable_mm = os.getenv("ENABLE_MEMORY_MANAGER", "")
-        if env_enable_mm.lower() == "false":
-            enable_memory_manager = False
+        # Explicit private-compaction switch for local chat transcript compaction.
+        env_enable_compaction = os.getenv("ENABLE_CONVERSATION_COMPACTION", "")
+        if env_enable_compaction.lower() == "false":
+            enable_conversation_compaction = False
 
-        self._enable_memory_manager: bool = enable_memory_manager
-        resolved_compaction_service = (
-            conversation_compaction_service or memory_manager
-        )
-        self.conversation_compaction_service = resolved_compaction_service
-        self.memory_manager = resolved_compaction_service
+        self._enable_conversation_compaction: bool = enable_conversation_compaction
+        self.conversation_compaction_service = conversation_compaction_service
 
         # Register memory_search tool if enabled and available
         if (
-            self._enable_memory_manager
+            self._enable_conversation_compaction
             and self.conversation_compaction_service is not None
         ):
-            # update memory manager
+            # Rebind the in-memory transcript store exposed by the compaction service.
             self.memory = self.conversation_compaction_service.get_in_memory_memory()
             self._register_memory_tools(
                 toolkit=self.toolkit,
@@ -646,7 +636,7 @@ class CoPawAgent(ReActAgent):
         namesake_strategy: NamesakeStrategy,
     ) -> None:
         if (
-            not self._enable_memory_manager
+            not self._enable_conversation_compaction
             or self.conversation_compaction_service is None
         ):
             return
@@ -662,11 +652,11 @@ class CoPawAgent(ReActAgent):
         """Register pre-reasoning hooks."""
         # Memory compaction hook - auto-compact when context is full
         if (
-            self._enable_memory_manager
+            self._enable_conversation_compaction
             and self.conversation_compaction_service is not None
         ):
             memory_compact_hook = MemoryCompactionHook(
-                memory_manager=self.conversation_compaction_service,
+                conversation_compaction_service=self.conversation_compaction_service,
             )
             self.register_instance_hook(
                 hook_type="pre_reasoning",

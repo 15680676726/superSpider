@@ -46,7 +46,7 @@ class DaemonContext:
 
     working_dir: Path = WORKING_DIR
     load_config_fn: Callable[[], Any] = load_config
-    memory_manager: Optional[Any] = None
+    conversation_compaction_service: Optional[Any] = None
     restart_callback: Optional[RestartCallback] = None
 
 
@@ -94,10 +94,10 @@ def run_daemon_status(context: DaemonContext) -> str:
         parts.append(f"- Config loaded: no ({exc})")
 
     parts.append(f"- Working dir: {context.working_dir}")
-    if context.memory_manager is not None:
-        parts.append("- Memory manager: running")
+    if context.conversation_compaction_service is not None:
+        parts.append("- Conversation compaction: running")
     else:
-        parts.append("- Memory manager: not attached")
+        parts.append("- Conversation compaction: not attached")
     return "\n".join(parts)
 
 

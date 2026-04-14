@@ -1949,6 +1949,13 @@ The next memory enhancement must land as a derived layer on top of unified
 - private conversation compaction may remain separate, but it must not become a second runtime memory truth
 - QMD/vector references are physically removed residuals and must not be reintroduced into the formal memory contract
 
+`2026-04-14` supplement:
+- formal text memory writes must first pass explicit selective-ingestion policy; low-value chat noise is rejected, durable work continuity routes to `work_context`, and shared durable domain knowledge routes to `industry`
+- formal recall surfaces must share one fixed related-scope order `work_context -> task -> agent -> industry -> global` plus explicit fetch budgets; activation/read surfaces must not over-read beyond that contract
+- repeated durable text anchors may be canonically merged; compaction normalizes formal text memory presentation but does not replace source-backed truth
+- `ConversationCompactionService` is private transcript compaction only; the old `agents/memory/memory_manager.py` shell is retired and must not be reintroduced as a second memory truth boundary
+- old memory-db additive upgrade is no longer part of the formal contract; current memory/state baseline assumes rebuildable fresh canonical schema instead of historical db migration guarantees
+
 ### Canonical truth remains:
 
 - `StrategyMemoryRecord` for strategic memory

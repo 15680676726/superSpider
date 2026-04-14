@@ -10,9 +10,9 @@ from agentscope.agent._react_agent import _MemoryMark
 from agentscope.message import Msg, TextBlock
 
 from copaw.config import load_config
+from ..memory.conversation_compaction_service import ConversationCompactionService
 
 if TYPE_CHECKING:
-    from .memory import MemoryManager
     from reme.memory.file_based import ReMeInMemoryMemory
 
 logger = logging.getLogger(__name__)
@@ -21,8 +21,8 @@ logger = logging.getLogger(__name__)
 class ConversationCommandHandlerMixin:
     """Mixin for conversation (system) commands: /compact, /new, /clear, etc.
 
-    Expects self to have: agent_name, memory, formatter, memory_manager,
-    _enable_memory_manager.
+    Expects self to have: agent_name, memory, formatter,
+    conversation_compaction_service, _enable_memory_compaction.
     """
 
     # Supported conversation commands (unchanged set)
@@ -59,21 +59,21 @@ class CommandHandler(ConversationCommandHandlerMixin):
         self,
         agent_name: str,
         memory: "ReMeInMemoryMemory",
-        memory_manager: "MemoryManager | None" = None,
-        enable_memory_manager: bool = True,
+        conversation_compaction_service: ConversationCompactionService | None = None,
+        enable_memory_compaction: bool = True,
     ):
         """Initialize command handler.
 
         Args:
             agent_name: Name of the agent for message creation
             memory: Agent's ReMeInMemoryMemory instance
-            memory_manager: Optional memory manager instance
-            enable_memory_manager: Whether memory manager is enabled
+            conversation_compaction_service: Optional private compaction service
+            enable_memory_compaction: Whether private compaction is enabled
         """
         self.agent_name = agent_name
         self.memory = memory
-        self.memory_manager = memory_manager
-        self._enable_memory_manager = enable_memory_manager
+        self.conversation_compaction_service = conversation_compaction_service
+        self._enable_memory_compaction = enable_memory_compaction
 
     def is_command(self, query: str | None) -> bool:
         """Check if the query is a system command (alias for mixin)."""
@@ -94,9 +94,12 @@ class CommandHandler(ConversationCommandHandlerMixin):
             content=[TextBlock(type="text", text=text)],
         )
 
-    def _has_memory_manager(self) -> bool:
-        """Check if memory manager is available."""
-        return self._enable_memory_manager and self.memory_manager is not None
+    def _has_conversation_compaction(self) -> bool:
+        """Check if private conversation compaction is available."""
+        return (
+            self._enable_memory_compaction
+            and self.conversation_compaction_service is not None
+        )
 
     async def _process_compact(
         self,
@@ -110,15 +113,15 @@ class CommandHandler(ConversationCommandHandlerMixin):
                 "- Current memory is empty\n"
                 "- No action taken",
             )
-        if not self._has_memory_manager():
+        if not self._has_conversation_compaction():
             return await self._make_system_msg(
-                "**Memory Manager Disabled**\n\n"
+                "**Memory Compaction Disabled**\n\n"
                 "- Memory compaction is not available\n"
-                "- Enable memory manager to use this feature",
+                "- Enable private compaction to use this feature",
             )
 
-        self.memory_manager.add_async_summary_task(messages=messages)
-        compact_content = await self.memory_manager.compact_memory(
+        self.conversation_compaction_service.add_async_summary_task(messages=messages)
+        compact_content = await self.conversation_compaction_service.compact_memory(
             messages=messages,
             previous_summary=self.memory.get_compressed_summary(),
         )
@@ -145,14 +148,14 @@ class CommandHandler(ConversationCommandHandlerMixin):
                 "- Compressed summary is clear\n"
                 "- No action taken",
             )
-        if not self._has_memory_manager():
+        if not self._has_conversation_compaction():
             return await self._make_system_msg(
-                "**Memory Manager Disabled**\n\n"
+                "**Memory Compaction Disabled**\n\n"
                 "- Cannot start new conversation with summary\n"
-                "- Enable memory manager to use this feature",
+                "- Enable private compaction to use this feature",
             )
 
-        self.memory_manager.add_async_summary_task(messages=messages)
+        self.conversation_compaction_service.add_async_summary_task(messages=messages)
         self.memory.clear_compressed_summary()
         updated_count = await self.memory.mark_messages_compressed(messages)
         logger.info(f"Marked {updated_count} messages as compacted")
@@ -212,21 +215,21 @@ class CommandHandler(ConversationCommandHandlerMixin):
         _args: str = "",
     ) -> Msg:
         """Process /await_summary command to wait for all summary tasks."""
-        if not self._has_memory_manager():
+        if not self._has_conversation_compaction():
             return await self._make_system_msg(
-                "**Memory Manager Disabled**\n\n"
+                "**Memory Compaction Disabled**\n\n"
                 "- Cannot await summary tasks\n"
-                "- Enable memory manager to use this feature",
+                "- Enable private compaction to use this feature",
             )
 
-        task_count = len(self.memory_manager.summary_tasks)
+        task_count = len(self.conversation_compaction_service.summary_tasks)
         if task_count == 0:
             return await self._make_system_msg(
                 "**No Summary Tasks**\n\n"
                 "- No pending summary tasks to wait for",
             )
 
-        result = await self.memory_manager.await_summary_tasks()
+        result = await self.conversation_compaction_service.await_summary_tasks()
         return await self._make_system_msg(
             f"**Summary Tasks Complete**\n\n"
             f"- Waited for {task_count} summary task(s)\n"

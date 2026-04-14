@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-import sqlite3
 from datetime import datetime, timezone
 
 from copaw.state.models_memory import (
@@ -57,96 +56,6 @@ def _make_fact(
         expires_at=expires_at,
         confidence_tier=confidence_tier,
     )
-
-
-def _create_legacy_memory_db(path) -> None:
-    with sqlite3.connect(path) as conn:
-        conn.executescript(
-            """
-            CREATE TABLE memory_fact_index (
-                id TEXT PRIMARY KEY,
-                source_type TEXT NOT NULL,
-                source_ref TEXT NOT NULL,
-                scope_type TEXT NOT NULL DEFAULT 'global',
-                scope_id TEXT NOT NULL,
-                owner_agent_id TEXT,
-                owner_scope TEXT,
-                industry_instance_id TEXT,
-                title TEXT NOT NULL,
-                summary TEXT NOT NULL DEFAULT '',
-                content_excerpt TEXT NOT NULL DEFAULT '',
-                content_text TEXT NOT NULL DEFAULT '',
-                entity_keys_json TEXT NOT NULL DEFAULT '[]',
-                opinion_keys_json TEXT NOT NULL DEFAULT '[]',
-                tags_json TEXT NOT NULL DEFAULT '[]',
-                role_bindings_json TEXT NOT NULL DEFAULT '[]',
-                evidence_refs_json TEXT NOT NULL DEFAULT '[]',
-                confidence REAL NOT NULL DEFAULT 0.5,
-                quality_score REAL NOT NULL DEFAULT 0.5,
-                source_updated_at TEXT,
-                metadata_json TEXT NOT NULL DEFAULT '{}',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-
-            CREATE UNIQUE INDEX idx_memory_fact_index_source
-                ON memory_fact_index(source_type, source_ref);
-            """
-        )
-        conn.execute(
-            """
-            INSERT INTO memory_fact_index (
-                id,
-                source_type,
-                source_ref,
-                scope_type,
-                scope_id,
-                owner_agent_id,
-                owner_scope,
-                industry_instance_id,
-                title,
-                summary,
-                content_excerpt,
-                content_text,
-                entity_keys_json,
-                opinion_keys_json,
-                tags_json,
-                role_bindings_json,
-                evidence_refs_json,
-                confidence,
-                quality_score,
-                source_updated_at,
-                metadata_json,
-                created_at,
-                updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                "legacy-fact-1",
-                "agent_report",
-                "report-legacy-1",
-                "industry",
-                "industry-legacy",
-                "agent-legacy",
-                "main-brain",
-                "industry-legacy",
-                "Legacy fact",
-                "Legacy summary",
-                "Legacy excerpt",
-                "Legacy content",
-                '["customer:legacy"]',
-                "[]",
-                '["legacy"]',
-                "[]",
-                '["evidence-legacy"]',
-                0.7,
-                0.6,
-                None,
-                "{}",
-                "2026-03-29T09:15:00+00:00",
-                "2026-03-29T09:15:00+00:00",
-            ),
-        )
 
 
 def test_truth_first_memory_fact_round_trips_evolution_fields(tmp_path) -> None:
@@ -251,65 +160,6 @@ def test_truth_first_memory_repository_demotes_superseded_latest_entry(tmp_path)
     assert stored_newer is not None
     assert stored_older.is_latest is False
     assert stored_newer.is_latest is True
-
-
-def test_truth_first_memory_store_upgrades_legacy_rows_with_safe_defaults(tmp_path) -> None:
-    db_path = tmp_path / "legacy-state.db"
-    _create_legacy_memory_db(db_path)
-    store = SQLiteStateStore(db_path)
-
-    store.initialize()
-    fact_repo = SqliteMemoryFactIndexRepository(store)
-    legacy = fact_repo.get_entry("legacy-fact-1")
-
-    assert legacy is not None
-    assert legacy.memory_type == "fact"
-    assert legacy.relation_kind == "references"
-    assert legacy.supersedes_entry_id is None
-    assert legacy.is_latest is True
-    assert legacy.valid_from == _utc("2026-03-29T09:15:00+00:00")
-    assert legacy.expires_at is None
-    assert legacy.confidence_tier == "standard"
-
-
-def test_truth_first_memory_views_materialize_on_upgraded_legacy_db(tmp_path) -> None:
-    db_path = tmp_path / "legacy-materialize.db"
-    _create_legacy_memory_db(db_path)
-    store = SQLiteStateStore(db_path)
-    store.initialize()
-    profile_repo = SqliteMemoryProfileViewRepository(store)
-    episode_repo = SqliteMemoryEpisodeViewRepository(store)
-
-    profile = MemoryProfileViewRecord(
-        profile_id="memory-profile:industry:industry-legacy",
-        scope_type="industry",
-        scope_id="industry-legacy",
-        owner_agent_id="agent-legacy",
-        industry_instance_id="industry-legacy",
-        static_profile="Legacy durable profile",
-        dynamic_profile="Rebuilt from upgraded legacy facts.",
-        active_preferences=["preserve-bootability"],
-        current_focus_summary="Rebuild views after additive migration.",
-        source_refs=["legacy-fact-1"],
-    )
-    episode = MemoryEpisodeViewRecord(
-        episode_id="memory-episode:industry:industry-legacy:1",
-        scope_type="industry",
-        scope_id="industry-legacy",
-        owner_agent_id="agent-legacy",
-        industry_instance_id="industry-legacy",
-        headline="Legacy rebuild",
-        summary="Materialized truth-first projections after schema upgrade.",
-        source_refs=["legacy-fact-1"],
-        started_at=_utc("2026-03-30T13:00:00+00:00"),
-        ended_at=_utc("2026-03-30T13:05:00+00:00"),
-    )
-
-    profile_repo.upsert_view(profile)
-    episode_repo.upsert_view(episode)
-
-    assert profile_repo.get_view(profile.profile_id) is not None
-    assert episode_repo.get_view(episode.episode_id) is not None
 
 
 def test_truth_first_memory_store_initialize_is_idempotent(tmp_path) -> None:

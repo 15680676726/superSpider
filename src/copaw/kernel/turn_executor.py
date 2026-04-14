@@ -1163,7 +1163,7 @@ class KernelTurnExecutor:
                         request=request,
                         msgs=msgs,
                         session_backend=self._session_backend,
-                        memory_manager=self._conversation_compaction_service,
+                        conversation_compaction_service=self._conversation_compaction_service,
                         restart_callback=self._restart_callback,
                     ):
                         last_output_summary = summarize_stream_message(msg)
@@ -1174,7 +1174,7 @@ class KernelTurnExecutor:
                             request=request,
                             msgs=msgs,
                             session_backend=self._session_backend,
-                            memory_manager=self._conversation_compaction_service,
+                            conversation_compaction_service=self._conversation_compaction_service,
                             restart_callback=self._restart_callback,
                         ):
                             last_output_summary = summarize_stream_message(msg)
