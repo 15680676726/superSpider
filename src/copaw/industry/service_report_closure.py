@@ -97,44 +97,12 @@ def _activation_followup_metadata(synthesis: Mapping[str, Any] | None) -> dict[s
     return metadata
 
 
-def _knowledge_writeback_followup_metadata(synthesis: Mapping[str, Any] | None) -> dict[str, Any]:
-    if not isinstance(synthesis, Mapping):
-        return {}
-    writeback = synthesis.get("knowledge_writeback")
-    if not isinstance(writeback, Mapping):
-        return {}
-    metadata: dict[str, Any] = {}
-    for source_key, target_key in (
-        ("node_ids", "knowledge_writeback_node_ids"),
-        ("node_types", "knowledge_writeback_node_types"),
-        ("relation_ids", "knowledge_writeback_relation_ids"),
-        ("relation_types", "knowledge_writeback_relation_types"),
-        ("evidence_refs", "knowledge_writeback_evidence_refs"),
-        ("source_report_ids", "knowledge_writeback_source_report_ids"),
-        ("topic_keys", "knowledge_writeback_topic_keys"),
-    ):
-        value = writeback.get(source_key)
-        if not isinstance(value, Sequence) or isinstance(value, str):
-            continue
-        copied = list(value)
-        if copied:
-            metadata[target_key] = copied
-    scope_type = _string(writeback.get("scope_type"))
-    scope_id = _string(writeback.get("scope_id"))
-    if scope_type is not None:
-        metadata["knowledge_writeback_scope_type"] = scope_type
-    if scope_id is not None:
-        metadata["knowledge_writeback_scope_id"] = scope_id
-    return metadata
-
-
 def synthesize_agent_reports(
     *,
     list_agent_report_records: Callable[..., list[AgentReportRecord]],
     instance_id: str,
     cycle_id: str | None,
     activation_result: object | None = None,
-    knowledge_writeback_service: object | None = None,
 ) -> dict[str, Any]:
     return synthesize_reports(
         list_agent_report_records(
@@ -143,7 +111,6 @@ def synthesize_agent_reports(
             limit=None,
         ),
         activation_result=activation_result,
-        knowledge_writeback_service=knowledge_writeback_service,
     )
 
 
@@ -175,9 +142,6 @@ def record_report_synthesis_backlog(
         activation_metadata = _activation_followup_metadata(synthesis)
         if activation_metadata:
             metadata.update(activation_metadata)
-        knowledge_writeback_metadata = _knowledge_writeback_followup_metadata(synthesis)
-        if knowledge_writeback_metadata:
-            metadata.update(knowledge_writeback_metadata)
         if not metadata:
             metadata = None
         try:
@@ -587,16 +551,6 @@ def write_agent_report_back_to_control_thread(
                     "evidence_count": len(report.evidence_ids or []),
                     "decision_count": len(report.decision_ids or []),
                     "requested_surfaces": list(requested_surfaces) if requested_surfaces else None,
-                    "knowledge_writeback_topic_keys": (
-                        list(continuity.get("knowledge_writeback_topic_keys") or [])
-                        or None
-                    ),
-                    "knowledge_writeback_scope_type": _string(
-                        continuity.get("knowledge_writeback_scope_type"),
-                    ),
-                    "knowledge_writeback_scope_id": _string(
-                        continuity.get("knowledge_writeback_scope_id"),
-                    ),
                 }.items()
                 if value is not None and (not isinstance(value, str) or value.strip())
             },

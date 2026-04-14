@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from copaw.industry.service_report_closure import (
     build_agent_report_control_thread_message,
+    record_report_synthesis_backlog,
     write_agent_report_back_to_control_thread,
 )
 
@@ -37,6 +38,14 @@ class _FakeSessionBackend:
         self._snapshots[(session_id, user_id)] = deepcopy(payload)
 
 
+class _FakeBacklogService:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def record_chat_writeback(self, **kwargs) -> None:
+        self.calls.append(dict(kwargs))
+
+
 def test_build_agent_report_control_thread_message_is_readable() -> None:
     report = SimpleNamespace(
         id="report-1",
@@ -61,6 +70,41 @@ def test_build_agent_report_control_thread_message_is_readable() -> None:
     assert "任务：写作并整理首章发布稿" in message
     assert "结论：已完成第一章草稿并整理发布素材。" in message
     assert "证据 2 / 决策 1" in message
+
+
+def test_record_report_synthesis_backlog_does_not_copy_legacy_knowledge_writeback_metadata() -> None:
+    backlog_service = _FakeBacklogService()
+    record = SimpleNamespace(instance_id="industry-v1-writer")
+    synthesis = {
+        "recommended_actions": [
+            {
+                "source_ref": "report-followup:report-1",
+                "title": "Continue publishing follow-up",
+                "summary": "Push the next publishing step.",
+                "priority": 3,
+                "metadata": {"source_report_ids": ["report-1"]},
+            },
+        ],
+        "knowledge_writeback": {
+            "topic_keys": ["writing", "publishing"],
+            "scope_type": "industry",
+            "scope_id": "industry-v1-writer",
+        },
+    }
+
+    record_report_synthesis_backlog(
+        backlog_service=backlog_service,
+        record=record,
+        synthesis=synthesis,
+        resolve_report_followup_metadata=lambda _: {},
+    )
+
+    assert len(backlog_service.calls) == 1
+    metadata = backlog_service.calls[0]["metadata"]
+    assert isinstance(metadata, dict)
+    assert "knowledge_writeback_topic_keys" not in metadata
+    assert "knowledge_writeback_scope_type" not in metadata
+    assert "knowledge_writeback_scope_id" not in metadata
 
 
 def test_write_agent_report_back_to_control_thread_persists_routes_and_requested_surfaces() -> None:
@@ -127,7 +171,7 @@ def test_write_agent_report_back_to_control_thread_persists_routes_and_requested
         == "/api/runtime-center/industry/industry-v1-writer?report_id=report-1"
     )
     assert metadata["requested_surfaces"] == ["browser", "document"]
-    assert metadata["knowledge_writeback_topic_keys"] == ["writing", "publishing"]
-    assert metadata["knowledge_writeback_scope_type"] == "industry"
-    assert metadata["knowledge_writeback_scope_id"] == "industry-v1-writer"
+    assert "knowledge_writeback_topic_keys" not in metadata
+    assert "knowledge_writeback_scope_type" not in metadata
+    assert "knowledge_writeback_scope_id" not in metadata
     assert report_message["content"][0]["text"].startswith("我刚完成一项任务：")

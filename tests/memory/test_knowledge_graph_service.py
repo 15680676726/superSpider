@@ -8,9 +8,11 @@ from copaw.memory.knowledge_graph_models import (
     KnowledgeGraphPath,
     KnowledgeGraphRelation,
     KnowledgeGraphScope,
+    KnowledgeGraphWritebackChange,
     TaskSubgraph,
 )
 from copaw.memory.knowledge_graph_service import KnowledgeGraphService
+from copaw.state import AssignmentRecord, WorkContextRecord
 
 
 def _sample_task_subgraph() -> TaskSubgraph:
@@ -138,6 +140,55 @@ class _StubSubgraphActivationService:
         return self._result
 
 
+class _StubWritebackService:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    def build_assignment_writeback(self, **kwargs) -> KnowledgeGraphWritebackChange:
+        self.calls.append(("assignment", kwargs))
+        scope = KnowledgeGraphScope(scope_type="industry", scope_id="industry-ops")
+        return KnowledgeGraphWritebackChange(
+            scope=scope,
+            upsert_nodes=[
+                KnowledgeGraphNode(
+                    node_id="assignment:assignment-1",
+                    node_type="assignment",
+                    scope=scope,
+                    title="Assignment 1",
+                ),
+            ],
+        )
+
+    def build_work_context_writeback(self, **kwargs) -> KnowledgeGraphWritebackChange:
+        self.calls.append(("work_context", kwargs))
+        scope = KnowledgeGraphScope(scope_type="work_context", scope_id="ctx-approval")
+        return KnowledgeGraphWritebackChange(
+            scope=scope,
+            upsert_nodes=[
+                KnowledgeGraphNode(
+                    node_id="work-context:ctx-approval",
+                    node_type="work_context",
+                    scope=scope,
+                    title="Approval context",
+                ),
+            ],
+        )
+
+    def apply_change(self, change: KnowledgeGraphWritebackChange) -> dict[str, object]:
+        return {
+            "scope_type": change.scope.scope_type,
+            "scope_id": change.scope.scope_id,
+            "node_ids": [item.node_id for item in change.upsert_nodes],
+        }
+
+    def summarize_change(self, change: KnowledgeGraphWritebackChange) -> dict[str, object]:
+        return {
+            "scope_type": change.scope.scope_type,
+            "scope_id": change.scope.scope_id,
+            "node_ids": [item.node_id for item in change.upsert_nodes],
+        }
+
+
 def test_knowledge_graph_service_builds_request_subgraph_and_summary() -> None:
     subgraph = _sample_task_subgraph()
     activation_service = _StubSubgraphActivationService(subgraph)
@@ -178,3 +229,44 @@ def test_knowledge_graph_service_builds_request_subgraph_and_summary() -> None:
     assert summary["recovery_paths"] == [
         "Refresh approval proof and rerun outbound verification.",
     ]
+
+
+def test_knowledge_graph_service_exposes_execution_projection_helpers() -> None:
+    stub = _StubWritebackService()
+    service = KnowledgeGraphService(
+        knowledge_writeback_service=stub,
+    )
+    assignment = AssignmentRecord(
+        id="assignment-1",
+        industry_instance_id="industry-ops",
+        cycle_id="cycle-1",
+        lane_id="lane-ops",
+        owner_agent_id="ops-agent",
+        title="Resolve approval blocker",
+        summary="Investigate the current blocker.",
+        status="queued",
+    )
+    work_context = WorkContextRecord(
+        id="ctx-approval",
+        title="Approval continuity",
+        summary="Shared approval work context.",
+        industry_instance_id="industry-ops",
+    )
+
+    assignment_summary = service.project_assignment(assignment=assignment)
+    work_context_summary = service.project_work_context(context=work_context)
+
+    assert stub.calls[0][0] == "assignment"
+    assert stub.calls[0][1]["assignment"] is assignment
+    assert assignment_summary == {
+        "scope_type": "industry",
+        "scope_id": "industry-ops",
+        "node_ids": ["assignment:assignment-1"],
+    }
+    assert stub.calls[1][0] == "work_context"
+    assert stub.calls[1][1]["context"] is work_context
+    assert work_context_summary == {
+        "scope_type": "work_context",
+        "scope_id": "ctx-approval",
+        "node_ids": ["work-context:ctx-approval"],
+    }

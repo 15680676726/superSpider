@@ -9,7 +9,14 @@ from copaw.memory.knowledge_graph_models import (
     KnowledgeGraphScope,
     KnowledgeGraphWritebackChange,
 )
-from copaw.state import AgentReportRecord, SQLiteStateStore
+from copaw.state import (
+    AgentReportRecord,
+    AssignmentRecord,
+    BacklogItemRecord,
+    OperatingCycleRecord,
+    SQLiteStateStore,
+    WorkContextRecord,
+)
 from copaw.state.knowledge_service import StateKnowledgeService
 from copaw.state.repositories import (
     SqliteKnowledgeChunkRepository,
@@ -316,3 +323,178 @@ def test_knowledge_writeback_service_applies_invalidation_to_future_activation(
     )
     assert any(neuron.title == "New blocker" for neuron in activation_result.activated_neurons)
     assert all(neuron.title != "Old blocker" for neuron in activation_result.activated_neurons)
+
+
+def test_knowledge_writeback_service_projects_execution_chain_nodes_and_edges() -> None:
+    service = KnowledgeWritebackService()
+    cycle = OperatingCycleRecord(
+        id="cycle-1",
+        industry_instance_id="industry-1",
+        title="Daily operating cycle",
+        summary="Drive the daily execution chain.",
+        status="active",
+        focus_lane_ids=["lane-ops"],
+        backlog_item_ids=["backlog-1"],
+        assignment_ids=["assignment-1"],
+    )
+    backlog = BacklogItemRecord(
+        id="backlog-1",
+        industry_instance_id="industry-1",
+        lane_id="lane-ops",
+        cycle_id=cycle.id,
+        assignment_id="assignment-1",
+        title="Weekend variance follow-up",
+        summary="Investigate the latest weekend variance.",
+        status="selected",
+        priority=4,
+        source_kind="operator",
+        source_ref="operator:weekend-variance",
+    )
+    assignment = AssignmentRecord(
+        id="assignment-1",
+        industry_instance_id="industry-1",
+        cycle_id=cycle.id,
+        lane_id="lane-ops",
+        backlog_item_id=backlog.id,
+        owner_agent_id="agent-a",
+        owner_role_id="role:agent-a",
+        title="Investigate weekend variance",
+        summary="Run the follow-up investigation.",
+        status="running",
+        metadata={"work_context_id": "ctx-1"},
+    )
+    work_context = WorkContextRecord(
+        id="ctx-1",
+        title="Weekend variance continuity",
+        summary="Shared continuity for the variance thread.",
+        context_type="analysis-thread",
+        status="active",
+        industry_instance_id="industry-1",
+        owner_agent_id="agent-a",
+        context_key="thread:weekend-variance",
+    )
+    report = _report(
+        headline="Weekend variance resolved",
+        result="completed",
+        findings=["Weekend variance root cause was confirmed."],
+        evidence_ids=["evidence-1"],
+        metadata={"verified_findings": True},
+    ).model_copy(
+        update={
+            "assignment_id": assignment.id,
+            "owner_agent_id": assignment.owner_agent_id,
+            "owner_role_id": assignment.owner_role_id,
+            "work_context_id": work_context.id,
+        },
+    )
+
+    change = service.merge_changes(
+        service.build_cycle_writeback(cycle=cycle),
+        service.build_backlog_writeback(item=backlog),
+        service.build_assignment_writeback(assignment=assignment),
+        service.build_work_context_writeback(context=work_context),
+        service.build_report_writeback(report=report),
+        service.build_execution_outcome_writeback(
+            scope_type="task",
+            scope_id="task-1",
+            outcome_ref="runtime-1",
+            outcome="failed",
+            summary="Runtime hit a recoverable filesystem error.",
+            work_context_id=work_context.id,
+        ),
+    )
+
+    node_ids = {item.node_id for item in change.upsert_nodes}
+    relation_pairs = {
+        (item.source_id, item.relation_type, item.target_id)
+        for item in change.upsert_relations
+    }
+
+    assert {
+        f"cycle:{cycle.id}",
+        f"backlog:{backlog.id}",
+        f"assignment:{assignment.id}",
+        f"work-context:{work_context.id}",
+        f"report:{report.id}",
+        "runtime-outcome:runtime-1",
+    } <= node_ids
+    assert (
+        f"backlog:{backlog.id}",
+        "belongs_to",
+        f"cycle:{cycle.id}",
+    ) in relation_pairs
+    assert (
+        f"backlog:{backlog.id}",
+        "produces",
+        f"assignment:{assignment.id}",
+    ) in relation_pairs
+    assert (
+        f"assignment:{assignment.id}",
+        "belongs_to",
+        f"cycle:{cycle.id}",
+    ) in relation_pairs
+    assert (
+        f"assignment:{assignment.id}",
+        "belongs_to",
+        f"work-context:{work_context.id}",
+    ) in relation_pairs
+    assert (
+        f"assignment:{assignment.id}",
+        "produces",
+        f"report:{report.id}",
+    ) in relation_pairs
+    assert (
+        f"report:{report.id}",
+        "belongs_to",
+        f"work-context:{work_context.id}",
+    ) in relation_pairs
+    assert (
+        "runtime-outcome:runtime-1",
+        "belongs_to",
+        f"work-context:{work_context.id}",
+    ) in relation_pairs
+
+
+def test_knowledge_writeback_service_invalidates_stale_execution_relations_when_links_move() -> None:
+    service = KnowledgeWritebackService()
+    previous = AssignmentRecord(
+        id="assignment-1",
+        industry_instance_id="industry-1",
+        cycle_id="cycle-1",
+        lane_id="lane-ops",
+        backlog_item_id="backlog-1",
+        owner_agent_id="agent-a",
+        title="Investigate weekend variance",
+        summary="Old execution link",
+        status="queued",
+        metadata={"work_context_id": "ctx-1"},
+    )
+    current = previous.model_copy(
+        update={
+            "cycle_id": "cycle-2",
+            "metadata": {"work_context_id": "ctx-2"},
+            "status": "running",
+        },
+    )
+
+    change = service.build_assignment_writeback(
+        assignment=current,
+        previous_assignment=previous,
+    )
+
+    relation_pairs = {
+        (item.source_id, item.relation_type, item.target_id)
+        for item in change.upsert_relations
+    }
+
+    assert (
+        f"assignment:{current.id}",
+        "belongs_to",
+        "cycle:cycle-2",
+    ) in relation_pairs
+    assert (
+        f"assignment:{current.id}",
+        "belongs_to",
+        "work-context:ctx-2",
+    ) in relation_pairs
+    assert len(change.invalidate_relation_ids) == 2

@@ -2253,6 +2253,56 @@ Persistence/query landing:
 - `control_thread_id`、`task-session:*` 这类线程锚点可以参与解析，但不应单独充当正式工作身份
 - conversation read surface 在同线程存在主脑 phase-2 commit 持久态时，可把 canonical session snapshot 投影为 `meta.main_brain_commit`；这只是聊天 reload/read-model 的派生字段，不构成新的 `ChatCommit` 一级对象。
 
+### 13.6.1 Execution Graph Projection Contract
+
+`2026-04-14` 起，execution truth 到 memory graph 的正式收口合同补充如下：
+
+- 正式 canonical owner 只允许放在 `state` 服务层：
+  - `BacklogService`
+  - `OperatingCycleService`
+  - `AssignmentService`
+  - `AgentReportService`
+  - `WorkContextService`
+- `industry/service_lifecycle.py`、`industry/report_synthesis.py`、`kernel/buddy_*` 这类业务入口可以继续写 canonical state，但不再是 raw execution graph writeback 的长期 owner。
+- memory graph 的 execution 主节点至少包括：
+  - `backlog`
+  - `cycle`
+  - `assignment`
+  - `report`
+  - `work_context`
+  - `runtime_outcome`
+- 稳定 node id 约定：
+  - `backlog:{backlog_id}`
+  - `cycle:{cycle_id}`
+  - `assignment:{assignment_id}`
+  - `report:{report_id}`
+  - `work-context:{work_context_id}`
+  - `runtime-outcome:{outcome_ref}`
+- 正式必备关系方向：
+  - `backlog belongs_to cycle`
+  - `backlog produces assignment`
+  - `assignment belongs_to cycle`
+  - `assignment belongs_to work_context`
+  - `assignment produces report`
+  - `report belongs_to work_context`
+  - `runtime_outcome belongs_to work_context`
+- canonical execution 状态要直接投影到 graph node status，而不是只塞进字符串 summary：
+  - backlog: `open / selected / materialized / completed`
+  - cycle: `planned / active / review / completed`
+  - assignment: `planned / queued / running / waiting-report / completed / failed`
+  - report: `recorded / processed`
+  - work_context: `active / paused / completed / archived`
+- 如果 canonical link 发生迁移，graph projection 必须显式失效旧关系，不能只 upsert 新关系。至少包括：
+  - 旧 `backlog -> cycle`
+  - 旧 `backlog -> assignment`
+  - 旧 `assignment -> cycle`
+  - 旧 `assignment -> work_context`
+  - 旧 `assignment -> report`
+  - 旧 `report -> work_context`
+  - 旧 `runtime_outcome -> work_context`
+- `report_synthesis` 仍负责 `latest_findings / conflicts / holes / recommended_actions / replan`，但不再负责 raw report graph writeback；原始 `report` 节点与其 execution anchor 必须从 `AgentReportService.record_task_terminal_report(...)` 这条 canonical 写路径产生。
+- 这次收口不新增第二套 graph-native runtime truth；memory graph 只是 canonical execution truth 的正式投影面，不反向替代 `state`。
+
 ## 13.7 Fixed SOP Kernel
 
 ### 定位

@@ -226,8 +226,17 @@ class OperatingLaneService:
 
 
 class BacklogService:
-    def __init__(self, *, repository: BaseBacklogItemRepository) -> None:
+    def __init__(
+        self,
+        *,
+        repository: BaseBacklogItemRepository,
+        graph_projection_service: object | None = None,
+    ) -> None:
         self._repository = repository
+        self._graph_projection_service = graph_projection_service
+
+    def set_graph_projection_service(self, graph_projection_service: object | None) -> None:
+        self._graph_projection_service = graph_projection_service
 
     def get_item(self, item_id: str) -> BacklogItemRecord | None:
         return self._repository.get_item(item_id)
@@ -293,7 +302,9 @@ class BacklogService:
                 created_at=existing.created_at if existing is not None else now,
                 updated_at=now,
             )
-            seeded.append(self._repository.upsert_item(item))
+            stored = self._repository.upsert_item(item)
+            self._project_item(stored, previous_item=existing)
+            seeded.append(stored)
         for schedule in schedules:
             stable_id = _stable_id("backlog-schedule", industry_instance_id, schedule.id)
             existing = self._repository.get_item(stable_id)
@@ -316,7 +327,9 @@ class BacklogService:
                 created_at=existing.created_at if existing is not None else now,
                 updated_at=now,
             )
-            seeded.append(self._repository.upsert_item(item))
+            stored = self._repository.upsert_item(item)
+            self._project_item(stored, previous_item=existing)
+            seeded.append(stored)
         return seeded
 
     def seed_bootstrap_items_from_goal_specs(
@@ -360,7 +373,9 @@ class BacklogService:
                 created_at=existing.created_at if existing is not None else now,
                 updated_at=now,
             )
-            seeded.append(self._repository.upsert_item(item))
+            stored = self._repository.upsert_item(item)
+            self._project_item(stored, previous_item=existing)
+            seeded.append(stored)
         for schedule_spec in schedule_specs:
             schedule_id = _string(schedule_spec.get("schedule_id"))
             title = _string(schedule_spec.get("title"))
@@ -398,7 +413,9 @@ class BacklogService:
                 created_at=existing.created_at if existing is not None else now,
                 updated_at=now,
             )
-            seeded.append(self._repository.upsert_item(item))
+            stored = self._repository.upsert_item(item)
+            self._project_item(stored, previous_item=existing)
+            seeded.append(stored)
         return seeded
 
     def record_generated_item(
@@ -436,7 +453,9 @@ class BacklogService:
             created_at=existing.created_at if existing is not None else _utc_now(),
             updated_at=_utc_now(),
         )
-        return self._repository.upsert_item(item)
+        stored = self._repository.upsert_item(item)
+        self._project_item(stored, previous_item=existing)
+        return stored
 
     def record_chat_writeback(
         self,
@@ -492,7 +511,9 @@ class BacklogService:
                     "spec_payload": dict(schedule.spec_payload),
                 },
             )
-            ensured.append(self._repository.upsert_item(item))
+            stored = self._repository.upsert_item(item)
+            self._project_item(stored, previous_item=existing)
+            ensured.append(stored)
         return ensured
 
     def mark_item_selected(
@@ -501,8 +522,9 @@ class BacklogService:
         *,
         cycle_id: str,
     ) -> BacklogItemRecord:
-        return self._repository.upsert_item(
-            item.model_copy(
+        previous = self._repository.get_item(item.id) or item
+        stored = self._repository.upsert_item(
+            previous.model_copy(
                 update={
                     "cycle_id": cycle_id,
                     "status": "selected",
@@ -510,6 +532,8 @@ class BacklogService:
                 },
             ),
         )
+        self._project_item(stored, previous_item=previous)
+        return stored
 
     def mark_item_materialized(
         self,
@@ -520,7 +544,7 @@ class BacklogService:
         assignment_id: str | None,
     ) -> BacklogItemRecord:
         current = self._repository.get_item(item.id) or item
-        return self._repository.upsert_item(
+        stored = self._repository.upsert_item(
             current.model_copy(
                 update={
                     "cycle_id": cycle_id,
@@ -531,11 +555,16 @@ class BacklogService:
                 },
             ),
         )
+        self._project_item(stored, previous_item=current)
+        return stored
 
     def mark_item_completed(self, item: BacklogItemRecord) -> BacklogItemRecord:
-        return self._repository.upsert_item(
-            item.model_copy(update={"status": "completed", "updated_at": _utc_now()}),
+        previous = self._repository.get_item(item.id) or item
+        stored = self._repository.upsert_item(
+            previous.model_copy(update={"status": "completed", "updated_at": _utc_now()}),
         )
+        self._project_item(stored, previous_item=previous)
+        return stored
 
     def attach_evidence_ids(
         self,
@@ -564,7 +593,7 @@ class BacklogService:
         )
         if merged_ids == list(current.evidence_ids or []):
             return current
-        return self._repository.upsert_item(
+        stored = self._repository.upsert_item(
             current.model_copy(
                 update={
                     "evidence_ids": merged_ids,
@@ -572,11 +601,36 @@ class BacklogService:
                 },
             ),
         )
+        self._project_item(stored, previous_item=current)
+        return stored
+
+    def _project_item(
+        self,
+        item: BacklogItemRecord,
+        *,
+        previous_item: BacklogItemRecord | None = None,
+    ) -> None:
+        projector = getattr(self._graph_projection_service, "project_backlog_item", None)
+        if not callable(projector):
+            return
+        try:
+            projector(item=item, previous_item=previous_item)
+        except Exception:
+            return
 
 
 class OperatingCycleService:
-    def __init__(self, *, repository: BaseOperatingCycleRepository) -> None:
+    def __init__(
+        self,
+        *,
+        repository: BaseOperatingCycleRepository,
+        graph_projection_service: object | None = None,
+    ) -> None:
         self._repository = repository
+        self._graph_projection_service = graph_projection_service
+
+    def set_graph_projection_service(self, graph_projection_service: object | None) -> None:
+        self._graph_projection_service = graph_projection_service
 
     def get_cycle(self, cycle_id: str) -> OperatingCycleRecord | None:
         return self._repository.get_cycle(cycle_id)
@@ -657,7 +711,9 @@ class OperatingCycleService:
             created_at=started_at,
             updated_at=started_at,
         )
-        return self._repository.upsert_cycle(cycle)
+        stored = self._repository.upsert_cycle(cycle)
+        self._project_cycle(stored)
+        return stored
 
     def reconcile_cycle(
         self,
@@ -685,7 +741,9 @@ class OperatingCycleService:
                 "updated_at": _utc_now(),
             },
         )
-        return self._repository.upsert_cycle(updated)
+        stored = self._repository.upsert_cycle(updated)
+        self._project_cycle(stored)
+        return stored
 
     def update_cycle_links(
         self,
@@ -705,12 +763,33 @@ class OperatingCycleService:
             update["backlog_item_ids"] = list(dict.fromkeys(backlog_item_ids))
         if focus_lane_ids is not None:
             update["focus_lane_ids"] = list(dict.fromkeys(focus_lane_ids))
-        return self._repository.upsert_cycle(cycle.model_copy(update=update))
+        previous = self._repository.get_cycle(cycle.id) or cycle
+        stored = self._repository.upsert_cycle(previous.model_copy(update=update))
+        self._project_cycle(stored)
+        return stored
+
+    def _project_cycle(self, cycle: OperatingCycleRecord) -> None:
+        projector = getattr(self._graph_projection_service, "project_cycle", None)
+        if not callable(projector):
+            return
+        try:
+            projector(cycle=cycle)
+        except Exception:
+            return
 
 
 class AssignmentService:
-    def __init__(self, *, repository: BaseAssignmentRepository) -> None:
+    def __init__(
+        self,
+        *,
+        repository: BaseAssignmentRepository,
+        graph_projection_service: object | None = None,
+    ) -> None:
         self._repository = repository
+        self._graph_projection_service = graph_projection_service
+
+    def set_graph_projection_service(self, graph_projection_service: object | None) -> None:
+        self._graph_projection_service = graph_projection_service
 
     def get_assignment(self, assignment_id: str) -> AssignmentRecord | None:
         return self._repository.get_assignment(assignment_id)
@@ -779,7 +858,9 @@ class AssignmentService:
                 created_at=existing.created_at if existing is not None else now,
                 updated_at=now,
             )
-            ensured.append(self._repository.upsert_assignment(assignment))
+            stored = self._repository.upsert_assignment(assignment)
+            self._project_assignment(stored, previous_assignment=existing)
+            ensured.append(stored)
         return ensured
 
     def attach_evidence_ids(
@@ -809,7 +890,7 @@ class AssignmentService:
         )
         if merged_ids == list(current.evidence_ids or []):
             return current
-        return self._repository.upsert_assignment(
+        stored = self._repository.upsert_assignment(
             current.model_copy(
                 update={
                     "evidence_ids": merged_ids,
@@ -817,6 +898,8 @@ class AssignmentService:
                 },
             ),
         )
+        self._project_assignment(stored, previous_assignment=current)
+        return stored
 
     def reconcile_assignments(
         self,
@@ -872,24 +955,41 @@ class AssignmentService:
                 and not has_live_task
             ):
                 next_status = "failed"
-            reconciled.append(
-                self._repository.upsert_assignment(
-                    assignment.model_copy(
-                        update={
-                            "task_id": task_id,
-                            "status": next_status,
-                            "evidence_ids": (
-                                list(latest_report.evidence_ids or [])
-                                if latest_report is not None
-                                else assignment.evidence_ids
-                            ),
-                            "last_report_id": latest_report.id if latest_report is not None else assignment.last_report_id,
-                            "updated_at": _utc_now(),
-                        },
-                    ),
+            stored = self._repository.upsert_assignment(
+                assignment.model_copy(
+                    update={
+                        "task_id": task_id,
+                        "status": next_status,
+                        "evidence_ids": (
+                            list(latest_report.evidence_ids or [])
+                            if latest_report is not None
+                            else assignment.evidence_ids
+                        ),
+                        "last_report_id": latest_report.id if latest_report is not None else assignment.last_report_id,
+                        "updated_at": _utc_now(),
+                    },
                 ),
             )
+            self._project_assignment(stored, previous_assignment=assignment)
+            reconciled.append(stored)
         return reconciled
+
+    def _project_assignment(
+        self,
+        assignment: AssignmentRecord,
+        *,
+        previous_assignment: AssignmentRecord | None = None,
+    ) -> None:
+        projector = getattr(self._graph_projection_service, "project_assignment", None)
+        if not callable(projector):
+            return
+        try:
+            projector(
+                assignment=assignment,
+                previous_assignment=previous_assignment,
+            )
+        except Exception:
+            return
 
 
 class AgentReportService:
@@ -898,12 +998,17 @@ class AgentReportService:
         *,
         repository: BaseAgentReportRepository,
         memory_retain_service: object | None = None,
+        graph_projection_service: object | None = None,
     ) -> None:
         self._repository = repository
         self._memory_retain_service = memory_retain_service
+        self._graph_projection_service = graph_projection_service
 
     def set_memory_retain_service(self, memory_retain_service: object | None) -> None:
         self._memory_retain_service = memory_retain_service
+
+    def set_graph_projection_service(self, graph_projection_service: object | None) -> None:
+        self._graph_projection_service = graph_projection_service
 
     def get_report(self, report_id: str) -> AgentReportRecord | None:
         return self._repository.get_report(report_id)
@@ -1024,6 +1129,7 @@ class AgentReportService:
             ),
         )
         stored = self._repository.upsert_report(report)
+        self._project_report(stored, previous_report=existing)
         retain = getattr(self._memory_retain_service, "retain_agent_report", None)
         if callable(retain):
             try:
@@ -1033,8 +1139,9 @@ class AgentReportService:
         return stored
 
     def mark_processed(self, report: AgentReportRecord) -> AgentReportRecord:
+        previous = self._repository.get_report(report.id) or report
         stored = self._repository.upsert_report(
-            report.model_copy(
+            previous.model_copy(
                 update={
                     "processed": True,
                     "status": "processed",
@@ -1043,6 +1150,7 @@ class AgentReportService:
                 },
             ),
         )
+        self._project_report(stored, previous_report=previous)
         retain = getattr(self._memory_retain_service, "retain_agent_report", None)
         if callable(retain):
             try:
@@ -1050,3 +1158,17 @@ class AgentReportService:
             except Exception:
                 pass
         return stored
+
+    def _project_report(
+        self,
+        report: AgentReportRecord,
+        *,
+        previous_report: AgentReportRecord | None = None,
+    ) -> None:
+        projector = getattr(self._graph_projection_service, "project_report", None)
+        if not callable(projector):
+            return
+        try:
+            projector(report=report, previous_report=previous_report)
+        except Exception:
+            return

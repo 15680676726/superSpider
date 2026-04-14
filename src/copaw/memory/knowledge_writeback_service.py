@@ -14,8 +14,12 @@ from .knowledge_graph_models import (
 )
 from ..state import (
     AgentReportRecord,
+    AssignmentRecord,
+    BacklogItemRecord,
     KnowledgeChunkRecord,
     MemoryFactIndexRecord,
+    OperatingCycleRecord,
+    WorkContextRecord,
 )
 from ..state.models_memory import MemoryRelationViewRecord
 
@@ -36,6 +40,10 @@ def _string(value: object | None) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _mapping(value: object | None) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
 
 
 def _unique_strings(*collections: object) -> list[str]:
@@ -116,6 +124,7 @@ class KnowledgeWritebackService:
         *,
         report: AgentReportRecord,
         activation_result: object | None = None,
+        previous_report: AgentReportRecord | None = None,
     ) -> KnowledgeGraphWritebackChange:
         _ = activation_result
         scope = self._scope_from_report(report)
@@ -123,6 +132,7 @@ class KnowledgeWritebackService:
         source_ref = f"agent-report:{report.id}"
         upsert_nodes: list[KnowledgeGraphNode] = []
         upsert_relations: list[KnowledgeGraphRelation] = []
+        invalidate_relation_ids: list[str] = []
 
         report_node = KnowledgeGraphNode(
             node_id=f"report:{report.id}",
@@ -132,6 +142,7 @@ class KnowledgeWritebackService:
             summary=report.summary,
             evidence_refs=evidence_refs,
             source_refs=[source_ref],
+            status=report.status,
             metadata={
                 "report_id": report.id,
                 "assignment_id": report.assignment_id,
@@ -143,6 +154,69 @@ class KnowledgeWritebackService:
             },
         )
         upsert_nodes.append(report_node)
+
+        if _string(report.assignment_id):
+            upsert_nodes.append(
+                self._assignment_anchor_node(
+                    assignment_id=report.assignment_id,
+                    industry_instance_id=report.industry_instance_id,
+                    owner_agent_id=report.owner_agent_id,
+                ),
+            )
+            upsert_relations.append(
+                self._relation(
+                    relation_type="produces",
+                    source_id=f"assignment:{report.assignment_id}",
+                    target_id=report_node.node_id,
+                    scope=scope,
+                    evidence_refs=evidence_refs,
+                    source_refs=[source_ref],
+                    metadata={"summary": f"Assignment {report.assignment_id} produced report {report.id}"},
+                ),
+            )
+            invalidate_relation_ids.extend(
+                self._invalidate_relation_ids_for_target_change(
+                    relation_type="produces",
+                    source_id=f"assignment:{report.assignment_id}",
+                    current_target_id=report_node.node_id,
+                    previous_target_id=(
+                        report_node.node_id
+                        if _string(getattr(previous_report, "assignment_id", None)) == _string(report.assignment_id)
+                        else None
+                    ),
+                ),
+            )
+
+        if _string(report.work_context_id):
+            work_context_node = self._work_context_anchor_node(
+                context_id=report.work_context_id,
+                industry_instance_id=report.industry_instance_id,
+                owner_agent_id=report.owner_agent_id,
+            )
+            upsert_nodes.append(work_context_node)
+            upsert_relations.append(
+                self._relation(
+                    relation_type="belongs_to",
+                    source_id=report_node.node_id,
+                    target_id=work_context_node.node_id,
+                    scope=scope,
+                    evidence_refs=evidence_refs,
+                    source_refs=[source_ref],
+                    metadata={"summary": f"Report {report.id} belongs to work context {report.work_context_id}"},
+                ),
+            )
+            invalidate_relation_ids.extend(
+                self._invalidate_relation_ids_for_target_change(
+                    relation_type="belongs_to",
+                    source_id=report_node.node_id,
+                    current_target_id=work_context_node.node_id,
+                    previous_target_id=(
+                        f"work-context:{previous_report.work_context_id}"
+                        if previous_report is not None and _string(previous_report.work_context_id)
+                        else None
+                    ),
+                ),
+            )
 
         outcome_event = KnowledgeGraphNode(
             node_id=f"report-event:{report.id}",
@@ -286,10 +360,326 @@ class KnowledgeWritebackService:
             scope=scope,
             upsert_nodes=upsert_nodes,
             upsert_relations=upsert_relations,
+            invalidate_relation_ids=invalidate_relation_ids,
             metadata={
                 "source": "agent-report",
                 "report_id": report.id,
             },
+        )
+
+    def build_cycle_writeback(
+        self,
+        *,
+        cycle: OperatingCycleRecord,
+    ) -> KnowledgeGraphWritebackChange:
+        scope = self._industry_scope(
+            industry_instance_id=cycle.industry_instance_id,
+        )
+        node = KnowledgeGraphNode(
+            node_id=f"cycle:{cycle.id}",
+            node_type="cycle",
+            scope=scope,
+            title=cycle.title,
+            summary=cycle.summary or cycle.title,
+            source_refs=_unique_strings(cycle.source_ref, f"cycle:{cycle.id}"),
+            status=cycle.status,
+            metadata={
+                "cycle_id": cycle.id,
+                "cycle_kind": cycle.cycle_kind,
+                "started_at": cycle.started_at.isoformat() if cycle.started_at is not None else None,
+                "due_at": cycle.due_at.isoformat() if cycle.due_at is not None else None,
+                "completed_at": cycle.completed_at.isoformat() if cycle.completed_at is not None else None,
+                "focus_lane_ids": list(cycle.focus_lane_ids or []),
+                "backlog_item_ids": list(cycle.backlog_item_ids or []),
+                "assignment_ids": list(cycle.assignment_ids or []),
+                "report_ids": list(cycle.report_ids or []),
+                **dict(cycle.metadata or {}),
+            },
+        )
+        return KnowledgeGraphWritebackChange(
+            scope=scope,
+            upsert_nodes=[node],
+            metadata={"source": "operating-cycle", "cycle_id": cycle.id},
+        )
+
+    def build_backlog_writeback(
+        self,
+        *,
+        item: BacklogItemRecord,
+        previous_item: BacklogItemRecord | None = None,
+    ) -> KnowledgeGraphWritebackChange:
+        scope = self._industry_scope(
+            industry_instance_id=item.industry_instance_id,
+            owner_agent_id=_string(_mapping(item.metadata).get("owner_agent_id")),
+        )
+        node = KnowledgeGraphNode(
+            node_id=f"backlog:{item.id}",
+            node_type="backlog",
+            scope=scope,
+            title=item.title,
+            summary=item.summary or item.title,
+            evidence_refs=_unique_strings(item.evidence_ids),
+            source_refs=_unique_strings(item.source_ref, f"backlog:{item.id}"),
+            status=item.status,
+            metadata={
+                "backlog_id": item.id,
+                "lane_id": item.lane_id,
+                "cycle_id": item.cycle_id,
+                "assignment_id": item.assignment_id,
+                "goal_id": item.goal_id,
+                "priority": item.priority,
+                "source_kind": item.source_kind,
+                **dict(item.metadata or {}),
+            },
+        )
+        upsert_nodes = [node]
+        upsert_relations: list[KnowledgeGraphRelation] = []
+        invalidate_relation_ids: list[str] = []
+
+        cycle_target_id = self._cycle_node_id(item.cycle_id)
+        if cycle_target_id is not None:
+            upsert_nodes.append(
+                self._cycle_anchor_node(
+                    cycle_id=item.cycle_id,
+                    industry_instance_id=item.industry_instance_id,
+                ),
+            )
+            upsert_relations.append(
+                self._relation(
+                    relation_type="belongs_to",
+                    source_id=node.node_id,
+                    target_id=cycle_target_id,
+                    scope=scope,
+                    evidence_refs=node.evidence_refs,
+                    source_refs=node.source_refs,
+                    metadata={"summary": f"Backlog {item.id} belongs to cycle {item.cycle_id}"},
+                ),
+            )
+        invalidate_relation_ids.extend(
+            self._invalidate_relation_ids_for_target_change(
+                relation_type="belongs_to",
+                source_id=node.node_id,
+                current_target_id=cycle_target_id,
+                previous_target_id=self._cycle_node_id(
+                    previous_item.cycle_id if previous_item is not None else None,
+                ),
+            ),
+        )
+
+        assignment_target_id = self._assignment_node_id(item.assignment_id)
+        if assignment_target_id is not None:
+            upsert_nodes.append(
+                self._assignment_anchor_node(
+                    assignment_id=item.assignment_id,
+                    industry_instance_id=item.industry_instance_id,
+                    owner_agent_id=_string(_mapping(item.metadata).get("owner_agent_id")),
+                ),
+            )
+            upsert_relations.append(
+                self._relation(
+                    relation_type="produces",
+                    source_id=node.node_id,
+                    target_id=assignment_target_id,
+                    scope=scope,
+                    evidence_refs=node.evidence_refs,
+                    source_refs=node.source_refs,
+                    metadata={"summary": f"Backlog {item.id} produced assignment {item.assignment_id}"},
+                ),
+            )
+        invalidate_relation_ids.extend(
+            self._invalidate_relation_ids_for_target_change(
+                relation_type="produces",
+                source_id=node.node_id,
+                current_target_id=assignment_target_id,
+                previous_target_id=self._assignment_node_id(
+                    previous_item.assignment_id if previous_item is not None else None,
+                ),
+            ),
+        )
+
+        return KnowledgeGraphWritebackChange(
+            scope=scope,
+            upsert_nodes=upsert_nodes,
+            upsert_relations=upsert_relations,
+            invalidate_relation_ids=invalidate_relation_ids,
+            metadata={"source": "backlog-item", "backlog_id": item.id},
+        )
+
+    def build_assignment_writeback(
+        self,
+        *,
+        assignment: AssignmentRecord,
+        previous_assignment: AssignmentRecord | None = None,
+    ) -> KnowledgeGraphWritebackChange:
+        metadata = _mapping(assignment.metadata)
+        work_context_id = _string(metadata.get("work_context_id"))
+        scope = self._industry_scope(
+            industry_instance_id=assignment.industry_instance_id,
+            owner_agent_id=assignment.owner_agent_id,
+        )
+        node = KnowledgeGraphNode(
+            node_id=f"assignment:{assignment.id}",
+            node_type="assignment",
+            scope=scope,
+            title=assignment.title,
+            summary=assignment.summary or assignment.title,
+            evidence_refs=_unique_strings(assignment.evidence_ids),
+            source_refs=[f"assignment:{assignment.id}"],
+            status=assignment.status,
+            metadata={
+                "assignment_id": assignment.id,
+                "cycle_id": assignment.cycle_id,
+                "lane_id": assignment.lane_id,
+                "backlog_item_id": assignment.backlog_item_id,
+                "goal_id": assignment.goal_id,
+                "task_id": assignment.task_id,
+                "owner_agent_id": assignment.owner_agent_id,
+                "owner_role_id": assignment.owner_role_id,
+                "report_back_mode": assignment.report_back_mode,
+                "last_report_id": assignment.last_report_id,
+                **metadata,
+            },
+        )
+        upsert_nodes = [node]
+        upsert_relations: list[KnowledgeGraphRelation] = []
+        invalidate_relation_ids: list[str] = []
+
+        cycle_target_id = self._cycle_node_id(assignment.cycle_id)
+        if cycle_target_id is not None:
+            upsert_nodes.append(
+                self._cycle_anchor_node(
+                    cycle_id=assignment.cycle_id,
+                    industry_instance_id=assignment.industry_instance_id,
+                ),
+            )
+            upsert_relations.append(
+                self._relation(
+                    relation_type="belongs_to",
+                    source_id=node.node_id,
+                    target_id=cycle_target_id,
+                    scope=scope,
+                    evidence_refs=node.evidence_refs,
+                    source_refs=node.source_refs,
+                    metadata={"summary": f"Assignment {assignment.id} belongs to cycle {assignment.cycle_id}"},
+                ),
+            )
+        invalidate_relation_ids.extend(
+            self._invalidate_relation_ids_for_target_change(
+                relation_type="belongs_to",
+                source_id=node.node_id,
+                current_target_id=cycle_target_id,
+                previous_target_id=self._cycle_node_id(
+                    previous_assignment.cycle_id if previous_assignment is not None else None,
+                ),
+            ),
+        )
+
+        work_context_target_id = self._work_context_node_id(work_context_id)
+        if work_context_target_id is not None:
+            upsert_nodes.append(
+                self._work_context_anchor_node(
+                    context_id=work_context_id,
+                    industry_instance_id=assignment.industry_instance_id,
+                    owner_agent_id=assignment.owner_agent_id,
+                ),
+            )
+            upsert_relations.append(
+                self._relation(
+                    relation_type="belongs_to",
+                    source_id=node.node_id,
+                    target_id=work_context_target_id,
+                    scope=scope,
+                    evidence_refs=node.evidence_refs,
+                    source_refs=node.source_refs,
+                    metadata={"summary": f"Assignment {assignment.id} belongs to work context {work_context_id}"},
+                ),
+            )
+        previous_work_context_id = _string(
+            _mapping(previous_assignment.metadata).get("work_context_id")
+            if previous_assignment is not None
+            else None,
+        )
+        invalidate_relation_ids.extend(
+            self._invalidate_relation_ids_for_target_change(
+                relation_type="belongs_to",
+                source_id=node.node_id,
+                current_target_id=work_context_target_id,
+                previous_target_id=self._work_context_node_id(previous_work_context_id),
+            ),
+        )
+
+        report_target_id = self._report_node_id(assignment.last_report_id)
+        if report_target_id is not None:
+            upsert_relations.append(
+                self._relation(
+                    relation_type="produces",
+                    source_id=node.node_id,
+                    target_id=report_target_id,
+                    scope=self._scope_from_assignment_report_target(
+                        assignment=assignment,
+                        report_id=assignment.last_report_id,
+                        work_context_id=work_context_id,
+                    ),
+                    evidence_refs=node.evidence_refs,
+                    source_refs=node.source_refs,
+                    metadata={"summary": f"Assignment {assignment.id} produced report {assignment.last_report_id}"},
+                ),
+            )
+        invalidate_relation_ids.extend(
+            self._invalidate_relation_ids_for_target_change(
+                relation_type="produces",
+                source_id=node.node_id,
+                current_target_id=report_target_id,
+                previous_target_id=self._report_node_id(
+                    previous_assignment.last_report_id if previous_assignment is not None else None,
+                ),
+            ),
+        )
+
+        return KnowledgeGraphWritebackChange(
+            scope=scope,
+            upsert_nodes=upsert_nodes,
+            upsert_relations=upsert_relations,
+            invalidate_relation_ids=invalidate_relation_ids,
+            metadata={"source": "assignment", "assignment_id": assignment.id},
+        )
+
+    def build_work_context_writeback(
+        self,
+        *,
+        context: WorkContextRecord,
+    ) -> KnowledgeGraphWritebackChange:
+        scope = self._work_context_scope(
+            context_id=context.id,
+            industry_instance_id=context.industry_instance_id,
+            owner_agent_id=context.owner_agent_id,
+        )
+        node = KnowledgeGraphNode(
+            node_id=f"work-context:{context.id}",
+            node_type="work_context",
+            scope=scope,
+            title=context.title,
+            summary=context.summary or context.title,
+            source_refs=_unique_strings(context.source_ref, context.context_key, f"work-context:{context.id}"),
+            status=context.status,
+            metadata={
+                "work_context_id": context.id,
+                "context_type": context.context_type,
+                "context_key": context.context_key,
+                "owner_scope": context.owner_scope,
+                "owner_agent_id": context.owner_agent_id,
+                "industry_instance_id": context.industry_instance_id,
+                "primary_thread_id": context.primary_thread_id,
+                "source_kind": context.source_kind,
+                "source_ref": context.source_ref,
+                "parent_work_context_id": context.parent_work_context_id,
+                **dict(context.metadata or {}),
+            },
+        )
+        return KnowledgeGraphWritebackChange(
+            scope=scope,
+            upsert_nodes=[node],
+            metadata={"source": "work-context", "work_context_id": context.id},
         )
 
     def build_report_synthesis_writeback(
@@ -316,6 +706,8 @@ class KnowledgeWritebackService:
         capability_ref: str | None = None,
         evidence_refs: list[str] | None = None,
         recovery_summary: str | None = None,
+        work_context_id: str | None = None,
+        previous_work_context_id: str | None = None,
     ) -> KnowledgeGraphWritebackChange:
         scope = self._scope(scope_type=scope_type, scope_id=scope_id)
         normalized_outcome = (_string(outcome) or "failed").lower()
@@ -337,6 +729,7 @@ class KnowledgeWritebackService:
         )
         upsert_nodes = [runtime_outcome_node]
         upsert_relations: list[KnowledgeGraphRelation] = []
+        invalidate_relation_ids: list[str] = []
 
         if normalized_outcome in _FAILURE_OUTCOMES:
             failure_node = KnowledgeGraphNode(
@@ -382,10 +775,39 @@ class KnowledgeWritebackService:
                     ),
                 )
 
+        normalized_work_context_id = _string(work_context_id)
+        if normalized_work_context_id is not None:
+            work_context_node = self._work_context_anchor_node(
+                context_id=normalized_work_context_id,
+            )
+            upsert_nodes.append(work_context_node)
+            upsert_relations.append(
+                self._relation(
+                    relation_type="belongs_to",
+                    source_id=runtime_outcome_node.node_id,
+                    target_id=work_context_node.node_id,
+                    scope=self._work_context_scope(context_id=normalized_work_context_id),
+                    evidence_refs=normalized_evidence_refs,
+                    source_refs=[f"runtime-outcome:{outcome_ref}"],
+                    metadata={
+                        "summary": f"Runtime outcome {outcome_ref} belongs to work context {normalized_work_context_id}",
+                    },
+                ),
+            )
+        invalidate_relation_ids.extend(
+            self._invalidate_relation_ids_for_target_change(
+                relation_type="belongs_to",
+                source_id=runtime_outcome_node.node_id,
+                current_target_id=self._work_context_node_id(normalized_work_context_id),
+                previous_target_id=self._work_context_node_id(previous_work_context_id),
+            ),
+        )
+
         return KnowledgeGraphWritebackChange(
             scope=scope,
             upsert_nodes=upsert_nodes,
             upsert_relations=upsert_relations,
+            invalidate_relation_ids=invalidate_relation_ids,
             metadata={
                 "source": "execution-outcome",
                 "outcome_ref": outcome_ref,
@@ -831,7 +1253,15 @@ class KnowledgeWritebackService:
 
     def _node_memory_type(self, node_type: str) -> str:
         normalized = str(node_type or "").strip().lower()
-        if normalized in {"event", "runtime_outcome", "report", "cycle", "assignment", "backlog"}:
+        if normalized in {
+            "event",
+            "runtime_outcome",
+            "report",
+            "cycle",
+            "assignment",
+            "backlog",
+            "work_context",
+        }:
             return "episode"
         if normalized in {
             "opinion",
@@ -849,17 +1279,199 @@ class KnowledgeWritebackService:
 
     def _scope_from_report(self, report: AgentReportRecord) -> KnowledgeGraphScope:
         if _string(report.work_context_id):
-            return self._scope(scope_type="work_context", scope_id=report.work_context_id)
+            return self._work_context_scope(
+                context_id=report.work_context_id,
+                industry_instance_id=report.industry_instance_id,
+                owner_agent_id=report.owner_agent_id,
+            )
         if _string(report.industry_instance_id):
-            return self._scope(scope_type="industry", scope_id=report.industry_instance_id)
+            return self._industry_scope(
+                industry_instance_id=report.industry_instance_id,
+                owner_agent_id=report.owner_agent_id,
+            )
         if _string(report.owner_agent_id):
-            return self._scope(scope_type="agent", scope_id=report.owner_agent_id)
+            return self._scope(
+                scope_type="agent",
+                scope_id=report.owner_agent_id,
+                owner_agent_id=report.owner_agent_id,
+                industry_instance_id=report.industry_instance_id,
+            )
         return self._scope(scope_type="global", scope_id="runtime")
 
-    def _scope(self, *, scope_type: str, scope_id: str | None) -> KnowledgeGraphScope:
+    def _scope(
+        self,
+        *,
+        scope_type: str,
+        scope_id: str | None,
+        owner_agent_id: str | None = None,
+        industry_instance_id: str | None = None,
+    ) -> KnowledgeGraphScope:
         return KnowledgeGraphScope(
             scope_type=str(scope_type or "global").strip().lower() or "global",
             scope_id=_string(scope_id) or "runtime",
+            owner_agent_id=_string(owner_agent_id),
+            industry_instance_id=_string(industry_instance_id),
+        )
+
+    def _industry_scope(
+        self,
+        *,
+        industry_instance_id: str | None,
+        owner_agent_id: str | None = None,
+    ) -> KnowledgeGraphScope:
+        normalized_industry_instance_id = _string(industry_instance_id)
+        if normalized_industry_instance_id is not None:
+            return self._scope(
+                scope_type="industry",
+                scope_id=normalized_industry_instance_id,
+                owner_agent_id=owner_agent_id,
+                industry_instance_id=normalized_industry_instance_id,
+            )
+        normalized_owner_agent_id = _string(owner_agent_id)
+        if normalized_owner_agent_id is not None:
+            return self._scope(
+                scope_type="agent",
+                scope_id=normalized_owner_agent_id,
+                owner_agent_id=normalized_owner_agent_id,
+            )
+        return self._scope(scope_type="global", scope_id="runtime")
+
+    def _work_context_scope(
+        self,
+        *,
+        context_id: str | None,
+        industry_instance_id: str | None = None,
+        owner_agent_id: str | None = None,
+    ) -> KnowledgeGraphScope:
+        return self._scope(
+            scope_type="work_context",
+            scope_id=context_id,
+            owner_agent_id=owner_agent_id,
+            industry_instance_id=industry_instance_id,
+        )
+
+    def _scope_from_assignment_report_target(
+        self,
+        *,
+        assignment: AssignmentRecord,
+        report_id: str | None,
+        work_context_id: str | None,
+    ) -> KnowledgeGraphScope:
+        if _string(work_context_id):
+            return self._work_context_scope(
+                context_id=work_context_id,
+                industry_instance_id=assignment.industry_instance_id,
+                owner_agent_id=assignment.owner_agent_id,
+            )
+        return self._industry_scope(
+            industry_instance_id=assignment.industry_instance_id,
+            owner_agent_id=assignment.owner_agent_id,
+        )
+
+    def _backlog_node_id(self, backlog_id: str | None) -> str | None:
+        normalized = _string(backlog_id)
+        return f"backlog:{normalized}" if normalized is not None else None
+
+    def _cycle_node_id(self, cycle_id: str | None) -> str | None:
+        normalized = _string(cycle_id)
+        return f"cycle:{normalized}" if normalized is not None else None
+
+    def _assignment_node_id(self, assignment_id: str | None) -> str | None:
+        normalized = _string(assignment_id)
+        return f"assignment:{normalized}" if normalized is not None else None
+
+    def _report_node_id(self, report_id: str | None) -> str | None:
+        normalized = _string(report_id)
+        return f"report:{normalized}" if normalized is not None else None
+
+    def _work_context_node_id(self, context_id: str | None) -> str | None:
+        normalized = _string(context_id)
+        return f"work-context:{normalized}" if normalized is not None else None
+
+    def _relation_id(self, *, relation_type: str, source_id: str, target_id: str) -> str:
+        return f"relation:{_stable_suffix(relation_type, source_id, target_id)}"
+
+    def _invalidate_relation_ids_for_target_change(
+        self,
+        *,
+        relation_type: str,
+        source_id: str,
+        current_target_id: str | None,
+        previous_target_id: str | None,
+    ) -> list[str]:
+        normalized_previous_target_id = _string(previous_target_id)
+        normalized_current_target_id = _string(current_target_id)
+        if normalized_previous_target_id is None or normalized_previous_target_id == normalized_current_target_id:
+            return []
+        return [
+            self._relation_id(
+                relation_type=relation_type,
+                source_id=source_id,
+                target_id=normalized_previous_target_id,
+            ),
+        ]
+
+    def _cycle_anchor_node(
+        self,
+        *,
+        cycle_id: str | None,
+        industry_instance_id: str | None,
+    ) -> KnowledgeGraphNode:
+        normalized_cycle_id = _string(cycle_id) or "unknown"
+        scope = self._industry_scope(industry_instance_id=industry_instance_id)
+        return KnowledgeGraphNode(
+            node_id=f"cycle:{normalized_cycle_id}",
+            node_type="cycle",
+            scope=scope,
+            title=f"Cycle {normalized_cycle_id}",
+            summary=f"Cycle anchor {normalized_cycle_id}",
+            source_refs=[f"cycle:{normalized_cycle_id}"],
+            status="planned",
+        )
+
+    def _assignment_anchor_node(
+        self,
+        *,
+        assignment_id: str | None,
+        industry_instance_id: str | None,
+        owner_agent_id: str | None = None,
+    ) -> KnowledgeGraphNode:
+        normalized_assignment_id = _string(assignment_id) or "unknown"
+        scope = self._industry_scope(
+            industry_instance_id=industry_instance_id,
+            owner_agent_id=owner_agent_id,
+        )
+        return KnowledgeGraphNode(
+            node_id=f"assignment:{normalized_assignment_id}",
+            node_type="assignment",
+            scope=scope,
+            title=f"Assignment {normalized_assignment_id}",
+            summary=f"Assignment anchor {normalized_assignment_id}",
+            source_refs=[f"assignment:{normalized_assignment_id}"],
+            status="planned",
+        )
+
+    def _work_context_anchor_node(
+        self,
+        *,
+        context_id: str | None,
+        industry_instance_id: str | None = None,
+        owner_agent_id: str | None = None,
+    ) -> KnowledgeGraphNode:
+        normalized_context_id = _string(context_id) or "runtime"
+        scope = self._work_context_scope(
+            context_id=normalized_context_id,
+            industry_instance_id=industry_instance_id,
+            owner_agent_id=owner_agent_id,
+        )
+        return KnowledgeGraphNode(
+            node_id=f"work-context:{normalized_context_id}",
+            node_type="work_context",
+            scope=scope,
+            title=f"Work context {normalized_context_id}",
+            summary=f"Work context anchor {normalized_context_id}",
+            source_refs=[f"work-context:{normalized_context_id}"],
+            status="active",
         )
 
     def _report_findings_verified(self, report: AgentReportRecord) -> bool:
@@ -917,13 +1529,19 @@ class KnowledgeWritebackService:
         scope: KnowledgeGraphScope,
         evidence_refs: list[str] | None = None,
         source_refs: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> KnowledgeGraphRelation:
         return KnowledgeGraphRelation(
-            relation_id=f"relation:{_stable_suffix(relation_type, source_id, target_id)}",
+            relation_id=self._relation_id(
+                relation_type=relation_type,
+                source_id=source_id,
+                target_id=target_id,
+            ),
             relation_type=relation_type,
             source_id=source_id,
             target_id=target_id,
             scope=scope,
             evidence_refs=_unique_strings(evidence_refs),
             source_refs=_unique_strings(source_refs),
+            metadata=dict(metadata or {}),
         )

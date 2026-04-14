@@ -37,8 +37,17 @@ def _merge_metadata(
 class WorkContextService:
     """Resolve and persist formal continuous work boundaries."""
 
-    def __init__(self, *, repository: BaseWorkContextRepository) -> None:
+    def __init__(
+        self,
+        *,
+        repository: BaseWorkContextRepository,
+        graph_projection_service: object | None = None,
+    ) -> None:
         self._repository = repository
+        self._graph_projection_service = graph_projection_service
+
+    def set_graph_projection_service(self, graph_projection_service: object | None) -> None:
+        self._graph_projection_service = graph_projection_service
 
     def get_context(self, context_id: str) -> WorkContextRecord | None:
         return self._repository.get_context(context_id)
@@ -94,7 +103,9 @@ class WorkContextService:
                 created_at=now,
                 updated_at=now,
             )
-            return self._repository.upsert_context(record)
+            stored = self._repository.upsert_context(record)
+            self._project_context(stored)
+            return stored
         merged_metadata = _merge_metadata(existing.metadata, metadata)
         updated = existing.model_copy(
             update={
@@ -118,4 +129,15 @@ class WorkContextService:
                 "updated_at": now,
             },
         )
-        return self._repository.upsert_context(updated)
+        stored = self._repository.upsert_context(updated)
+        self._project_context(stored)
+        return stored
+
+    def _project_context(self, context: WorkContextRecord) -> None:
+        projector = getattr(self._graph_projection_service, "project_work_context", None)
+        if not callable(projector):
+            return
+        try:
+            projector(context=context)
+        except Exception:
+            return

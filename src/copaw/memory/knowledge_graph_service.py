@@ -271,6 +271,21 @@ class KnowledgeGraphService:
     def build_report_synthesis_writeback_change(self, **kwargs) -> object:
         return self._knowledge_writeback_service.build_report_synthesis_writeback(**kwargs)
 
+    def build_cycle_writeback_change(self, **kwargs) -> object:
+        return self._knowledge_writeback_service.build_cycle_writeback(**kwargs)
+
+    def build_backlog_writeback_change(self, **kwargs) -> object:
+        return self._knowledge_writeback_service.build_backlog_writeback(**kwargs)
+
+    def build_assignment_writeback_change(self, **kwargs) -> object:
+        return self._knowledge_writeback_service.build_assignment_writeback(**kwargs)
+
+    def build_work_context_writeback_change(self, **kwargs) -> object:
+        return self._knowledge_writeback_service.build_work_context_writeback(**kwargs)
+
+    def build_report_writeback_change(self, **kwargs) -> object:
+        return self._knowledge_writeback_service.build_report_writeback(**kwargs)
+
     def apply_change(self, change: object) -> object | None:
         apply_change = getattr(self._knowledge_writeback_service, "apply_change", None)
         if not callable(apply_change):
@@ -283,6 +298,21 @@ class KnowledgeGraphService:
             return None
         payload = summarize(change)
         return dict(payload) if isinstance(payload, dict) else None
+
+    def project_cycle(self, **kwargs) -> dict[str, Any] | None:
+        return self._build_apply_and_summarize("build_cycle_writeback", **kwargs)
+
+    def project_backlog_item(self, **kwargs) -> dict[str, Any] | None:
+        return self._build_apply_and_summarize("build_backlog_writeback", **kwargs)
+
+    def project_assignment(self, **kwargs) -> dict[str, Any] | None:
+        return self._build_apply_and_summarize("build_assignment_writeback", **kwargs)
+
+    def project_work_context(self, **kwargs) -> dict[str, Any] | None:
+        return self._build_apply_and_summarize("build_work_context_writeback", **kwargs)
+
+    def project_report(self, **kwargs) -> dict[str, Any] | None:
+        return self._build_apply_and_summarize("build_report_writeback", **kwargs)
 
     @staticmethod
     def _coerce_task_subgraph(value: object | None) -> TaskSubgraph | None:
@@ -343,6 +373,20 @@ class KnowledgeGraphService:
             "blocker_paths": _path_summaries(value.get("blocker_paths")),
             "recovery_paths": _path_summaries(value.get("recovery_paths")),
         }
+
+    def _build_apply_and_summarize(
+        self,
+        builder_name: str,
+        **kwargs,
+    ) -> dict[str, Any] | None:
+        builder = getattr(self._knowledge_writeback_service, builder_name, None)
+        if not callable(builder):
+            return None
+        change = builder(**kwargs)
+        applied = self.apply_change(change)
+        if isinstance(applied, dict):
+            return applied
+        return self.summarize_change(change)
 
 
 __all__ = ["KnowledgeGraphService"]

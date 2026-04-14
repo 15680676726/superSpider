@@ -209,16 +209,48 @@ def build_runtime_domain_services(
     backlog_service = BacklogService(
         repository=repositories.backlog_item_repository,
     )
+    set_backlog_graph_projection = getattr(backlog_service, "set_graph_projection_service", None)
+    if callable(set_backlog_graph_projection):
+        set_backlog_graph_projection(knowledge_graph_service)
     operating_cycle_service = OperatingCycleService(
         repository=repositories.operating_cycle_repository,
     )
+    set_cycle_graph_projection = getattr(
+        operating_cycle_service,
+        "set_graph_projection_service",
+        None,
+    )
+    if callable(set_cycle_graph_projection):
+        set_cycle_graph_projection(knowledge_graph_service)
     assignment_service = AssignmentService(
         repository=repositories.assignment_repository,
     )
+    set_assignment_graph_projection = getattr(
+        assignment_service,
+        "set_graph_projection_service",
+        None,
+    )
+    if callable(set_assignment_graph_projection):
+        set_assignment_graph_projection(knowledge_graph_service)
     agent_report_service = AgentReportService(
         repository=repositories.agent_report_repository,
         memory_retain_service=memory_retain_service,
     )
+    set_report_graph_projection = getattr(
+        agent_report_service,
+        "set_graph_projection_service",
+        None,
+    )
+    if callable(set_report_graph_projection):
+        set_report_graph_projection(knowledge_graph_service)
+    if work_context_service is not None:
+        set_work_context_graph_projection = getattr(
+            work_context_service,
+            "set_graph_projection_service",
+            None,
+        )
+        if callable(set_work_context_graph_projection):
+            set_work_context_graph_projection(knowledge_graph_service)
     media_service = MediaService(
         repository=repositories.media_analysis_repository,
         evidence_ledger=evidence_ledger,
@@ -262,6 +294,7 @@ def build_runtime_domain_services(
         memory_retain_service=memory_retain_service,
         memory_activation_service=memory_activation_service,
         knowledge_service=knowledge_service,
+        knowledge_graph_service=knowledge_graph_service,
     )
     industry_service = IndustryService(
         goal_service=goal_service,

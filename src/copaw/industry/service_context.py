@@ -215,6 +215,7 @@ def build_industry_service_runtime_bindings(
     memory_retain_service: object | None = None,
     memory_activation_service: object | None = None,
     knowledge_service: object | None = None,
+    knowledge_graph_service: object | None = None,
 ) -> IndustryServiceRuntimeBindings:
     # `state_store` remains in the signature for compatibility with older
     # bootstrapping sites, but runtime bindings must now be assembled from
@@ -250,16 +251,37 @@ def build_industry_service_runtime_bindings(
         if backlog_repository is not None
         else None
     )
+    set_backlog_graph_projection = getattr(
+        backlog_runtime_service,
+        "set_graph_projection_service",
+        None,
+    )
+    if callable(set_backlog_graph_projection):
+        set_backlog_graph_projection(knowledge_graph_service)
     cycle_service = operating_cycle_service or (
         OperatingCycleService(repository=cycle_repository)
         if cycle_repository is not None
         else None
     )
+    set_cycle_graph_projection = getattr(
+        cycle_service,
+        "set_graph_projection_service",
+        None,
+    )
+    if callable(set_cycle_graph_projection):
+        set_cycle_graph_projection(knowledge_graph_service)
     assignment_runtime_service = assignment_service or (
         AssignmentService(repository=assignment_repo)
         if assignment_repo is not None
         else None
     )
+    set_assignment_graph_projection = getattr(
+        assignment_runtime_service,
+        "set_graph_projection_service",
+        None,
+    )
+    if callable(set_assignment_graph_projection):
+        set_assignment_graph_projection(knowledge_graph_service)
     report_service = agent_report_service or (
         AgentReportService(
             repository=report_repository,
@@ -268,6 +290,13 @@ def build_industry_service_runtime_bindings(
         if report_repository is not None
         else None
     )
+    set_report_graph_projection = getattr(
+        report_service,
+        "set_graph_projection_service",
+        None,
+    )
+    if callable(set_report_graph_projection):
+        set_report_graph_projection(knowledge_graph_service)
     browser_service = browser_runtime_service
     return IndustryServiceRuntimeBindings(
         kernel_dispatcher=kernel_dispatcher,

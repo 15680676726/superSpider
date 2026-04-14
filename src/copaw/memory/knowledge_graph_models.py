@@ -31,6 +31,7 @@ EXECUTION_KNOWLEDGE_NODE_TYPES = (
     "cycle",
     "assignment",
     "report",
+    "work_context",
     "capability",
     "environment",
     "runtime_outcome",
@@ -98,7 +99,27 @@ KNOWLEDGE_GRAPH_NODE_KINDS = KNOWLEDGE_GRAPH_NODE_TYPES
 
 _NODE_TYPE_SET = set(KNOWLEDGE_GRAPH_NODE_TYPES)
 _RELATION_TYPE_SET = set(KNOWLEDGE_GRAPH_RELATION_TYPES)
-_STATUS_SET = {"active", "candidate", "superseded", "expired"}
+_STATUS_SET = {
+    "active",
+    "candidate",
+    "superseded",
+    "expired",
+    "open",
+    "selected",
+    "materialized",
+    "completed",
+    "planned",
+    "review",
+    "queued",
+    "running",
+    "waiting-report",
+    "failed",
+    "recorded",
+    "processed",
+    "paused",
+    "archived",
+    "cancelled",
+}
 
 
 def map_activation_kind_to_graph_node_type(kind: str) -> str:

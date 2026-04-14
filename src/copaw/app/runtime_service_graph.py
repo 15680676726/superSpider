@@ -573,6 +573,13 @@ def build_runtime_bootstrap(
     work_context_service = WorkContextService(
         repository=repositories.work_context_repository,
     )
+    set_work_context_graph_projection = getattr(
+        work_context_service,
+        "set_graph_projection_service",
+        None,
+    )
+    if callable(set_work_context_graph_projection):
+        set_work_context_graph_projection(knowledge_graph_service)
     (
         learning_service,
         governance_service,

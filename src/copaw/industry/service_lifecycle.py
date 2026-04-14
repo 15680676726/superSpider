@@ -1502,20 +1502,11 @@ class _IndustryLifecycleMixin:
         cycle_id: str | None,
         activation_result: object | None = None,
     ) -> dict[str, Any]:
-        knowledge_writeback_service = None
-        knowledge_service = getattr(self, "_knowledge_service", None)
-        if knowledge_service is not None:
-            from ..memory.knowledge_writeback_service import KnowledgeWritebackService
-
-            knowledge_writeback_service = KnowledgeWritebackService(
-                knowledge_service=knowledge_service,
-            )
         synthesis = _synthesize_agent_reports_helper(
             list_agent_report_records=self._list_agent_report_records,
             instance_id=instance_id,
             cycle_id=cycle_id,
             activation_result=activation_result,
-            knowledge_writeback_service=knowledge_writeback_service,
         )
         return self._decorate_report_synthesis_with_replan(synthesis)
 
