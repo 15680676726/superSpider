@@ -14,6 +14,46 @@ from .runtime_support import (
     _strategy_target_layer,
 )
 
+_SOURCE_CODE_TARGET_FIELDS = ("file_path", "repo_path")
+
+
+def _normalize_text(value: object | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _validate_patch_creation_contract(
+    *,
+    kind: str,
+    patch_payload: dict[str, object] | None,
+) -> dict[str, object]:
+    payload = dict(patch_payload or {})
+    target_surface = _normalize_text(payload.get("target_surface"))
+    if kind == "workflow_patch":
+        if target_surface != "workflow_template":
+            raise ValueError(
+                "workflow_patch target_surface must be workflow_template.",
+            )
+        return payload
+
+    illegal_fields: list[str] = []
+    if target_surface is not None:
+        illegal_fields.append("target_surface")
+    illegal_fields.extend(
+        field
+        for field in _SOURCE_CODE_TARGET_FIELDS
+        if _normalize_text(payload.get(field)) is not None
+    )
+    if illegal_fields:
+        fields = ", ".join(dict.fromkeys(illegal_fields))
+        raise ValueError(
+            "Only workflow_patch may carry target_surface/file_path/repo_path; "
+            f"got unsupported source patch field(s): {fields}.",
+        )
+    return payload
+
 
 class LearningPatchRuntimeService(LearningRuntimeDelegate):
     """Patch and strategy-cycle entrypoints extracted from the runtime core."""
@@ -79,6 +119,10 @@ class LearningPatchRuntimeService(LearningRuntimeDelegate):
         risk_level: str = "auto",
         auto_apply: bool = False,
     ) -> dict[str, object]:
+        validated_patch_payload = _validate_patch_creation_contract(
+            kind=kind,
+            patch_payload=patch_payload,
+        )
         resolved_links = self._resolve_learning_context(
             goal_id=goal_id,
             task_id=task_id,
@@ -98,7 +142,7 @@ class LearningPatchRuntimeService(LearningRuntimeDelegate):
             title=title,
             description=description,
             diff_summary=diff_summary,
-            patch_payload=dict(patch_payload or {}),
+            patch_payload=validated_patch_payload,
             evidence_refs=resolved_links["evidence_refs"],
             source_evidence_id=resolved_links["source_evidence_id"],
             risk_level=risk_level,

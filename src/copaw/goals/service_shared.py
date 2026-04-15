@@ -16,7 +16,11 @@ from ..compiler import (
     ResumePoint,
     SemanticCompiler,
 )
-from ..evidence import EvidenceLedger, EvidenceRecord
+from ..evidence import (
+    EvidenceLedger,
+    EvidenceRecord,
+    serialize_evidence_record as canonical_serialize_evidence_record,
+)
 from ..industry.identity import EXECUTION_CORE_AGENT_ID, is_execution_core_role_id
 from ..kernel import KernelDispatcher, KernelResult, KernelTask
 from ..kernel.persistence import (
@@ -62,21 +66,7 @@ def _stable_payload_signature(payload: dict[str, object]) -> str:
 
 
 def _serialize_evidence_record(record: EvidenceRecord) -> dict[str, object]:
-    return {
-        "id": record.id,
-        "task_id": record.task_id,
-        "actor_ref": record.actor_ref,
-        "environment_ref": record.environment_ref,
-        "capability_ref": record.capability_ref,
-        "risk_level": record.risk_level,
-        "action_summary": record.action_summary,
-        "result_summary": record.result_summary,
-        "created_at": record.created_at.isoformat() if record.created_at else None,
-        "status": record.status,
-        "metadata": dict(record.metadata),
-        "artifact_count": len(record.artifacts),
-        "replay_count": len(record.replay_pointers),
-    }
+    return canonical_serialize_evidence_record(record)
 
 
 def _parse_metadata(diff_summary: str) -> dict[str, str]:

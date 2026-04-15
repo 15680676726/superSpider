@@ -6,6 +6,7 @@ from typing import Any, Callable
 
 from pydantic import BaseModel, Field
 
+from .identity import EXECUTION_CORE_ROLE_ID, is_execution_core_role_id
 from ..providers.runtime_provider_facade import (
     ProviderRuntimeSurface,
     build_compat_runtime_provider_facade,
@@ -83,6 +84,82 @@ class _GeneratedDraft(BaseModel):
     goals: list[_GeneratedGoal] = Field(default_factory=list)
     schedules: list[_GeneratedSchedule] = Field(default_factory=list)
     generation_summary: str | None = None
+
+
+def _is_researcher_role(role: IndustryRoleBlueprint) -> bool:
+    role_id = str(role.role_id or "").strip().lower()
+    goal_kind = str(role.goal_kind or "").strip().lower()
+    return role_id == "researcher" or goal_kind == "researcher"
+
+
+def _fallback_goal_plan_steps(*, role_name: str, execution_core: bool) -> list[str]:
+    if execution_core:
+        return [
+            "Review the latest evidence, backlog, and operating constraints.",
+            "Choose the next governed assignments and execution priorities.",
+            "Report decisions, blockers, and follow-up actions with evidence.",
+        ]
+    return [
+        f"Clarify the next deliverable for {role_name}.",
+        "Execute the lane work and capture durable evidence.",
+        "Report progress, blockers, and next actions back to the main brain.",
+    ]
+
+
+def _synthesize_fallback_goals(
+    *,
+    profile: IndustryProfile,
+    draft: IndustryDraftPlan,
+) -> list[IndustryDraftGoal]:
+    goals: list[IndustryDraftGoal] = []
+    seen_goal_ids: set[str] = set()
+    for role in draft.team.agents:
+        if _is_researcher_role(role):
+            continue
+        owner_ref = str(role.agent_id or role.role_id or role.goal_kind or "").strip()
+        if not owner_ref:
+            continue
+        role_name = str(role.role_name or role.name or role.goal_kind or role.role_id or "Specialist").strip()
+        execution_core = is_execution_core_role_id(role.role_id) or is_execution_core_role_id(
+            role.goal_kind,
+        )
+        goal_kind = (
+            EXECUTION_CORE_ROLE_ID
+            if execution_core
+            else str(role.goal_kind or role.role_id or "execution").strip()
+        )
+        goal_id_base = str(role.role_id or role.goal_kind or role_name).strip().lower().replace(" ", "-") or "goal"
+        goal_id = f"{goal_id_base}-goal"
+        counter = 2
+        while goal_id in seen_goal_ids:
+            goal_id = f"{goal_id_base}-goal-{counter}"
+            counter += 1
+        seen_goal_ids.add(goal_id)
+        goals.append(
+            IndustryDraftGoal(
+                goal_id=goal_id,
+                kind=goal_kind,
+                owner_agent_id=owner_ref,
+                title=(
+                    f"Operate {profile.primary_label()}"
+                    if execution_core
+                    else f"Advance {profile.primary_label()} {role_name}"
+                ),
+                summary=(
+                    str(role.mission or "").strip()
+                    or (
+                        "Maintain the governed operating loop and route the next best work."
+                        if execution_core
+                        else f"Execute {role_name} lane work and report durable evidence."
+                    )
+                ),
+                plan_steps=_fallback_goal_plan_steps(
+                    role_name=role_name,
+                    execution_core=execution_core,
+                ),
+            )
+        )
+    return goals
 
 
 def _response_to_payload(response: object) -> dict[str, Any]:
@@ -259,11 +336,27 @@ class IndustryDraftGenerator:
             ],
             generation_summary=payload.generation_summary,
         )
-        return canonicalize_industry_draft(
-            profile,
-            draft,
-            owner_scope=owner_scope,
-        )
+        try:
+            return canonicalize_industry_draft(
+                profile,
+                draft,
+                owner_scope=owner_scope,
+            )
+        except ValueError as exc:
+            if str(exc).strip() != "Industry draft must include at least one goal.":
+                raise
+            fallback_goals = _synthesize_fallback_goals(
+                profile=profile,
+                draft=draft,
+            )
+            if not fallback_goals:
+                raise
+            repaired_draft = draft.model_copy(update={"goals": fallback_goals})
+            return canonicalize_industry_draft(
+                profile,
+                repaired_draft,
+                owner_scope=owner_scope,
+            )
 
     def describe(self) -> dict[str, str]:
         try:

@@ -263,3 +263,159 @@ def test_tool_bridge_builds_formal_replay_result_items_from_recorded_evidence(
         },
     ]
     assert tool_use_summary["summary"] == "Replay shell command: git status"
+
+
+def test_tool_bridge_builds_formal_screenshot_result_items_from_browser_evidence() -> None:
+    class _FakeTaskStore:
+        def __init__(self) -> None:
+            self.task = KernelTask(
+                id="ktask:browser-screenshot",
+                title="Browser screenshot evidence",
+                capability_ref="tool:browser_use",
+                owner_agent_id="ops-agent",
+                risk_level="guarded",
+            )
+
+        def get(self, task_id: str) -> KernelTask | None:
+            return self.task if task_id == self.task.id else None
+
+        def append_evidence(self, task: KernelTask, **kwargs):
+            artifacts = tuple(
+                ArtifactRecord(
+                    id=f"artifact-browser-{index}",
+                    artifact_type=artifact.artifact_type,
+                    storage_uri=artifact.storage_uri,
+                    summary=artifact.summary,
+                    metadata=artifact.metadata,
+                ).materialize(evidence_id="evidence-browser-1")
+                for index, artifact in enumerate(tuple(kwargs.get("artifacts") or ()), start=1)
+            )
+            return EvidenceRecord(
+                id="evidence-browser-1",
+                task_id=task.id,
+                actor_ref=kwargs.get("actor_ref") or "tool:browser_use",
+                environment_ref=kwargs.get("environment_ref"),
+                capability_ref=kwargs.get("capability_ref"),
+                risk_level=task.risk_level,
+                action_summary=kwargs["action_summary"],
+                result_summary=kwargs["result_summary"],
+                status=kwargs["status"],
+                metadata=kwargs.get("metadata") or {},
+                artifacts=artifacts,
+            )
+
+        def upsert(self, task: KernelTask, **kwargs) -> None:
+            _ = (task, kwargs)
+
+    bridge = KernelToolBridge(task_store=_FakeTaskStore())
+
+    tool_use_summary = bridge.record_browser_event(
+        "ktask:browser-screenshot",
+        {
+            "action": "screenshot",
+            "page_id": "page-1",
+            "status": "success",
+            "result_summary": "Saved screenshot for operator review",
+            "metadata": {
+                "path": "D:/word/copaw/artifacts/browser-shot.png",
+                "verification": {
+                    "kind": "artifact",
+                    "artifact": {
+                        "path": "D:/word/copaw/artifacts/browser-shot.png",
+                        "exists": True,
+                    },
+                },
+            },
+        },
+    )
+
+    assert tool_use_summary is not None
+    assert tool_use_summary["summary"] == "Saved screenshot for operator review"
+    assert tool_use_summary["artifact_refs"] == [
+        "D:/word/copaw/artifacts/browser-shot.png",
+    ]
+    assert len(tool_use_summary["result_items"]) == 1
+    result_item = tool_use_summary["result_items"][0]
+    assert result_item["ref"] == "D:/word/copaw/artifacts/browser-shot.png"
+    assert result_item["kind"] == "screenshot"
+    assert str(result_item["label"]).strip()
+    assert result_item["summary"] == "Saved screenshot for operator review"
+    assert result_item["route"] == "/api/runtime-center/artifacts/artifact-browser-1"
+
+
+def test_tool_bridge_builds_formal_download_file_result_items_from_browser_evidence() -> None:
+    class _FakeTaskStore:
+        def __init__(self) -> None:
+            self.task = KernelTask(
+                id="ktask:browser-download",
+                title="Browser download evidence",
+                capability_ref="tool:browser_use",
+                owner_agent_id="ops-agent",
+                risk_level="guarded",
+            )
+
+        def get(self, task_id: str) -> KernelTask | None:
+            return self.task if task_id == self.task.id else None
+
+        def append_evidence(self, task: KernelTask, **kwargs):
+            artifacts = tuple(
+                ArtifactRecord(
+                    id=f"artifact-download-{index}",
+                    artifact_type=artifact.artifact_type,
+                    storage_uri=artifact.storage_uri,
+                    summary=artifact.summary,
+                    metadata=artifact.metadata,
+                ).materialize(evidence_id="evidence-download-1")
+                for index, artifact in enumerate(tuple(kwargs.get("artifacts") or ()), start=1)
+            )
+            return EvidenceRecord(
+                id="evidence-download-1",
+                task_id=task.id,
+                actor_ref=kwargs.get("actor_ref") or "tool:browser_use",
+                environment_ref=kwargs.get("environment_ref"),
+                capability_ref=kwargs.get("capability_ref"),
+                risk_level=task.risk_level,
+                action_summary=kwargs["action_summary"],
+                result_summary=kwargs["result_summary"],
+                status=kwargs["status"],
+                metadata=kwargs.get("metadata") or {},
+                artifacts=artifacts,
+            )
+
+        def upsert(self, task: KernelTask, **kwargs) -> None:
+            _ = (task, kwargs)
+
+    bridge = KernelToolBridge(task_store=_FakeTaskStore())
+
+    tool_use_summary = bridge.record_browser_event(
+        "ktask:browser-download",
+        {
+            "action": "click",
+            "page_id": "page-1",
+            "status": "success",
+            "result_summary": "Downloaded operator report",
+            "metadata": {
+                "verification": {
+                    "kind": "download",
+                    "download": {
+                        "path": "D:/word/copaw/artifacts/operator-report.csv",
+                        "verified": True,
+                        "status": "completed",
+                    },
+                },
+            },
+        },
+    )
+
+    assert tool_use_summary is not None
+    assert tool_use_summary["summary"] == "Downloaded operator report"
+    assert tool_use_summary["artifact_refs"] == [
+        "D:/word/copaw/artifacts/operator-report.csv",
+    ]
+    assert len(tool_use_summary["result_items"]) == 1
+    result_item = tool_use_summary["result_items"][0]
+    assert result_item["ref"] == "D:/word/copaw/artifacts/operator-report.csv"
+    assert result_item["kind"] == "file"
+    assert str(result_item["label"]).strip()
+    assert result_item["summary"] == "Downloaded operator report"
+    assert result_item["route"] == "/api/runtime-center/artifacts/artifact-download-1"

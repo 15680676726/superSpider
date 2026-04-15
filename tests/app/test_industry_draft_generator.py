@@ -302,3 +302,68 @@ def test_industry_draft_generator_uses_runtime_provider_facade_by_default(
         "provider_id": "openai",
         "model": "gpt-5.2",
     }
+
+
+def test_industry_draft_generator_synthesizes_fallback_goals_when_model_omits_them() -> None:
+    payload = {
+        "team": {
+            "label": "Northwind Robotics AI Draft",
+            "summary": "Editable AI-generated team draft.",
+            "topology": "solo",
+            "agents": [
+                {
+                    "role_id": "execution-core",
+                    "name": "白泽执行中枢",
+                    "role_name": "白泽执行中枢",
+                    "role_summary": "Owns the operating brief.",
+                    "mission": "Choose the next move.",
+                    "goal_kind": "execution-core",
+                    "agent_class": "business",
+                    "activation_mode": "persistent",
+                    "suspendable": False,
+                    "risk_level": "guarded",
+                },
+                {
+                    "role_id": "solution-lead",
+                    "agent_id": "solution-lead",
+                    "name": "Northwind Solution Lead",
+                    "role_name": "Solution Lead",
+                    "role_summary": "Shapes the operating design.",
+                    "mission": "Turn the brief into a rollout-ready solution.",
+                    "goal_kind": "solution",
+                    "agent_class": "business",
+                    "activation_mode": "persistent",
+                    "suspendable": False,
+                    "reports_to": "execution-core",
+                    "risk_level": "guarded",
+                },
+            ],
+        },
+        "goals": [],
+        "schedules": [],
+        "generation_summary": "AI draft response without goal seeds.",
+    }
+    generator = IndustryDraftGenerator(
+        model_factory=lambda: _StreamingStructuredModel(payload),
+    )
+    profile = normalize_industry_profile(
+        IndustryPreviewRequest(
+            industry="Industrial Equipment",
+            company_name="Northwind Robotics",
+            product="factory monitoring copilots",
+            goals=["launch two pilot deployments"],
+        ),
+    )
+
+    draft = asyncio.run(
+        generator.generate(
+            profile=profile,
+            owner_scope="industry-v1-northwind-robotics",
+        ),
+    )
+
+    assert draft.generation_summary == "AI draft response without goal seeds."
+    assert {goal.kind for goal in draft.goals} == {"execution-core", "solution"}
+    assert all(goal.plan_steps for goal in draft.goals)
+    assert any(goal.owner_agent_id == "copaw-agent-runner" for goal in draft.goals)
+    assert any(goal.owner_agent_id == "solution-lead" for goal in draft.goals)

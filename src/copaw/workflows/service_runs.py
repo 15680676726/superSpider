@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from .service_shared import *  # noqa: F401,F403
 from ..kernel.runtime_coordination import build_durable_runtime_coordination
+from ..evidence import serialize_evidence_record as canonical_serialize_evidence_record
 
 
 def _workflow_first_non_empty(*values: object) -> str | None:
@@ -44,25 +45,7 @@ def _workflow_goal_task_payloads(detail: dict[str, Any]) -> list[dict[str, Any]]
 def _workflow_serialize_evidence(record: object) -> dict[str, Any]:
     if isinstance(record, dict):
         return dict(record)
-    return {
-        "id": getattr(record, "id", None),
-        "task_id": getattr(record, "task_id", None),
-        "actor_ref": getattr(record, "actor_ref", None),
-        "environment_ref": getattr(record, "environment_ref", None),
-        "capability_ref": getattr(record, "capability_ref", None),
-        "risk_level": getattr(record, "risk_level", None),
-        "action_summary": getattr(record, "action_summary", None),
-        "result_summary": getattr(record, "result_summary", None),
-        "created_at": (
-            getattr(record, "created_at").isoformat()
-            if getattr(record, "created_at", None) is not None
-            else None
-        ),
-        "status": getattr(record, "status", None),
-        "metadata": dict(getattr(record, "metadata", {}) or {}),
-        "artifact_count": len(tuple(getattr(record, "artifacts", ()) or ())),
-        "replay_count": len(tuple(getattr(record, "replay_pointers", ()) or ())),
-    }
+    return canonical_serialize_evidence_record(record)
 
 
 def _resolve_canonical_host_identity(

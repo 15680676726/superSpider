@@ -13,17 +13,28 @@ def _default_root() -> Path:
 
 
 def _runtime_targets(root: Path) -> list[Path]:
+    return [root / "memory" / "qmd"]
+
+
+def _destructive_runtime_targets(root: Path) -> list[Path]:
     return [
         root / "state" / "phase1.sqlite3",
         root / "evidence" / "phase1.sqlite3",
         root / "learning" / "phase1.sqlite3",
-        root / "memory" / "qmd",
     ]
 
 
-def reset_autonomy_runtime(*, root: Path, dry_run: bool = False) -> dict[str, object]:
+def reset_autonomy_runtime(
+    *,
+    root: Path,
+    dry_run: bool = False,
+    allow_destructive: bool = False,
+) -> dict[str, object]:
     resolved_root = root.resolve()
-    existing_targets = [path for path in _runtime_targets(resolved_root) if path.exists()]
+    candidate_targets = _runtime_targets(resolved_root)
+    if allow_destructive:
+        candidate_targets = _destructive_runtime_targets(resolved_root) + candidate_targets
+    existing_targets = [path for path in candidate_targets if path.exists()]
     removed_paths = [str(path) for path in existing_targets]
 
     if not dry_run:
@@ -36,6 +47,7 @@ def reset_autonomy_runtime(*, root: Path, dry_run: bool = False) -> dict[str, ob
     return {
         "root": str(resolved_root),
         "dry_run": dry_run,
+        "allow_destructive": allow_destructive,
         "removed_paths": removed_paths,
     }
 
@@ -54,6 +66,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="List removable runtime artifacts without deleting them.",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Also remove primary runtime databases under state/evidence/learning.",
+    )
     return parser.parse_args()
 
 
@@ -62,6 +79,7 @@ def main() -> int:
     payload = reset_autonomy_runtime(
         root=Path(args.root),
         dry_run=bool(args.dry_run),
+        allow_destructive=bool(args.force),
     )
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0

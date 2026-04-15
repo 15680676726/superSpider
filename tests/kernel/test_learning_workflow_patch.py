@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from copaw.learning import LearningEngine, LearningService, PatchExecutor
 from copaw.state import SQLiteStateStore, WorkflowTemplateRecord
 from copaw.state.repositories import SqliteWorkflowRunRepository, SqliteWorkflowTemplateRepository
@@ -70,3 +72,29 @@ def test_learning_service_applies_and_rolls_back_workflow_patch_against_template
     assert restored is not None
     assert restored.step_specs[0]["summary"] == "Original summary"
     assert restored.step_specs[0]["plan_steps"] == ["collect signal"]
+
+
+def test_learning_service_rejects_source_code_patch_intent_at_creation(tmp_path) -> None:
+    engine = LearningEngine(tmp_path / "learning.sqlite3")
+    state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    workflow_template_repository = SqliteWorkflowTemplateRepository(state_store)
+    workflow_run_repository = SqliteWorkflowRunRepository(state_store)
+    service = LearningService(
+        engine=engine,
+        patch_executor=PatchExecutor(
+            workflow_template_repository=workflow_template_repository,
+            workflow_run_repository=workflow_run_repository,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="file_path|repo_path|target_surface"):
+        service.create_patch(
+            kind="plan_patch",
+            title="Illegal source patch intent",
+            description="Learning patches must not target source files directly.",
+            patch_payload={
+                "target_surface": "filesystem",
+                "file_path": "src/copaw/kernel/query_execution_runtime.py",
+                "repo_path": "D:/word/copaw",
+            },
+        )

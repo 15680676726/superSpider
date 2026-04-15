@@ -672,6 +672,7 @@
   - `V6` 的 routine diagnosis / lock conflict / replay fallback 也应继续落在 Runtime Center detail/drawer 体系里，不允许再造 page-local routine operator 面
   - 当前 `/runtime-center/learning/proposals|patches|growth` 已统一走共享 `LearningService`，不再旁路到底层 engine
   - `2026-03-29` 补充：single-item patch 写动作现也已统一收口到 Runtime Center governed surface；`/api/runtime-center/learning/patches/{id}/approve|reject|apply|rollback` 全部通过 kernel-governed `system:*patch` mounts 执行，旧 `/api/learning/patches/{id}/approve|reject|apply|rollback` 已物理删除
+  - `2026-04-15` 补充：`POST /api/learning/patches` 的正式 front-door 现在也会 fail closed 拒绝源码/文件系统型 patch 意图；只有 `workflow_patch` 允许声明 `patch_payload.target_surface`，且当前唯一合法值是 `workflow_template`。`file_path / repo_path` 不再允许进入 learning patch 正式写链
 - `2026-03-22` 起 `/api/learning/acquisition/proposals|plans|onboarding-runs|run` 已作为 learning 写读面落地，用于承接行业 learning stage 自动产出的 acquisition/install/onboarding 闭环；`CapabilityAcquisitionProposal` 现也已正式接入 approval gate，并开放 approve/reject 写入口；Runtime Center 的行业 detail 也已直接消费这些正式对象，而不是从日志推断
   - 当前 `RuntimeOverviewResponse.bridge` 与 `X-CoPaw-Bridge-*` header 已删除；Runtime Center discovery/header contract 现统一使用 `RuntimeCenterSurfaceInfo` 与 `X-CoPaw-Runtime-*` / `X-CoPaw-Runtime-Surface-*`
   - 当前这些 detail route 已被 Runtime Center 前端统一消费为 drawer drill-down；overview/card/detail 已完成对正式 service 与治理动作验收的收口，不再保留 runtime-center bridge fallback

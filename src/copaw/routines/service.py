@@ -24,7 +24,11 @@ from ..capabilities.browser_runtime import (
     BrowserRuntimeService,
     BrowserSessionStartOptions,
 )
-from ..evidence import EvidenceLedger, EvidenceRecord
+from ..evidence import (
+    EvidenceLedger,
+    EvidenceRecord,
+    serialize_evidence_record as canonical_serialize_evidence_record,
+)
 from ..industry.identity import is_execution_core_agent_id
 from ..kernel import KernelTask
 from ..kernel.decision_policy import MAIN_BRAIN_DECISION_ACTOR
@@ -153,17 +157,7 @@ def _safe_key(text: str, *, fallback: str) -> str:
 
 def _serialize_evidence(record: EvidenceRecord) -> dict[str, Any]:
     return {
-        "id": record.id,
-        "task_id": record.task_id,
-        "actor_ref": record.actor_ref,
-        "environment_ref": record.environment_ref,
-        "capability_ref": record.capability_ref,
-        "risk_level": record.risk_level,
-        "action_summary": record.action_summary,
-        "result_summary": record.result_summary,
-        "created_at": record.created_at.isoformat() if record.created_at else None,
-        "status": record.status,
-        "metadata": dict(record.metadata or {}),
+        **canonical_serialize_evidence_record(record),
         "artifact_refs": list(record.artifact_refs),
         "replay_refs": list(record.replay_refs),
     }

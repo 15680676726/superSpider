@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import inspect
 from pathlib import Path
 import time
 from typing import Any
@@ -171,12 +172,15 @@ def _build_remote_skill_discovery_check(app_state: Any) -> dict[str, object]:
     }
 
 
-def _probe_chat_decision_model(app_state: Any) -> object:
+async def _probe_chat_decision_model(app_state: Any) -> object:
     probe = getattr(app_state, "chat_decision_model_probe", None)
     if callable(probe):
-        return probe()
+        result = probe()
+        if inspect.isawaitable(result):
+            return await result
+        return result
     query_execution_writeback_module.clear_chat_writeback_decision_cache()
-    return query_execution_writeback_module.resolve_chat_writeback_model_decision_sync(
+    return await query_execution_writeback_module.resolve_chat_writeback_model_decision(
         text=(
             "Use the mounted browser capability right now. "
             "Open https://example.com and save a screenshot to C:\\temp\\probe.png."
@@ -184,9 +188,9 @@ def _probe_chat_decision_model(app_state: Any) -> object:
     )
 
 
-def _build_chat_decision_model_check(app_state: Any) -> dict[str, object]:
+async def _build_chat_decision_model_check(app_state: Any) -> dict[str, object]:
     try:
-        decision = _probe_chat_decision_model(app_state)
+        decision = await _probe_chat_decision_model(app_state)
     except (
         query_execution_writeback_module.ChatWritebackDecisionModelUnavailableError,
         query_execution_writeback_module.ChatWritebackDecisionModelTimeoutError,
@@ -449,7 +453,7 @@ async def run_system_self_check(request: Request) -> dict[str, object]:
             for slot in fallback_slots
         ],
     )
-    checks.append(_build_chat_decision_model_check(app_state))
+    checks.append(await _build_chat_decision_model_check(app_state))
 
     recovery_summary, _ = resolve_current_recovery_report(app_state)
     add_check(

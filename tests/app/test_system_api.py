@@ -501,6 +501,37 @@ def test_system_self_check_warns_when_chat_decision_model_is_unavailable(
     assert "unavailable" in by_name["chat_decision_model"]["summary"]
 
 
+def test_system_self_check_uses_async_chat_decision_resolution_in_route_context(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app = build_app(tmp_path)
+    delattr(app.state, "chat_decision_model_probe")
+
+    async def _resolve_chat_writeback_model_decision(*, text: str | None):
+        assert text
+        return SimpleNamespace(
+            intent_kind="execute-task",
+            kickoff_allowed=True,
+            risky_actuation_requested=False,
+            confidence=0.91,
+        )
+
+    monkeypatch.setattr(
+        "copaw.app.routers.system.query_execution_writeback_module.resolve_chat_writeback_model_decision",
+        _resolve_chat_writeback_model_decision,
+    )
+    client = TestClient(app)
+
+    response = client.get("/system/self-check")
+
+    assert response.status_code == 200
+    payload = response.json()
+    by_name = {item["name"]: item for item in payload["checks"]}
+    assert by_name["chat_decision_model"]["status"] == "pass"
+    assert by_name["chat_decision_model"]["meta"]["confidence"] == 0.91
+
+
 def test_system_backup_download_streams_workspace_archive(
     tmp_path: Path,
     monkeypatch,

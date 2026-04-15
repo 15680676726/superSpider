@@ -376,24 +376,27 @@ async def create_patch(
     service: LearningServiceDep,
     payload: PatchCreateRequest,
 ) -> dict[str, object]:
-    result = service.create_patch(
-        kind=payload.kind,
-        title=payload.title,
-        description=payload.description,
-        goal_id=payload.goal_id,
-        task_id=payload.task_id,
-        agent_id=payload.agent_id,
-        workflow_template_id=payload.workflow_template_id,
-        workflow_run_id=payload.workflow_run_id,
-        workflow_step_id=payload.workflow_step_id,
-        diff_summary=payload.diff_summary,
-        patch_payload=payload.patch_payload,
-        proposal_id=payload.proposal_id,
-        evidence_refs=payload.evidence_refs,
-        source_evidence_id=payload.source_evidence_id,
-        risk_level=payload.risk_level,
-        auto_apply=payload.auto_apply,
-    )
+    try:
+        result = service.create_patch(
+            kind=payload.kind,
+            title=payload.title,
+            description=payload.description,
+            goal_id=payload.goal_id,
+            task_id=payload.task_id,
+            agent_id=payload.agent_id,
+            workflow_template_id=payload.workflow_template_id,
+            workflow_run_id=payload.workflow_run_id,
+            workflow_step_id=payload.workflow_step_id,
+            diff_summary=payload.diff_summary,
+            patch_payload=payload.patch_payload,
+            proposal_id=payload.proposal_id,
+            evidence_refs=payload.evidence_refs,
+            source_evidence_id=payload.source_evidence_id,
+            risk_level=payload.risk_level,
+            auto_apply=payload.auto_apply,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, detail=str(exc)) from exc
     patch = result.get("patch")
     decision = result.get("decision_request")
     applied_patch = result.get("applied_patch")

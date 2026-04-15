@@ -169,6 +169,13 @@ class KernelToolBridge:
             success=status == "success",
             phase=self._string(payload_metadata.get("phase")) or status,
         )
+        artifacts = self._build_browser_artifacts(
+            status=status,
+            action=action,
+            payload=payload,
+            payload_metadata=payload_metadata,
+            summary=result_summary or summary,
+        )
         evidence = self._append_evidence(
             task,
             action_summary=f"browser {action} {status}",
@@ -181,6 +188,7 @@ class KernelToolBridge:
                 **payload_metadata,
                 "outcome_kind": outcome_kind,
             },
+            artifacts=artifacts,
         )
         self._touch_environment(
             ref=environment_ref,
@@ -487,6 +495,85 @@ class KernelToolBridge:
                 },
             ),
         )
+
+    @classmethod
+    def _build_browser_artifacts(
+        cls,
+        *,
+        status: str,
+        action: str,
+        payload: dict[str, object],
+        payload_metadata: dict[str, object],
+        summary: str,
+    ) -> tuple[ArtifactRecord, ...]:
+        if status != "success":
+            return ()
+        normalized_action = str(action or "").strip().lower()
+        artifact_type, resolved_path = cls._resolve_browser_artifact_target(
+            action=normalized_action,
+            payload=payload,
+            payload_metadata=payload_metadata,
+        )
+        if not artifact_type or not resolved_path:
+            return ()
+        return (
+            ArtifactRecord(
+                artifact_type=artifact_type,
+                storage_uri=resolved_path,
+                summary=summary,
+                metadata={
+                    "source": "tool-bridge",
+                    "action": normalized_action,
+                    "status": status,
+                },
+            ),
+        )
+
+    @classmethod
+    def _resolve_browser_artifact_path(
+        cls,
+        *,
+        payload: dict[str, object],
+        payload_metadata: dict[str, object],
+    ) -> str | None:
+        direct_path = cls._string(payload.get("path")) or cls._string(payload_metadata.get("path"))
+        if direct_path:
+            return direct_path
+        verification = payload_metadata.get("verification")
+        if not isinstance(verification, dict):
+            return None
+        artifact = verification.get("artifact")
+        if not isinstance(artifact, dict):
+            return None
+        return cls._string(artifact.get("path"))
+
+    @classmethod
+    def _resolve_browser_artifact_target(
+        cls,
+        *,
+        action: str,
+        payload: dict[str, object],
+        payload_metadata: dict[str, object],
+    ) -> tuple[str | None, str | None]:
+        if action in {"screenshot", "take_screenshot"}:
+            return (
+                "screenshot",
+                cls._resolve_browser_artifact_path(
+                    payload=payload,
+                    payload_metadata=payload_metadata,
+                ),
+            )
+        verification = payload_metadata.get("verification")
+        if not isinstance(verification, dict):
+            return (None, None)
+        if str(verification.get("kind") or "").strip().lower() != "download":
+            return (None, None)
+        download = verification.get("download")
+        if not isinstance(download, dict):
+            return (None, None)
+        if not bool(download.get("verified")):
+            return (None, None)
+        return ("file", cls._string(download.get("path")))
 
     @staticmethod
     def _string(value: object) -> str | None:

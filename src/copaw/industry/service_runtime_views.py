@@ -12,6 +12,7 @@ from .service_recommendation_pack import *  # noqa: F401,F403
 from .main_brain_cognitive_surface import build_main_brain_cognitive_surface
 from .models import IndustryMainBrainPlanningSurface, IndustrySeatCapabilityLayers
 from ..compiler.planning import build_uncertainty_register_payload
+from ..evidence import serialize_evidence_record as canonical_serialize_evidence_record
 from ..state.strategy_memory_service import resolve_strategy_payload
 
 
@@ -3359,33 +3360,9 @@ class _IndustryRuntimeViewsMixin:
                     continue
 
                 evidence_by_id[normalized_id] = {
-
-                    "id": evidence_record.id,
-
-                    "task_id": evidence_record.task_id,
-
-                    "actor_ref": evidence_record.actor_ref,
-
-                    "environment_ref": evidence_record.environment_ref,
-
-                    "capability_ref": evidence_record.capability_ref,
-
-                    "risk_level": evidence_record.risk_level,
-
-                    "action_summary": evidence_record.action_summary,
-
-                    "result_summary": evidence_record.result_summary,
-
-                    "status": evidence_record.status,
-
-                    "metadata": dict(evidence_record.metadata or {}),
-
+                    **canonical_serialize_evidence_record(evidence_record),
                     "artifact_refs": list(evidence_record.artifact_refs or []),
-
                     "replay_refs": list(evidence_record.replay_refs or []),
-
-                    "created_at": evidence_record.created_at,
-
                 }
 
 
@@ -3966,7 +3943,7 @@ class _IndustryRuntimeViewsMixin:
     ) -> list[str]:
         task_payload = _mapping(task_entry.get("task"))
         runtime_payload = _mapping(task_entry.get("runtime"))
-        metadata = decode_kernel_task_metadata(task_payload.get("acceptance_criteria"))
+        metadata = decode_kernel_task_metadata(task_payload.get("acceptance_criteria")) or {}
         payload = _mapping(metadata.get("payload"))
         compiler = _mapping(payload.get("compiler"))
         task_seed = _mapping(payload.get("task_seed"))
@@ -4087,7 +4064,7 @@ class _IndustryRuntimeViewsMixin:
         task_entry: dict[str, Any],
     ) -> dict[str, str | None]:
         task_payload = _mapping(task_entry.get("task"))
-        metadata = decode_kernel_task_metadata(task_payload.get("acceptance_criteria"))
+        metadata = decode_kernel_task_metadata(task_payload.get("acceptance_criteria")) or {}
         payload = _mapping(metadata.get("payload"))
         compiler = _mapping(payload.get("compiler"))
         task_seed = _mapping(payload.get("task_seed"))

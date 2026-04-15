@@ -21,7 +21,7 @@ from copaw.app.runtime_center.task_list_projection import RuntimeCenterTaskListP
 from copaw.app.runtime_center.work_context_projection import (
     RuntimeCenterWorkContextProjector,
 )
-from copaw.evidence import EvidenceLedger, EvidenceRecord
+from copaw.evidence import ArtifactRecord, EvidenceLedger, EvidenceRecord, ReplayPointer
 from copaw.industry.models import IndustrySeatCapabilityLayers
 from copaw.kernel.models import KernelTask
 from copaw.kernel.persistence import KernelTaskStore
@@ -302,6 +302,22 @@ def test_runtime_query_services_read_state_backed_surfaces(tmp_path) -> None:
             risk_level="auto",
             action_summary="query completed",
             result_summary="Summarized backlog.",
+            artifacts=(
+                ArtifactRecord(
+                    id="artifact-query-1",
+                    artifact_type="file",
+                    storage_uri="file:///tmp/query-summary.md",
+                    summary="Summarized backlog report",
+                ),
+            ),
+            replay_pointers=(
+                ReplayPointer(
+                    id="replay-query-1",
+                    replay_type="shell",
+                    storage_uri="file:///tmp/query-replay.json",
+                    summary="Replay query summarization",
+                ),
+            ),
         ),
     )
     task_thread_decision = decision_request_repository.upsert_decision_request(
@@ -566,6 +582,24 @@ def test_runtime_query_services_read_state_backed_surfaces(tmp_path) -> None:
     assert task_detail["decisions"][0]["trace_id"] == "trace:query:session:console:founder:console:chat-1"
     assert task_detail["evidence"][0]["id"] == evidence.id
     assert task_detail["evidence"][0]["trace_id"] == "trace:query:session:console:founder:console:chat-1"
+    assert task_detail["evidence"][0]["artifact_count"] == 1
+    assert task_detail["evidence"][0]["replay_count"] == 1
+    assert task_detail["evidence"][0]["artifacts"] == [
+        {
+            "id": "artifact-query-1",
+            "artifact_type": "file",
+            "storage_uri": "file:///tmp/query-summary.md",
+            "summary": "Summarized backlog report",
+        }
+    ]
+    assert task_detail["evidence"][0]["replay_pointers"] == [
+        {
+            "id": "replay-query-1",
+            "replay_type": "shell",
+            "storage_uri": "file:///tmp/query-replay.json",
+            "summary": "Replay query summarization",
+        }
+    ]
     assert task_detail["stats"]["decision_count"] == 1
     assert task_detail["stats"]["evidence_count"] == 1
     assert task_detail["work_context"]["id"] == "ctx-industry-control"

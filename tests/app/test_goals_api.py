@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from copaw.app.routers.goals import router as goals_router
-from copaw.evidence import EvidenceLedger, EvidenceRecord
+from copaw.evidence import ArtifactRecord, EvidenceLedger, EvidenceRecord, ReplayPointer
 from copaw.capabilities import CapabilityService
 from copaw.goals import GoalService
 from copaw.kernel.persistence import decode_kernel_task_metadata
@@ -730,6 +730,22 @@ def test_goal_detail_links_tasks_agents_patches_and_growth(tmp_path) -> None:
             action_summary="Dispatch goal step",
             result_summary="Collected current bindings.",
             environment_ref="session:goal:goal-detail",
+            artifacts=(
+                ArtifactRecord(
+                    id="artifact-goal-detail-1",
+                    artifact_type="file",
+                    storage_uri="file:///tmp/goal-detail.md",
+                    summary="Goal detail checkpoint",
+                ),
+            ),
+            replay_pointers=(
+                ReplayPointer(
+                    id="replay-goal-detail-1",
+                    replay_type="shell",
+                    storage_uri="file:///tmp/goal-detail-replay.json",
+                    summary="Replay goal detail inspection",
+                ),
+            ),
         ),
     )
     patch_result = app.state.learning_service.create_patch(
@@ -775,6 +791,25 @@ def test_goal_detail_links_tasks_agents_patches_and_growth(tmp_path) -> None:
     assert any(item["task_id"] == task.id for item in payload["decisions"])
     assert any(item["task_id"] == patch.id for item in payload["decisions"])
     assert any(item["id"] == evidence.id for item in payload["evidence"])
+    goal_evidence = next(item for item in payload["evidence"] if item["id"] == evidence.id)
+    assert goal_evidence["artifact_count"] == 1
+    assert goal_evidence["replay_count"] == 1
+    assert goal_evidence["artifacts"] == [
+        {
+            "id": "artifact-goal-detail-1",
+            "artifact_type": "file",
+            "storage_uri": "file:///tmp/goal-detail.md",
+            "summary": "Goal detail checkpoint",
+        }
+    ]
+    assert goal_evidence["replay_pointers"] == [
+        {
+            "id": "replay-goal-detail-1",
+            "replay_type": "shell",
+            "storage_uri": "file:///tmp/goal-detail-replay.json",
+            "summary": "Replay goal detail inspection",
+        }
+    ]
     assert any(item["id"] == patch.id for item in payload["patches"])
     assert any(item["source_patch_id"] == patch.id for item in payload["growth"])
 

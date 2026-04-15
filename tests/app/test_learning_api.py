@@ -583,6 +583,54 @@ def test_learning_api_create_patch_accepts_workflow_patch_contract(tmp_path) -> 
     ]
 
 
+def test_learning_api_rejects_workflow_patch_non_template_target_surface(tmp_path) -> None:
+    app = _build_learning_app(tmp_path)
+    client = TestClient(app)
+
+    created_patch = client.post(
+        "/learning/patches",
+        json={
+            "kind": "workflow_patch",
+            "title": "Illegal workflow target",
+            "description": "Workflow patches must stay on workflow template truth.",
+            "workflow_template_id": "workflow-template-1",
+            "workflow_step_id": "weekly-research-goal",
+            "patch_payload": {
+                "target_surface": "filesystem",
+                "step_updates": {
+                    "summary": "Should never be accepted",
+                },
+            },
+            "risk_level": "guarded",
+        },
+    )
+
+    assert created_patch.status_code == 400
+    assert "workflow_template" in created_patch.json()["detail"]
+
+
+def test_learning_api_rejects_non_workflow_patch_source_code_target_payload(tmp_path) -> None:
+    app = _build_learning_app(tmp_path)
+    client = TestClient(app)
+
+    created_patch = client.post(
+        "/learning/patches",
+        json={
+            "kind": "plan_patch",
+            "title": "Illegal source patch intent",
+            "description": "Learning patches must not smuggle source-code mutation targets.",
+            "patch_payload": {
+                "file_path": "src/copaw/kernel/query_execution_runtime.py",
+                "repo_path": "D:/word/copaw",
+            },
+            "risk_level": "guarded",
+        },
+    )
+
+    assert created_patch.status_code == 400
+    assert "file_path" in created_patch.json()["detail"]
+
+
 def test_runtime_center_patch_action_routes_enter_governed_mutation_flow(tmp_path) -> None:
     app = _build_learning_app(tmp_path)
     client = TestClient(app)

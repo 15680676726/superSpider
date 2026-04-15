@@ -1147,6 +1147,7 @@ Windows-first 约束：
   - 当前稳定目标面是 `workflow_template`
   - 当前稳定字段包括 `workflow_template_id / workflow_run_id / workflow_step_id / patch_payload`
   - 当前真实副作用是直接更新 `WorkflowTemplateRecord.step_specs`，并通过 patch-owned backup 支持 rollback
+  - `2026-04-15` 补充：`workflow_patch` 的正式创建合同已收口为 `patch_payload.target_surface="workflow_template"`；`file_path / repo_path` 这类源码或文件系统目标字段不再属于正式 learning patch contract，`/learning/patches` 与 `LearningService.create_patch(...)` 均应 fail closed
 
 ### runtime optimization closure 补充
 
@@ -2269,6 +2270,7 @@ Persistence/query landing:
 
 - 本轮允许直接清理旧 runtime artifacts，而不是做历史迁移。
 - reset 基线以 `scripts/reset_autonomy_runtime.py` 为准。
+- `2026-04-15` 起，reset 默认只允许清理 `memory/qmd`；`state/phase1.sqlite3`、`evidence/phase1.sqlite3`、`learning/phase1.sqlite3` 属于 destructive reset，必须显式 `--force`。
 - 任何依赖旧 `phase1.sqlite3` 或 `memory/qmd` 内容才能启动的新实现，都视为错误接线。
 
 ---

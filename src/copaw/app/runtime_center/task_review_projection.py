@@ -4,7 +4,10 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from ...evidence import EvidenceRecord
+from ...evidence import (
+    EvidenceRecord,
+    serialize_evidence_record as canonical_serialize_evidence_record,
+)
 from ...kernel.persistence import decode_kernel_task_metadata
 from ...utils.runtime_routes import task_route
 from .chat_thread_projection import extract_chat_thread_payload
@@ -48,18 +51,8 @@ def trace_id_from_kernel_meta(task_id: str, metadata: dict[str, Any] | None) -> 
 def serialize_evidence_record(record: EvidenceRecord) -> dict[str, object]:
     metadata = dict(record.metadata or {})
     return {
-        "id": record.id,
+        **canonical_serialize_evidence_record(record),
         "trace_id": trace_id_from_metadata(record.task_id, metadata),
-        "task_id": record.task_id,
-        "actor_ref": record.actor_ref,
-        "risk_level": record.risk_level,
-        "action_summary": record.action_summary,
-        "result_summary": record.result_summary,
-        "environment_ref": record.environment_ref,
-        "capability_ref": record.capability_ref,
-        "created_at": record.created_at.isoformat() if record.created_at else None,
-        "status": record.status,
-        "metadata": metadata,
         "artifact_refs": list(record.artifact_refs),
         "replay_refs": list(record.replay_refs),
     }

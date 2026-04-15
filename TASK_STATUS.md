@@ -387,7 +387,32 @@
 - 当前已真实直出的结果类型：
   - file artifact -> `文件`
   - shell replay -> `回放`
+  - browser screenshot artifact -> `截图`
+  - browser verified download artifact -> `文件`
 - `ConversationCompactionService` 仍保留保守派生兜底，但它已退回 fallback 角色；正式优先级改为“真实 evidence 生产侧直出 > compaction fallback > 前端 fallback”。
+- 相关读面 serializer 也已开始统一到 canonical evidence projection，避免不同页面再次把正式 evidence 缩回 count/ref：
+  - Runtime Center task detail / schedule detail
+  - goal detail
+  - routine evidence hydration
+  - workflow preview / workflow run detail
+  - industry runtime evidence aggregation
+- 当前 fresh verification：
+  - backend：
+    - `python -m pytest tests/app/test_learning_api.py tests/app/test_runtime_reset.py tests/app/test_system_api.py tests/app/test_industry_draft_generator.py tests/app/test_goals_api.py tests/app/test_runtime_query_services.py -q`
+    - `python -m pytest tests/kernel/test_learning_workflow_patch.py tests/kernel/test_tool_bridge.py -q`
+    - `python -m pytest tests/app/test_runtime_center_api.py tests/app/test_runtime_center_events_api.py tests/app/test_workflow_industry_optimization_scenario.py tests/app/test_workflow_templates_api.py -q`
+    - `python -m pytest tests/routines/test_routine_service.py tests/app/runtime_center_api_parts/detail_environment.py -q`
+    - `python -m pytest tests/app/test_phase_next_autonomy_smoke.py tests/app/test_predictions_api.py tests/app/test_cron_executor.py tests/app/test_runtime_canonical_flow_e2e.py tests/app/test_self_evolution_engine_e2e.py tests/industry/test_optimization_closure_projection.py -q`
+    - 结果：`351 passed`
+  - live：
+    - `COPAW_RUN_LIVE_AGENT_ACTION_SMOKE=1 python -m pytest tests/app/test_live_agent_action_smoke.py -q -rs`
+    - `COPAW_RUN_LIVE_OPTIMIZATION_SMOKE=1 python -m pytest tests/app/test_live_optimization_smoke.py -q -rs`
+    - 结果：`2 passed`
+  - console：
+    - `npm --prefix console test -- src/pages/Chat/runtimeSidecarEvents.test.ts src/pages/Chat/index.results.test.tsx src/pages/RuntimeCenter/index.test.tsx src/pages/RuntimeCenter/viewHelpers.test.tsx src/pages/AgentWorkbench/WorkspaceTab.test.tsx src/pages/AgentWorkbench/sections/detailPanels.test.tsx`
+    - 结果：`37 passed`
+    - `npm --prefix console run build`
+    - 结果：通过
 
 ---
 
@@ -427,6 +452,24 @@
   - `python -m pytest tests/kernel/test_main_brain_orchestrator.py -q -k timeout` -> `1 passed`
   - `COPAW_RUN_LIVE_AGENT_ACTION_SMOKE=1 python -m pytest tests/app/test_live_agent_action_smoke.py -q -rs` -> `1 passed`
   - `COPAW_RUN_LIVE_OPTIMIZATION_SMOKE=1 python -m pytest tests/app/test_live_optimization_smoke.py -q -rs` -> `1 passed`
+
+---
+
+## 1.3.5 `2026-04-15` learning patch 前门治理补充
+
+- `LearningService.create_patch(...)` 与 `POST /learning/patches` 现在会对 patch 创建合同 fail closed：
+  - 只有 `workflow_patch` 允许声明 `patch_payload.target_surface`
+  - 且当前唯一合法值是 `workflow_template`
+  - `file_path / repo_path` 这类源码或文件系统目标字段不再允许进入正式 learning patch 写链
+- 这次收口的目标不是新增“源码 patch”能力，而是明确学习层正式边界：
+  - 学习层只能产标准 patch 对象
+  - 当前真实副作用边界仍是 profile / role / capability / plan / workflow-template
+  - 任何试图借 `/learning/patches` 塞入源码/文件系统意图的 payload 都应在前门直接 `400`
+- 当前 fresh verification：
+  - `python -m pytest tests/app/test_learning_api.py -q` -> `21 passed`
+  - `python -m pytest tests/kernel/test_learning_workflow_patch.py -q` -> `2 passed`
+  - `python -m pytest tests/app/test_workflow_industry_optimization_scenario.py -q` -> `1 passed`
+  - `python -m pytest tests/industry/test_optimization_closure_projection.py -q` -> `1 passed`
 
 ---
 
@@ -868,6 +911,7 @@
 - 硬切 spec 与 implementation plan 已落地
 - 用户已明确接受停机窗口、旧数据直接删除、旧前后端入口一起下线
 - `scripts/reset_autonomy_runtime.py` 与 `tests/app/test_runtime_reset.py` 已落地并通过首轮验证
+- `2026-04-15` 补充：reset 脚本已加默认安全护栏；默认只清 `memory/qmd`，`state/evidence/learning` 三个主 runtime 库必须显式 `--force` 才允许删除，相关回归 `tests/app/test_runtime_reset.py tests/app/test_runtime_lifecycle.py tests/app/test_startup_recovery.py -q` 已通过 `32 passed`
 - Task 7/8 已完成：runtime health、shared control-chain presenter、Runtime Center / Industry / AgentWorkbench 新读面全部上线
 - Task 9 已完成产品面删旧：runtime-center direct delegate route 已物理删除，console 侧旧 goal-dispatch 文案已下线
 - `2026-03-25` 补充：Task 10/11 已完成收口，formal operating-cycle 已完全切成 `assignment -> task -> report`，历史 retirement 回归已更新到 live contract，不再拿 `waiting-confirm` / `goal` 节点当当前主链。
