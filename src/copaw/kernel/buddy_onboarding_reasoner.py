@@ -15,6 +15,7 @@ from ..providers.runtime_provider_facade import (
     build_compat_runtime_provider_facade,
 )
 from ..state import HumanProfile
+from ..utils.model_response import materialize_model_response
 
 logger = logging.getLogger(__name__)
 _DEFAULT_REASONING_TIMEOUT_SECONDS = 45.0
@@ -181,12 +182,7 @@ def _normalize_reasoner_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 async def _materialize_response(response: object) -> object:
-    if not hasattr(response, "__aiter__"):
-        return response
-    last_item: object | None = None
-    async for item in response:  # type: ignore[misc]
-        last_item = item
-    return last_item if last_item is not None else response
+    return await materialize_model_response(response)
 
 
 def _run_async_blocking(

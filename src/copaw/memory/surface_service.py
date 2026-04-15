@@ -58,13 +58,18 @@ class MemorySurfaceService:
         self,
         *,
         memory_recall_service: Any | None = None,
+        memory_sleep_service: Any | None = None,
         conversation_compaction_service: Any | None = None,
     ) -> None:
         self._memory_recall_service = memory_recall_service
+        self._memory_sleep_service = memory_sleep_service
         self._conversation_compaction_service = conversation_compaction_service
 
     def set_memory_recall_service(self, memory_recall_service: Any | None) -> None:
         self._memory_recall_service = memory_recall_service
+
+    def set_memory_sleep_service(self, memory_sleep_service: Any | None) -> None:
+        self._memory_sleep_service = memory_sleep_service
 
     def set_conversation_compaction_service(
         self,
@@ -95,6 +100,7 @@ class MemorySurfaceService:
                 "entries": [],
                 "latest_entries": [],
                 "history_entries": [],
+                "sleep": self.resolve_sleep_overlay(scope_type=scope_type, scope_id=scope_id),
             }
         bounded_limit = surface_snapshot_limit(limit)
         try:
@@ -117,7 +123,20 @@ class MemorySurfaceService:
             "entries": entries,
             "latest_entries": entries[:2],
             "history_entries": entries[2:4],
+            "sleep": self.resolve_sleep_overlay(scope_type=scope_type, scope_id=scope_id),
         }
+
+    def resolve_sleep_overlay(self, *, scope_type: str, scope_id: str) -> dict[str, Any]:
+        service = self._memory_sleep_service
+        resolver = getattr(service, "resolve_scope_overlay", None)
+        if not callable(resolver):
+            return {}
+        try:
+            payload = resolver(scope_type=scope_type, scope_id=scope_id)
+        except Exception:
+            logger.debug("Memory surface sleep overlay resolve failed", exc_info=True)
+            return {}
+        return dict(payload or {}) if isinstance(payload, dict) else {}
 
     def resolve_runtime_compaction_visibility_payload(self) -> dict[str, Any]:
         conversation_compaction_service = self._conversation_compaction_service

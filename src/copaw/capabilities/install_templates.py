@@ -990,6 +990,52 @@ def _cooperative_execution_routes() -> dict[str, str]:
     }
 
 
+_KNOWN_INSTALL_TEMPLATE_CAPABILITY_IDS = frozenset(
+    {
+        "tool:browser_use",
+        "system:browser_companion_runtime",
+        "system:document_bridge_runtime",
+        "system:host_watchers_runtime",
+        "system:windows_app_adapter_runtime",
+    }
+)
+_KNOWN_IMPLICIT_INSTALL_TEMPLATE_IDS_BY_CAPABILITY_ID: dict[str, tuple[str, ...]] = {
+    "tool:browser_use": ("browser-local", "browser-companion"),
+    "system:browser_companion_runtime": ("browser-companion",),
+    "system:document_bridge_runtime": ("document-office-bridge",),
+    "system:host_watchers_runtime": ("host-watchers",),
+    "system:windows_app_adapter_runtime": ("windows-app-adapters",),
+}
+
+
+def may_have_install_template_for_capability(capability_id: str) -> bool:
+    normalized_capability_id = str(capability_id or "").strip().lower()
+    if not normalized_capability_id:
+        return False
+    if normalized_capability_id.startswith("mcp:"):
+        return True
+    return normalized_capability_id in _KNOWN_INSTALL_TEMPLATE_CAPABILITY_IDS
+
+
+def resolve_install_template_ids_for_capability(capability_id: str) -> list[str]:
+    normalized_capability_id = str(capability_id or "").strip().lower()
+    if not normalized_capability_id:
+        return []
+    if normalized_capability_id.startswith("mcp:"):
+        client_key = normalized_capability_id.removeprefix("mcp:")
+        return [
+            template.template_id
+            for template in list_desktop_mcp_templates()
+            if str(template.default_client_key).strip().lower() == client_key
+        ]
+    return list(
+        _KNOWN_IMPLICIT_INSTALL_TEMPLATE_IDS_BY_CAPABILITY_ID.get(
+            normalized_capability_id,
+            (),
+        ),
+    )
+
+
 def list_install_templates(
     *,
     capability_service: object | None = None,

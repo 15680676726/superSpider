@@ -140,6 +140,7 @@ class CronManager:
         repo: BaseJobRepository,
         timezone: str = "UTC",
         kernel_dispatcher: Any | None = None,
+        memory_sleep_service: Any | None = None,
     ):
         self._repo = repo
         self._scheduler = AsyncIOScheduler(timezone=timezone)
@@ -147,6 +148,7 @@ class CronManager:
             kernel_dispatcher=kernel_dispatcher,
         )
         self._kernel_dispatcher = kernel_dispatcher
+        self._memory_sleep_service = memory_sleep_service
 
         self._lock = asyncio.Lock()
         self._heartbeat_run_lock = asyncio.Lock()
@@ -160,6 +162,9 @@ class CronManager:
         """Attach the SRK kernel dispatcher for cron execution."""
         self._kernel_dispatcher = kernel_dispatcher
         self._executor.set_kernel_dispatcher(kernel_dispatcher)
+
+    def set_memory_sleep_service(self, memory_sleep_service: Any | None) -> None:
+        self._memory_sleep_service = memory_sleep_service
 
     async def start(self) -> None:
         async with self._lock:
@@ -502,6 +507,20 @@ class CronManager:
                 kernel_dispatcher=self._kernel_dispatcher,
                 ignore_active_hours=ignore_active_hours,
             )
+            status = str(result.get("status") or "").strip().lower()
+            if status not in {"error", "blocked"}:
+                sleep_runner = getattr(self._memory_sleep_service, "run_due_sleep_jobs", None)
+                if callable(sleep_runner):
+                    sleep_jobs = list(sleep_runner(limit=None) or [])
+                    failed_sleep_jobs = [
+                        item
+                        for item in sleep_jobs
+                        if str(getattr(item, "status", "") or "").strip().lower() == "failed"
+                    ]
+                    result = dict(result)
+                    result["memory_sleep_status"] = "failed" if failed_sleep_jobs else "success"
+                    result["memory_sleep_job_count"] = len(sleep_jobs)
+                    result["memory_sleep_failed_count"] = len(failed_sleep_jobs)
         except Exception as exc:  # pylint: disable=broad-except
             logger.exception("heartbeat run failed")
             result = {

@@ -67,11 +67,18 @@ from .models import (
 )
 from .models_knowledge import KnowledgeChunkRecord
 from .models_memory import (
+    MemoryAliasMapRecord,
+    MemoryConflictProposalRecord,
     MemoryEntityViewRecord,
     MemoryFactIndexRecord,
+    MemoryMergeResultRecord,
     MemoryOpinionViewRecord,
     MemoryRelationViewRecord,
     MemoryReflectionRunRecord,
+    MemoryScopeDigestRecord,
+    MemorySleepJobRecord,
+    MemorySleepScopeStateRecord,
+    MemorySoftRuleRecord,
 )
 from .models_work_context import WorkContextRecord
 from .work_context_service import WorkContextService
@@ -143,11 +150,18 @@ __all__ = [
     "MediaAnalysisRecord",
     "KnowledgeChunkRecord",
     "LaneBudgetRecord",
+    "MemoryAliasMapRecord",
+    "MemoryConflictProposalRecord",
     "MemoryEntityViewRecord",
     "MemoryFactIndexRecord",
+    "MemoryMergeResultRecord",
     "MemoryOpinionViewRecord",
     "MemoryRelationViewRecord",
     "MemoryReflectionRunRecord",
+    "MemoryScopeDigestRecord",
+    "MemorySleepJobRecord",
+    "MemorySleepScopeStateRecord",
+    "MemorySoftRuleRecord",
     "MetricRecord",
     "OperatingCycleService",
     "OperatingCycleRecord",

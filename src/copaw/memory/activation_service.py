@@ -17,13 +17,49 @@ from .relation_traversal import pack_relation_paths, traversal_score
 from ..state.strategy_memory_service import resolve_strategy_payload
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{1,}")
+_CJK_SEGMENT_SPLIT_RE = re.compile(
+    r"[，。；、：！？\s]+|必须|需要|应该|建议|避免|不要|不能|只能|先|再|才可以|才能|并且|以及|确认后|完成后|之后|以后"
+)
+
+
+def _contains_cjk(text: object | None) -> bool:
+    return any("\u4e00" <= character <= "\u9fff" for character in str(text or ""))
+
+
+def _normalize_cjk_phrase(value: str) -> str:
+    normalized = re.sub(r"[^\u4e00-\u9fffA-Za-z0-9]", "", str(value or "").strip())
+    for prefix in ("完成", "发送", "确认", "进行", "执行", "推进", "处理", "启动"):
+        if normalized.startswith(prefix) and len(normalized) - len(prefix) >= 2:
+            normalized = normalized[len(prefix) :]
+    for suffix in ("规则", "内容", "信息", "情况", "之后", "以后", "之前", "才能", "才可以"):
+        if normalized.endswith(suffix) and len(normalized) - len(suffix) >= 2:
+            normalized = normalized[: -len(suffix)]
+    return normalized
+
+
+def _tokenize_cjk_phrases(text: object | None) -> list[str]:
+    raw = str(text or "").strip()
+    if not raw or not _contains_cjk(raw):
+        return []
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for segment in _CJK_SEGMENT_SPLIT_RE.split(raw):
+        normalized = _normalize_cjk_phrase(segment)
+        if len(normalized) < 2 or len(normalized) > 12 or normalized in seen:
+            continue
+        seen.add(normalized)
+        ordered.append(normalized)
+    return ordered
 
 
 def _tokenize(text: object | None) -> list[str]:
     raw = str(text or "").strip().lower()
     if not raw:
         return []
-    return [token for token in _TOKEN_RE.findall(raw) if len(token) > 1]
+    return [
+        *[token for token in _TOKEN_RE.findall(raw) if len(token) > 1],
+        *_tokenize_cjk_phrases(raw),
+    ]
 
 
 def _dedupe(values: Iterable[str]) -> list[str]:

@@ -21,6 +21,7 @@ from ..state import (
 from ..state.models_memory import MemoryRelationViewRecord
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{2,}")
+_SENTENCE_SPLIT_RE = re.compile(r"(?:\r?\n)+|(?<=[.!?])\s+|(?<=[。！？；])")
 _MEMORY_DOCUMENT_PREFIX = "memory:"
 _STOP_WORDS = {
     "the",
@@ -45,6 +46,7 @@ _STOP_WORDS = {
     "task",
     "goal",
     "agent",
+    "approve",
     "report",
     "memory",
     "summary",
@@ -56,7 +58,119 @@ _STOP_WORDS = {
     "global",
     "scope",
     "record",
+    "any",
+    "wait",
+    "message",
+    "sent",
+    "own",
+    "owns",
+    "clear",
+    "clears",
+    "verified",
+    "verify",
+    "using",
+    "used",
+    "use",
+    "being",
+    "becomes",
+    "become",
+    "just",
+    "still",
+    "action",
+    "auto",
+    "blocker",
+    "blocked",
+    "completed",
+    "discipline",
+    "execution",
+    "holding",
+    "keep",
+    "night",
+    "operator",
+    "protect",
+    "recorded",
+    "refreshed",
+    "recommends",
+    "resolve",
+    "retain",
+    "risk",
+    "quality",
+    "blockers",
+    "until",
 }
+_INTERNAL_ENTITY_ID_PARTS = {
+    "agent",
+    "assignment",
+    "brain",
+    "chunk",
+    "context",
+    "cycle",
+    "fact",
+    "global",
+    "goal",
+    "industry",
+    "lane",
+    "memory",
+    "record",
+    "report",
+    "runtime",
+    "scope",
+    "task",
+    "work",
+    "main",
+    "ctx",
+}
+_CJK_SEGMENT_SPLIT_RE = re.compile(
+    r"[，。；、：！？\s]+|必须|需要|应该|建议|避免|不要|不能|只能|先|再|才可以|才能|并且|以及|确认后|完成后|之后|以后"
+)
+_CJK_LOW_SIGNAL_WORDS = {
+    "规则",
+    "内容",
+    "信息",
+    "情况",
+    "东西",
+    "问题",
+    "系统",
+    "任务",
+    "目标",
+    "工作",
+    "处理",
+    "完成",
+    "发送",
+    "确认",
+    "继续",
+    "通过",
+    "进行",
+    "记忆",
+    "共享记忆",
+}
+_CJK_TRIM_PREFIXES = (
+    "完成",
+    "发送",
+    "确认",
+    "进行",
+    "执行",
+    "推进",
+    "开展",
+    "处理",
+    "启动",
+    "安排",
+    "等待",
+    "进入",
+    "发出",
+    "提交",
+)
+_CJK_TRIM_SUFFIXES = (
+    "规则",
+    "内容",
+    "信息",
+    "情况",
+    "之后",
+    "以后",
+    "之前",
+    "才能",
+    "才可以",
+)
 _OPINION_CUES: tuple[tuple[str, str], ...] = (
     ("do not", "caution"),
     ("don't", "caution"),
@@ -71,6 +185,13 @@ _OPINION_CUES: tuple[tuple[str, str], ...] = (
     ("never", "caution"),
     ("only", "requirement"),
     ("should", "recommendation"),
+    ("不要", "caution"),
+    ("避免", "caution"),
+    ("必须", "requirement"),
+    ("需要", "requirement"),
+    ("只能", "requirement"),
+    ("应该", "recommendation"),
+    ("建议", "recommendation"),
 )
 
 
@@ -201,10 +322,324 @@ def truncate_text(value: object, *, max_length: int) -> str:
     return f"{text[: max_length - 3].rstrip()}..."
 
 
+def _contains_cjk(text: object | None) -> bool:
+    return any("\u4e00" <= character <= "\u9fff" for character in str(text or ""))
+
+
+def _normalize_cjk_phrase(value: str) -> str:
+    normalized = re.sub(r"[^\u4e00-\u9fffA-Za-z0-9]", "", str(value or "").strip())
+    changed = True
+    while changed and len(normalized) >= 2:
+        changed = False
+        for prefix in _CJK_TRIM_PREFIXES:
+            if normalized.startswith(prefix) and len(normalized) - len(prefix) >= 2:
+                normalized = normalized[len(prefix) :]
+                changed = True
+        for suffix in _CJK_TRIM_SUFFIXES:
+            if normalized.endswith(suffix) and len(normalized) - len(suffix) >= 2:
+                normalized = normalized[: -len(suffix)]
+                changed = True
+    return normalized
+
+
+def _tokenize_cjk_phrases(text: str | None) -> list[str]:
+    if not isinstance(text, str) or not text.strip() or not _contains_cjk(text):
+        return []
+    tokens: list[str] = []
+    seen: set[str] = set()
+    for sentence in _split_sentences(text):
+        for segment in _CJK_SEGMENT_SPLIT_RE.split(sentence):
+            normalized = _normalize_cjk_phrase(segment)
+            if (
+                len(normalized) < 2
+                or len(normalized) > 12
+                or normalized in _CJK_LOW_SIGNAL_WORDS
+                or normalized in seen
+            ):
+                continue
+            seen.add(normalized)
+            tokens.append(normalized)
+    return tokens
+
+
 def tokenize(text: str | None) -> list[str]:
     if not isinstance(text, str) or not text.strip():
         return []
-    return [token.lower() for token in _TOKEN_RE.findall(text)]
+    latin_tokens = [token.lower() for token in _TOKEN_RE.findall(text)]
+    return [*latin_tokens, *_tokenize_cjk_phrases(text)]
+
+
+def _split_entity_parts(value: str) -> list[str]:
+    return [
+        part
+        for part in re.split(r"[-_:/.]+", str(value or "").strip().lower())
+        if part
+    ]
+
+
+def _is_low_signal_entity_token(token: str) -> bool:
+    normalized = str(token or "").strip().lower()
+    return (
+        not normalized
+        or normalized in _STOP_WORDS
+        or normalized in _INTERNAL_ENTITY_ID_PARTS
+        or normalized in _CJK_LOW_SIGNAL_WORDS
+        or normalized.isdigit()
+    )
+
+
+def _is_noisy_explicit_entity(value: object) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return True
+    normalized = text.lower()
+    if " " not in normalized and _is_low_signal_entity_token(normalized):
+        return True
+    parts = _split_entity_parts(normalized)
+    if not parts:
+        return True
+    if any(part.isdigit() for part in parts):
+        return True
+    if len(parts) > 1 and any(part in _INTERNAL_ENTITY_ID_PARTS for part in parts):
+        return True
+    return False
+
+
+def _split_sentences(text: str | None) -> list[str]:
+    if not isinstance(text, str) or not text.strip():
+        return []
+    return [
+        sentence.strip()
+        for sentence in _SENTENCE_SPLIT_RE.split(text)
+        if sentence and sentence.strip()
+    ]
+
+
+def _parse_opinion_key(opinion_key: str) -> tuple[str, str, str]:
+    subject_key, first_sep, remainder = str(opinion_key or "").partition(":")
+    if not first_sep:
+        return "general", "neutral", str(opinion_key or "").strip()
+    stance, second_sep, label = remainder.partition(":")
+    if not second_sep:
+        return subject_key or "general", stance or "neutral", remainder
+    return subject_key or "general", stance or "neutral", label or opinion_key
+
+
+def humanize_opinion_key(opinion_key: str) -> str:
+    subject_key, stance, label = _parse_opinion_key(opinion_key)
+    normalized_subject = subject_key.replace("-", " ").strip()
+    normalized_stance = stance.replace("-", " ").strip()
+    normalized_label = label.replace("-", " ").strip()
+    if _contains_cjk(normalized_subject) or _contains_cjk(normalized_label):
+        has_subject = bool(normalized_subject and normalized_subject != "general")
+        if normalized_stance == "requirement":
+            return (
+                f"{normalized_subject}需要{normalized_label}"
+                if has_subject and normalized_label
+                else f"需要{normalized_label}"
+                if normalized_label
+                else opinion_key
+            )
+        if normalized_stance == "preference":
+            return (
+                f"{normalized_subject}偏好{normalized_label}"
+                if has_subject and normalized_label
+                else f"偏好{normalized_label}"
+                if normalized_label
+                else opinion_key
+            )
+        if normalized_stance == "recommendation":
+            return (
+                f"{normalized_subject}建议{normalized_label}"
+                if has_subject and normalized_label
+                else f"建议{normalized_label}"
+                if normalized_label
+                else opinion_key
+            )
+        if normalized_stance == "caution":
+            return (
+                f"{normalized_subject}注意{normalized_label}"
+                if has_subject and normalized_label
+                else f"注意{normalized_label}"
+                if normalized_label
+                else opinion_key
+            )
+    has_subject = bool(normalized_subject and normalized_subject != "general")
+    if normalized_stance == "requirement":
+        if has_subject and normalized_label:
+            return f"{normalized_subject} requires {normalized_label}"
+        if normalized_label:
+            return f"requires {normalized_label}"
+    if normalized_stance == "preference":
+        if has_subject and normalized_label:
+            return f"{normalized_subject} prefers {normalized_label}"
+        if normalized_label:
+            return f"prefers {normalized_label}"
+    if normalized_stance == "recommendation":
+        if has_subject and normalized_label:
+            return f"{normalized_subject} recommends {normalized_label}"
+        if normalized_label:
+            return f"recommends {normalized_label}"
+    if normalized_stance == "caution":
+        if has_subject and normalized_label:
+            return f"{normalized_subject} caution: {normalized_label}"
+        if normalized_label:
+            return f"caution: {normalized_label}"
+    pieces: list[str] = []
+    if has_subject:
+        pieces.append(normalized_subject)
+    if normalized_stance and normalized_stance != "neutral":
+        pieces.append(normalized_stance)
+    if normalized_label and normalized_label not in {normalized_subject, normalized_stance}:
+        pieces.append(normalized_label)
+    return " ".join(piece for piece in pieces if piece).strip() or opinion_key
+
+
+def _looks_like_opinion_summary(text: str) -> bool:
+    normalized = str(text or "").strip()
+    if not normalized:
+        return False
+    if _contains_cjk(normalized):
+        return any(marker in normalized for marker in ("需要", "偏好", "建议", "注意"))
+    lowered = normalized.lower()
+    return any(
+        marker in lowered
+        for marker in (" requires ", " prefers ", " recommends ", "caution:")
+    )
+
+
+def present_relation_summary(*, source_text: str, relation_kind: str, target_text: str) -> str:
+    source = str(source_text or "").strip()
+    target = str(target_text or "").strip()
+    kind = str(relation_kind or "").strip().lower() or "references"
+    if _looks_like_opinion_summary(source) and target:
+        if (_contains_cjk(source) and target in source) or (
+            not _contains_cjk(source) and target.lower() in source.lower()
+        ):
+            return source
+    if _contains_cjk(source) or _contains_cjk(target):
+        verb = {
+            "mentions": "提到",
+            "supports": "支持",
+            "contradicts": "与",
+            "depends_on": "依赖",
+            "references": "关联",
+        }.get(kind, "关联")
+        if kind == "contradicts":
+            return f"{source}与{target}冲突".strip()
+        return f"{source}{verb}{target}".strip()
+    verb = {
+        "mentions": "mentions",
+        "supports": "supports",
+        "contradicts": "contradicts",
+        "depends_on": "depends on",
+        "references": "references",
+    }.get(kind, kind)
+    return f"{source} {verb} {target}".strip()
+
+
+def _sentence_case(text: str) -> str:
+    normalized = str(text or "").strip()
+    if not normalized or _contains_cjk(normalized):
+        return normalized
+    return normalized[:1].upper() + normalized[1:]
+
+
+def present_fact_opinion_summary(
+    *,
+    source_text: str,
+    relation_kind: str,
+    opinion_key: str,
+) -> str:
+    _ = source_text
+    opinion_summary = _sentence_case(humanize_opinion_key(opinion_key))
+    normalized_kind = str(relation_kind or "").strip().lower()
+    if normalized_kind == "supports":
+        return opinion_summary
+    if normalized_kind == "contradicts":
+        if _contains_cjk(opinion_summary):
+            return f"与{opinion_summary}冲突"
+        return f"Conflicts with {opinion_summary}"
+    return present_relation_summary(
+        source_text=source_text,
+        relation_kind=relation_kind,
+        target_text=opinion_summary,
+    )
+
+
+def _derive_opinion_subject(*, sentence: str, entity_keys: list[str]) -> str:
+    sentence_tokens = set(tokenize(sentence))
+    for entity_key in entity_keys:
+        normalized_key = str(entity_key or "").strip().lower()
+        if normalized_key and normalized_key in sentence_tokens:
+            return normalized_key
+    return entity_keys[0] if entity_keys else "general"
+
+
+def _derive_cjk_opinion_label(
+    *,
+    sentence_text: str,
+    tail_text: str,
+    subject_key: str,
+    entity_keys: list[str],
+) -> str | None:
+    ordered_entity_keys = list(dict.fromkeys(str(item or "").strip().lower() for item in entity_keys))
+    candidates: list[tuple[int, int, str]] = []
+    for entity_key in ordered_entity_keys:
+        if (
+            not entity_key
+            or entity_key == subject_key
+            or _is_low_signal_entity_token(entity_key)
+        ):
+            continue
+        position = tail_text.find(entity_key)
+        if position >= 0:
+            candidates.append((position, -len(entity_key), entity_key))
+    if candidates:
+        candidates.sort()
+        return candidates[0][2]
+
+    label_tokens = [
+        token
+        for token in tokenize(tail_text or sentence_text)
+        if not _is_low_signal_entity_token(token) and token != subject_key
+    ]
+    return label_tokens[0] if label_tokens else None
+
+
+def _derive_opinion_label(
+    *,
+    sentence: str,
+    cue: str,
+    subject_key: str,
+    fallback: str,
+    entity_keys: list[str],
+) -> str:
+    sentence_text = str(sentence or "").strip().lower()
+    if not sentence_text:
+        return fallback
+    tail_text = sentence_text.split(cue, 1)[1] if cue in sentence_text else sentence_text
+    if _contains_cjk(sentence_text):
+        cjk_label = _derive_cjk_opinion_label(
+            sentence_text=sentence_text,
+            tail_text=tail_text,
+            subject_key=subject_key,
+            entity_keys=entity_keys,
+        )
+        if cjk_label:
+            return slugify(cjk_label, fallback=fallback)
+    label_tokens = [
+        token
+        for token in tokenize(tail_text)
+        if not _is_low_signal_entity_token(token) and token != subject_key
+    ]
+    if not label_tokens:
+        label_tokens = [
+            token
+            for token in tokenize(sentence_text)
+            if not _is_low_signal_entity_token(token) and token != subject_key
+        ]
+    return slugify("-".join(label_tokens[:3]), fallback=fallback)
 
 
 def dedupe_texts(values: Iterable[object]) -> list[str]:
@@ -231,6 +666,8 @@ def extract_entity_candidates(
         text = str(value or "").strip()
         if not text:
             return
+        if _is_noisy_explicit_entity(text):
+            return
         key = slugify(text, fallback="entity")
         if key in entity_labels:
             return
@@ -243,11 +680,11 @@ def extract_entity_candidates(
     token_counts = Counter(
         token
         for token in tokenize("\n".join(part for part in (title, summary, content_text) if part))
-        if token not in _STOP_WORDS
+        if not _is_low_signal_entity_token(token)
     )
-    for token, _count in token_counts.most_common(8):
+    for token, _count in token_counts.most_common(6):
         add(token, label=token.replace("-", " "))
-    return ordered_keys[:12], entity_labels
+    return ordered_keys[:8], entity_labels
 
 
 def extract_opinion_keys(text: str | None, *, entity_keys: list[str]) -> list[str]:
@@ -255,11 +692,20 @@ def extract_opinion_keys(text: str | None, *, entity_keys: list[str]) -> list[st
     if not normalized_text:
         return []
     collected: list[str] = []
-    for cue, stance in _OPINION_CUES:
-        if cue not in normalized_text:
-            continue
-        subject = entity_keys[0] if entity_keys else "general"
-        collected.append(f"{subject}:{stance}:{slugify(cue, fallback=stance)}")
+    sentences = _split_sentences(normalized_text) or [normalized_text]
+    for sentence in sentences:
+        for cue, stance in _OPINION_CUES:
+            if cue not in sentence:
+                continue
+            subject = _derive_opinion_subject(sentence=sentence, entity_keys=entity_keys)
+            label = _derive_opinion_label(
+                sentence=sentence,
+                cue=cue,
+                subject_key=subject,
+                fallback=slugify(cue, fallback=stance),
+                entity_keys=entity_keys,
+            )
+            collected.append(f"{subject}:{stance}:{label}")
     return list(dict.fromkeys(collected))[:8]
 
 
@@ -478,16 +924,20 @@ class DerivedMemoryIndexService:
             if isinstance(scope_id, str) and scope_id.strip()
             else None
         )
-        list_kwargs: dict[str, Any] = {
+        relation_owner_agent_id = owner_agent_id or (
+            normalized_scope_id if normalized_scope_type == "agent" else None
+        )
+        relation_industry_instance_id = industry_instance_id or (
+            normalized_scope_id if normalized_scope_type == "industry" else None
+        )
+        input_list_kwargs: dict[str, Any] = {
             "scope_type": normalized_scope_type,
             "scope_id": normalized_scope_id,
-            "owner_agent_id": owner_agent_id,
-            "industry_instance_id": industry_instance_id,
             "limit": None,
         }
-        fact_entries = self.list_fact_entries(**list_kwargs)
-        entity_views = self.list_entity_views(**list_kwargs)
-        opinion_views = self.list_opinion_views(**list_kwargs)
+        fact_entries = self.list_fact_entries(**input_list_kwargs)
+        entity_views = self.list_entity_views(**input_list_kwargs)
+        opinion_views = self.list_opinion_views(**input_list_kwargs)
         self._relation_view_repository.clear(
             scope_type=normalized_scope_type,
             scope_id=normalized_scope_id,
@@ -498,12 +948,17 @@ class DerivedMemoryIndexService:
             opinion_views=opinion_views,
             scope_type=normalized_scope_type,
             scope_id=normalized_scope_id,
-            owner_agent_id=owner_agent_id,
-            industry_instance_id=industry_instance_id,
+            owner_agent_id=relation_owner_agent_id,
+            industry_instance_id=relation_industry_instance_id,
         )
         for relation_view in relation_views:
             self._relation_view_repository.upsert_view(relation_view)
-        return self.list_relation_views(**list_kwargs)
+        result_list_kwargs = dict(input_list_kwargs)
+        if relation_owner_agent_id is not None:
+            result_list_kwargs["owner_agent_id"] = relation_owner_agent_id
+        if relation_industry_instance_id is not None:
+            result_list_kwargs["industry_instance_id"] = relation_industry_instance_id
+        return self.list_relation_views(**result_list_kwargs)
 
     def delete_source(self, *, source_type: str, source_ref: str) -> int:
         existing_entries = self._fact_index_repository.list_entries(
@@ -679,9 +1134,7 @@ class DerivedMemoryIndexService:
         content_text = "\n".join(part for part in (chunk.title, chunk.summary, chunk.content) if part).strip()
         explicit_entities = [
             scope_id,
-            *(chunk.role_bindings or []),
             *(chunk.tags or []),
-            *(chunk.source_ref.split(":") if isinstance(chunk.source_ref, str) else []),
         ]
         entity_keys, entity_labels = extract_entity_candidates(
             title=title,
@@ -773,9 +1226,7 @@ class DerivedMemoryIndexService:
         ).strip()
         explicit_entities = [
             strategy.scope_id,
-            strategy.owner_agent_id,
             strategy.industry_instance_id,
-            *(strategy.current_focuses or []),
             *(strategy.paused_lane_ids or []),
         ]
         entity_keys, entity_labels = extract_entity_candidates(
@@ -861,15 +1312,7 @@ class DerivedMemoryIndexService:
             )
             if part
         ).strip()
-        explicit_entities = [
-            report.industry_instance_id,
-            report.owner_agent_id,
-            report.owner_role_id,
-            report.goal_id,
-            report.task_id,
-            report.lane_id,
-            *(report.evidence_ids or []),
-        ]
+        explicit_entities: list[str] = []
         entity_keys, entity_labels = extract_entity_candidates(
             title=report.headline,
             summary=report.summary,
@@ -1798,9 +2241,13 @@ class DerivedMemoryIndexService:
                         industry_instance_id=industry_instance_id
                         or _safe_getattr(entry, "industry_instance_id")
                         or _safe_getattr(entity_view, "industry_instance_id"),
-                        summary=(
-                            f"{getattr(entry, 'title', '') or getattr(entry, 'summary', '')} "
-                            f"mentions {getattr(entity_view, 'display_name', '') or getattr(entity_view, 'entity_key', '')}"
+                        summary=present_relation_summary(
+                            source_text=getattr(entry, "title", "") or getattr(entry, "summary", ""),
+                            relation_kind="mentions",
+                            target_text=(
+                                getattr(entity_view, "display_name", "")
+                                or getattr(entity_view, "entity_key", "")
+                            ),
                         ),
                         confidence=(
                             float(getattr(entry, "confidence", 0.0) or 0.0)
@@ -1856,9 +2303,10 @@ class DerivedMemoryIndexService:
                         industry_instance_id=industry_instance_id
                         or _safe_getattr(entry, "industry_instance_id")
                         or _safe_getattr(opinion_view, "industry_instance_id"),
-                        summary=(
-                            f"{getattr(entry, 'title', '') or getattr(entry, 'summary', '')} "
-                            f"{relation_kind} {getattr(opinion_view, 'opinion_key', '')}"
+                        summary=present_fact_opinion_summary(
+                            source_text=getattr(entry, "title", "") or getattr(entry, "summary", ""),
+                            relation_kind=relation_kind,
+                            opinion_key=str(getattr(opinion_view, "opinion_key", "") or ""),
                         ),
                         confidence=(
                             float(getattr(entry, "confidence", 0.0) or 0.0)
@@ -1936,9 +2384,13 @@ class DerivedMemoryIndexService:
                         industry_instance_id=industry_instance_id
                         or _safe_getattr(opinion_view, "industry_instance_id")
                         or _safe_getattr(entity_view, "industry_instance_id"),
-                        summary=(
-                            f"{getattr(opinion_view, 'opinion_key', '')} "
-                            f"{relation_kind} {getattr(entity_view, 'display_name', '') or getattr(entity_view, 'entity_key', '')}"
+                        summary=present_relation_summary(
+                            source_text=humanize_opinion_key(getattr(opinion_view, "opinion_key", "")),
+                            relation_kind=relation_kind,
+                            target_text=(
+                                getattr(entity_view, "display_name", "")
+                                or getattr(entity_view, "entity_key", "")
+                            ),
                         ),
                         confidence=(
                             float(getattr(opinion_view, "confidence", 0.0) or 0.0)

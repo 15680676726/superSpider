@@ -40,6 +40,7 @@ from ..memory import (
     MemoryRecallService,
     MemoryReflectionService,
     MemoryRetainService,
+    MemorySleepService,
 )
 from ..discovery.scout_service import DonorScoutService
 from ..discovery.opportunity_radar import OpportunityRadarService
@@ -340,6 +341,7 @@ def _build_query_services(
     skill_lifecycle_decision_service: object | None,
     human_assist_task_service: HumanAssistTaskService | None,
     environment_service: EnvironmentService,
+    runtime_provider: object | None,
     external_runtime_service: object | None = None,
 ) -> tuple[
     RuntimeCenterStateQueryService,
@@ -369,6 +371,7 @@ def _build_query_services(
         human_assist_task_service=human_assist_task_service,
         environment_service=environment_service,
         external_runtime_service=external_runtime_service,
+        runtime_provider=runtime_provider,
     )
 
 
@@ -428,6 +431,7 @@ def _warm_runtime_memory_services(
     repositories: RuntimeRepositories,
     derived_memory_index_service: DerivedMemoryIndexService,
     memory_reflection_service: MemoryReflectionService,
+    memory_sleep_service: MemorySleepService | None = None,
 ) -> None:
     derived_memory_index_service.rebuild_all()
     try:
@@ -447,6 +451,12 @@ def _warm_runtime_memory_services(
             )
     except Exception:
         pass
+    idle_catchup = getattr(memory_sleep_service, "run_idle_catchup", None)
+    if callable(idle_catchup):
+        try:
+            idle_catchup(limit=5)
+        except Exception:
+            logger.debug("startup memory sleep idle catchup failed", exc_info=True)
 
 
 def build_runtime_bootstrap(
@@ -538,6 +548,7 @@ def build_runtime_bootstrap(
         memory_reflection_service,
         memory_recall_service,
         memory_retain_service,
+        memory_sleep_service,
         memory_activation_service,
         agent_experience_service,
     ) = _build_query_services(
@@ -555,6 +566,7 @@ def build_runtime_bootstrap(
         skill_lifecycle_decision_service=skill_lifecycle_decision_service,
         human_assist_task_service=human_assist_task_service,
         environment_service=environment_service,
+        runtime_provider=runtime_provider,
         external_runtime_service=external_runtime_service,
     )
     knowledge_graph_service = KnowledgeGraphService(
@@ -624,6 +636,7 @@ def build_runtime_bootstrap(
         memory_reflection_service=memory_reflection_service,
         memory_recall_service=memory_recall_service,
         memory_retain_service=memory_retain_service,
+        memory_sleep_service=memory_sleep_service,
         memory_activation_service=memory_activation_service,
         knowledge_graph_service=knowledge_graph_service,
         agent_experience_service=agent_experience_service,
@@ -734,6 +747,7 @@ def build_runtime_bootstrap(
         repositories=repositories,
         derived_memory_index_service=derived_memory_index_service,
         memory_reflection_service=memory_reflection_service,
+        memory_sleep_service=memory_sleep_service,
     )
     turn_executor = KernelTurnExecutor(
         session_backend=session_backend,
@@ -792,6 +806,7 @@ def build_runtime_bootstrap(
         memory_recall_service=memory_recall_service,
         memory_reflection_service=memory_reflection_service,
         memory_retain_service=memory_retain_service,
+        memory_sleep_service=memory_sleep_service,
         memory_activation_service=memory_activation_service,
         knowledge_graph_service=knowledge_graph_service,
         agent_experience_service=agent_experience_service,

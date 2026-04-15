@@ -31,6 +31,9 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "MemoryRecallService": (".recall_service", "MemoryRecallService"),
     "MemoryReflectionService": (".reflection_service", "MemoryReflectionService"),
     "MemoryRetainService": (".retain_service", "MemoryRetainService"),
+    "build_memory_sleep_model_runner": (".sleep_inference_service", "build_memory_sleep_model_runner"),
+    "MemorySleepInferenceService": (".sleep_inference_service", "MemorySleepInferenceService"),
+    "MemorySleepService": (".sleep_service", "MemorySleepService"),
     "MemorySurfaceService": (".surface_service", "MemorySurfaceService"),
 }
 

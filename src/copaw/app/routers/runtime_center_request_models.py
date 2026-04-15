@@ -165,6 +165,12 @@ class MemoryReflectRequest(BaseModel):
     create_learning_proposals: bool = True
 
 
+class MemorySleepRunRequest(BaseModel):
+    scope_type: Literal["global", "industry", "agent", "task", "work_context"]
+    scope_id: str = Field(min_length=1)
+    trigger_kind: str = Field(default="manual", min_length=1)
+
+
 class TaskBatchActionRequest(BaseModel):
     task_ids: list[str] = Field(default_factory=list)
     action: Literal["cancel"] = "cancel"

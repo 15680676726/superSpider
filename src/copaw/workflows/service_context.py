@@ -523,20 +523,15 @@ class _WorkflowServiceContextMixin:
         install_templates_by_id: dict[str, Any | None] | None = None,
         capability_mounts_by_id: dict[str, Any | None] | None = None,
     ) -> list[WorkflowTemplateInstallTemplateRef]:
-        mappings = template.metadata.get("dependency_install_templates")
-        explicit_template_ids = _unique_strings(
-            mappings.get(capability_id) if isinstance(mappings, dict) else [],
-        )
-        if explicit_template_ids:
-            candidates = []
-            for template_id in explicit_template_ids:
+        def _load_candidates_for_template_ids(template_ids: list[str]) -> list[Any]:
+            candidates: list[Any] = []
+            for template_id in template_ids:
                 if install_templates_by_id is not None and template_id in install_templates_by_id:
                     candidate = install_templates_by_id[template_id]
                 else:
                     candidate = get_install_template(
                         template_id,
                         capability_service=self._capability_service,
-                        decision_request_repository=self._decision_request_repository,
                         include_runtime=False,
                         prefetched_capability_mounts_by_id=capability_mounts_by_id,
                     )
@@ -544,29 +539,46 @@ class _WorkflowServiceContextMixin:
                         install_templates_by_id[template_id] = candidate
                 if candidate is not None:
                     candidates.append(candidate)
+            return candidates
+
+        mappings = template.metadata.get("dependency_install_templates")
+        explicit_template_ids = _unique_strings(
+            mappings.get(capability_id) if isinstance(mappings, dict) else [],
+        )
+        if explicit_template_ids:
+            candidates = _load_candidates_for_template_ids(explicit_template_ids)
         else:
-            candidates = (
-                install_template_candidates_by_runtime.get(False)
-                if install_template_candidates_by_runtime is not None
-                else None
-            )
-            if candidates is None:
-                candidates = list_install_templates(
-                    capability_service=self._capability_service,
-                    decision_request_repository=self._decision_request_repository,
-                    include_runtime=False,
-                    prefetched_capability_mounts_by_id=capability_mounts_by_id,
+            if not may_have_install_template_for_capability(capability_id):
+                candidates = []
+            else:
+                implicit_template_ids = resolve_install_template_ids_for_capability(
+                    capability_id,
                 )
-                if install_template_candidates_by_runtime is not None:
-                    install_template_candidates_by_runtime[False] = list(candidates)
-            explicit_template_ids = [
-                candidate.id
-                for candidate in candidates
-                if _candidate_matches_install_template_capability_ids(
-                    candidate,
-                    capability_ids=[capability_id],
-                )
-            ]
+                if implicit_template_ids:
+                    candidates = _load_candidates_for_template_ids(implicit_template_ids)
+                    explicit_template_ids = [candidate.id for candidate in candidates]
+                else:
+                    candidates = (
+                        install_template_candidates_by_runtime.get(False)
+                        if install_template_candidates_by_runtime is not None
+                        else None
+                    )
+                    if candidates is None:
+                        candidates = list_install_templates(
+                            capability_service=self._capability_service,
+                            include_runtime=False,
+                            prefetched_capability_mounts_by_id=capability_mounts_by_id,
+                        )
+                        if install_template_candidates_by_runtime is not None:
+                            install_template_candidates_by_runtime[False] = list(candidates)
+                    explicit_template_ids = [
+                        candidate.id
+                        for candidate in candidates
+                        if _candidate_matches_install_template_capability_ids(
+                            candidate,
+                            capability_ids=[capability_id],
+                        )
+                    ]
         matched_ids = set(explicit_template_ids)
         refs: list[WorkflowTemplateInstallTemplateRef] = []
         for candidate in candidates:

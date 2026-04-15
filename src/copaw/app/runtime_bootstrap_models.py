@@ -35,6 +35,7 @@ if TYPE_CHECKING:
         MemoryRecallService,
         MemoryReflectionService,
         MemoryRetainService,
+        MemorySleepService,
     )
     from ..predictions import PredictionService
     from ..providers.runtime_provider_facade import ProviderRuntimeSurface
@@ -81,6 +82,7 @@ if TYPE_CHECKING:
         SqliteMemoryOpinionViewRepository,
         SqliteMemoryRelationViewRepository,
         SqliteMemoryReflectionRunRepository,
+        SqliteMemorySleepRepository,
         SqliteOperatingCycleRepository,
         SqliteOperatingLaneRepository,
         SqlitePredictionCaseRepository,
@@ -148,6 +150,7 @@ class RuntimeRepositories:
     memory_opinion_view_repository: SqliteMemoryOpinionViewRepository
     memory_relation_view_repository: SqliteMemoryRelationViewRepository
     memory_reflection_run_repository: SqliteMemoryReflectionRunRepository
+    memory_sleep_repository: SqliteMemorySleepRepository
     workflow_template_repository: SqliteWorkflowTemplateRepository
     workflow_preset_repository: SqliteWorkflowPresetRepository
     workflow_run_repository: SqliteWorkflowRunRepository
@@ -199,6 +202,7 @@ class RuntimeBootstrap:
     memory_recall_service: MemoryRecallService
     memory_reflection_service: MemoryReflectionService
     memory_retain_service: MemoryRetainService
+    memory_sleep_service: MemorySleepService
     memory_activation_service: Any | None
     knowledge_graph_service: Any | None
     agent_experience_service: AgentExperienceMemoryService

@@ -138,3 +138,25 @@ def test_memory_surface_service_caps_truth_first_snapshot_budget() -> None:
     assert len(snapshot["entries"]) == 8
     assert len(snapshot["latest_entries"]) == 2
     assert len(snapshot["history_entries"]) == 2
+
+
+def test_memory_surface_service_exposes_sleep_overlay() -> None:
+    class _SleepService:
+        def resolve_scope_overlay(self, *, scope_type: str, scope_id: str) -> dict[str, object]:
+            assert scope_type == "work_context"
+            assert scope_id == "ctx-sleep"
+            return {
+                "digest": {"headline": "Finance review digest", "summary": "Review-first memory overlay."},
+                "soft_rules": [{"rule_text": "Wait for finance review before outbound approval."}],
+                "conflicts": [],
+            }
+
+    service = MemorySurfaceService(memory_recall_service=object(), memory_sleep_service=_SleepService())
+
+    snapshot = service.resolve_truth_first_scope_snapshot(
+        scope_type="work_context",
+        scope_id="ctx-sleep",
+    )
+
+    assert snapshot["sleep"]["digest"]["headline"] == "Finance review digest"
+    assert snapshot["sleep"]["soft_rules"][0]["rule_text"] == "Wait for finance review before outbound approval."

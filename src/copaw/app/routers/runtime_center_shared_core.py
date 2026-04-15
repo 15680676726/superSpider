@@ -32,6 +32,7 @@ from .runtime_center_dependencies import (
     _get_knowledge_service,
     _get_memory_recall_service,
     _get_memory_reflection_service,
+    _get_memory_sleep_service,
     _get_prediction_service,
     _get_reporting_service,
     _get_runtime_event_bus,
@@ -49,6 +50,7 @@ from .runtime_center_request_models import (
     KnowledgeMemoryUpsertRequest,
     MemoryRebuildRequest,
     MemoryReflectRequest,
+    MemorySleepRunRequest,
 )
 from .runtime_center_shared import (
     router,
@@ -68,6 +70,7 @@ __all__ = [
     "Literal",
     "MemoryRebuildRequest",
     "MemoryReflectRequest",
+    "MemorySleepRunRequest",
     "PredictionCapabilityOptimizationOverview",
     "Request",
     "Response",
@@ -86,6 +89,7 @@ __all__ = [
     "_get_knowledge_service",
     "_get_memory_recall_service",
     "_get_memory_reflection_service",
+    "_get_memory_sleep_service",
     "_get_prediction_service",
     "_get_reporting_service",
     "_get_runtime_event_bus",

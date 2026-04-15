@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-STATE_SCHEMA_VERSION = 37
+STATE_SCHEMA_VERSION = 38
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS human_profiles (
@@ -1524,6 +1524,167 @@ CREATE INDEX IF NOT EXISTS idx_memory_reflection_runs_scope
     ON memory_reflection_runs(scope_type, scope_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_memory_reflection_runs_status
     ON memory_reflection_runs(status, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS memory_sleep_scope_states (
+    scope_key TEXT PRIMARY KEY,
+    scope_type TEXT NOT NULL DEFAULT 'global',
+    scope_id TEXT NOT NULL,
+    owner_agent_id TEXT,
+    industry_instance_id TEXT,
+    is_dirty INTEGER NOT NULL DEFAULT 0,
+    dirty_reasons_json TEXT NOT NULL DEFAULT '[]',
+    dirty_source_refs_json TEXT NOT NULL DEFAULT '[]',
+    dirty_count INTEGER NOT NULL DEFAULT 0,
+    first_dirtied_at TEXT,
+    last_dirtied_at TEXT,
+    last_sleep_job_id TEXT,
+    last_sleep_at TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_memory_sleep_scope_states_scope
+    ON memory_sleep_scope_states(scope_type, scope_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_sleep_scope_states_dirty
+    ON memory_sleep_scope_states(is_dirty, last_dirtied_at DESC, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS memory_sleep_jobs (
+    job_id TEXT PRIMARY KEY,
+    scope_type TEXT NOT NULL DEFAULT 'global',
+    scope_id TEXT NOT NULL,
+    owner_agent_id TEXT,
+    industry_instance_id TEXT,
+    trigger_kind TEXT NOT NULL DEFAULT 'manual',
+    window_start TEXT,
+    window_end TEXT,
+    status TEXT NOT NULL DEFAULT 'queued',
+    input_refs_json TEXT NOT NULL DEFAULT '[]',
+    output_refs_json TEXT NOT NULL DEFAULT '[]',
+    model_ref TEXT,
+    started_at TEXT,
+    completed_at TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_memory_sleep_jobs_scope
+    ON memory_sleep_jobs(scope_type, scope_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_sleep_jobs_status
+    ON memory_sleep_jobs(status, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS memory_scope_digests (
+    digest_id TEXT PRIMARY KEY,
+    scope_type TEXT NOT NULL DEFAULT 'global',
+    scope_id TEXT NOT NULL,
+    headline TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    current_constraints_json TEXT NOT NULL DEFAULT '[]',
+    current_focus_json TEXT NOT NULL DEFAULT '[]',
+    top_entities_json TEXT NOT NULL DEFAULT '[]',
+    top_relations_json TEXT NOT NULL DEFAULT '[]',
+    evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+    source_job_id TEXT,
+    version INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'active',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_memory_scope_digests_scope
+    ON memory_scope_digests(scope_type, scope_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_scope_digests_status
+    ON memory_scope_digests(status, version DESC, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS memory_alias_maps (
+    alias_id TEXT PRIMARY KEY,
+    scope_type TEXT NOT NULL DEFAULT 'global',
+    scope_id TEXT NOT NULL,
+    canonical_term TEXT NOT NULL,
+    aliases_json TEXT NOT NULL DEFAULT '[]',
+    confidence REAL NOT NULL DEFAULT 0.5,
+    evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+    source_job_id TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_memory_alias_maps_scope
+    ON memory_alias_maps(scope_type, scope_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_alias_maps_canonical
+    ON memory_alias_maps(canonical_term, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS memory_merge_results (
+    merge_id TEXT PRIMARY KEY,
+    scope_type TEXT NOT NULL DEFAULT 'global',
+    scope_id TEXT NOT NULL,
+    merged_title TEXT NOT NULL,
+    merged_summary TEXT NOT NULL DEFAULT '',
+    merged_source_refs_json TEXT NOT NULL DEFAULT '[]',
+    evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+    source_job_id TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_memory_merge_results_scope
+    ON memory_merge_results(scope_type, scope_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_merge_results_status
+    ON memory_merge_results(status, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS memory_soft_rules (
+    rule_id TEXT PRIMARY KEY,
+    scope_type TEXT NOT NULL DEFAULT 'global',
+    scope_id TEXT NOT NULL,
+    rule_text TEXT NOT NULL,
+    rule_kind TEXT NOT NULL DEFAULT 'general',
+    evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+    hit_count INTEGER NOT NULL DEFAULT 0,
+    day_span INTEGER NOT NULL DEFAULT 0,
+    conflict_count INTEGER NOT NULL DEFAULT 0,
+    risk_level TEXT NOT NULL DEFAULT 'low',
+    state TEXT NOT NULL DEFAULT 'candidate',
+    source_job_id TEXT,
+    expires_at TEXT,
+    last_supported_at TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_memory_soft_rules_scope
+    ON memory_soft_rules(scope_type, scope_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_soft_rules_state
+    ON memory_soft_rules(state, hit_count DESC, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS memory_conflict_proposals (
+    proposal_id TEXT PRIMARY KEY,
+    scope_type TEXT NOT NULL DEFAULT 'global',
+    scope_id TEXT NOT NULL,
+    proposal_kind TEXT NOT NULL DEFAULT 'conflict',
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    conflicting_refs_json TEXT NOT NULL DEFAULT '[]',
+    supporting_refs_json TEXT NOT NULL DEFAULT '[]',
+    recommended_action TEXT NOT NULL DEFAULT '',
+    risk_level TEXT NOT NULL DEFAULT 'high',
+    status TEXT NOT NULL DEFAULT 'pending',
+    source_job_id TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_memory_conflict_proposals_scope
+    ON memory_conflict_proposals(scope_type, scope_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_conflict_proposals_status
+    ON memory_conflict_proposals(status, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS capability_candidates (
     candidate_id TEXT PRIMARY KEY,

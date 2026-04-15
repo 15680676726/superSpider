@@ -39,6 +39,7 @@ async def start_runtime_manager_stack(
     governance_service: GovernanceService,
     schedule_repository: SqliteScheduleRepository,
     mcp_manager: MCPClientManager,
+    memory_sleep_service: object | None,
     logger: logging.Logger,
     strict_mcp_watcher: bool,
 ) -> RuntimeManagerStack:
@@ -58,6 +59,7 @@ async def start_runtime_manager_stack(
             repo=stack.job_repository,
             timezone="UTC",
             kernel_dispatcher=kernel_dispatcher,
+            memory_sleep_service=memory_sleep_service,
         )
         await stack.cron_manager.start()
         capability_service.set_cron_manager(stack.cron_manager)

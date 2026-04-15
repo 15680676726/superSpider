@@ -6,6 +6,8 @@ from copaw.capabilities.install_templates import (
     CapabilityInstallTemplateSpec,
     get_install_template,
     list_install_templates,
+    may_have_install_template_for_capability,
+    resolve_install_template_ids_for_capability,
 )
 
 
@@ -219,3 +221,20 @@ def test_list_install_templates_reuses_pending_decision_listing_once() -> None:
         "windows-app-adapters",
     }
     assert decision_request_repository.calls == 1
+
+
+def test_may_have_install_template_for_capability_only_flags_supported_families() -> None:
+    assert may_have_install_template_for_capability("mcp:desktop_windows") is True
+    assert may_have_install_template_for_capability("tool:browser_use") is True
+    assert may_have_install_template_for_capability("system:dispatch_query") is False
+
+
+def test_resolve_install_template_ids_for_capability_returns_known_candidates() -> None:
+    assert resolve_install_template_ids_for_capability("mcp:desktop_windows") == [
+        "desktop-windows"
+    ]
+    assert resolve_install_template_ids_for_capability("tool:browser_use") == [
+        "browser-local",
+        "browser-companion",
+    ]
+    assert resolve_install_template_ids_for_capability("system:dispatch_query") == []

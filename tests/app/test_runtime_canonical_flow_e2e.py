@@ -10,7 +10,13 @@ from fastapi.testclient import TestClient
 
 from copaw.evidence import EvidenceRecord
 from copaw.industry.chat_writeback import build_chat_writeback_plan
-from copaw.kernel import ActorMailboxService, ActorWorker, KernelTurnExecutor, TaskDelegationService
+from copaw.kernel import (
+    ActorMailboxService,
+    ActorWorker,
+    KernelTask,
+    KernelTurnExecutor,
+    TaskDelegationService,
+)
 from copaw.kernel import query_execution_writeback as writeback_module
 from copaw.kernel.main_brain_chat_service import MainBrainChatService
 from copaw.kernel.main_brain_intake import MainBrainIntakeContract
@@ -195,6 +201,37 @@ def _resolve_initial_materialization(
     processed_instances = list(cycle_result["processed_instances"])
     assert processed_instances
     return dict(processed_instances[0])
+
+
+def _execute_kernel_capability_task(
+    app,
+    *,
+    capability_id: str,
+    payload: dict[str, object],
+    owner_agent_id: str,
+    title: str,
+    environment_ref: str | None = None,
+    parent_task_id: str | None = None,
+    work_context_id: str | None = None,
+) -> dict[str, object]:
+    capability_service = app.state.capability_service
+    dispatcher = app.state.kernel_dispatcher
+    mount = capability_service.get_capability(capability_id)
+    assert mount is not None
+    task = KernelTask(
+        title=title,
+        capability_ref=capability_id,
+        owner_agent_id=owner_agent_id,
+        risk_level=mount.risk_level,
+        payload=dict(payload),
+        environment_ref=environment_ref,
+        parent_task_id=parent_task_id,
+        work_context_id=work_context_id,
+    )
+    admitted = dispatcher.submit(task)
+    if admitted.phase != "executing":
+        return admitted.model_dump(mode="json")
+    return asyncio.run(dispatcher.execute_task(task.id)).model_dump(mode="json")
 
 
 def test_runtime_canonical_flow_harness_covers_identity_chat_execution_and_runtime_reads_contract(
@@ -450,7 +487,7 @@ def test_runtime_canonical_flow_harness_covers_identity_chat_execution_and_runti
     assert evidence.id in evidence_ids
 
 
-def test_runtime_canonical_flow_harness_auto_writeback_requested_actions_routes_frontdoor_contract(
+def test_runtime_canonical_flow_harness_explicit_orchestrate_writeback_keeps_same_thread_backlog_contract(
     tmp_path,
 ) -> None:
     app = _build_industry_app(tmp_path)
@@ -573,7 +610,7 @@ def test_runtime_canonical_flow_harness_auto_writeback_requested_actions_routes_
     assert backlog_item["metadata"]["source"] == "chat-writeback"
 
 
-def test_runtime_canonical_flow_harness_model_driven_content_creation_request_kicks_off_execution(
+def test_runtime_canonical_flow_harness_model_classified_artifact_request_materializes_same_thread_governed_execution_contract(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -633,6 +670,10 @@ def test_runtime_canonical_flow_harness_model_driven_content_creation_request_ki
     assert bootstrap.status_code == 200
     instance_id = bootstrap.json()["team"]["team_id"]
     control_thread_id = f"industry-chat:{instance_id}:execution-core"
+    binding = app.state.agent_thread_binding_repository.get_binding(control_thread_id)
+    assert binding is not None
+    work_context_id = binding.work_context_id
+    assert work_context_id is not None
 
     response = client.post(
         "/runtime-center/chat/run",
@@ -684,8 +725,213 @@ def test_runtime_canonical_flow_harness_model_driven_content_creation_request_ki
     assert backlog_item["metadata"]["source"] == "chat-writeback"
     assert backlog_item["metadata"]["control_thread_id"] == control_thread_id
 
+    processed_instance = _resolve_initial_materialization(
+        app,
+        instance_id=instance_id,
+        writeback=writeback,
+        backlog_id=str(created_backlog_ids[0]),
+        actor="test:canonical-flow-artifact-request",
+        auto_dispatch_materialized_goals=False,
+    )
+    assignment_id = processed_instance["created_assignment_ids"][0]
+    assignment = app.state.assignment_repository.get_assignment(assignment_id)
+    assert assignment is not None
+    assert assignment.metadata["control_thread_id"] == control_thread_id
+    assert assignment.metadata["session_id"] == control_thread_id
+    assert assignment.metadata["work_context_id"] == work_context_id
 
-def test_runtime_canonical_flow_harness_auto_frontdoor_replan_materializes_followup_assignment_on_same_thread_contract(
+    task_id = assignment.task_id or next(
+        iter(processed_instance.get("created_task_ids") or []),
+        None,
+    )
+    if task_id:
+        task = app.state.task_repository.get_task(task_id)
+        assert task is not None
+        assert task.work_context_id == work_context_id
+        kernel_metadata = decode_kernel_task_metadata(task.acceptance_criteria)
+        assert kernel_metadata is not None
+        payload = dict(kernel_metadata.get("payload") or {})
+        compiler_meta = dict(payload.get("compiler") or {})
+        task_seed = dict(payload.get("task_seed") or {})
+
+        assert compiler_meta["control_thread_id"] == control_thread_id
+        assert task_seed["request_context"]["control_thread_id"] == control_thread_id
+        assert task_seed["request_context"]["work_context_id"] == work_context_id
+
+
+def test_runtime_canonical_flow_harness_materialized_same_thread_file_task_surfaces_runtime_center_artifact_contract(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    instruction = "现在去写一篇短篇小说，保存成实际文件，完成后回到同一线程汇报。"
+    control_ack = "我会先把这次请求落进正式执行链，再把真实产物和结果带回同一线程。"
+    monkeypatch.setattr(
+        writeback_module,
+        "_CHAT_WRITEBACK_DECISION_MODEL_FACTORY",
+        lambda: _StaticStructuredDecisionModel(),
+        raising=False,
+    )
+    writeback_module.clear_chat_writeback_decision_cache()
+
+    chat_service = MainBrainChatService(
+        session_backend=app.state.session_backend,
+        industry_service=app.state.industry_service,
+        agent_profile_service=app.state.agent_profile_service,
+        model_factory=lambda: _StaticResponseModel(control_ack),
+    )
+    query_execution_service = _CanonicalFlowQueryExecutionService(
+        chat_service=chat_service,
+        industry_service=app.state.industry_service,
+    )
+
+    app.state.turn_executor = KernelTurnExecutor(
+        session_backend=app.state.session_backend,
+        query_execution_service=query_execution_service,
+        main_brain_chat_service=chat_service,
+        main_brain_orchestrator=MainBrainOrchestrator(
+            query_execution_service=query_execution_service,
+            session_backend=app.state.session_backend,
+        ),
+    )
+
+    client = TestClient(app)
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Content Operations",
+            "company_name": "Northwind Studio",
+            "product": "artifact execution",
+            "goals": ["turn executable requests into durable work"],
+        },
+    )
+    assert preview.status_code == 200
+
+    bootstrap = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": preview.json()["profile"],
+            "draft": preview.json()["draft"],
+            "auto_activate": True,
+        },
+    )
+    assert bootstrap.status_code == 200
+    instance_id = bootstrap.json()["team"]["team_id"]
+    control_thread_id = f"industry-chat:{instance_id}:execution-core"
+    binding = app.state.agent_thread_binding_repository.get_binding(control_thread_id)
+    assert binding is not None
+    work_context_id = binding.work_context_id
+    assert work_context_id is not None
+
+    response = client.post(
+        "/runtime-center/chat/run",
+        json={
+            "id": "req-frontdoor-file-artifact-surface",
+            "session_id": control_thread_id,
+            "thread_id": control_thread_id,
+            "user_id": "copaw-agent-runner",
+            "channel": "console",
+            "agent_id": "copaw-agent-runner",
+            "industry_instance_id": instance_id,
+            "industry_role_id": "execution-core",
+            "session_kind": "industry-control-thread",
+            "control_thread_id": control_thread_id,
+            "interaction_mode": "auto",
+            "input": [
+                {
+                    "role": "user",
+                    "type": "message",
+                    "content": [{"type": "text", "text": instruction}],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert len(query_execution_service.calls) == 1
+    assert query_execution_service.writeback_result is not None
+
+    writeback = query_execution_service.writeback_result
+    created_backlog_ids = list(writeback["created_backlog_ids"])
+    assert created_backlog_ids
+
+    processed_instance = _resolve_initial_materialization(
+        app,
+        instance_id=instance_id,
+        writeback=writeback,
+        backlog_id=str(created_backlog_ids[0]),
+        actor="test:canonical-flow-file-artifact-surface",
+        auto_dispatch_materialized_goals=False,
+    )
+    assignment_id = processed_instance["created_assignment_ids"][0]
+    assignment = app.state.assignment_repository.get_assignment(assignment_id)
+    assert assignment is not None
+    assert assignment.metadata["control_thread_id"] == control_thread_id
+    assert assignment.metadata["session_id"] == control_thread_id
+    assert assignment.metadata["work_context_id"] == work_context_id
+
+    parent_task_id = assignment.task_id or next(
+        iter(processed_instance.get("created_task_ids") or []),
+        None,
+    )
+    assert parent_task_id is not None
+
+    target = tmp_path / "frontdoor-runtime-artifact.txt"
+    content = "real frontdoor file artifact"
+    file_payload = _execute_kernel_capability_task(
+        app,
+        capability_id="tool:write_file",
+        payload={"file_path": str(target), "content": content},
+        owner_agent_id=getattr(assignment, "owner_agent_id", None) or "copaw-agent-runner",
+        title="Persist runtime artifact",
+        environment_ref=control_thread_id,
+        parent_task_id=parent_task_id,
+        work_context_id=work_context_id,
+    )
+
+    assert file_payload["success"] is True
+    assert file_payload["evidence_id"] is not None
+    assert target.exists()
+    assert target.read_text(encoding="utf-8") == content
+
+    file_task = app.state.task_repository.get_task(file_payload["task_id"])
+    assert file_task is not None
+    assert file_task.parent_task_id == parent_task_id
+    assert file_task.work_context_id == work_context_id
+
+    evidence_list = client.get(
+        "/runtime-center/evidence",
+        params={"task_id": file_payload["task_id"], "limit": 10},
+    )
+    assert evidence_list.status_code == 200
+    file_evidence = next(
+        item
+        for item in evidence_list.json()
+        if item["capability_ref"] == "tool:write_file"
+        and item["status"] == "succeeded"
+        and item["metadata"].get("status") == "success"
+    )
+
+    evidence_detail = client.get(f"/runtime-center/evidence/{file_evidence['id']}")
+    assert evidence_detail.status_code == 200
+    evidence_payload = evidence_detail.json()
+    assert evidence_payload["capability_ref"] == "tool:write_file"
+    assert evidence_payload["metadata"]["work_context_id"] == work_context_id
+    assert len(evidence_payload["artifacts"]) == 1
+    artifact = evidence_payload["artifacts"][0]
+    assert artifact["artifact_type"] == "file"
+    assert artifact["storage_uri"] == str(target)
+
+    artifact_detail = client.get(f"/runtime-center/artifacts/{artifact['id']}")
+    assert artifact_detail.status_code == 200
+    artifact_payload = artifact_detail.json()
+    assert artifact_payload["artifact_type"] == "file"
+    assert artifact_payload["storage_uri"] == str(target)
+
+
+def test_runtime_canonical_flow_harness_orchestrate_replan_materializes_followup_assignment_on_same_thread_contract(
     tmp_path,
 ) -> None:
     app = _build_industry_app(tmp_path)
@@ -898,7 +1144,7 @@ def test_runtime_canonical_flow_harness_auto_frontdoor_replan_materializes_follo
     assert runtime_assignment["metadata"]["work_context_id"] == work_context_id
 
 
-def test_runtime_canonical_flow_harness_chat_frontdoor_closes_through_fixed_sop_terminal_report_contract(
+def test_runtime_canonical_flow_harness_fixed_sop_processed_report_reaches_same_thread_runtime_surface_contract(
     tmp_path,
 ) -> None:
     app = _build_industry_app(tmp_path)
@@ -1125,7 +1371,7 @@ def test_runtime_canonical_flow_harness_chat_frontdoor_closes_through_fixed_sop_
     assert report_message["metadata"]["work_context_id"] == work_context_id
 
 
-def test_runtime_canonical_flow_harness_chat_assignment_delegated_child_closes_through_terminal_report_contract(
+def test_runtime_canonical_flow_harness_delegated_child_report_supports_manual_parent_close_contract(
     tmp_path,
 ) -> None:
     app = _build_industry_app(tmp_path)

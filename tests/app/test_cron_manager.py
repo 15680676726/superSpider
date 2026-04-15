@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 from copaw.app.crons.manager import CronManager
 from copaw.app.crons.models import (
@@ -143,5 +144,76 @@ def test_cron_manager_reuses_inflight_heartbeat_run(monkeypatch) -> None:
         third_result = await manager.run_heartbeat()
         assert call_count == 2
         assert third_result["status"] == "success"
+
+    asyncio.run(run())
+
+
+def test_cron_manager_runs_memory_sleep_jobs_after_heartbeat(monkeypatch) -> None:
+    async def run() -> None:
+        sleep_calls: list[dict[str, object]] = []
+
+        manager = CronManager(
+            repo=InMemoryJobRepository(),
+            timezone="UTC",
+            memory_sleep_service=SimpleNamespace(
+                run_due_sleep_jobs=lambda **kwargs: sleep_calls.append(dict(kwargs)) or [],
+            ),
+        )
+
+        async def _fake_run_heartbeat_once(*, kernel_dispatcher=None, ignore_active_hours=False):
+            _ = kernel_dispatcher
+            _ = ignore_active_hours
+            return {
+                "status": "success",
+                "task_id": "ktask:heartbeat",
+                "query_path": "system:run_operating_cycle",
+            }
+
+        monkeypatch.setattr(
+            "copaw.app.crons.manager.run_heartbeat_once",
+            _fake_run_heartbeat_once,
+        )
+
+        result = await manager.run_heartbeat()
+
+        assert result["status"] == "success"
+        assert sleep_calls == [{"limit": None}]
+
+    asyncio.run(run())
+
+
+def test_cron_manager_reports_failed_memory_sleep_jobs(monkeypatch) -> None:
+    async def run() -> None:
+        manager = CronManager(
+            repo=InMemoryJobRepository(),
+            timezone="UTC",
+            memory_sleep_service=SimpleNamespace(
+                run_due_sleep_jobs=lambda **kwargs: [
+                    SimpleNamespace(status="completed"),
+                    SimpleNamespace(status="failed"),
+                ],
+            ),
+        )
+
+        async def _fake_run_heartbeat_once(*, kernel_dispatcher=None, ignore_active_hours=False):
+            _ = kernel_dispatcher
+            _ = ignore_active_hours
+            return {
+                "status": "success",
+                "task_id": "ktask:heartbeat",
+                "query_path": "system:run_operating_cycle",
+            }
+
+        monkeypatch.setattr(
+            "copaw.app.crons.manager.run_heartbeat_once",
+            _fake_run_heartbeat_once,
+        )
+
+        result = await manager.run_heartbeat()
+
+        assert result["status"] == "success"
+        assert result["memory_sleep_status"] == "failed"
+        assert result["memory_sleep_job_count"] == 2
+        assert result["memory_sleep_failed_count"] == 1
 
     asyncio.run(run())

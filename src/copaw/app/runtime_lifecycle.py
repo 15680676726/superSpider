@@ -809,6 +809,7 @@ class RuntimeRestartCoordinator:
                 governance_service=self._bootstrap.governance_service,
                 schedule_repository=schedule_repository,
                 mcp_manager=new_mcp_manager,
+                memory_sleep_service=self._bootstrap.memory_sleep_service,
                 logger=self._logger,
                 strict_mcp_watcher=True,
             )

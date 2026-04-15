@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any
 
-from .derived_index_service import slugify, truncate_text
+from .derived_index_service import humanize_opinion_key, slugify, truncate_text
 from .models import MemoryReflectionSummary, utc_now
 from ..state import (
     MemoryEntityViewRecord,
@@ -30,6 +30,64 @@ def _parse_opinion_key(opinion_key: str) -> tuple[str, str, str]:
     if not second_sep:
         return subject_key or "general", stance or "neutral", remainder
     return subject_key or "general", stance or "neutral", label or opinion_key
+
+
+def _normalize_relation_text(value: str) -> str:
+    return "".join(
+        character.lower()
+        for character in str(value or "").strip()
+        if character.isalnum() or "\u4e00" <= character <= "\u9fff"
+    )
+
+
+def _effective_owner_agent_id(
+    *,
+    scope_type: str,
+    scope_id: str,
+    owner_agent_id: str | None,
+) -> str | None:
+    if owner_agent_id:
+        return owner_agent_id
+    return scope_id if scope_type == "agent" else None
+
+
+def _effective_industry_instance_id(
+    *,
+    scope_type: str,
+    scope_id: str,
+    industry_instance_id: str | None,
+) -> str | None:
+    if industry_instance_id:
+        return industry_instance_id
+    return scope_id if scope_type == "industry" else None
+
+
+def _select_opinion_entity_keys(
+    *,
+    subject_key: str,
+    label: str,
+    opinion_entries: list[MemoryFactIndexRecord],
+) -> list[str]:
+    ordered_entity_keys = list(
+        dict.fromkeys(
+            item
+            for entry in opinion_entries
+            for item in entry.entity_keys
+            if item and item != subject_key
+        )
+    )
+    normalized_label = _normalize_relation_text(label)
+    if not normalized_label:
+        return [subject_key, *ordered_entity_keys[:6]]
+
+    related_entity_keys = [
+        item
+        for item in ordered_entity_keys
+        if (normalized_key := _normalize_relation_text(item))
+        and (normalized_key in normalized_label or normalized_label in normalized_key)
+    ]
+    selected_entity_keys = related_entity_keys or ordered_entity_keys
+    return [subject_key, *selected_entity_keys[:6]]
 
 
 class MemoryReflectionService:
@@ -67,11 +125,21 @@ class MemoryReflectionService:
         create_learning_proposals: bool = True,
     ) -> MemoryReflectionSummary:
         started_at = utc_now()
-        run = MemoryReflectionRunRecord(
+        effective_owner_agent_id = _effective_owner_agent_id(
             scope_type=scope_type,
             scope_id=scope_id,
             owner_agent_id=owner_agent_id,
+        )
+        effective_industry_instance_id = _effective_industry_instance_id(
+            scope_type=scope_type,
+            scope_id=scope_id,
             industry_instance_id=industry_instance_id,
+        )
+        run = MemoryReflectionRunRecord(
+            scope_type=scope_type,
+            scope_id=scope_id,
+            owner_agent_id=effective_owner_agent_id,
+            industry_instance_id=effective_industry_instance_id,
             trigger_kind=trigger_kind,
             status="running",
             started_at=started_at,
@@ -93,8 +161,8 @@ class MemoryReflectionService:
             entries=entries,
             scope_type=scope_type,
             scope_id=scope_id,
-            owner_agent_id=owner_agent_id,
-            industry_instance_id=industry_instance_id,
+            owner_agent_id=effective_owner_agent_id,
+            industry_instance_id=effective_industry_instance_id,
         )
         for entity_view in entity_views:
             self._entity_view_repository.upsert_view(entity_view)
@@ -103,8 +171,8 @@ class MemoryReflectionService:
             entries=entries,
             scope_type=scope_type,
             scope_id=scope_id,
-            owner_agent_id=owner_agent_id,
-            industry_instance_id=industry_instance_id,
+            owner_agent_id=effective_owner_agent_id,
+            industry_instance_id=effective_industry_instance_id,
         )
         for opinion_view in opinion_views:
             self._opinion_view_repository.upsert_view(opinion_view)
@@ -233,7 +301,7 @@ class MemoryReflectionService:
                 " / ".join(
                     part
                     for part in (
-                        label.replace("-", " "),
+                        humanize_opinion_key(opinion_key),
                         *(entry.summary or entry.title for entry in opinion_entries[:3]),
                     )
                     if part
@@ -253,9 +321,11 @@ class MemoryReflectionService:
                 confidence=sum(entry.confidence for entry in opinion_entries) / max(1, len(opinion_entries)),
                 supporting_refs=[entry.source_ref for entry in opinion_entries[:8]],
                 contradicting_refs=list(dict.fromkeys(contradicting_refs))[:8],
-                entity_keys=[subject_key, *list(dict.fromkeys(
-                    item for entry in opinion_entries for item in entry.entity_keys if item != subject_key
-                ))[:6]],
+                entity_keys=_select_opinion_entity_keys(
+                    subject_key=subject_key,
+                    label=label,
+                    opinion_entries=opinion_entries,
+                ),
                 source_refs=[entry.source_ref for entry in opinion_entries[:12]],
                 last_reflected_at=now,
                 metadata={

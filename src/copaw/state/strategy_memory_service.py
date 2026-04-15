@@ -346,12 +346,16 @@ class StateStrategyMemoryService:
         self._repository = repository
         self._derived_index_service = derived_index_service
         self._reflection_service = reflection_service
+        self._memory_sleep_service: object | None = None
 
     def set_derived_index_service(self, derived_index_service: object | None) -> None:
         self._derived_index_service = derived_index_service
 
     def set_reflection_service(self, reflection_service: object | None) -> None:
         self._reflection_service = reflection_service
+
+    def set_memory_sleep_service(self, memory_sleep_service: object | None) -> None:
+        self._memory_sleep_service = memory_sleep_service
 
     def canonical_strategy_id(
         self,
@@ -439,6 +443,7 @@ class StateStrategyMemoryService:
                 indexer(stored)
             except Exception:
                 pass
+        self._mark_memory_sleep_dirty(stored)
         self._reflect_scope(stored)
         return stored
 
@@ -453,6 +458,7 @@ class StateStrategyMemoryService:
                 except Exception:
                     pass
             if strategy is not None:
+                self._mark_memory_sleep_dirty(strategy)
                 self._reflect_scope(strategy)
         return deleted
 
@@ -476,6 +482,22 @@ class StateStrategyMemoryService:
                 ),
                 trigger_kind="strategy-upsert",
                 create_learning_proposals=False,
+            )
+        except Exception:
+            return
+
+    def _mark_memory_sleep_dirty(self, strategy: StrategyMemoryRecord) -> None:
+        marker = getattr(self._memory_sleep_service, "mark_scope_dirty", None)
+        if not callable(marker):
+            return
+        try:
+            marker(
+                scope_type=_normalize_scope_type(strategy.scope_type),
+                scope_id=str(strategy.scope_id).strip(),
+                owner_agent_id=(str(strategy.owner_agent_id).strip() if strategy.owner_agent_id else None),
+                industry_instance_id=(str(strategy.industry_instance_id).strip() if strategy.industry_instance_id else None),
+                reason="strategy-upsert",
+                source_ref=str(strategy.strategy_id).strip(),
             )
         except Exception:
             return

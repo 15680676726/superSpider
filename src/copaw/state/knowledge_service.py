@@ -31,12 +31,16 @@ class StateKnowledgeService:
         self._repository = repository
         self._derived_index_service = derived_index_service
         self._reflection_service = reflection_service
+        self._memory_sleep_service: object | None = None
 
     def set_derived_index_service(self, derived_index_service: object | None) -> None:
         self._derived_index_service = derived_index_service
 
     def set_reflection_service(self, reflection_service: object | None) -> None:
         self._reflection_service = reflection_service
+
+    def set_memory_sleep_service(self, memory_sleep_service: object | None) -> None:
+        self._memory_sleep_service = memory_sleep_service
 
     def list_chunks(
         self,
@@ -291,6 +295,7 @@ class StateKnowledgeService:
                 indexer(stored)
             except Exception:
                 pass
+        self._mark_memory_sleep_dirty(stored.document_id, source_ref=stored.source_ref or stored.id)
         self._reflect_memory_scope(stored.document_id)
         return stored
 
@@ -305,6 +310,7 @@ class StateKnowledgeService:
                 except Exception:
                     pass
             if chunk is not None:
+                self._mark_memory_sleep_dirty(chunk.document_id, source_ref=chunk.source_ref or chunk.id)
                 self._reflect_memory_scope(chunk.document_id)
         return deleted
 
@@ -384,6 +390,21 @@ class StateKnowledgeService:
                 scope_id=scope["scope_id"],
                 trigger_kind="knowledge-upsert",
                 create_learning_proposals=False,
+            )
+        except Exception:
+            return
+
+    def _mark_memory_sleep_dirty(self, document_id: str, *, source_ref: str | None) -> None:
+        scope = _parse_memory_document_id(document_id)
+        marker = getattr(self._memory_sleep_service, "mark_scope_dirty", None)
+        if scope is None or not callable(marker):
+            return
+        try:
+            marker(
+                scope_type=scope["scope_type"],
+                scope_id=scope["scope_id"],
+                reason="knowledge-upsert",
+                source_ref=source_ref,
             )
         except Exception:
             return

@@ -8,6 +8,8 @@ from typing import Any
 from ..capabilities.install_templates import (
     get_install_template,
     list_install_templates,
+    may_have_install_template_for_capability,
+    resolve_install_template_ids_for_capability,
     match_install_template_capability_ids,
 )
 from ..evidence import EvidenceLedger

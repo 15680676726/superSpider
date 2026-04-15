@@ -39,6 +39,7 @@ from ..memory import (
     MemoryRecallService,
     MemoryReflectionService,
     MemoryRetainService,
+    MemorySleepService,
 )
 from ..predictions import PredictionService
 from ..providers.runtime_provider_facade import ProviderRuntimeSurface
@@ -121,6 +122,7 @@ def build_runtime_domain_services(
     memory_reflection_service: MemoryReflectionService,
     memory_recall_service: MemoryRecallService,
     memory_retain_service: MemoryRetainService,
+    memory_sleep_service: MemorySleepService | None = None,
     memory_activation_service: MemoryActivationService | None = None,
     knowledge_graph_service: KnowledgeGraphService | None = None,
     agent_experience_service: AgentExperienceMemoryService | None = None,

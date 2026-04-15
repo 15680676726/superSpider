@@ -178,6 +178,24 @@ def _get_memory_reflection_service(request: Request):
     return service
 
 
+def _get_memory_sleep_service(request: Request):
+    service = getattr(request.app.state, "memory_sleep_service", None)
+    if service is None or not all(
+        callable(getattr(service, method_name, None))
+        for method_name in (
+            "run_sleep",
+            "resolve_scope_overlay",
+            "list_scope_states",
+            "list_sleep_jobs",
+            "list_digests",
+            "list_soft_rules",
+            "list_conflict_proposals",
+        )
+    ):
+        raise HTTPException(503, detail="Memory sleep service is not available")
+    return service
+
+
 def _get_reporting_service(request: Request):
     service = getattr(request.app.state, "reporting_service", None)
     if service is None or not all(

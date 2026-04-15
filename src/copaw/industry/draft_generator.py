@@ -10,6 +10,7 @@ from ..providers.runtime_provider_facade import (
     ProviderRuntimeSurface,
     build_compat_runtime_provider_facade,
 )
+from ..utils.model_response import materialize_model_response
 from .compiler import canonicalize_industry_draft
 from .models import (
     IndustryDraftGoal,
@@ -103,14 +104,7 @@ def _response_to_payload(response: object) -> dict[str, Any]:
 
 
 async def _materialize_response(response: object) -> object:
-    if not hasattr(response, "__aiter__"):
-        return response
-
-    last_item: object | None = None
-    async for item in response:  # type: ignore[misc]
-        last_item = item
-
-    return last_item if last_item is not None else response
+    return await materialize_model_response(response)
 
 
 def _response_to_text(response: object) -> str:

@@ -12,6 +12,7 @@ from ..memory import (
     MemoryRecallService,
     MemoryReflectionService,
     MemoryRetainService,
+    build_memory_sleep_model_runner,
     MemorySleepInferenceService,
     MemorySleepService,
 )
@@ -75,6 +76,7 @@ def build_runtime_query_services(
     human_assist_task_service: object | None = None,
     environment_service: EnvironmentService | None = None,
     external_runtime_service: object | None = None,
+    runtime_provider: object | None = None,
 ) -> RuntimeQueryServices:
     default_recall_backend = resolve_default_memory_recall_backend()
     state_query_service = RuntimeCenterStateQueryService(
@@ -156,7 +158,15 @@ def build_runtime_query_services(
         strategy_memory_service=strategy_memory_service,
         derived_index_service=derived_memory_index_service,
         reflection_service=memory_reflection_service,
-        inference_service=MemorySleepInferenceService(),
+        inference_service=MemorySleepInferenceService(
+            model_runner=build_memory_sleep_model_runner(
+                model_factory=(
+                    getattr(runtime_provider, "get_active_chat_model", None)
+                    if runtime_provider is not None
+                    else None
+                ),
+            ),
+        ),
     )
     knowledge_service.set_memory_sleep_service(memory_sleep_service)
     strategy_memory_service.set_memory_sleep_service(memory_sleep_service)

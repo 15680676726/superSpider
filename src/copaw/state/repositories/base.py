@@ -45,11 +45,18 @@ from ..models import (
 from ..models_external_runtime import ExternalCapabilityRuntimeInstanceRecord
 from ..models_knowledge import KnowledgeChunkRecord
 from ..models_memory import (
+    MemoryAliasMapRecord,
+    MemoryConflictProposalRecord,
     MemoryEntityViewRecord,
     MemoryFactIndexRecord,
+    MemoryMergeResultRecord,
     MemoryOpinionViewRecord,
     MemoryRelationViewRecord,
     MemoryReflectionRunRecord,
+    MemoryScopeDigestRecord,
+    MemorySleepJobRecord,
+    MemorySleepScopeStateRecord,
+    MemorySoftRuleRecord,
 )
 from ..models_work_context import WorkContextRecord
 
@@ -1353,4 +1360,156 @@ class BaseMemoryReflectionRunRepository(ABC):
 
     @abstractmethod
     def delete_run(self, run_id: str) -> bool:
+        raise NotImplementedError
+
+
+class BaseMemorySleepRepository(ABC):
+    """Abstract repository for B+ sleep-layer derived memory artifacts."""
+
+    @abstractmethod
+    def get_scope_state(
+        self,
+        *,
+        scope_type: str,
+        scope_id: str,
+    ) -> Optional[MemorySleepScopeStateRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_scope_states(
+        self,
+        *,
+        scope_type: str | None = None,
+        scope_id: str | None = None,
+        dirty_only: bool = False,
+        limit: int | None = None,
+    ) -> list[MemorySleepScopeStateRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upsert_scope_state(
+        self,
+        record: MemorySleepScopeStateRecord,
+    ) -> MemorySleepScopeStateRecord:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_sleep_job(self, job_id: str) -> Optional[MemorySleepJobRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_sleep_jobs(
+        self,
+        *,
+        scope_type: str | None = None,
+        scope_id: str | None = None,
+        status: str | None = None,
+        limit: int | None = None,
+    ) -> list[MemorySleepJobRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upsert_sleep_job(
+        self,
+        record: MemorySleepJobRecord,
+    ) -> MemorySleepJobRecord:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_active_digest(
+        self,
+        scope_type: str,
+        scope_id: str,
+    ) -> Optional[MemoryScopeDigestRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_digests(
+        self,
+        *,
+        scope_type: str | None = None,
+        scope_id: str | None = None,
+        status: str | None = None,
+        limit: int | None = None,
+    ) -> list[MemoryScopeDigestRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upsert_digest(
+        self,
+        record: MemoryScopeDigestRecord,
+    ) -> MemoryScopeDigestRecord:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_alias_maps(
+        self,
+        *,
+        scope_type: str | None = None,
+        scope_id: str | None = None,
+        canonical_term: str | None = None,
+        status: str | None = None,
+        limit: int | None = None,
+    ) -> list[MemoryAliasMapRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upsert_alias_map(
+        self,
+        record: MemoryAliasMapRecord,
+    ) -> MemoryAliasMapRecord:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_merge_results(
+        self,
+        *,
+        scope_type: str | None = None,
+        scope_id: str | None = None,
+        status: str | None = None,
+        limit: int | None = None,
+    ) -> list[MemoryMergeResultRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upsert_merge_result(
+        self,
+        record: MemoryMergeResultRecord,
+    ) -> MemoryMergeResultRecord:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_soft_rules(
+        self,
+        *,
+        scope_type: str | None = None,
+        scope_id: str | None = None,
+        state: str | None = None,
+        limit: int | None = None,
+    ) -> list[MemorySoftRuleRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upsert_soft_rule(
+        self,
+        record: MemorySoftRuleRecord,
+    ) -> MemorySoftRuleRecord:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_conflict_proposals(
+        self,
+        *,
+        scope_type: str | None = None,
+        scope_id: str | None = None,
+        status: str | None = None,
+        limit: int | None = None,
+    ) -> list[MemoryConflictProposalRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upsert_conflict_proposal(
+        self,
+        record: MemoryConflictProposalRecord,
+    ) -> MemoryConflictProposalRecord:
         raise NotImplementedError

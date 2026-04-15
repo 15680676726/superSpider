@@ -31,12 +31,16 @@ class MemoryRetainService:
         self._derived_index_service = derived_index_service
         self._reflection_service = reflection_service
         self._scope_snapshot_dirty_marker: object | None = None
+        self._memory_sleep_service: object | None = None
 
     def set_reflection_service(self, reflection_service: object | None) -> None:
         self._reflection_service = reflection_service
 
     def set_scope_snapshot_dirty_marker(self, marker: object | None) -> None:
         self._scope_snapshot_dirty_marker = marker
+
+    def set_memory_sleep_service(self, memory_sleep_service: object | None) -> None:
+        self._memory_sleep_service = memory_sleep_service
 
     def retain_agent_report(self, report: object) -> object | None:
         industry_instance_id = str(getattr(report, "industry_instance_id", "") or "").strip()

@@ -29,9 +29,12 @@ from copaw.capabilities.remote_skill_catalog import (
     CuratedSkillCatalogSource,
 )
 from copaw.environments import (
+    ActionReplayStore,
+    ArtifactStore,
     EnvironmentRegistry,
     EnvironmentRepository,
     EnvironmentService,
+    ObservationCache,
     SessionMountRepository,
 )
 from copaw.evidence import EvidenceLedger, EvidenceRecord
@@ -62,6 +65,7 @@ from copaw.kernel import (
     AgentProfileService,
     KernelDispatcher,
     KernelTaskStore,
+    KernelToolBridge,
     TaskDelegationService,
 )
 from copaw.predictions import PredictionService
@@ -452,6 +456,15 @@ def _build_industry_app(
         ),
     )
     environment_service.set_session_repository(session_repository)
+    environment_service.set_observation_cache(
+        ObservationCache(ledger=evidence_ledger),
+    )
+    environment_service.set_action_replay(
+        ActionReplayStore(ledger=evidence_ledger),
+    )
+    environment_service.set_artifact_store(
+        ArtifactStore(ledger=evidence_ledger),
+    )
     capability_service = CapabilityService(
         evidence_ledger=evidence_ledger,
         turn_executor=turn_executor or FakeTurnExecutor(),
@@ -466,6 +479,12 @@ def _build_industry_app(
         evidence_ledger=evidence_ledger,
         work_context_service=work_context_service,
     )
+    kernel_tool_bridge = KernelToolBridge(
+        task_store=task_store,
+        environment_service=environment_service,
+    )
+    capability_service.set_tool_bridge(kernel_tool_bridge)
+    capability_service.set_environment_service(environment_service)
     dispatcher = KernelDispatcher(
         capability_service=capability_service,
         task_store=task_store,
@@ -652,11 +671,13 @@ def _build_industry_app(
     app.state.work_context_service = work_context_service
     app.state.decision_request_repository = decision_request_repository
     app.state.evidence_ledger = evidence_ledger
+    app.state.environment_service = environment_service
     app.state.learning_service = learning_service
     app.state.agent_profile_service = agent_profile_service
     app.state.state_query_service = state_query_service
     app.state.evidence_query_service = evidence_query_service
     app.state.kernel_dispatcher = dispatcher
+    app.state.kernel_tool_bridge = kernel_tool_bridge
     app.state.reporting_service = reporting_service
     app.state.strategy_memory_service = strategy_memory_service
     app.state.schedule_repository = schedule_repository

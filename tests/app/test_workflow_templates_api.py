@@ -1237,6 +1237,183 @@ def test_workflow_preview_matches_install_template_from_candidate_manifest_witho
     assert dependency["install_templates"][0]["template_id"] == "browser-local"
 
 
+def test_workflow_preview_skips_full_template_listing_for_non_installable_dependencies(
+    tmp_path,
+) -> None:
+    client = TestClient(_build_workflow_app(tmp_path))
+    desktop_template = CapabilityInstallTemplateSpec(
+        id="desktop-windows",
+        name="Windows Desktop Host",
+        default_client_key="desktop_windows",
+        capability_tags=["desktop"],
+    )
+
+    with (
+        patch(
+            "copaw.workflows.service_context.list_install_templates",
+            side_effect=AssertionError(
+                "workflow preview should not enumerate the full install-template catalog for non-installable capabilities",
+            ),
+        ),
+        patch(
+            "copaw.workflows.service_context.get_install_template",
+            side_effect=lambda template_id, **kwargs: (
+                desktop_template if template_id == "desktop-windows" else None
+            ),
+        ) as mocked_get_install_template,
+    ):
+        preview = client.post(
+            "/workflow-templates/desktop-outreach-smoke/preview",
+            json={
+                "parameters": {
+                    "target_application": "Desktop app",
+                    "recipient_name": "Target contact",
+                    "message_text": "Draft message",
+                },
+            },
+        )
+
+    assert preview.status_code == 200
+    payload = preview.json()
+    dependency_by_id = {item["capability_id"]: item for item in payload["dependencies"]}
+    assert dependency_by_id["system:dispatch_query"]["install_templates"] == []
+    assert dependency_by_id["mcp:desktop_windows"]["install_templates"][0]["template_id"] == (
+        "desktop-windows"
+    )
+    assert mocked_get_install_template.call_count == 1
+
+
+def test_workflow_preview_resolves_implicit_browser_install_templates_without_full_listing(
+    tmp_path,
+) -> None:
+    client = TestClient(_build_workflow_app(tmp_path))
+    repository = client.app.state.workflow_template_repository
+    repository.upsert_template(
+        WorkflowTemplateRecord(
+            template_id="implicit-browser-install-template-preview-smoke",
+            title="Implicit browser dependency preview",
+            summary="Resolve browser dependency without explicit install template mapping.",
+            category="smoke",
+            status="active",
+            version="v1",
+            dependency_capability_ids=["tool:browser_use"],
+            suggested_role_ids=["solution-lead"],
+            owner_role_id="solution-lead",
+            step_specs=[
+                {
+                    "id": "browser-step",
+                    "kind": "goal",
+                    "execution_mode": "leaf",
+                    "owner_role_id": "solution-lead",
+                    "title": "Need browser surface",
+                    "summary": "Resolve browser install templates implicitly.",
+                    "required_capability_ids": ["tool:browser_use"],
+                }
+            ],
+            metadata={"builtin": False},
+        ),
+    )
+    browser_local_template = CapabilityInstallTemplateSpec(
+        id="browser-local",
+        name="Local Browser Runtime",
+        default_client_key=None,
+        capability_tags=["browser", "playwright", "runtime", "network"],
+    )
+    browser_companion_template = CapabilityInstallTemplateSpec(
+        id="browser-companion",
+        name="Browser Companion Runtime",
+        default_client_key=None,
+        capability_tags=["browser", "companion", "cooperative", "phase2"],
+    )
+
+    with (
+        patch(
+            "copaw.workflows.service_context.list_install_templates",
+            side_effect=AssertionError(
+                "implicit browser dependency resolution should not enumerate the full install-template catalog",
+            ),
+        ),
+        patch(
+            "copaw.workflows.service_context.get_install_template",
+            side_effect=lambda template_id, **kwargs: {
+                "browser-local": browser_local_template,
+                "browser-companion": browser_companion_template,
+            }.get(template_id),
+        ) as mocked_get_install_template,
+    ):
+        preview = client.post(
+            "/workflow-templates/implicit-browser-install-template-preview-smoke/preview",
+            json={},
+        )
+
+    assert preview.status_code == 200
+    payload = preview.json()
+    dependency = next(
+        item for item in payload["dependencies"] if item["capability_id"] == "tool:browser_use"
+    )
+    assert [item["template_id"] for item in dependency["install_templates"]] == [
+        "browser-local",
+        "browser-companion",
+    ]
+    assert mocked_get_install_template.call_count == 2
+
+
+def test_workflow_preview_install_template_refs_do_not_query_pending_decisions(
+    tmp_path,
+) -> None:
+    client = TestClient(_build_workflow_app(tmp_path))
+    repository = client.app.state.workflow_template_repository
+    repository.upsert_template(
+        WorkflowTemplateRecord(
+            template_id="implicit-browser-install-template-preview-smoke",
+            title="Implicit browser dependency preview",
+            summary="Resolve browser dependency without explicit install template mapping.",
+            category="smoke",
+            status="active",
+            version="v1",
+            dependency_capability_ids=["tool:browser_use"],
+            suggested_role_ids=["solution-lead"],
+            owner_role_id="solution-lead",
+            step_specs=[
+                {
+                    "id": "browser-step",
+                    "kind": "goal",
+                    "execution_mode": "leaf",
+                    "owner_role_id": "solution-lead",
+                    "title": "Need browser surface",
+                    "summary": "Resolve browser install templates implicitly.",
+                    "required_capability_ids": ["tool:browser_use"],
+                }
+            ],
+            metadata={"builtin": False},
+        ),
+    )
+    workflow_service = client.app.state.workflow_template_service
+
+    original_list_decisions = workflow_service._decision_request_repository.list_decision_requests
+
+    with patch.object(
+        workflow_service._decision_request_repository,
+        "list_decision_requests",
+        side_effect=original_list_decisions,
+    ) as wrapped_list_decisions:
+        preview = client.post(
+            "/workflow-templates/implicit-browser-install-template-preview-smoke/preview",
+            json={},
+        )
+
+    assert preview.status_code == 200
+    payload = preview.json()
+    dependency = next(
+        item for item in payload["dependencies"] if item["capability_id"] == "tool:browser_use"
+    )
+    assert [item["template_id"] for item in dependency["install_templates"]] == [
+        "browser-local",
+        "browser-companion",
+    ]
+    assert wrapped_list_decisions.call_count == 0
+
+
 def test_workflow_preview_reuses_single_capability_lookup_across_preview_dependencies(
     tmp_path,
 ) -> None:

@@ -24,6 +24,11 @@ MemoryScopeType = Literal["global", "industry", "agent", "task", "work_context"]
 MemoryReflectionStatus = Literal["queued", "running", "completed", "failed"]
 MemoryFactType = Literal["fact", "preference", "episode", "temporary", "inference"]
 MemoryRelationKind = str
+MemorySleepTriggerKind = Literal["scheduled", "idle", "manual"]
+MemorySleepJobStatus = Literal["queued", "running", "completed", "failed", "skipped"]
+MemorySleepArtifactStatus = Literal["active", "superseded"]
+MemorySoftRuleState = Literal["candidate", "active", "promoted", "rejected", "expired"]
+MemoryConflictProposalStatus = Literal["pending", "accepted", "rejected", "expired"]
 MemoryOpinionStance = Literal[
     "supporting",
     "neutral",
@@ -327,4 +332,210 @@ class MemoryReflectionRunRecord(UpdatedRecord):
     )
     @classmethod
     def _normalize_reflection_lists(cls, value: object) -> list[str]:
+        return _normalize_text_list(value)
+
+
+class MemorySleepScopeStateRecord(UpdatedRecord):
+    """Persistent dirty-state and latest sleep-run state for one formal scope."""
+
+    scope_key: str = Field(default="", min_length=1)
+    scope_type: MemoryScopeType = "global"
+    scope_id: str = Field(default="runtime", min_length=1)
+    owner_agent_id: str | None = None
+    industry_instance_id: str | None = None
+    is_dirty: bool = False
+    dirty_reasons: list[str] = Field(default_factory=list)
+    dirty_source_refs: list[str] = Field(default_factory=list)
+    dirty_count: int = Field(default=0, ge=0)
+    first_dirtied_at: datetime | None = None
+    last_dirtied_at: datetime | None = None
+    last_sleep_job_id: str | None = None
+    last_sleep_at: datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("dirty_reasons", "dirty_source_refs", mode="before")
+    @classmethod
+    def _normalize_dirty_lists(cls, value: object) -> list[str]:
+        return _normalize_text_list(value)
+
+    @field_validator(
+        "first_dirtied_at",
+        "last_dirtied_at",
+        "last_sleep_at",
+        mode="after",
+    )
+    @classmethod
+    def _normalize_optional_datetimes(cls, value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        return _normalize_datetime(value)
+
+    @model_validator(mode="after")
+    def _default_scope_key(self) -> "MemorySleepScopeStateRecord":
+        if not self.scope_key:
+            self.scope_key = f"{self.scope_type}:{self.scope_id}"
+        return self
+
+
+class MemorySleepJobRecord(UpdatedRecord):
+    """One formal sleep-layer run over a dirty scope."""
+
+    job_id: str = Field(default_factory=_new_record_id, min_length=1)
+    scope_type: MemoryScopeType = "global"
+    scope_id: str = Field(default="runtime", min_length=1)
+    owner_agent_id: str | None = None
+    industry_instance_id: str | None = None
+    trigger_kind: MemorySleepTriggerKind = "manual"
+    window_start: datetime | None = None
+    window_end: datetime | None = None
+    status: MemorySleepJobStatus = "queued"
+    input_refs: list[str] = Field(default_factory=list)
+    output_refs: list[str] = Field(default_factory=list)
+    model_ref: str | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("input_refs", "output_refs", mode="before")
+    @classmethod
+    def _normalize_job_lists(cls, value: object) -> list[str]:
+        return _normalize_text_list(value)
+
+    @field_validator(
+        "window_start",
+        "window_end",
+        "started_at",
+        "completed_at",
+        mode="after",
+    )
+    @classmethod
+    def _normalize_job_datetimes(cls, value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        return _normalize_datetime(value)
+
+
+class MemoryScopeDigestRecord(UpdatedRecord):
+    """Next-day high-level digest over one formal memory scope."""
+
+    digest_id: str = Field(default_factory=_new_record_id, min_length=1)
+    scope_type: MemoryScopeType = "global"
+    scope_id: str = Field(default="runtime", min_length=1)
+    headline: str = Field(..., min_length=1)
+    summary: str = ""
+    current_constraints: list[str] = Field(default_factory=list)
+    current_focus: list[str] = Field(default_factory=list)
+    top_entities: list[str] = Field(default_factory=list)
+    top_relations: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
+    source_job_id: str | None = None
+    version: int = Field(default=1, ge=1)
+    status: MemorySleepArtifactStatus = "active"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator(
+        "current_constraints",
+        "current_focus",
+        "top_entities",
+        "top_relations",
+        "evidence_refs",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_digest_lists(cls, value: object) -> list[str]:
+        return _normalize_text_list(value)
+
+
+class MemoryAliasMapRecord(UpdatedRecord):
+    """Canonical term plus sleep-derived aliases for one scope."""
+
+    alias_id: str = Field(default_factory=_new_record_id, min_length=1)
+    scope_type: MemoryScopeType = "global"
+    scope_id: str = Field(default="runtime", min_length=1)
+    canonical_term: str = Field(..., min_length=1)
+    aliases: list[str] = Field(default_factory=list)
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    evidence_refs: list[str] = Field(default_factory=list)
+    source_job_id: str | None = None
+    status: MemorySleepArtifactStatus = "active"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("aliases", "evidence_refs", mode="before")
+    @classmethod
+    def _normalize_alias_lists(cls, value: object) -> list[str]:
+        return _normalize_text_list(value)
+
+
+class MemoryMergeResultRecord(UpdatedRecord):
+    """Sleep-derived merged topic over multiple truth-backed sources."""
+
+    merge_id: str = Field(default_factory=_new_record_id, min_length=1)
+    scope_type: MemoryScopeType = "global"
+    scope_id: str = Field(default="runtime", min_length=1)
+    merged_title: str = Field(..., min_length=1)
+    merged_summary: str = ""
+    merged_source_refs: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
+    source_job_id: str | None = None
+    status: MemorySleepArtifactStatus = "active"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("merged_source_refs", "evidence_refs", mode="before")
+    @classmethod
+    def _normalize_merge_lists(cls, value: object) -> list[str]:
+        return _normalize_text_list(value)
+
+
+class MemorySoftRuleRecord(UpdatedRecord):
+    """Sleep-derived soft rule that may auto-apply on the read path."""
+
+    rule_id: str = Field(default_factory=_new_record_id, min_length=1)
+    scope_type: MemoryScopeType = "global"
+    scope_id: str = Field(default="runtime", min_length=1)
+    rule_text: str = Field(..., min_length=1)
+    rule_kind: str = Field(default="general", min_length=1)
+    evidence_refs: list[str] = Field(default_factory=list)
+    hit_count: int = Field(default=0, ge=0)
+    day_span: int = Field(default=0, ge=0)
+    conflict_count: int = Field(default=0, ge=0)
+    risk_level: str = Field(default="low", min_length=1)
+    state: MemorySoftRuleState = "candidate"
+    source_job_id: str | None = None
+    expires_at: datetime | None = None
+    last_supported_at: datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("evidence_refs", mode="before")
+    @classmethod
+    def _normalize_rule_lists(cls, value: object) -> list[str]:
+        return _normalize_text_list(value)
+
+    @field_validator("expires_at", "last_supported_at", mode="after")
+    @classmethod
+    def _normalize_rule_datetimes(cls, value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        return _normalize_datetime(value)
+
+
+class MemoryConflictProposalRecord(UpdatedRecord):
+    """High-risk sleep conclusion that must stay proposal-only."""
+
+    proposal_id: str = Field(default_factory=_new_record_id, min_length=1)
+    scope_type: MemoryScopeType = "global"
+    scope_id: str = Field(default="runtime", min_length=1)
+    proposal_kind: str = Field(default="conflict", min_length=1)
+    title: str = Field(..., min_length=1)
+    summary: str = ""
+    conflicting_refs: list[str] = Field(default_factory=list)
+    supporting_refs: list[str] = Field(default_factory=list)
+    recommended_action: str = ""
+    risk_level: str = Field(default="high", min_length=1)
+    status: MemoryConflictProposalStatus = "pending"
+    source_job_id: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("conflicting_refs", "supporting_refs", mode="before")
+    @classmethod
+    def _normalize_proposal_lists(cls, value: object) -> list[str]:
         return _normalize_text_list(value)

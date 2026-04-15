@@ -1996,6 +1996,64 @@ def test_shell_execution_writes_evidence_via_unified_contract(
     )
 
 
+def test_file_execution_writes_real_file_and_tool_bridge_evidence(
+    tmp_path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "tool-bridge-file-state.db")
+    evidence_ledger = EvidenceLedger(tmp_path / "tool-bridge-file-evidence.db")
+    task_repository = SqliteTaskRepository(state_store)
+    task_runtime_repository = SqliteTaskRuntimeRepository(state_store)
+    runtime_frame_repository = SqliteRuntimeFrameRepository(state_store)
+    decision_request_repository = SqliteDecisionRequestRepository(state_store)
+    task_store = KernelTaskStore(
+        task_repository=task_repository,
+        task_runtime_repository=task_runtime_repository,
+        runtime_frame_repository=runtime_frame_repository,
+        decision_request_repository=decision_request_repository,
+        evidence_ledger=evidence_ledger,
+    )
+    tool_bridge = KernelToolBridge(task_store=task_store)
+    capability_service = CapabilityService(
+        evidence_ledger=evidence_ledger,
+        tool_bridge=tool_bridge,
+    )
+    dispatcher = KernelDispatcher(
+        task_store=task_store,
+        capability_service=capability_service,
+    )
+    target = tmp_path / "story.txt"
+    content = "hello real file closure"
+
+    payload = _execute_capability_direct(
+        capability_service,
+        dispatcher,
+        capability_id="tool:write_file",
+        environment_ref="session:console:test",
+        payload={"file_path": str(target), "content": content},
+    )
+
+    assert payload["success"] is True
+    assert target.exists()
+    assert target.read_text(encoding="utf-8") == content
+
+    records = evidence_ledger.list_by_task(payload["task_id"])
+    file_evidence = next(
+        record
+        for record in records
+        if record.capability_ref == "tool:write_file"
+        and record.status == "succeeded"
+        and record.metadata.get("status") == "success"
+    )
+    assert file_evidence.environment_ref == str(target)
+    assert file_evidence.metadata["tool_contract"] == "tool:write_file"
+    assert file_evidence.metadata["resolved_path"] == str(target)
+    assert file_evidence.metadata["bytes_written"] == len(content.encode("utf-8"))
+    assert "Wrote" in file_evidence.result_summary
+    assert len(file_evidence.artifacts) == 1
+    assert file_evidence.artifacts[0].artifact_type == "file"
+    assert file_evidence.artifacts[0].storage_uri == str(target)
+
+
 def test_blocked_shell_execution_preserves_contract_metadata_in_tool_bridge_evidence(
     monkeypatch,
     tmp_path,
