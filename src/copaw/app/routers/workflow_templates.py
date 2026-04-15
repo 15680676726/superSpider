@@ -203,6 +203,8 @@ async def resume_workflow_run(
         )
     except KeyError as exc:
         raise HTTPException(404, detail=str(exc).strip("'")) from exc
+    except ValueError as exc:
+        raise HTTPException(400, detail=str(exc)) from exc
 
 
 @run_router.get(

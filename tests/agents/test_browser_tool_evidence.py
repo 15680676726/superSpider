@@ -1382,3 +1382,78 @@ def test_browser_runtime_service_resolves_attach_snapshot_from_environment_id(
     assert snapshot["session_mount_id"] == lease.id
     assert snapshot["transport_ref"] == "transport:cdp:local"
     assert snapshot["session_ref"] == "browser-session:web:main"
+
+
+def test_browser_runtime_start_session_rebinds_existing_browser_mount_truth_after_restart(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    environment_service, _, session_repo = _build_environment_service(tmp_path)
+    lease = environment_service.acquire_session_lease(
+        channel="browser",
+        session_id="restart-browser-session",
+        user_id="alice",
+        owner="worker-1",
+        ttl_seconds=60,
+        handle={"page_id": "page:browser:before-restart"},
+        metadata={
+            "host_mode": "attach-existing-session",
+            "lease_class": "exclusive-writer",
+            "access_mode": "writer",
+            "session_scope": "browser-user-session",
+        },
+    )
+    assert lease.lease_token is not None
+
+    environment_service.release_session_lease(
+        lease.id,
+        lease_token=lease.lease_token,
+        reason="simulate service restart",
+        release_status="expired",
+        validate_token=False,
+    )
+    blocked = environment_service.get_session_detail(lease.id, limit=5) or {}
+    assert blocked["host_twin_summary"]["host_companion_status"] == "detached"
+
+    browser_runtime = BrowserRuntimeService(SQLiteStateStore(tmp_path / "browser.sqlite3"))
+    setattr(browser_runtime, "_environment_service", environment_service)
+
+    async def fake_browser_use(**kwargs):
+        return _json_response({"ok": True, "message": "started"})
+
+    monkeypatch.setattr(browser_runtime_module, "browser_use", fake_browser_use)
+    monkeypatch.setattr(
+        browser_runtime_module,
+        "get_browser_runtime_snapshot",
+        lambda: {
+            "running": True,
+            "current_session_id": "restart-browser-session",
+            "session_count": 1,
+            "sessions": [
+                {
+                    "session_id": "restart-browser-session",
+                    "page_count": 1,
+                    "page_ids": ["restart-browser-session"],
+                },
+            ],
+        },
+    )
+
+    result = asyncio.run(
+        browser_runtime.start_session(
+            BrowserSessionStartOptions(
+                session_id="restart-browser-session",
+                reuse_running_session=False,
+                session_mount_id=lease.id,
+            ),
+        ),
+    )
+
+    resumed = environment_service.get_session_detail(lease.id, limit=5) or {}
+    persisted_session = session_repo.get_session(lease.id)
+
+    assert result["status"] == "started"
+    assert persisted_session is not None
+    assert persisted_session.lease_status == "leased"
+    assert persisted_session.live_handle_ref is not None
+    assert resumed["host_twin_summary"]["host_companion_status"] == "attached"

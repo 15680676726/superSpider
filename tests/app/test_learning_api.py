@@ -24,13 +24,15 @@ from copaw.industry import (
 from copaw.kernel import KernelDispatcher, KernelTaskStore
 from copaw.learning import LearningEngine, LearningService, PatchExecutor
 from copaw.learning.runtime_bindings import LearningRuntimeBindings
-from copaw.state import SQLiteStateStore
+from copaw.state import SQLiteStateStore, WorkflowTemplateRecord
 from copaw.state.repositories import (
     SqliteAgentProfileOverrideRepository,
     SqliteDecisionRequestRepository,
     SqliteGoalOverrideRepository,
     SqliteTaskRepository,
     SqliteTaskRuntimeRepository,
+    SqliteWorkflowRunRepository,
+    SqliteWorkflowTemplateRepository,
 )
 
 
@@ -45,6 +47,8 @@ def _build_learning_app(tmp_path) -> FastAPI:
     decision_request_repository = SqliteDecisionRequestRepository(state_store)
     task_repository = SqliteTaskRepository(state_store)
     task_runtime_repository = SqliteTaskRuntimeRepository(state_store)
+    workflow_template_repository = SqliteWorkflowTemplateRepository(state_store)
+    workflow_run_repository = SqliteWorkflowRunRepository(state_store)
     evidence_ledger = EvidenceLedger(tmp_path / "evidence.db")
 
     learning_service = LearningService(
@@ -52,6 +56,8 @@ def _build_learning_app(tmp_path) -> FastAPI:
         patch_executor=PatchExecutor(
             agent_profile_override_repository=agent_profile_override_repository,
             goal_override_repository=goal_override_repository,
+            workflow_template_repository=workflow_template_repository,
+            workflow_run_repository=workflow_run_repository,
         ),
         decision_request_repository=decision_request_repository,
         task_repository=task_repository,
@@ -80,6 +86,8 @@ def _build_learning_app(tmp_path) -> FastAPI:
     app.state.decision_request_repository = decision_request_repository
     app.state.task_repository = task_repository
     app.state.task_runtime_repository = task_runtime_repository
+    app.state.workflow_template_repository = workflow_template_repository
+    app.state.workflow_run_repository = workflow_run_repository
     app.state.evidence_ledger = evidence_ledger
     app.state.evidence_query_service = RuntimeCenterEvidenceQueryService(
         evidence_ledger=evidence_ledger,
@@ -507,6 +515,72 @@ def test_learning_api_patch_lifecycle_and_runtime_center_reads(tmp_path) -> None
     assert "learning:patch-approved" in capability_refs
     assert "learning:patch-applied" in capability_refs
     assert "learning:patch-rolled-back" in capability_refs
+
+
+def test_learning_api_create_patch_accepts_workflow_patch_contract(tmp_path) -> None:
+    app = _build_learning_app(tmp_path)
+    app.state.workflow_template_repository.upsert_template(
+        WorkflowTemplateRecord(
+            template_id="workflow-template-1",
+            title="Workflow Template",
+            summary="Baseline summary",
+            step_specs=[
+                {
+                    "id": "weekly-research-goal",
+                    "kind": "goal",
+                    "title": "Original title",
+                    "summary": "Original summary",
+                    "plan_steps": ["collect signal"],
+                }
+            ],
+        )
+    )
+    client = TestClient(app)
+
+    created_patch = client.post(
+        "/learning/patches",
+        json={
+            "kind": "workflow_patch",
+            "title": "Refine workflow template step",
+            "description": "Persist workflow-native updates through learning API.",
+            "workflow_template_id": "workflow-template-1",
+            "workflow_step_id": "weekly-research-goal",
+            "patch_payload": {
+                "target_surface": "workflow_template",
+                "step_updates": {
+                    "summary": "Updated through HTTP",
+                    "plan_steps": ["collect signal", "write operator brief"],
+                },
+            },
+            "risk_level": "guarded",
+        },
+    )
+    assert created_patch.status_code == 200
+    patch_payload = created_patch.json()
+    patch = patch_payload["patch"]
+    assert patch is not None
+    assert patch["kind"] == "workflow_patch"
+    assert patch["workflow_template_id"] == "workflow-template-1"
+    assert patch["workflow_step_id"] == "weekly-research-goal"
+    assert patch["patch_payload"]["target_surface"] == "workflow_template"
+
+    applied = app.state.learning_service.apply_patch(
+        patch["id"],
+        applied_by="workflow-http-tester",
+    )
+    assert applied.status == "applied"
+    template = app.state.workflow_template_repository.get_template("workflow-template-1")
+    assert template is not None
+    target_step = next(
+        item
+        for item in template.step_specs
+        if str(item.get("id") or "") == "weekly-research-goal"
+    )
+    assert target_step["summary"] == "Updated through HTTP"
+    assert target_step["plan_steps"] == [
+        "collect signal",
+        "write operator brief",
+    ]
 
 
 def test_runtime_center_patch_action_routes_enter_governed_mutation_flow(tmp_path) -> None:

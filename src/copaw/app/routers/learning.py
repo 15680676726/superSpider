@@ -29,7 +29,11 @@ class PatchCreateRequest(BaseModel):
     goal_id: str | None = None
     task_id: str | None = None
     agent_id: str | None = None
+    workflow_template_id: str | None = None
+    workflow_run_id: str | None = None
+    workflow_step_id: str | None = None
     diff_summary: str = ""
+    patch_payload: dict[str, object] = Field(default_factory=dict)
     proposal_id: str | None = None
     evidence_refs: list[str] = Field(default_factory=list)
     source_evidence_id: str | None = None
@@ -379,7 +383,11 @@ async def create_patch(
         goal_id=payload.goal_id,
         task_id=payload.task_id,
         agent_id=payload.agent_id,
+        workflow_template_id=payload.workflow_template_id,
+        workflow_run_id=payload.workflow_run_id,
+        workflow_step_id=payload.workflow_step_id,
         diff_summary=payload.diff_summary,
+        patch_payload=payload.patch_payload,
         proposal_id=payload.proposal_id,
         evidence_refs=payload.evidence_refs,
         source_evidence_id=payload.source_evidence_id,

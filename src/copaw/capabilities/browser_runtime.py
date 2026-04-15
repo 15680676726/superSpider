@@ -245,6 +245,86 @@ class BrowserRuntimeService:
         with self._store.connection() as conn:
             conn.executescript(self._SCHEMA)
 
+    def _resolve_environment_service(self) -> object | None:
+        return getattr(self, "_environment_service", None)
+
+    def _resolve_existing_browser_mount(
+        self,
+        *,
+        session_id: str,
+        session_mount_id: str | None = None,
+        environment_id: str | None = None,
+    ) -> object | None:
+        environment_service = self._resolve_environment_service()
+        if environment_service is None:
+            return None
+        getter = getattr(environment_service, "get_session", None)
+        if not callable(getter):
+            return None
+        normalized_mount_id = str(session_mount_id or "").strip() or None
+        if normalized_mount_id is not None:
+            existing = getter(normalized_mount_id)
+            if existing is not None:
+                return existing
+        fallback_mount_id = f"session:browser:{session_id}"
+        existing = getter(fallback_mount_id)
+        if existing is not None:
+            return existing
+        detail_getter = getattr(environment_service, "get_environment_detail", None)
+        normalized_environment_id = str(environment_id or "").strip() or None
+        if normalized_environment_id is None or not callable(detail_getter):
+            return None
+        detail = detail_getter(normalized_environment_id, limit=5)
+        if not isinstance(detail, dict):
+            return None
+        summary = dict(detail.get("host_twin_summary") or {})
+        derived_mount_id = str(summary.get("selected_session_mount_id") or "").strip() or None
+        if derived_mount_id is None:
+            return None
+        return getter(derived_mount_id)
+
+    def _rebind_environment_session_lease(
+        self,
+        *,
+        session_id: str,
+        session_mount_id: str | None = None,
+        environment_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        environment_service = self._resolve_environment_service()
+        if environment_service is None:
+            return None
+        acquire = getattr(environment_service, "acquire_session_lease", None)
+        if not callable(acquire):
+            return None
+        existing = self._resolve_existing_browser_mount(
+            session_id=session_id,
+            session_mount_id=session_mount_id,
+            environment_id=environment_id,
+        )
+        if existing is None:
+            return None
+        metadata = dict(getattr(existing, "metadata", None) or {})
+        owner = (
+            str(getattr(existing, "lease_owner", "") or "").strip()
+            or str(metadata.get("lease_owner") or "").strip()
+            or str(dict(metadata.get("lease_runtime") or {}).get("owner") or "").strip()
+            or str(dict(dict(metadata.get("lease_runtime") or {}).get("descriptor") or {}).get("owner") or "").strip()
+            or "browser-runtime"
+        )
+        user_id = str(getattr(existing, "user_id", "") or "").strip() or None
+        rebound = acquire(
+            channel=str(getattr(existing, "channel", "") or "browser").strip() or "browser",
+            session_id=str(getattr(existing, "session_id", "") or session_id).strip() or session_id,
+            user_id=user_id,
+            owner=owner,
+            metadata=metadata,
+        )
+        return {
+            "session_mount_id": getattr(rebound, "id", None),
+            "environment_id": getattr(rebound, "environment_id", None),
+            "lease_status": getattr(rebound, "lease_status", None),
+        }
+
     def list_profiles(self) -> list[BrowserProfileRecord]:
         with self._store.connection() as conn:
             rows = conn.execute(
@@ -689,6 +769,11 @@ class BrowserRuntimeService:
         if reuse_running_session and session_id in active_session_ids:
             attach_payload = attach_browser_session(session_id)
             runtime_after_attach = get_browser_runtime_snapshot()
+            rebound_lease = self._rebind_environment_session_lease(
+                session_id=session_id,
+                session_mount_id=options.session_mount_id,
+                environment_id=options.environment_id,
+            )
             return {
                 "status": "attached",
                 "session_id": session_id,
@@ -696,6 +781,7 @@ class BrowserRuntimeService:
                 "runtime": runtime_after_attach,
                 "result": attach_payload,
                 "channel_resolution": channel_resolution,
+                "environment_rebind": rebound_lease,
                 "continuity": _browser_continuity_contract(
                     session_id=session_id,
                     runtime=runtime_after_attach,
@@ -725,6 +811,11 @@ class BrowserRuntimeService:
         )
         text = self._tool_response_text(response)
         runtime_after_start = get_browser_runtime_snapshot()
+        rebound_lease = self._rebind_environment_session_lease(
+            session_id=session_id,
+            session_mount_id=options.session_mount_id,
+            environment_id=options.environment_id,
+        )
         return {
             "status": "started",
             "session_id": session_id,
@@ -732,6 +823,7 @@ class BrowserRuntimeService:
             "runtime": runtime_after_start,
             "result": self._tool_response_json(text),
             "channel_resolution": channel_resolution,
+            "environment_rebind": rebound_lease,
             "continuity": _browser_continuity_contract(
                 session_id=session_id,
                 runtime=runtime_after_start,
@@ -758,10 +850,14 @@ class BrowserRuntimeService:
         normalized = str(session_id or "").strip()
         attach_result = attach_browser_session(normalized)
         runtime = get_browser_runtime_snapshot()
+        rebound_lease = self._rebind_environment_session_lease(
+            session_id=normalized,
+        )
         return {
             "session_id": normalized,
             "runtime": runtime,
             "result": attach_result,
+            "environment_rebind": rebound_lease,
             "continuity": _browser_continuity_contract(
                 session_id=normalized,
                 runtime=runtime,

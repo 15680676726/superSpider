@@ -3143,6 +3143,81 @@ def test_capability_market_browser_local_session_start_fails_closed_when_attach_
     mocked_browser_use.assert_not_called()
 
 
+def test_capability_market_browser_local_session_start_rebinds_existing_environment_lease_after_restart(
+    tmp_path,
+) -> None:
+    app = build_runtime_app(tmp_path)
+    client = TestClient(app)
+    environment_service = app.state.environment_service
+
+    lease = environment_service.acquire_session_lease(
+        channel="browser",
+        session_id="market-browser-session-rebind",
+        user_id="alice",
+        owner="worker-1",
+        ttl_seconds=60,
+        metadata={
+            "host_mode": "local-managed",
+            "lease_class": "exclusive-writer",
+            "access_mode": "writer",
+            "session_scope": "browser-user-session",
+            "browser_mode": "built-in-browser",
+        },
+    )
+    assert lease.lease_token is not None
+    environment_service.release_session_lease(
+        lease.id,
+        lease_token=lease.lease_token,
+        reason="simulate service restart",
+        release_status="expired",
+        validate_token=False,
+    )
+
+    with (
+        patch(
+            "copaw.capabilities.browser_runtime.browser_use",
+            return_value=_fake_tool_response('{"ok": true, "message": "started"}'),
+        ),
+        patch(
+            "copaw.capabilities.browser_runtime.get_browser_runtime_snapshot",
+            return_value={
+                "running": True,
+                "current_session_id": "market-browser-session-rebind",
+                "session_count": 1,
+                "sessions": [
+                    {
+                        "session_id": "market-browser-session-rebind",
+                        "page_count": 1,
+                        "page_ids": ["page-1"],
+                    }
+                ],
+                "current_page_id": "page-1",
+                "page_count": 1,
+                "page_ids": ["page-1"],
+            },
+        ),
+    ):
+        response = client.post(
+            "/capability-market/install-templates/browser-local/sessions/start",
+            json={
+                "session_id": "market-browser-session-rebind",
+                "session_mount_id": lease.id,
+                "reuse_running_session": False,
+            },
+        )
+
+    payload = response.json()
+    detail = environment_service.get_session_detail(lease.id, limit=5) or {}
+    rebound = environment_service.get_session(lease.id)
+
+    assert response.status_code == 200
+    assert payload["status"] == "started"
+    assert (payload.get("environment_rebind") or {}).get("session_mount_id") == lease.id
+    assert rebound is not None
+    assert rebound.lease_status == "leased"
+    assert detail["host_twin_summary"]["host_companion_status"] == "attached"
+
+
 def test_capability_market_browser_local_session_start_resolves_to_attached_browser_channel_when_available(
     tmp_path,
 ) -> None:

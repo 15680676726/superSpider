@@ -85,6 +85,8 @@ def build_runtime_execution_stack(
         capability_override_repository=repositories.capability_override_repository,
         agent_profile_override_repository=repositories.agent_profile_override_repository,
         goal_override_repository=repositories.goal_override_repository,
+        workflow_template_repository=repositories.workflow_template_repository,
+        workflow_run_repository=repositories.workflow_run_repository,
     )
     learning_service = learning_service_cls(
         patch_executor=patch_executor,
