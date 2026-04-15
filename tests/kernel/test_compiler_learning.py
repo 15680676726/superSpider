@@ -15,6 +15,7 @@ from copaw.learning import (
     InstallBindingPlan,
     LearningEngine,
     LearningService,
+    SqliteLearningStore,
     OnboardingRun,
     Patch,
     PatchExecutor,
@@ -281,6 +282,32 @@ class TestLearningEngine:
             )
         limited = engine.get_growth_history(limit=5)
         assert len(limited) == 5
+
+    def test_learning_store_recovers_after_live_db_is_deleted(self, tmp_path):
+        store = SqliteLearningStore(tmp_path / "learning.sqlite3")
+        proposal = Proposal(
+            title="Recover learning schema",
+            description="Ensure learning storage self-heals after db deletion.",
+        )
+        store.save_proposal(proposal, action="created")
+
+        path = store.database_path
+        assert path.exists()
+        path.unlink()
+
+        # Reusing the same store mirrors a live runtime after the backing
+        # SQLite file was deleted underneath it.
+        assert store.list_proposals(limit=None) == []
+
+        with sqlite3.connect(path) as conn:
+            tables = {
+                str(row[0])
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'",
+                ).fetchall()
+            }
+        assert "learning_proposals" in tables
+        assert "learning_audit_log" in tables
 
     def test_delete_learning_entities_cleans_audit_rows(self, tmp_path):
         engine = _make_learning_engine(tmp_path)

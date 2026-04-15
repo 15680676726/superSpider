@@ -2289,6 +2289,7 @@ class SQLiteStateStore:
         if isinstance(path, str):
             path = Path(path)
         self._path = path.expanduser()
+        self._schema_verified = False
 
     @property
     def path(self) -> Path:
@@ -2297,35 +2298,25 @@ class SQLiteStateStore:
     def initialize(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         with self.connection() as conn:
-            current_version = int(
-                conn.execute("PRAGMA user_version").fetchone()[0],
-            )
-            existing_tables = _list_table_names(conn)
-            if existing_tables and current_version not in {0, STATE_SCHEMA_VERSION}:
-                _drop_user_tables(conn, table_names=existing_tables)
-                existing_tables = set()
-            if existing_tables:
-                _ensure_additive_schema_columns(
-                    conn,
-                    existing_tables=existing_tables,
-                )
-                _migrate_buddy_onboarding_sessions_contract_table(
-                    conn,
-                    existing_tables=existing_tables,
-                )
-            conn.executescript(_SCHEMA)
-            _ensure_additive_schema_columns(conn)
-            _migrate_buddy_onboarding_sessions_contract_table(conn)
-            conn.execute(f"PRAGMA user_version = {STATE_SCHEMA_VERSION}")
+            _ensure_state_schema_ready(conn)
+            self._schema_verified = True
 
     @contextmanager
     def connection(self) -> Iterator[sqlite3.Connection]:
         self._path.parent.mkdir(parents=True, exist_ok=True)
+        schema_check_required = (
+            not self._schema_verified
+            or not self._path.exists()
+            or self._path.stat().st_size == 0
+        )
         conn = sqlite3.connect(self._path)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("PRAGMA busy_timeout = 5000")
         try:
+            if schema_check_required:
+                _ensure_state_schema_ready(conn)
+                self._schema_verified = True
             yield conn
             conn.commit()
         except Exception:
@@ -2363,6 +2354,35 @@ def _list_table_names(conn: sqlite3.Connection) -> set[str]:
 def _drop_user_tables(conn: sqlite3.Connection, *, table_names: set[str]) -> None:
     for table_name in sorted(name for name in table_names if not name.startswith("sqlite_")):
         conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+
+
+def _ensure_state_schema_ready(conn: sqlite3.Connection) -> None:
+    current_version = int(
+        conn.execute("PRAGMA user_version").fetchone()[0],
+    )
+    existing_tables = _list_table_names(conn)
+    if (
+        current_version == STATE_SCHEMA_VERSION
+        and "agent_runtimes" in existing_tables
+        and "automation_loop_runtimes" in existing_tables
+    ):
+        return
+    if existing_tables and current_version not in {0, STATE_SCHEMA_VERSION}:
+        _drop_user_tables(conn, table_names=existing_tables)
+        existing_tables = set()
+    if existing_tables:
+        _ensure_additive_schema_columns(
+            conn,
+            existing_tables=existing_tables,
+        )
+        _migrate_buddy_onboarding_sessions_contract_table(
+            conn,
+            existing_tables=existing_tables,
+        )
+    conn.executescript(_SCHEMA)
+    _ensure_additive_schema_columns(conn)
+    _migrate_buddy_onboarding_sessions_contract_table(conn)
+    conn.execute(f"PRAGMA user_version = {STATE_SCHEMA_VERSION}")
 
 
 def _ensure_additive_schema_columns(

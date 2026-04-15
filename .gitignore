@@ -94,3 +94,5 @@ codex_desktop_smoke_*.txt
 .cache/  # Includes conda_unpack_wheels/ for Windows packaging workaround
 .worktrees/
 tmp/
+tmp_real_self_evolution_smoke.py
+tmp_real_self_evolution_smoke_*/

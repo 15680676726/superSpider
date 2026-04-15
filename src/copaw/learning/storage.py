@@ -161,10 +161,12 @@ class SqliteLearningStore:
                 "Learning storage must be persistent; ':memory:' is not allowed.",
             )
         self._database_path = Path(database_path).expanduser().resolve()
+        self._schema_verified = False
         try:
             self._database_path.parent.mkdir(parents=True, exist_ok=True)
             with self.connection() as conn:
-                conn.executescript(_SCHEMA)
+                _ensure_learning_schema_ready(conn)
+                self._schema_verified = True
         except (OSError, sqlite3.Error) as exc:
             raise LearningStorageError(
                 f"Unable to initialize learning storage at '{self._database_path}': {exc}",
@@ -177,6 +179,11 @@ class SqliteLearningStore:
     @contextmanager
     def connection(self) -> Iterator[sqlite3.Connection]:
         try:
+            schema_check_required = (
+                not self._schema_verified
+                or not self._database_path.exists()
+                or self._database_path.stat().st_size == 0
+            )
             conn = sqlite3.connect(self._database_path)
             conn.row_factory = sqlite3.Row
             conn.execute("PRAGMA foreign_keys = ON")
@@ -187,6 +194,9 @@ class SqliteLearningStore:
                 f"Unable to open learning storage '{self._database_path}': {exc}",
             ) from exc
         try:
+            if schema_check_required:
+                _ensure_learning_schema_ready(conn)
+                self._schema_verified = True
             yield conn
             conn.commit()
         except Exception:
@@ -957,6 +967,27 @@ class SqliteLearningStore:
                 f"Unable to delete {entity_type} '{normalized_entity_id}': {exc}",
             ) from exc
         return True
+
+
+def _ensure_learning_schema_ready(conn: sqlite3.Connection) -> None:
+    existing_tables = {
+        str(row[0])
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'",
+        ).fetchall()
+    }
+    required_tables = {
+        "learning_proposals",
+        "learning_patches",
+        "learning_growth_events",
+        "learning_acquisition_proposals",
+        "learning_install_binding_plans",
+        "learning_onboarding_runs",
+        "learning_audit_log",
+    }
+    if required_tables.issubset(existing_tables):
+        return
+    conn.executescript(_SCHEMA)
 
 
 def _dump_model(

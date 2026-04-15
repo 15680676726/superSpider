@@ -213,6 +213,38 @@ def test_sqlite_repositories_crud_round_trip(tmp_path) -> None:
     assert goal_repo.get_goal(goal.id) is None
 
 
+def test_sqlite_agent_runtime_repository_recovers_after_live_state_db_is_deleted(
+    tmp_path,
+) -> None:
+    store = SQLiteStateStore(tmp_path / "state.db")
+    runtime_repo = SqliteAgentRuntimeRepository(store)
+    runtime = AgentRuntimeRecord(
+        agent_id="ops-agent",
+        actor_key="industry:ops-agent",
+        actor_fingerprint="fp-ops-agent",
+        desired_state="active",
+        runtime_status="idle",
+    )
+    runtime_repo.upsert_runtime(runtime)
+
+    path = store.path
+    assert path.exists()
+    path.unlink()
+
+    # Reusing the same repository mirrors a live process after the backing
+    # SQLite file was deleted underneath it.
+    assert runtime_repo.list_runtimes(limit=None) == []
+
+    with sqlite3.connect(path) as conn:
+        tables = {
+            str(row[0])
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'",
+            ).fetchall()
+        }
+    assert "agent_runtimes" in tables
+
+
 def test_sqlite_human_assist_task_repository_round_trip(tmp_path) -> None:
     store = SQLiteStateStore(tmp_path / "state.db")
     repository = SqliteHumanAssistTaskRepository(store)
