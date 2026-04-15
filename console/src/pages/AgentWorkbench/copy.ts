@@ -279,6 +279,8 @@ export const agentWorkbenchText = {
   taskTag: (id: string) => `任务 ${id}`,
   environmentTag: (id: string) => `环境 ${id}`,
   checkpointTag: (id: string) => `检查点 ${id}`,
+  evidenceArtifactCount: (count: number) => `产物 ${count}`,
+  evidenceReplayCount: (count: number) => `回放 ${count}`,
   capabilityDecisionQueued: (id: string) => `能力变更已进入治理队列：${id}`,
   capabilityDecisionQueuedNoId: "能力变更已进入治理队列。",
   capabilityUpdated: "能力已更新。",
