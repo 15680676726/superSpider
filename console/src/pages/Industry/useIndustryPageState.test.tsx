@@ -1191,4 +1191,68 @@ describe("useIndustryPageState", () => {
       expect(result.current.detail?.instance_id).toBe("industry-b");
     });
   });
+
+  it("does not let the late retired-list refresh override a newer manual selection", async () => {
+    let resolveRetired!: (value: unknown) => void;
+    mockedListIndustryInstances.mockImplementation((options) => {
+      const status =
+        typeof options === "object" && options ? options.status : undefined;
+      if (status === "retired") {
+        return new Promise((resolve) => {
+          resolveRetired = resolve;
+        }) as never;
+      }
+      return Promise.resolve([
+        {
+          instance_id: "industry-a",
+          label: "Industry A",
+          owner_scope: "industry-a",
+          team: { agents: [] },
+        },
+        {
+          instance_id: "industry-b",
+          label: "Industry B",
+          owner_scope: "industry-b",
+          team: { agents: [] },
+        },
+      ]) as never;
+    });
+    mockedGetRuntimeIndustryDetail.mockImplementation(async (instanceId) => ({
+      instance_id: instanceId,
+      label: instanceId === "industry-a" ? "Industry A" : "Industry B",
+      owner_scope: instanceId,
+      profile: { industry: "Retail" },
+      team: { agents: [] },
+      media_analyses: [],
+    }) as never);
+
+    const { result } = renderHook(() => {
+      const [briefForm] = Form.useForm();
+      const [draftForm] = Form.useForm();
+      return useIndustryPageState({
+        briefForm,
+        draftForm,
+        navigate: vi.fn() as never,
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.instances.map((item) => item.instance_id)).toEqual([
+        "industry-a",
+        "industry-b",
+      ]);
+      expect(result.current.selectedInstanceId).toBe("industry-a");
+    });
+
+    await act(async () => {
+      result.current.setSelectedInstanceId("industry-b");
+      resolveRetired([]);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(result.current.selectedInstanceId).toBe("industry-b");
+      expect(result.current.detail?.instance_id).toBe("industry-b");
+    });
+  });
 });

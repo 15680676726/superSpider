@@ -240,6 +240,9 @@ export function useRuntimeCenter() {
   const [detailError, setDetailError] = useState<string | null>(null);
   const surfaceReloadTimerRef = useRef<number | null>(null);
   const pendingSectionsRef = useRef<Set<RuntimeSurfaceSection>>(new Set());
+  const cardsRequestSeqRef = useRef(0);
+  const mainBrainRequestSeqRef = useRef(0);
+  const detailRequestSeqRef = useRef(0);
 
   const data = useMemo<RuntimeCenterOverviewPayload | null>(() => {
     if (!surfaceData) {
@@ -278,6 +281,17 @@ export function useRuntimeCenter() {
       );
       const requestsCards = requestedSections.has("cards");
       const requestsMainBrain = requestedSections.has("main_brain");
+      const cardsRequestSeq = requestsCards ? cardsRequestSeqRef.current + 1 : null;
+      const mainBrainRequestSeq = requestsMainBrain
+        ? mainBrainRequestSeqRef.current + 1
+        : null;
+
+      if (cardsRequestSeq !== null) {
+        cardsRequestSeqRef.current = cardsRequestSeq;
+      }
+      if (mainBrainRequestSeq !== null) {
+        mainBrainRequestSeqRef.current = mainBrainRequestSeq;
+      }
 
       if (requestsCards && mode === "initial" && !hasCachedSurface) {
         setLoading(true);
@@ -297,38 +311,57 @@ export function useRuntimeCenter() {
               requestOptions,
             )
           : await requestRuntimeSurface<RuntimeCenterSurfaceResponse>();
+        const canApplyCards =
+          cardsRequestSeq !== null && cardsRequestSeqRef.current === cardsRequestSeq;
+        const canApplyMainBrain =
+          mainBrainRequestSeq !== null &&
+          mainBrainRequestSeqRef.current === mainBrainRequestSeq;
+        const hasStaleSection =
+          (requestsCards && !canApplyCards) ||
+          (requestsMainBrain && !canApplyMainBrain);
+        if (!canApplyCards && !canApplyMainBrain) {
+          return;
+        }
         setSurfaceData((previous) => ({
-          generated_at: payload.generated_at,
-          surface: payload.surface,
-          cards: requestedSections.has("cards")
+          generated_at: hasStaleSection
+            ? previous?.generated_at ?? payload.generated_at
+            : payload.generated_at,
+          surface: hasStaleSection
+            ? previous?.surface ?? payload.surface
+            : payload.surface,
+          cards: canApplyCards
             ? payload.cards
             : previous?.cards ?? [],
-          main_brain: requestedSections.has("main_brain")
+          main_brain: canApplyMainBrain
             ? payload.main_brain
             : previous?.main_brain ?? null,
         }));
         runtimeCenterSurfaceCache = {
-          generated_at: payload.generated_at,
-          surface: payload.surface,
-          cards: requestedSections.has("cards")
+          generated_at: hasStaleSection
+            ? runtimeCenterSurfaceCache?.generated_at ?? payload.generated_at
+            : payload.generated_at,
+          surface: hasStaleSection
+            ? runtimeCenterSurfaceCache?.surface ?? payload.surface
+            : payload.surface,
+          cards: canApplyCards
             ? payload.cards
             : runtimeCenterSurfaceCache?.cards ?? [],
-          main_brain: requestedSections.has("main_brain")
+          main_brain: canApplyMainBrain
             ? payload.main_brain
             : runtimeCenterSurfaceCache?.main_brain ?? null,
         };
-        if (requestedSections.has("main_brain")) {
+        if (canApplyMainBrain) {
           const nextBuddySummary = payload.main_brain?.buddy_summary ?? null;
           setBuddySummary(nextBuddySummary);
           runtimeCenterBuddySummaryCache = nextBuddySummary;
           setMainBrainHydrated(true);
           runtimeCenterMainBrainHydratedCache = true;
         }
-        if (requestsCards) {
+        if (canApplyCards) {
           setError(null);
         }
         if (
-          requestsCards &&
+          canApplyCards &&
           !requestsMainBrain &&
           !runtimeCenterMainBrainHydratedCache &&
           payload.surface
@@ -339,21 +372,42 @@ export function useRuntimeCenter() {
         const detail = localizeRuntimeText(
           err instanceof Error ? err.message : String(err),
         );
-        if (requestsCards) {
+        if (
+          requestsCards &&
+          cardsRequestSeq !== null &&
+          cardsRequestSeqRef.current === cardsRequestSeq
+        ) {
           setError(detail);
         }
-        if (requestsMainBrain) {
+        if (
+          requestsMainBrain &&
+          mainBrainRequestSeq !== null &&
+          mainBrainRequestSeqRef.current === mainBrainRequestSeq
+        ) {
           setMainBrainError(detail);
         }
-        if (mode === "initial" && requestsCards) {
+        if (
+          mode === "initial" &&
+          requestsCards &&
+          cardsRequestSeq !== null &&
+          cardsRequestSeqRef.current === cardsRequestSeq
+        ) {
           setSurfaceData(null);
         }
       } finally {
-        if (requestsCards) {
+        if (
+          requestsCards &&
+          cardsRequestSeq !== null &&
+          cardsRequestSeqRef.current === cardsRequestSeq
+        ) {
           setLoading(false);
           setRefreshing(false);
         }
-        if (requestsMainBrain) {
+        if (
+          requestsMainBrain &&
+          mainBrainRequestSeq !== null &&
+          mainBrainRequestSeqRef.current === mainBrainRequestSeq
+        ) {
           setMainBrainLoading(false);
         }
       }
@@ -485,23 +539,33 @@ export function useRuntimeCenter() {
   );
 
   const openDetail = useCallback(async (route: string, title: string) => {
+    const detailRequestSeq = detailRequestSeqRef.current + 1;
+    detailRequestSeqRef.current = detailRequestSeq;
     setDetailLoading(true);
     setDetailError(null);
     try {
       const payload = await requestRuntimeRecord<Record<string, unknown>>(route);
+      if (detailRequestSeqRef.current !== detailRequestSeq) {
+        return;
+      }
       setDetail({
         route,
         title,
         payload,
       });
     } catch (err) {
+      if (detailRequestSeqRef.current !== detailRequestSeq) {
+        return;
+      }
       const detailMessage = localizeRuntimeText(
         err instanceof Error ? err.message : String(err),
       );
       setDetailError(detailMessage);
       message.error(detailMessage);
     } finally {
-      setDetailLoading(false);
+      if (detailRequestSeqRef.current === detailRequestSeq) {
+        setDetailLoading(false);
+      }
     }
   }, []);
 

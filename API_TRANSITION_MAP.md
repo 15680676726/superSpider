@@ -812,7 +812,7 @@
     - 首轮 scope：`industry / work_context`
     - 次日主读优先级目标：`canonical truth -> sleep artifacts -> raw text memory -> lexical fallback`
     - `ConversationCompactionService` 明确排除在这条正式共享记忆链之外
-    - 当前状态是 design-approved / implementation pending，不应误写成已经落地
+    - 当前状态已进入首轮代码落地：`industry / work_context` 两类 scope 的 `B+` sleep layer 已接入当前仓库实现与测试，不应继续误写成 `implementation pending`
 
 ---
 

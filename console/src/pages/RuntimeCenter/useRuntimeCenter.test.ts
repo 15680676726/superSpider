@@ -98,17 +98,28 @@ const mockSurface = (
 
 const requestRuntimeSurfaceMock = vi.fn();
 const requestRuntimeBusinessAgentsMock = vi.fn();
+const requestRuntimeRecordMock = vi.fn();
 const readBuddyProfileIdMock = vi.fn();
 let runtimeEventHandler:
   | ((event: { event_name: string; payload: Record<string, unknown> }) => void)
   | null = null;
+
+function createDeferredPromise<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+  return { promise, resolve, reject };
+}
 
 vi.mock("../../runtime/runtimeSurfaceClient", () => ({
   normalizeRuntimePath: vi.fn((path: string) => path),
   requestRuntimeSurface: (...args: unknown[]) => requestRuntimeSurfaceMock(...args),
   requestRuntimeBusinessAgents: (...args: unknown[]) =>
     requestRuntimeBusinessAgentsMock(...args),
-  requestRuntimeRecord: vi.fn(),
+  requestRuntimeRecord: (...args: unknown[]) => requestRuntimeRecordMock(...args),
 }));
 
 vi.mock("../../runtime/buddyProfileBinding", () => ({
@@ -132,6 +143,7 @@ describe("useRuntimeCenter", () => {
     readBuddyProfileIdMock.mockReturnValue("profile-bound");
     requestRuntimeSurfaceMock.mockResolvedValue(mockSurface());
     requestRuntimeBusinessAgentsMock.mockResolvedValue([]);
+    requestRuntimeRecordMock.mockReset();
   });
 
   it("loads cards first and hydrates main-brain in a follow-up request", async () => {
@@ -512,5 +524,137 @@ describe("useRuntimeCenter", () => {
     expect(remounted.result.current.businessAgents.map((agent) => agent.agent_id)).toEqual([
       "agent-ops-9",
     ]);
+  });
+
+  it("does not let a stale surface request override a newer reload result", async () => {
+    const initialSurface = createDeferredPromise<RuntimeCenterSurfaceResponse>();
+    const refreshedSurface = createDeferredPromise<RuntimeCenterSurfaceResponse>();
+    requestRuntimeSurfaceMock
+      .mockReturnValueOnce(initialSurface.promise)
+      .mockReturnValueOnce(refreshedSurface.promise);
+
+    const { result } = renderHook(() => useRuntimeCenter());
+
+    expect(requestRuntimeSurfaceMock).toHaveBeenNthCalledWith(1, {
+      sections: ["cards"],
+    });
+
+    await act(async () => {
+      void result.current.reload();
+      await Promise.resolve();
+    });
+
+    expect(requestRuntimeSurfaceMock.mock.calls[1]).toEqual([]);
+
+    await act(async () => {
+      refreshedSurface.resolve(
+        mockSurface({
+          generated_at: "2026-03-29T10:00:00Z",
+          cards: [
+            createAgentsCard({
+              id: "agent-new",
+              title: "Fresh Agent",
+              kind: "agent",
+              status: "active",
+              owner: "Closer",
+              summary: "Newer surface",
+              actions: {},
+              meta: {},
+            }),
+          ],
+        }),
+      );
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(result.current.data?.generated_at).toBe("2026-03-29T10:00:00Z");
+      expect(result.current.businessAgents.map((agent) => agent.agent_id)).toEqual([
+        "agent-new",
+      ]);
+    });
+
+    await act(async () => {
+      initialSurface.resolve(
+        mockSurface({
+          generated_at: "2026-03-29T09:00:00Z",
+          cards: [
+            createAgentsCard({
+              id: "agent-old",
+              title: "Old Agent",
+              kind: "agent",
+              status: "active",
+              owner: "Closer",
+              summary: "Older surface",
+              actions: {},
+              meta: {},
+            }),
+          ],
+        }),
+      );
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(result.current.data?.generated_at).toBe("2026-03-29T10:00:00Z");
+      expect(result.current.businessAgents.map((agent) => agent.agent_id)).toEqual([
+        "agent-new",
+      ]);
+    });
+  });
+
+  it("does not let a stale detail request override the latest opened detail", async () => {
+    const detailA = createDeferredPromise<Record<string, unknown>>();
+    const detailB = createDeferredPromise<Record<string, unknown>>();
+    requestRuntimeRecordMock.mockImplementation((route: string) => {
+      if (route === "/runtime-center/details/a") {
+        return detailA.promise;
+      }
+      if (route === "/runtime-center/details/b") {
+        return detailB.promise;
+      }
+      throw new Error(`Unexpected detail route: ${route}`);
+    });
+
+    const { result } = renderHook(() => useRuntimeCenter());
+
+    await waitFor(
+      () =>
+        !result.current.loading &&
+        !result.current.mainBrainLoading &&
+        !result.current.businessAgentsLoading,
+    );
+
+    await act(async () => {
+      void result.current.openDetail("/runtime-center/details/a", "Detail A");
+      void result.current.openDetail("/runtime-center/details/b", "Detail B");
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      detailB.resolve({ detail_id: "b", label: "New detail" });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(result.current.detail?.route).toBe("/runtime-center/details/b");
+      expect(result.current.detail?.title).toBe("Detail B");
+      expect(result.current.detail?.payload).toEqual(
+        expect.objectContaining({ detail_id: "b" }),
+      );
+    });
+
+    await act(async () => {
+      detailA.resolve({ detail_id: "a", label: "Old detail" });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(result.current.detail?.route).toBe("/runtime-center/details/b");
+      expect(result.current.detail?.title).toBe("Detail B");
+      expect(result.current.detail?.payload).toEqual(
+        expect.objectContaining({ detail_id: "b" }),
+      );
+    });
   });
 });

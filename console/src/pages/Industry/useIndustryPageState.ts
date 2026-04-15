@@ -242,6 +242,10 @@ export function useIndustryPageState({
   const [currentBuddyCarrierInstanceId, setCurrentBuddyCarrierInstanceId] = useState<string | null>(
     () => industryPageStateCache.currentBuddyCarrierInstanceId,
   );
+  const commitSelectedInstanceId = useCallback((instanceId: string | null) => {
+    selectedInstanceIdRef.current = instanceId;
+    setSelectedInstanceId(instanceId);
+  }, []);
   const protectedCarrierInstanceId = resolveProtectedCarrierInstanceId(
     {
       buddyCarrierInstanceId: currentBuddyCarrierInstanceId,
@@ -333,7 +337,7 @@ export function useIndustryPageState({
           buddyCarrierInstanceId: resolvedBuddyCarrierInstanceId,
           buddyProfileId: resolvedBuddyProfileId,
         });
-        setSelectedInstanceId(nextSelected);
+        commitSelectedInstanceId(nextSelected);
         industryPageStateCache = {
           ...industryPageStateCache,
           instances: nextInstances,
@@ -392,7 +396,7 @@ export function useIndustryPageState({
               (selectedInstanceIdRef.current == null ||
                 selectedInstanceIdRef.current === nextSelected)
             ) {
-              setSelectedInstanceId(nextResolvedSelected);
+              commitSelectedInstanceId(nextResolvedSelected);
             }
 
             industryPageStateCache = {
@@ -428,7 +432,7 @@ export function useIndustryPageState({
         setLoadingInstances(false);
       }
     },
-    [],
+    [commitSelectedInstanceId],
   );
 
   const loadDetail = useCallback(async (
@@ -682,7 +686,7 @@ export function useIndustryPageState({
         requestPayload,
       );
       const instanceId = payload.team.team_id;
-      setSelectedInstanceId(instanceId);
+      commitSelectedInstanceId(instanceId);
       setPreview(null);
       setDraftSourceInstanceId(null);
       setInstallPlan([]);
@@ -702,7 +706,15 @@ export function useIndustryPageState({
     } finally {
       setApplyCarrierLoading(false);
     }
-  }, [draftForm, draftSourceInstanceId, installPlan, loadDetail, loadInstances, preview]);
+  }, [
+    commitSelectedInstanceId,
+    draftForm,
+    draftSourceInstanceId,
+    installPlan,
+    loadDetail,
+    loadInstances,
+    preview,
+  ]);
 
   const handleDeleteInstance = useCallback(
     async (instanceId: string) => {
@@ -1099,7 +1111,7 @@ export function useIndustryPageState({
     setError,
     setInstallPlan,
     setPreview,
-    setSelectedInstanceId,
+    setSelectedInstanceId: commitSelectedInstanceId,
     watchedExperienceMode,
   };
 }

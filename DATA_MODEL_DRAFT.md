@@ -2101,7 +2101,7 @@ Current hard boundary after phase 4:
 The approved next memory step is a model-steered sleep layer over canonical
 truth, not a new durable memory source.
 
-Current design-only scope:
+Current landed scope:
 
 - first landing scopes: `industry`, `work_context`
 - private `ConversationCompactionService` remains excluded from the formal sleep path
@@ -2133,7 +2133,7 @@ Hard boundary remains:
 - sleep outputs are derived and rebuildable from canonical `state / evidence / graph projection / strategy / formal memory`
 - no private conversation compaction input becomes canonical shared sleep truth
 - no model write may overwrite raw `EvidenceRecord / KnowledgeChunkRecord / Assignment / AgentReport` facts
-- this section records the approved contract; runtime landing is still pending
+- this section records the approved contract; the current repo has already landed the first runtime implementation for `industry / work_context` sleep scopes
 ---
 
 ## 12.7 2026-03-19 media analysis ingest boundary
