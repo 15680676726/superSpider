@@ -1004,6 +1004,26 @@ def test_conversation_compaction_service_builds_visibility_payload() -> None:
             "tool_use_summary": {
                 "summary": "2 tool results compacted into artifact previews.",
                 "artifact_refs": ["artifact://tool-result-1"],
+                "result_items": [
+                    {
+                        "ref": "artifact://tool-result-1",
+                        "kind": "file",
+                        "label": "文件",
+                        "summary": "执行结果文件",
+                    },
+                    {
+                        "ref": "replay://tool-result-1",
+                        "kind": "replay",
+                        "label": "回放",
+                    },
+                    {
+                        "ref": "artifact://tool-result-1",
+                        "kind": "file",
+                        "label": "文件",
+                        "summary": "执行结果文件",
+                    },
+                    "drop-me",
+                ],
             },
         }
     )
@@ -1022,4 +1042,90 @@ def test_conversation_compaction_service_builds_visibility_payload() -> None:
     assert payload["tool_use_summary"] == {
         "summary": "2 tool results compacted into artifact previews.",
         "artifact_refs": ["artifact://tool-result-1"],
+        "result_items": [
+            {
+                "ref": "artifact://tool-result-1",
+                "kind": "file",
+                "label": "文件",
+                "summary": "执行结果文件",
+            },
+            {
+                "ref": "replay://tool-result-1",
+                "kind": "replay",
+                "label": "回放",
+            },
+        ],
+    }
+
+
+def test_conversation_compaction_service_derives_formal_result_items_from_concrete_refs() -> None:
+    payload = ConversationCompactionService.build_visibility_payload(
+        {
+            "tool_use_summary": {
+                "artifact_refs": [
+                    "file:///tmp/report.md",
+                    "replay://trace-1",
+                    "file://artifacts/screenshot-1.png",
+                    "artifact://tool-result-1",
+                ],
+            },
+        }
+    )
+
+    assert payload["tool_use_summary"] == {
+        "artifact_refs": [
+            "file:///tmp/report.md",
+            "replay://trace-1",
+            "file://artifacts/screenshot-1.png",
+            "artifact://tool-result-1",
+        ],
+        "result_items": [
+            {
+                "ref": "file:///tmp/report.md",
+                "kind": "file",
+                "label": "文件",
+            },
+            {
+                "ref": "replay://trace-1",
+                "kind": "replay",
+                "label": "回放",
+            },
+            {
+                "ref": "file://artifacts/screenshot-1.png",
+                "kind": "screenshot",
+                "label": "截图",
+            },
+        ],
+    }
+
+
+def test_conversation_compaction_service_preserves_formal_result_item_routes() -> None:
+    payload = ConversationCompactionService.build_visibility_payload(
+        {
+            "tool_use_summary": {
+                "artifact_refs": ["file:///tmp/report.md"],
+                "result_items": [
+                    {
+                        "ref": "file:///tmp/report.md",
+                        "kind": "file",
+                        "label": "File",
+                        "summary": "Saved report",
+                        "route": "/api/runtime-center/artifacts/artifact-file-1",
+                    }
+                ],
+            }
+        }
+    )
+
+    assert payload["tool_use_summary"] == {
+        "artifact_refs": ["file:///tmp/report.md"],
+        "result_items": [
+            {
+                "ref": "file:///tmp/report.md",
+                "kind": "file",
+                "label": "File",
+                "summary": "Saved report",
+                "route": "/api/runtime-center/artifacts/artifact-file-1",
+            }
+        ],
     }

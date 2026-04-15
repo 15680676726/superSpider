@@ -225,6 +225,113 @@ class ConversationCompactionService(ReMeLight):
         return normalized or None
 
     @classmethod
+    def _normalize_visibility_result_items(
+        cls,
+        value: Any,
+        *,
+        max_items: int = 6,
+    ) -> list[dict[str, str]] | None:
+        if not isinstance(value, (list, tuple)):
+            return None
+        normalized: list[dict[str, str]] = []
+        seen: set[tuple[str, str, str, str]] = set()
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            normalized_item: dict[str, str] = {}
+            for key in ("ref", "kind", "label", "summary", "route"):
+                text = item.get(key)
+                if text is None:
+                    continue
+                resolved = str(text).strip()
+                if resolved:
+                    normalized_item[key] = resolved
+            if not normalized_item:
+                continue
+            signature = (
+                normalized_item.get("ref", ""),
+                normalized_item.get("kind", ""),
+                normalized_item.get("label", ""),
+                normalized_item.get("summary", ""),
+                normalized_item.get("route", ""),
+            )
+            if signature in seen:
+                continue
+            seen.add(signature)
+            normalized.append(normalized_item)
+            if len(normalized) >= max_items:
+                break
+        return normalized or None
+
+    @staticmethod
+    def _looks_like_local_file_ref(value: str) -> bool:
+        if not value:
+            return False
+        normalized = value.strip()
+        if normalized.startswith(("file://", "/", "./", "../")):
+            return True
+        return len(normalized) >= 3 and normalized[1:3] in (":\\", ":/")
+
+    @staticmethod
+    def _looks_like_screenshot_ref(value: str) -> bool:
+        normalized = value.lower()
+        return any(
+            token in normalized
+            for token in (
+                "screenshot",
+                "screen-shot",
+                "screen_capture",
+                "screencap",
+                "snapshot",
+            )
+        )
+
+    @classmethod
+    def _derive_visibility_result_items(
+        cls,
+        artifact_refs: list[str] | None,
+        *,
+        max_items: int = 6,
+    ) -> list[dict[str, str]] | None:
+        if not artifact_refs:
+            return None
+        derived: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for ref in artifact_refs:
+            normalized = str(ref).strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            lowered = normalized.lower()
+            if lowered.startswith("replay://"):
+                derived.append(
+                    {
+                        "ref": normalized,
+                        "kind": "replay",
+                        "label": "回放",
+                    }
+                )
+            elif cls._looks_like_screenshot_ref(lowered):
+                derived.append(
+                    {
+                        "ref": normalized,
+                        "kind": "screenshot",
+                        "label": "截图",
+                    }
+                )
+            elif cls._looks_like_local_file_ref(normalized):
+                derived.append(
+                    {
+                        "ref": normalized,
+                        "kind": "file",
+                        "label": "文件",
+                    }
+                )
+            if len(derived) >= max_items:
+                break
+        return derived or None
+
+    @classmethod
     def build_visibility_payload(
         cls,
         value: dict[str, Any] | None,
@@ -246,7 +353,7 @@ class ConversationCompactionService(ReMeLight):
             payload["tool_result_budget"] = tool_result_budget
         tool_use_summary = cls._normalize_visibility_dict(
             value.get("tool_use_summary"),
-            allowed_keys=("summary", "artifact_refs"),
+            allowed_keys=("summary", "artifact_refs", "result_items"),
         )
         if tool_use_summary is not None:
             artifact_refs = cls._normalize_visibility_list(tool_use_summary.get("artifact_refs"))
@@ -254,6 +361,15 @@ class ConversationCompactionService(ReMeLight):
                 tool_use_summary["artifact_refs"] = artifact_refs
             else:
                 tool_use_summary.pop("artifact_refs", None)
+            result_items = cls._normalize_visibility_result_items(
+                tool_use_summary.get("result_items"),
+            )
+            if result_items is None:
+                result_items = cls._derive_visibility_result_items(artifact_refs)
+            if result_items is not None:
+                tool_use_summary["result_items"] = result_items
+            else:
+                tool_use_summary.pop("result_items", None)
             payload["tool_use_summary"] = tool_use_summary
         donor_trial_carry_forward = cls._normalize_visibility_dict(
             value.get("donor_trial_carry_forward"),

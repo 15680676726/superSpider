@@ -12,6 +12,8 @@ def _repositories() -> SimpleNamespace:
         capability_override_repository=object(),
         agent_profile_override_repository=object(),
         goal_override_repository=object(),
+        workflow_template_repository=object(),
+        workflow_run_repository=object(),
         governance_control_repository=object(),
         decision_request_repository=object(),
         task_repository=object(),

@@ -467,14 +467,17 @@ describe("runtimeCenter viewHelpers", () => {
             evidence: {
               count: 5,
               summary: "5 evidence records",
+              route: "/api/runtime-center/evidence/evidence-5",
             },
             decisions: {
               count: 1,
               summary: "1 decision pending",
+              route: "/api/runtime-center/decisions/decision-1",
             },
             patches: {
               count: 2,
               summary: "2 patches pending",
+              route: "/api/runtime-center/patches/patch-2",
             },
             environment: {
               summary: "Host twin ready",
@@ -508,8 +511,17 @@ describe("runtimeCenter viewHelpers", () => {
       "/api/runtime-center/industry/industry-1?report_id=report-1",
     );
     expect(industrySignals.find((signal) => signal.key === "evidence")?.value).toBe("5");
+    expect(industrySignals.find((signal) => signal.key === "evidence")?.route).toBe(
+      "/api/runtime-center/evidence/evidence-5",
+    );
     expect(industrySignals.find((signal) => signal.key === "decisions")?.value).toBe("1");
+    expect(industrySignals.find((signal) => signal.key === "decisions")?.route).toBe(
+      "/api/runtime-center/decisions/decision-1",
+    );
     expect(industrySignals.find((signal) => signal.key === "patches")?.value).toBe("2");
+    expect(industrySignals.find((signal) => signal.key === "patches")?.route).toBe(
+      "/api/runtime-center/patches/patch-2",
+    );
 
     expect(environmentSignals.find((signal) => signal.key === "carrier")?.route).toBe(
       "/api/runtime-center/governance/status",

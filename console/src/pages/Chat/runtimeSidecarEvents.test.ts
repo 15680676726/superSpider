@@ -279,6 +279,182 @@ describe("runtimeSidecarEvents", () => {
     });
   });
 
+  it("captures user-facing reply result hints from turn_reply_done artifact refs", () => {
+    const initialState = createInitialRuntimeSidecarState(
+      "industry-chat:industry-1:execution-core",
+    );
+
+    const nextState = reduceRuntimeSidecarEvent(
+      initialState,
+      {
+        event: "turn_reply_done",
+        payload: {
+          summary: "reply complete",
+          tool_use_summary: {
+            summary: "已保存 1 个结果文件。",
+            artifact_refs: ["artifact://tool-result-1"],
+          },
+        },
+      },
+      501,
+    );
+
+    expect(nextState.currentReplyResult).toEqual({
+      title: "已生成 1 个结果",
+      summary: "已保存 1 个结果文件。",
+      resultCount: 1,
+      artifactRefs: ["artifact://tool-result-1"],
+      resultItems: [],
+      updatedAt: 501,
+      payload: {
+        summary: "reply complete",
+        tool_use_summary: {
+          summary: "已保存 1 个结果文件。",
+          artifact_refs: ["artifact://tool-result-1"],
+        },
+      },
+    });
+  });
+
+  it("captures formal result item labels from turn_reply_done payloads", () => {
+    const initialState = createInitialRuntimeSidecarState(
+      "industry-chat:industry-1:execution-core",
+    );
+
+    const nextState = reduceRuntimeSidecarEvent(
+      initialState,
+      {
+        event: "turn_reply_done",
+        payload: {
+          tool_use_summary: {
+            summary: "已保存 2 个可查看结果。",
+            result_items: [
+              {
+                ref: "artifact://tool-result-1",
+                kind: "file",
+                label: "文件",
+                summary: "执行结果文件",
+              },
+              {
+                ref: "replay://tool-result-1",
+                kind: "replay",
+                label: "回放",
+              },
+            ],
+          },
+        },
+      },
+      502,
+    );
+
+    expect(nextState.currentReplyResult).toEqual({
+      title: "已生成 2 个结果",
+      summary: "已保存 2 个可查看结果。",
+      resultCount: 2,
+      artifactRefs: [],
+      resultItems: [
+        {
+          ref: "artifact://tool-result-1",
+          kind: "file",
+          label: "文件",
+          summary: "执行结果文件",
+        },
+        {
+          ref: "replay://tool-result-1",
+          kind: "replay",
+          label: "回放",
+          summary: null,
+        },
+      ],
+      updatedAt: 502,
+      payload: {
+        tool_use_summary: {
+          summary: "已保存 2 个可查看结果。",
+          result_items: [
+            {
+              ref: "artifact://tool-result-1",
+              kind: "file",
+              label: "文件",
+              summary: "执行结果文件",
+            },
+            {
+              ref: "replay://tool-result-1",
+              kind: "replay",
+              label: "回放",
+            },
+          ],
+        },
+      },
+    });
+  });
+
+  it("derives safe fallback result labels from concrete refs", () => {
+    const initialState = createInitialRuntimeSidecarState(
+      "industry-chat:industry-1:execution-core",
+    );
+
+    const nextState = reduceRuntimeSidecarEvent(
+      initialState,
+      {
+        event: "turn_reply_done",
+        payload: {
+          tool_use_summary: {
+            artifact_refs: [
+              "file:///tmp/report.md",
+              "replay://trace-1",
+              "file://artifacts/screenshot-1.png",
+              "artifact://tool-result-1",
+            ],
+          },
+        },
+      },
+      503,
+    );
+
+    expect(nextState.currentReplyResult).toEqual({
+      title: "已生成 4 个结果",
+      summary: "这轮执行已经产出 4 个可查看结果。",
+      resultCount: 4,
+      artifactRefs: [
+        "file:///tmp/report.md",
+        "replay://trace-1",
+        "file://artifacts/screenshot-1.png",
+        "artifact://tool-result-1",
+      ],
+      resultItems: [
+        {
+          ref: "file:///tmp/report.md",
+          kind: "file",
+          label: "文件",
+          summary: null,
+        },
+        {
+          ref: "replay://trace-1",
+          kind: "replay",
+          label: "回放",
+          summary: null,
+        },
+        {
+          ref: "file://artifacts/screenshot-1.png",
+          kind: "screenshot",
+          label: "截图",
+          summary: null,
+        },
+      ],
+      updatedAt: 503,
+      payload: {
+        tool_use_summary: {
+          artifact_refs: [
+            "file:///tmp/report.md",
+            "replay://trace-1",
+            "file://artifacts/screenshot-1.png",
+            "artifact://tool-result-1",
+          ],
+        },
+      },
+    });
+  });
+
   it("records a terminal response boundary even when no reply_done sidecar arrives", () => {
     const initialState = createInitialRuntimeSidecarState(
       "industry-chat:industry-1:execution-core",

@@ -536,6 +536,42 @@ export default function ChatPage() {
             shell={runtimeIntentShell}
             onViewDetails={() => navigate("/runtime-center")}
           />
+          {runtimeCommitState.currentReplyResult ? (
+            <Alert
+              type="success"
+              showIcon
+              message={runtimeCommitState.currentReplyResult.title}
+              description={
+                <>
+                  <div>
+                    {runtimeCommitState.currentReplyResult.summary ||
+                      "这轮执行已经产出可查看结果。"}
+                  </div>
+                  {runtimeCommitState.currentReplyResult.resultItems.length > 0 ? (
+                    <Space wrap size={[6, 6]} className={styles.replyResultTags}>
+                      {runtimeCommitState.currentReplyResult.resultItems.map(
+                        (item, index) => (
+                          <Tag
+                            key={`${item.kind}:${item.ref ?? item.label}:${index}`}
+                            className={styles.replyResultTag}
+                            title={item.summary ?? item.label}
+                          >
+                            {item.label}
+                          </Tag>
+                        ),
+                      )}
+                    </Space>
+                  ) : null}
+                </>
+              }
+              action={
+                <Button size="small" onClick={() => navigate("/runtime-center")}>
+                  查看结果
+                </Button>
+              }
+              className={styles.inlineAlert}
+            />
+          ) : null}
 
           {/* 错误提示 */}
           {threadBootstrapError ? (

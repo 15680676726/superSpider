@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...evidence import EvidenceLedger, EvidenceRecord
+from ...evidence import EvidenceLedger, EvidenceRecord, serialize_evidence_record
 
 
 class RuntimeCenterEvidenceQueryService:
@@ -49,40 +49,6 @@ class RuntimeCenterEvidenceQueryService:
 
     def serialize_record(self, record: EvidenceRecord) -> dict[str, Any]:
         """Serialize a single EvidenceRecord to JSON-friendly dict."""
-        return {
-            "id": record.id,
-            "task_id": record.task_id,
-            "actor_ref": record.actor_ref,
-            "environment_ref": record.environment_ref,
-            "capability_ref": record.capability_ref,
-            "risk_level": record.risk_level,
-            "action_summary": record.action_summary,
-            "result_summary": record.result_summary,
-            "created_at": record.created_at.isoformat() if record.created_at else None,
-            "status": record.status,
-            "input_digest": record.input_digest,
-            "output_digest": record.output_digest,
-            "metadata": dict(record.metadata),
-            "artifact_count": len(record.artifacts),
-            "replay_count": len(record.replay_pointers),
-            "artifacts": [
-                {
-                    "id": a.id,
-                    "artifact_type": a.artifact_type,
-                    "storage_uri": a.storage_uri,
-                    "summary": a.summary,
-                }
-                for a in record.artifacts
-            ],
-            "replay_pointers": [
-                {
-                    "id": r.id,
-                    "replay_type": r.replay_type,
-                    "storage_uri": r.storage_uri,
-                    "summary": r.summary,
-                }
-                for r in record.replay_pointers
-            ],
-        }
+        return serialize_evidence_record(record)
 Phase1EvidenceQueryService = RuntimeCenterEvidenceQueryService
 RuntimeEvidenceQueryService = RuntimeCenterEvidenceQueryService

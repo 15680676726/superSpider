@@ -1217,6 +1217,78 @@ def test_query_execution_runtime_evidence_sinks_attach_tool_contract_metadata() 
     assert browser_meta["selected_scope"] == "seat"
 
 
+def test_query_execution_runtime_persists_formal_tool_result_items_into_query_runtime_state() -> None:
+    class _ToolBridge:
+        def __init__(self) -> None:
+            self.file_calls: list[dict[str, object]] = []
+
+        def record_file_event(
+            self,
+            task_id: str,
+            payload: dict[str, object],
+        ) -> dict[str, object]:
+            self.file_calls.append({"task_id": task_id, "payload": payload})
+            return {
+                "summary": "saved report",
+                "artifact_refs": ["D:/word/copaw/report.md"],
+                "result_items": [
+                    {
+                        "ref": "D:/word/copaw/report.md",
+                        "kind": "file",
+                        "label": "文件",
+                        "summary": "saved report",
+                        "route": "/api/runtime-center/artifacts/artifact-file-1",
+                    },
+                ],
+            }
+
+    session_backend = _SnapshotSessionBackend()
+    bridge = _ToolBridge()
+    service = KernelQueryExecutionService(
+        session_backend=session_backend,
+        tool_bridge=bridge,
+    )
+    request = SimpleNamespace(
+        session_id="session-tool-results",
+        user_id="ops-user",
+    )
+
+    file_sink = service._make_file_evidence_sink(  # pylint: disable=protected-access
+        "ktask:query-tool",
+        request=request,
+    )
+    assert file_sink is not None
+
+    file_sink(
+        {
+            "tool_name": "write_file",
+            "action": "write",
+            "resolved_path": "D:/word/copaw/report.md",
+            "status": "success",
+            "result_summary": "saved report",
+            "metadata": {},
+        },
+    )
+
+    runtime_context = getattr(request, "_copaw_main_brain_runtime_context")
+    query_runtime_state = runtime_context["query_runtime_state"]
+    assert query_runtime_state["tool_use_summary"] == {
+        "summary": "saved report",
+        "artifact_refs": ["D:/word/copaw/report.md"],
+        "result_items": [
+            {
+                "ref": "D:/word/copaw/report.md",
+                "kind": "file",
+                "label": "文件",
+                "summary": "saved report",
+                "route": "/api/runtime-center/artifacts/artifact-file-1",
+            },
+        ],
+    }
+    snapshot = session_backend.snapshots[(request.session_id, request.user_id)]
+    assert snapshot["query_runtime_state"]["tool_use_summary"] == query_runtime_state["tool_use_summary"]
+
+
 def test_query_execution_runtime_bounds_trial_attribution_list_carry_forward() -> None:
     class _ToolBridge:
         def __init__(self) -> None:

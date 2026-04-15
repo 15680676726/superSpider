@@ -9,7 +9,9 @@ from typing import Any
 
 from fastapi import APIRouter, File, Request, UploadFile
 
+from ...capabilities.remote_skill_catalog import search_curated_skill_catalog
 from ...constant import WORKING_DIR
+from ...kernel import query_execution_writeback as query_execution_writeback_module
 from ...utils.cache import TTLCache
 from ..startup_environment_preflight import (
     build_environment_preflight_report,
@@ -60,6 +62,177 @@ def _get_runtime_provider(app_state: Any) -> object:
     if runtime_provider is not None:
         return runtime_provider
     raise RuntimeError("runtime_provider is not attached to app.state")
+
+
+def _slot_ref(slot: object | None) -> tuple[str | None, str | None]:
+    if slot is None:
+        return (None, None)
+    return (
+        getattr(slot, "provider_id", None),
+        getattr(slot, "model", None),
+    )
+
+
+def _slot_payload(slot: object | None) -> object:
+    if slot is None:
+        return None
+    if hasattr(slot, "model_dump"):
+        return slot.model_dump(mode="json")
+    return slot
+
+
+def _get_active_models_info(runtime_provider: object) -> object | None:
+    getter = getattr(runtime_provider, "get_active_models_info", None)
+    if not callable(getter):
+        return None
+    try:
+        return getter()
+    except Exception:
+        return None
+
+
+def _build_provider_resolution_check(runtime_provider: object) -> dict[str, object] | None:
+    info = _get_active_models_info(runtime_provider)
+    if info is None:
+        return None
+    active_slot = getattr(info, "active_llm", None)
+    resolved_slot = getattr(info, "resolved_llm", None)
+    fallback_applied = bool(getattr(info, "fallback_applied", False))
+    resolution_reason = str(getattr(info, "resolution_reason", "") or "").strip()
+    unavailable_candidates = list(getattr(info, "unavailable_candidates", []) or [])
+    status = "pass" if resolved_slot is not None else "warn"
+    summary = resolution_reason or (
+        "Resolved a runnable provider/model slot."
+        if resolved_slot is not None
+        else "No available provider/model slot."
+    )
+    return {
+        "name": "provider_resolution",
+        "status": status,
+        "summary": summary,
+        "meta": {
+            "active_model": _slot_payload(active_slot),
+            "resolved_model": _slot_payload(resolved_slot),
+            "fallback_applied": fallback_applied,
+            "unavailable_candidates": unavailable_candidates,
+        },
+    }
+
+
+def _probe_remote_skill_discovery(app_state: Any) -> object:
+    probe = getattr(app_state, "remote_skill_discovery_probe", None)
+    if callable(probe):
+        return probe()
+    return search_curated_skill_catalog("automation", limit=1)
+
+
+def _build_remote_skill_discovery_check(app_state: Any) -> dict[str, object]:
+    try:
+        response = _probe_remote_skill_discovery(app_state)
+        items = list(getattr(response, "items", []) or [])
+        sources = list(getattr(response, "sources", []) or [])
+        warnings = [
+            str(item).strip()
+            for item in list(getattr(response, "warnings", []) or [])
+            if str(item).strip()
+        ]
+    except Exception as exc:
+        return {
+            "name": "remote_skill_discovery",
+            "status": "warn",
+            "summary": f"Curated remote skill discovery probe failed: {exc}",
+            "meta": {
+                "query": "automation",
+                "item_count": 0,
+                "source_count": 0,
+                "warnings": [str(exc)],
+            },
+        }
+
+    status = "pass" if items and not warnings else "warn"
+    if items and not warnings:
+        summary = f"Curated remote skill discovery returned {len(items)} result(s)."
+    elif items:
+        summary = "Curated remote skill discovery returned results with warnings."
+    elif warnings:
+        summary = warnings[0]
+    else:
+        summary = "Curated remote skill discovery returned no results."
+    return {
+        "name": "remote_skill_discovery",
+        "status": status,
+        "summary": summary,
+        "meta": {
+            "query": "automation",
+            "item_count": len(items),
+            "source_count": len(sources),
+            "warnings": warnings,
+        },
+    }
+
+
+def _probe_chat_decision_model(app_state: Any) -> object:
+    probe = getattr(app_state, "chat_decision_model_probe", None)
+    if callable(probe):
+        return probe()
+    query_execution_writeback_module.clear_chat_writeback_decision_cache()
+    return query_execution_writeback_module.resolve_chat_writeback_model_decision_sync(
+        text=(
+            "Use the mounted browser capability right now. "
+            "Open https://example.com and save a screenshot to C:\\temp\\probe.png."
+        ),
+    )
+
+
+def _build_chat_decision_model_check(app_state: Any) -> dict[str, object]:
+    try:
+        decision = _probe_chat_decision_model(app_state)
+    except (
+        query_execution_writeback_module.ChatWritebackDecisionModelUnavailableError,
+        query_execution_writeback_module.ChatWritebackDecisionModelTimeoutError,
+    ) as exc:
+        return {
+            "name": "chat_decision_model",
+            "status": "warn",
+            "summary": f"Chat decision model is unavailable: {exc}",
+            "meta": {
+                "intent_kind": None,
+                "kickoff_allowed": False,
+            },
+        }
+    except Exception as exc:
+        return {
+            "name": "chat_decision_model",
+            "status": "warn",
+            "summary": f"Chat decision model probe failed: {exc}",
+            "meta": {
+                "intent_kind": None,
+                "kickoff_allowed": False,
+            },
+        }
+
+    intent_kind = getattr(decision, "intent_kind", None)
+    kickoff_allowed = bool(getattr(decision, "kickoff_allowed", False))
+    risky_actuation_requested = bool(
+        getattr(decision, "risky_actuation_requested", False),
+    )
+    ready = intent_kind == "execute-task" and (kickoff_allowed or risky_actuation_requested)
+    summary = (
+        "Chat decision model is ready for governed execute-task routing."
+        if ready
+        else "Chat decision model did not resolve execute-task readiness."
+    )
+    return {
+        "name": "chat_decision_model",
+        "status": "pass" if ready else "warn",
+        "summary": summary,
+        "meta": {
+            "intent_kind": intent_kind,
+            "kickoff_allowed": kickoff_allowed,
+            "risky_actuation_requested": risky_actuation_requested,
+            "confidence": getattr(decision, "confidence", None),
+        },
+    }
 
 
 def _resolve_state_db_path(app_state: Any) -> Path:
@@ -225,12 +398,21 @@ async def run_system_self_check(request: Request) -> dict[str, object]:
             "pass" if present else "warn",
             f"{service_name} {'is available' if present else 'is not available'}.",
         )
+    provider_resolution_check = _build_provider_resolution_check(runtime_provider)
+    if provider_resolution_check is not None:
+        checks.append(provider_resolution_check)
     active_model = None
     get_active_model = getattr(runtime_provider, "get_active_model", None)
     if callable(get_active_model):
         active_model = get_active_model()
     provider_ok = False
-    if active_model is not None and getattr(active_model, "provider_id", None):
+    info = _get_active_models_info(runtime_provider)
+    if info is not None:
+        provider_ok = (
+            active_model is not None
+            and _slot_ref(active_model) == _slot_ref(getattr(info, "resolved_llm", None))
+        )
+    elif active_model is not None and getattr(active_model, "provider_id", None):
         get_provider = getattr(runtime_provider, "get_provider", None)
         if callable(get_provider):
             provider_ok = get_provider(active_model.provider_id) is not None
@@ -249,6 +431,8 @@ async def run_system_self_check(request: Request) -> dict[str, object]:
         ),
     )
 
+    checks.append(_build_remote_skill_discovery_check(app_state))
+
     fallback_slots = []
     get_fallback_slots = getattr(runtime_provider, "get_fallback_slots", None)
     if callable(get_fallback_slots):
@@ -265,6 +449,7 @@ async def run_system_self_check(request: Request) -> dict[str, object]:
             for slot in fallback_slots
         ],
     )
+    checks.append(_build_chat_decision_model_check(app_state))
 
     recovery_summary, _ = resolve_current_recovery_report(app_state)
     add_check(

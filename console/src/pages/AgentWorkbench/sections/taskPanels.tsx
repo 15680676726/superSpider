@@ -9,7 +9,9 @@ import {
 
 import {
   agentWorkbenchText,
+  getArtifactKindLabel,
   getPhaseLabel,
+  getReplayTypeLabel,
   getRiskLabel,
   getStatusLabel,
   runtimeCenterText,
@@ -216,6 +218,10 @@ export function EvidenceRow({
     item.capability_ref === DELEGATE_TASK_CAPABILITY
       ? formatDelegationEvidenceSummary(item, agents, taskTitleById)
       : item.result_summary;
+  const artifacts = Array.isArray(item.artifacts) ? item.artifacts.slice(0, 2) : [];
+  const replayPointers = Array.isArray(item.replay_pointers)
+    ? item.replay_pointers.slice(0, 2)
+    : [];
 
   return (
     <div
@@ -233,6 +239,12 @@ export function EvidenceRow({
         ) : null}
         {item.capability_ref ? <Tag color="blue">{item.capability_ref}</Tag> : null}
         {item.task_id ? <Tag>{agentWorkbenchText.taskTag(item.task_id)}</Tag> : null}
+        {typeof item.artifact_count === "number" && item.artifact_count > 0 ? (
+          <Tag color="gold">{agentWorkbenchText.evidenceArtifactCount(item.artifact_count)}</Tag>
+        ) : null}
+        {typeof item.replay_count === "number" && item.replay_count > 0 ? (
+          <Tag>{agentWorkbenchText.evidenceReplayCount(item.replay_count)}</Tag>
+        ) : null}
         {item.risk_level && item.risk_level !== "auto" ? (
           <Tag color={riskColor(item.risk_level)}>{getRiskLabel(item.risk_level)}</Tag>
         ) : null}
@@ -259,6 +271,40 @@ export function EvidenceRow({
       <div style={{ marginTop: 4 }}>
         <Text type="secondary">{localizeWorkbenchText(summary)}</Text>
       </div>
+      {artifacts.length > 0 ? (
+        <div style={{ marginTop: 4, display: "grid", gap: 2 }}>
+          {artifacts.map((artifact, index) => {
+            const label = getArtifactKindLabel(artifact.artifact_type) || "产物";
+            const parts = [
+              label,
+              normalizeNonEmpty(artifact.summary),
+              normalizeNonEmpty(artifact.storage_uri),
+            ].filter((value): value is string => Boolean(value));
+            return (
+              <Text key={artifact.id || `${item.id}:artifact:${index}`} type="secondary">
+                {localizeWorkbenchText(parts.join(" · "))}
+              </Text>
+            );
+          })}
+        </div>
+      ) : null}
+      {replayPointers.length > 0 ? (
+        <div style={{ marginTop: 4, display: "grid", gap: 2 }}>
+          {replayPointers.map((replay, index) => {
+            const label = getReplayTypeLabel(replay.replay_type) || "回放";
+            const parts = [
+              label,
+              normalizeNonEmpty(replay.summary),
+              normalizeNonEmpty(replay.storage_uri),
+            ].filter((value): value is string => Boolean(value));
+            return (
+              <Text key={replay.id || `${item.id}:replay:${index}`} type="secondary">
+                {localizeWorkbenchText(parts.join(" · "))}
+              </Text>
+            );
+          })}
+        </div>
+      ) : null}
       <Text type="secondary" style={{ fontSize: 11 }}>
         {formatTime(item.created_at, runtimeCenterText.noTimestamp)}
         {item.environment_ref ? ` - ${item.environment_ref}` : ""}

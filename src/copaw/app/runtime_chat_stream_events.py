@@ -301,6 +301,15 @@ def _build_sidecar_events(
             "timing": timing_profile if isinstance(timing_profile, dict) and timing_profile else None,
         }
     )
+    reply_done_payload = _compact_payload(
+        {
+            **base_payload,
+            "compaction_state": runtime_summary.get("compaction_state"),
+            "tool_result_budget": runtime_summary.get("tool_result_budget"),
+            "tool_use_summary": runtime_summary.get("tool_use_summary"),
+            "donor_trial_carry_forward": runtime_summary.get("donor_trial_carry_forward"),
+        }
+    )
     accepted_persistence = runtime_summary.get("accepted_persistence")
     if accepted_persistence is None and query_runtime_state:
         accepted_persistence = query_runtime_state.get("accepted_persistence")
@@ -323,7 +332,7 @@ def _build_sidecar_events(
     events.append(
         _build_sidecar_event(
             "turn_reply_done",
-            payload=base_payload,
+            payload=reply_done_payload,
         )
     )
     if commit_state is None or _should_skip_commit_sidecars(commit_state):

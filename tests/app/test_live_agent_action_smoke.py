@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import copaw.kernel.query_execution_runtime as query_execution_runtime_module
+import copaw.kernel.query_execution_writeback as query_execution_writeback_module
 from copaw.app.runtime_session import SafeJSONSession
 from copaw.agents.tools.browser_control_shared import get_browser_runtime_snapshot
 from copaw.capabilities import CapabilityService
@@ -52,6 +53,26 @@ LIVE_AGENT_ACTION_SMOKE_SKIP_REASON = (
     "Set COPAW_RUN_LIVE_AGENT_ACTION_SMOKE=1 to run live professional-agent "
     "browser action smoke coverage (opt-in; not part of default regression coverage)."
 )
+
+
+def _ensure_live_chat_writeback_model_ready_or_skip() -> None:
+    query_execution_writeback_module.clear_chat_writeback_decision_cache()
+    try:
+        decision = query_execution_writeback_module.resolve_chat_writeback_model_decision_sync(
+            text=(
+                "Use the mounted browser capability right now. "
+                "Open https://example.com and save a screenshot to C:\\temp\\probe.png."
+            ),
+        )
+    except (
+        query_execution_writeback_module.ChatWritebackDecisionModelUnavailableError,
+        query_execution_writeback_module.ChatWritebackDecisionModelTimeoutError,
+    ) as exc:
+        pytest.skip(f"Live chat writeback decision model is unavailable: {exc}")
+    if decision is None or decision.intent_kind != "execute-task" or not decision.kickoff_allowed:
+        pytest.skip(
+            "Live chat writeback decision model did not resolve execute-task readiness.",
+        )
 
 
 def _parse_sse_events(raw_text: str) -> list[dict[str, object]]:
@@ -381,6 +402,7 @@ def _run_live_agent_action_case(tmp_path: Path) -> dict[str, object]:
 def test_live_solution_lead_browser_action_runs_through_runtime_center_chat_front_door(
     tmp_path,
 ) -> None:
+    _ensure_live_chat_writeback_model_ready_or_skip()
     payload = _run_live_agent_action_case(tmp_path)
     assert payload["response_status"] == 200
     assert payload["event_count"] >= 1

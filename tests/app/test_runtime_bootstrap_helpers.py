@@ -106,6 +106,7 @@ def _build_bootstrap() -> RuntimeBootstrap:
         memory_opinion_view_repository=object(),
         memory_relation_view_repository=object(),
         memory_reflection_run_repository=object(),
+        memory_sleep_repository=object(),
         workflow_template_repository=object(),
         workflow_preset_repository=object(),
         workflow_run_repository=object(),
@@ -154,6 +155,7 @@ def _build_bootstrap() -> RuntimeBootstrap:
         memory_recall_service=object(),
         memory_reflection_service=object(),
         memory_retain_service=object(),
+        memory_sleep_service=object(),
         memory_activation_service=object(),
         knowledge_graph_service=object(),
         agent_experience_service=object(),
@@ -215,6 +217,7 @@ def test_build_runtime_query_services_returns_memory_activation_service_when_ava
         memory_entity_view_repository=object(),
         memory_opinion_view_repository=object(),
         memory_reflection_run_repository=object(),
+        memory_sleep_repository=object(),
         knowledge_chunk_repository=object(),
         strategy_memory_repository=object(),
         agent_report_repository=object(),
@@ -231,8 +234,9 @@ def test_build_runtime_query_services_returns_memory_activation_service_when_ava
         environment_service=object(),
     )
 
-    assert len(bootstrap) == 10
+    assert len(bootstrap) == 11
     assert bootstrap[8] is not None
+    assert bootstrap[9] is not None
     assert created["derived_index_service"] is bootstrap[4]
     assert created["strategy_memory_service"] is bootstrap[2]
     assert not hasattr(bootstrap[0], "_kernel_dispatcher")
@@ -255,6 +259,7 @@ def test_build_runtime_query_services_attaches_capability_candidate_service() ->
         memory_entity_view_repository=object(),
         memory_opinion_view_repository=object(),
         memory_reflection_run_repository=object(),
+        memory_sleep_repository=object(),
         knowledge_chunk_repository=object(),
         strategy_memory_repository=object(),
         agent_report_repository=object(),
@@ -273,6 +278,94 @@ def test_build_runtime_query_services_attaches_capability_candidate_service() ->
     )
 
     assert bootstrap[0]._capability_candidate_service is candidate_service
+
+
+def test_build_runtime_query_services_injects_runtime_provider_into_memory_sleep_inference() -> None:
+    class _FakeSleepChatModel:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        async def __call__(self, *, messages, structured_model=None, **kwargs):
+            self.calls.append(
+                {
+                    "messages": messages,
+                    "structured_model": structured_model,
+                    "kwargs": kwargs,
+                },
+            )
+            payload = {
+                "digest": {
+                    "headline": "Model digest",
+                    "summary": "Compiled by runtime model.",
+                    "current_constraints": ["Wait for finance review."],
+                    "current_focus": ["Close the approval blocker."],
+                    "top_entities": ["finance review"],
+                    "top_relations": ["approval depends on finance review"],
+                    "evidence_refs": ["fact:ctx-1:1"],
+                },
+                "alias_maps": [],
+                "merge_results": [],
+                "soft_rules": [],
+                "conflict_proposals": [],
+            }
+            metadata = (
+                structured_model.model_validate(payload)
+                if structured_model is not None
+                else payload
+            )
+            return SimpleNamespace(metadata=metadata, content=[])
+
+    fake_model = _FakeSleepChatModel()
+    runtime_provider = SimpleNamespace(get_active_chat_model=lambda: fake_model)
+    repositories = SimpleNamespace(
+        task_repository=object(),
+        task_runtime_repository=object(),
+        runtime_frame_repository=object(),
+        schedule_repository=object(),
+        backlog_item_repository=object(),
+        assignment_repository=object(),
+        goal_repository=object(),
+        work_context_repository=object(),
+        decision_request_repository=object(),
+        memory_fact_index_repository=object(),
+        memory_entity_view_repository=object(),
+        memory_opinion_view_repository=object(),
+        memory_reflection_run_repository=object(),
+        memory_sleep_repository=object(),
+        knowledge_chunk_repository=object(),
+        strategy_memory_repository=object(),
+        agent_report_repository=object(),
+        routine_repository=object(),
+        routine_run_repository=object(),
+        industry_instance_repository=object(),
+    )
+
+    bootstrap = build_runtime_query_services(
+        repositories=repositories,
+        evidence_ledger=object(),
+        runtime_event_bus=object(),
+        human_assist_task_service=object(),
+        environment_service=object(),
+        runtime_provider=runtime_provider,
+    )
+
+    sleep_service = bootstrap[8]
+    inference_service = sleep_service._inference_service
+    model_runner = inference_service._model_runner
+
+    assert callable(model_runner)
+    result = model_runner(
+        scope_type="work_context",
+        scope_id="ctx-1",
+        knowledge_chunks=[],
+        strategies=[],
+        fact_entries=[],
+        entity_views=[],
+        relation_views=[],
+    )
+    assert result["digest"]["headline"] == "Model digest"
+    assert fake_model.calls
+    assert fake_model.calls[0]["structured_model"] is not None
 
 
 def test_build_runtime_repositories_exposes_external_runtime_repository(tmp_path) -> None:
@@ -853,6 +946,8 @@ def test_build_kernel_runtime_threads_state_store_into_capability_service(
         capability_override_repository=object(),
         agent_profile_override_repository=object(),
         goal_override_repository=object(),
+        workflow_template_repository=object(),
+        workflow_run_repository=object(),
         decision_request_repository=object(),
         task_repository=object(),
         governance_control_repository=object(),
@@ -924,6 +1019,8 @@ def test_build_kernel_runtime_threads_external_runtime_service_into_capability_s
         capability_override_repository=object(),
         agent_profile_override_repository=object(),
         goal_override_repository=object(),
+        workflow_template_repository=object(),
+        workflow_run_repository=object(),
         decision_request_repository=object(),
         task_repository=object(),
         governance_control_repository=object(),
@@ -1150,6 +1247,32 @@ def test_warm_runtime_memory_services_skips_legacy_sidecar_prewarm_call() -> Non
             "create_learning_proposals": False,
         },
     ]
+
+
+def test_warm_runtime_memory_services_runs_idle_sleep_catchup_when_available() -> None:
+    calls: dict[str, object] = {}
+    repositories = SimpleNamespace(
+        industry_instance_repository=SimpleNamespace(list_instances=lambda limit=None: []),
+    )
+    derived_memory_index_service = SimpleNamespace(
+        rebuild_all=lambda: calls.setdefault("rebuild_all", True),
+    )
+    memory_reflection_service = SimpleNamespace(
+        reflect=lambda **kwargs: calls.setdefault("reflect_calls", []).append(kwargs),
+    )
+    memory_sleep_service = SimpleNamespace(
+        run_idle_catchup=lambda **kwargs: calls.setdefault("idle_catchup_calls", []).append(kwargs),
+    )
+
+    _warm_runtime_memory_services(
+        repositories=repositories,
+        derived_memory_index_service=derived_memory_index_service,
+        memory_reflection_service=memory_reflection_service,
+        memory_sleep_service=memory_sleep_service,
+    )
+
+    assert calls["rebuild_all"] is True
+    assert calls["idle_catchup_calls"] == [{"limit": 5}]
 
 
 def test_formal_memory_backend_kind_excludes_vector_and_legacy_sidecar_variants() -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from copaw.evidence import ArtifactRecord, EvidenceRecord, ReplayPointer
 from copaw.kernel import KernelTask, KernelToolBridge
 
 
@@ -107,3 +108,158 @@ def test_tool_bridge_preserves_blocked_status_and_contract_metadata() -> None:
     assert appended["metadata"]["preflight_policy"] == "shell-safety"
     assert appended["metadata"]["outcome_kind"] == "blocked"
     assert store.upserts[0]["last_error_summary"].startswith("Shell command blocked")
+
+
+def test_tool_bridge_builds_formal_file_result_items_from_recorded_evidence() -> None:
+    class _FakeTaskStore:
+        def __init__(self) -> None:
+            self.task = KernelTask(
+                id="ktask:file-result",
+                title="File result evidence",
+                capability_ref="tool:write_file",
+                owner_agent_id="ops-agent",
+                risk_level="auto",
+            )
+
+        def get(self, task_id: str) -> KernelTask | None:
+            return self.task if task_id == self.task.id else None
+
+        def append_evidence(self, task: KernelTask, **kwargs):
+            artifacts = tuple(
+                ArtifactRecord(
+                    id=f"artifact-file-{index}",
+                    artifact_type=artifact.artifact_type,
+                    storage_uri=artifact.storage_uri,
+                    summary=artifact.summary,
+                    metadata=artifact.metadata,
+                ).materialize(evidence_id="evidence-file-1")
+                for index, artifact in enumerate(tuple(kwargs.get("artifacts") or ()), start=1)
+            )
+            replays = tuple(
+                ReplayPointer(
+                    id=f"replay-file-{index}",
+                    replay_type=replay.replay_type,
+                    storage_uri=replay.storage_uri,
+                    summary=replay.summary,
+                    metadata=replay.metadata,
+                ).materialize(evidence_id="evidence-file-1")
+                for index, replay in enumerate(tuple(kwargs.get("replay_pointers") or ()), start=1)
+            )
+            return EvidenceRecord(
+                id="evidence-file-1",
+                task_id=task.id,
+                actor_ref=kwargs.get("actor_ref") or "tool:write_file",
+                environment_ref=kwargs.get("environment_ref"),
+                capability_ref=kwargs.get("capability_ref"),
+                risk_level=task.risk_level,
+                action_summary=kwargs["action_summary"],
+                result_summary=kwargs["result_summary"],
+                status=kwargs["status"],
+                metadata=kwargs.get("metadata") or {},
+                artifacts=artifacts,
+                replay_pointers=replays,
+            )
+
+        def upsert(self, task: KernelTask, **kwargs) -> None:
+            _ = (task, kwargs)
+
+    bridge = KernelToolBridge(task_store=_FakeTaskStore())
+
+    tool_use_summary = bridge.record_file_event(
+        "ktask:file-result",
+        {
+            "tool_name": "write_file",
+            "action": "write",
+            "resolved_path": "D:/word/copaw/report.md",
+            "status": "success",
+            "result_summary": "saved report",
+        },
+    )
+
+    assert tool_use_summary == {
+        "summary": "saved report",
+        "artifact_refs": ["D:/word/copaw/report.md"],
+        "result_items": [
+            {
+                "ref": "D:/word/copaw/report.md",
+                "kind": "file",
+                "label": "文件",
+                "summary": "saved report",
+                "route": "/api/runtime-center/artifacts/artifact-file-1",
+            },
+        ],
+    }
+
+
+def test_tool_bridge_builds_formal_replay_result_items_from_recorded_evidence(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    class _FakeTaskStore:
+        def __init__(self) -> None:
+            self.task = KernelTask(
+                id="ktask:shell-result",
+                title="Shell result evidence",
+                capability_ref="tool:execute_shell_command",
+                owner_agent_id="ops-agent",
+                risk_level="guarded",
+            )
+
+        def get(self, task_id: str) -> KernelTask | None:
+            return self.task if task_id == self.task.id else None
+
+        def append_evidence(self, task: KernelTask, **kwargs):
+            replays = tuple(
+                ReplayPointer(
+                    id=f"replay-shell-{index}",
+                    replay_type=replay.replay_type,
+                    storage_uri=replay.storage_uri,
+                    summary=replay.summary,
+                    metadata=replay.metadata,
+                ).materialize(evidence_id="evidence-shell-1")
+                for index, replay in enumerate(tuple(kwargs.get("replay_pointers") or ()), start=1)
+            )
+            return EvidenceRecord(
+                id="evidence-shell-1",
+                task_id=task.id,
+                actor_ref=kwargs.get("actor_ref") or "tool:execute_shell_command",
+                environment_ref=kwargs.get("environment_ref"),
+                capability_ref=kwargs.get("capability_ref"),
+                risk_level=task.risk_level,
+                action_summary=kwargs["action_summary"],
+                result_summary=kwargs["result_summary"],
+                status=kwargs["status"],
+                metadata=kwargs.get("metadata") or {},
+                replay_pointers=replays,
+            )
+
+        def upsert(self, task: KernelTask, **kwargs) -> None:
+            _ = (task, kwargs)
+
+    monkeypatch.setattr("copaw.kernel.tool_bridge.WORKING_DIR", tmp_path)
+    bridge = KernelToolBridge(task_store=_FakeTaskStore())
+
+    tool_use_summary = bridge.record_shell_event(
+        "ktask:shell-result",
+        {
+            "command": "git status",
+            "cwd": "D:/word/copaw",
+            "status": "success",
+            "stdout": "working tree clean",
+            "stderr": "",
+        },
+    )
+
+    assert tool_use_summary is not None
+    assert len(tool_use_summary["artifact_refs"]) == 1
+    assert str(tool_use_summary["artifact_refs"][0]).startswith("file:///")
+    assert tool_use_summary["result_items"] == [
+        {
+            "ref": tool_use_summary["artifact_refs"][0],
+            "kind": "replay",
+            "label": "回放",
+            "summary": "Replay shell command: git status",
+            "route": "/api/runtime-center/replays/replay-shell-1",
+        },
+    ]
+    assert tool_use_summary["summary"] == "Replay shell command: git status"

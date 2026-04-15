@@ -8,7 +8,7 @@ from urllib.parse import quote
 
 from .agent_profile import AgentProfile, DEFAULT_AGENTS
 from .persistence import decode_kernel_task_metadata
-from ..evidence import EvidenceLedger
+from ..evidence import EvidenceLedger, serialize_evidence_record
 from ..industry.models import (
     IndustrySeatCapabilityLayers,
     resolve_runtime_effective_capability_ids,
@@ -1754,18 +1754,7 @@ def _utc_now() -> datetime:
 
 
 def _serialize_evidence(record) -> dict[str, object]:
-    return {
-        "id": record.id,
-        "task_id": record.task_id,
-        "actor_ref": record.actor_ref,
-        "environment_ref": record.environment_ref,
-        "capability_ref": record.capability_ref,
-        "risk_level": record.risk_level,
-        "action_summary": record.action_summary,
-        "result_summary": record.result_summary,
-        "created_at": record.created_at.isoformat() if record.created_at else None,
-        "status": record.status,
-    }
+    return serialize_evidence_record(record)
 
 
 __all__ = ["AgentProfileService"]

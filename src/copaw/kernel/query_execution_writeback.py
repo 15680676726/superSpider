@@ -11,6 +11,7 @@ from agentscope.message import Msg, TextBlock
 from pydantic import BaseModel, Field
 
 from ..industry.chat_writeback import ChatWritebackPlan, build_chat_writeback_plan_from_payload
+from ..utils.model_response import materialize_model_response
 from ..utils.cache import BoundedLRUCache
 from .query_execution_intent_policy import (
     is_hypothetical_control_text as _is_hypothetical_control_text,
@@ -25,12 +26,53 @@ _CHAT_WRITEBACK_MODEL_INTENT_KINDS = frozenset(
 _CHAT_WRITEBACK_MODEL_SURFACES = frozenset({"browser", "desktop", "auto"})
 _CHAT_WRITEBACK_TEAM_ROLE_GAP_ACTIONS = frozenset({"approve", "reject"})
 _CHAT_WRITEBACK_MODEL_CACHE_MAX = 128
+_CHAT_WRITEBACK_DIRECT_EXECUTION_ACTION_TOKENS = (
+    "use ",
+    "open ",
+    "navigate",
+    "go to ",
+    "visit ",
+    "save ",
+    "capture ",
+    "take ",
+    "打开",
+    "访问",
+    "进入",
+    "前往",
+    "保存",
+    "截图",
+)
+_CHAT_WRITEBACK_DIRECT_EXECUTION_TARGET_TOKENS = (
+    "browser capability",
+    "mounted browser",
+    "browser",
+    "desktop",
+    "page",
+    "screen",
+    "window",
+    "site",
+    "website",
+    "url",
+    "screenshot",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    "浏览器",
+    "网页",
+    "页面",
+    "屏幕",
+    "窗口",
+    "截图",
+    "网址",
+    "链接",
+)
 _CHAT_WRITEBACK_MODEL_CACHE_LOCK = threading.Lock()
 _CHAT_WRITEBACK_MODEL_CACHE = BoundedLRUCache[str, "_ChatWritebackModelDecision"](
     max_entries=_CHAT_WRITEBACK_MODEL_CACHE_MAX,
 )
 _CHAT_WRITEBACK_DECISION_MODEL_FACTORY = None
-_CHAT_WRITEBACK_MODEL_TIMEOUT_SECONDS = 80.0
+_CHAT_WRITEBACK_MODEL_TIMEOUT_SECONDS = 300.0
 _CHAT_WRITEBACK_MODEL_PLANNER_PROMPT = """
 You are the governed execution-core chat frontdoor for CoPaw.
 
@@ -536,12 +578,7 @@ def _response_to_payload(response: object) -> dict[str, Any]:
 
 
 async def _materialize_response(response: object) -> object:
-    if not hasattr(response, "__aiter__"):
-        return response
-    last_item: object | None = None
-    async for item in response:  # type: ignore[misc]
-        last_item = item
-    return last_item if last_item is not None else response
+    return await materialize_model_response(response)
 
 
 def _cache_chat_writeback_decision(
@@ -763,6 +800,17 @@ def _looks_like_risky_actuation_request(text: str) -> bool:
     )
 
 
+def _looks_like_direct_execution_request(text: str) -> bool:
+    lowered = text.casefold()
+    return _contains_any(
+        lowered,
+        _CHAT_WRITEBACK_DIRECT_EXECUTION_ACTION_TOKENS,
+    ) and _contains_any(
+        lowered,
+        _CHAT_WRITEBACK_DIRECT_EXECUTION_TARGET_TOKENS,
+    )
+
+
 def _looks_like_schedule_change(text: str) -> bool:
     lowered = text.casefold()
     cadence = _contains_any(
@@ -895,6 +943,7 @@ def _heuristic_chat_writeback_model_decision(
     policy_writeback = _looks_like_policy_writeback(normalized)
     goal_writeback = _looks_like_goal_setting_text(normalized)
     execute_now = _looks_like_execute_now(normalized)
+    direct_execution_request = _looks_like_direct_execution_request(normalized)
 
     if team_role_gap_action is not None:
         return _ChatWritebackModelDecision(
@@ -950,7 +999,12 @@ def _heuristic_chat_writeback_model_decision(
         explicit_execution_confirmation
         or (
             not _is_hypothetical_control_text(normalized)
-            and (execute_now or risky_actuation_requested or goal_writeback)
+            and (
+                execute_now
+                or direct_execution_request
+                or risky_actuation_requested
+                or goal_writeback
+            )
         ),
     )
     intent_kind: Literal["chat", "discussion", "status-query", "execute-task"] = (
@@ -965,6 +1019,10 @@ def _heuristic_chat_writeback_model_decision(
         confidence = 0.95
         intent_confidence = 0.95
         intent_signals = ["risky-actuation"]
+    elif direct_execution_request:
+        confidence = 0.94
+        intent_confidence = 0.94
+        intent_signals = ["direct-execution-request"]
     elif should_writeback:
         confidence = 0.86
         intent_confidence = 0.86
@@ -1019,6 +1077,16 @@ def _heuristic_chat_writeback_model_decision(
     )
 
 
+def _should_prefer_direct_execution_heuristic(
+    decision: _ChatWritebackModelDecision,
+) -> bool:
+    return bool(
+        decision.intent_kind == "execute-task"
+        and decision.kickoff_allowed
+        and "direct-execution-request" in decision.intent_signals
+    )
+
+
 def _merge_model_decision_with_heuristic(
     model_decision: _ChatWritebackModelDecision,
     heuristic_decision: _ChatWritebackModelDecision,
@@ -1032,6 +1100,10 @@ def _merge_model_decision_with_heuristic(
         and not model_decision.team_role_gap_notice
     )
     if looks_empty and heuristic_decision.confidence > model_decision.intent_confidence:
+        return heuristic_decision
+    if _should_prefer_direct_execution_heuristic(heuristic_decision) and (
+        model_decision.intent_kind != "execute-task" or not model_decision.kickoff_allowed
+    ):
         return heuristic_decision
 
     payload = model_decision.model_dump(mode="json")
@@ -1114,7 +1186,18 @@ async def resolve_chat_writeback_model_decision(
     ):
         return _cache_chat_writeback_decision(normalized, heuristic)
 
-    model_decision = await _resolve_model_chat_writeback_decision(normalized)
+    try:
+        model_decision = await _resolve_model_chat_writeback_decision(normalized)
+    except (
+        ChatWritebackDecisionModelTimeoutError,
+        ChatWritebackDecisionModelUnavailableError,
+    ):
+        if _should_prefer_direct_execution_heuristic(heuristic):
+            logger.info(
+                "Falling back to direct-execution heuristic after chat writeback model failure.",
+            )
+            return _cache_chat_writeback_decision(normalized, heuristic)
+        raise
     return _cache_chat_writeback_decision(
         normalized,
         _merge_model_decision_with_heuristic(model_decision, heuristic),

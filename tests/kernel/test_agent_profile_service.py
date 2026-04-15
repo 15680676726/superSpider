@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 from types import SimpleNamespace
+from datetime import datetime, timezone
 
+from copaw.evidence import ArtifactRecord, EvidenceLedger, EvidenceRecord, ReplayPointer
 from copaw.kernel.agent_profile_service import AgentProfileService
 from copaw.kernel import KernelTask, KernelTaskStore
 from copaw.state import (
@@ -975,3 +977,96 @@ def test_agent_profile_service_detail_stats_drop_goal_count(tmp_path) -> None:
     assert detail is not None
     assert detail["stats"]["task_count"] == 1
     assert "goal_count" not in detail["stats"]
+
+
+def test_agent_profile_service_detail_reuses_canonical_evidence_projection(tmp_path) -> None:
+    store = SQLiteStateStore(tmp_path / "state.db")
+    runtime_repo = SqliteAgentRuntimeRepository(store)
+    task_repo = SqliteTaskRepository(store)
+    task_runtime_repo = SqliteTaskRuntimeRepository(store)
+    evidence_ledger = EvidenceLedger(tmp_path / "evidence.db")
+
+    runtime_repo.upsert_runtime(
+        AgentRuntimeRecord(
+            agent_id="agent-1",
+            actor_key="industry-v1-ops:operator",
+            actor_fingerprint="fp-agent-1",
+            actor_class="industry-dynamic",
+            desired_state="active",
+            runtime_status="idle",
+            industry_instance_id="industry-v1-ops",
+            industry_role_id="operator",
+            display_name="Ops Agent",
+            role_name="Operations",
+        ),
+    )
+    task_repo.upsert_task(
+        TaskRecord(
+            id="task-1",
+            owner_agent_id="agent-1",
+            title="Write report file",
+            summary="Persist the latest operator report.",
+            task_type="assignment-step",
+            status="completed",
+        ),
+    )
+    evidence_ledger.append(
+        EvidenceRecord(
+            id="evidence-1",
+            task_id="task-1",
+            actor_ref="agent-1",
+            environment_ref="session:web:main",
+            capability_ref="tool:write_file",
+            risk_level="auto",
+            action_summary="Write report file",
+            result_summary="Saved the latest operator report.",
+            created_at=datetime(2026, 4, 14, 10, 0, tzinfo=timezone.utc),
+            metadata={"child_task_id": "task-child-1"},
+            artifacts=(
+                ArtifactRecord(
+                    id="artifact-1",
+                    artifact_type="file",
+                    storage_uri="file:///tmp/report.md",
+                    summary="Operator report file",
+                ),
+            ),
+            replay_pointers=(
+                ReplayPointer(
+                    id="replay-1",
+                    replay_type="browser",
+                    storage_uri="replay://trace-1",
+                    summary="Browser replay",
+                ),
+            ),
+        ),
+    )
+
+    service = AgentProfileService(
+        task_repository=task_repo,
+        task_runtime_repository=task_runtime_repo,
+        agent_runtime_repository=runtime_repo,
+        evidence_ledger=evidence_ledger,
+    )
+    detail = service.get_agent_detail("agent-1")
+
+    assert detail is not None
+    evidence = detail["evidence"][0]
+    assert evidence["metadata"]["child_task_id"] == "task-child-1"
+    assert evidence["artifact_count"] == 1
+    assert evidence["replay_count"] == 1
+    assert evidence["artifacts"] == [
+        {
+            "id": "artifact-1",
+            "artifact_type": "file",
+            "storage_uri": "file:///tmp/report.md",
+            "summary": "Operator report file",
+        }
+    ]
+    assert evidence["replay_pointers"] == [
+        {
+            "id": "replay-1",
+            "replay_type": "browser",
+            "storage_uri": "replay://trace-1",
+            "summary": "Browser replay",
+        }
+    ]

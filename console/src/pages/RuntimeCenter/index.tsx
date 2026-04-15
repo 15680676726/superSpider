@@ -75,6 +75,33 @@ function firstText(...values: unknown[]): string | null {
   return null;
 }
 
+function firstNumber(...values: unknown[]): number | null {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === "string" && value.trim()) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+    if (isRecord(value)) {
+      const nested = firstNumber(
+        value.count,
+        value.total,
+        value.artifact_count,
+        value.replay_count,
+        value.value,
+      );
+      if (nested !== null) {
+        return nested;
+      }
+    }
+  }
+  return null;
+}
+
 function buildList(...values: Array<string | null | undefined>): string[] {
   return Array.from(
     new Set(values.map((item) => item?.trim()).filter((item): item is string => Boolean(item))),
@@ -174,6 +201,34 @@ function pickLatestRecord<T extends RuntimeMainBrainRecord>(
   return latest;
 }
 
+function buildEvidenceHint(...records: Array<RuntimeMainBrainRecord | undefined>): string | undefined {
+  const populatedRecords = records.filter(
+    (record): record is RuntimeMainBrainRecord => Boolean(record),
+  );
+  if (populatedRecords.length === 0) {
+    return undefined;
+  }
+  const artifactCount = firstNumber(
+    ...populatedRecords.flatMap((record) => {
+      const rawRecord = record as Record<string, unknown>;
+      const meta = isRecord(rawRecord.meta) ? rawRecord.meta : {};
+      return [meta.artifact_count, rawRecord.artifact_count];
+    }),
+  );
+  const replayCount = firstNumber(
+    ...populatedRecords.flatMap((record) => {
+      const rawRecord = record as Record<string, unknown>;
+      const meta = isRecord(rawRecord.meta) ? rawRecord.meta : {};
+      return [meta.replay_count, rawRecord.replay_count];
+    }),
+  );
+  const parts = buildList(
+    typeof artifactCount === "number" && artifactCount > 0 ? `产物 ${artifactCount}` : null,
+    typeof replayCount === "number" && replayCount > 0 ? `回放 ${replayCount}` : null,
+  );
+  return parts.length > 0 ? parts.join(" | ") : undefined;
+}
+
 function buildMainBrainSummaryFields(
   mainBrainData: RuntimeMainBrainResponse | null,
   approvals: PendingApprovalItem[],
@@ -190,6 +245,20 @@ function buildMainBrainSummaryFields(
       },
     ];
   }
+
+  const latestEvidence = pickLatestRecord(mainBrainData.evidence.entries);
+  const latestEvidenceSummary =
+    firstText(
+      latestEvidence?.summary,
+      latestEvidence?.title,
+      latestEvidence?.detail,
+      latestEvidence?.label,
+      latestEvidence?.name,
+      mainBrainData.evidence.summary,
+    ) ||
+    (mainBrainData.evidence.count > 0
+      ? `已有 ${mainBrainData.evidence.count} 条证据进入系统。`
+      : "今天还没有新的证据。");
 
   return [
     {
@@ -211,6 +280,11 @@ function buildMainBrainSummaryFields(
     {
       label: "今日进展",
       value: `已派工 ${mainBrainData.assignments.length} 项，已回收 ${mainBrainData.reports.length} 份汇报，新增 ${mainBrainData.evidence.count} 条证据。`,
+    },
+    {
+      label: "最新证据",
+      value: latestEvidenceSummary,
+      hint: buildEvidenceHint(latestEvidence, mainBrainData.evidence.meta),
     },
     {
       label: "需要你决定",

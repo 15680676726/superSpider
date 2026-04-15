@@ -246,6 +246,81 @@ describe("RuntimeCenterPage", () => {
     expect(screen.getByText("负责整理交付内容、跟进结果、回传进度。")).toBeInTheDocument();
   });
 
+  it("surfaces latest evidence artifact and replay counts in the main-brain summary", () => {
+    const state: any = createRuntimeCenterState();
+    state.mainBrainData.evidence = {
+      count: 2,
+      summary: "今天新增 2 条证据。",
+      route: "/api/runtime-center/evidence/evidence-1",
+      entries: [
+        {
+          id: "evidence-1",
+          title: "Write report file",
+          summary: "已将运营日报写成实际文件。",
+          created_at: "2026-04-12T08:55:00Z",
+          route: "/api/runtime-center/evidence/evidence-1",
+          meta: {
+            artifact_count: 2,
+            replay_count: 1,
+          },
+        },
+      ],
+      meta: {},
+    };
+    useRuntimeCenterMock.mockReturnValue(state);
+
+    render(<RuntimeCenterPage />);
+
+    expect(screen.getByText("最新证据")).toBeInTheDocument();
+    expect(screen.getByText("已将运营日报写成实际文件。")).toBeInTheDocument();
+    expect(screen.getByText("产物 2 | 回放 1")).toBeInTheDocument();
+  });
+
+  it("uses detail-only latest evidence copy in the main-brain summary", () => {
+    const state: any = createRuntimeCenterState();
+    state.mainBrainData.evidence = {
+      count: 1,
+      summary: "今天新增 1 条证据。",
+      route: "/api/runtime-center/evidence/evidence-2",
+      entries: [
+        {
+          id: "evidence-2",
+          detail: "实际文件已经落到工作区。",
+          created_at: "2026-04-12T08:58:00Z",
+          route: "/api/runtime-center/evidence/evidence-2",
+        },
+      ],
+      meta: {},
+    };
+    useRuntimeCenterMock.mockReturnValue(state);
+
+    render(<RuntimeCenterPage />);
+
+    expect(screen.getByText("最新证据")).toBeInTheDocument();
+    expect(screen.getByText("实际文件已经落到工作区。")).toBeInTheDocument();
+  });
+
+  it("falls back to section-level evidence artifact and replay counts", () => {
+    const state: any = createRuntimeCenterState();
+    state.mainBrainData.evidence = {
+      count: 2,
+      summary: "今天新增 2 条证据。",
+      route: "/api/runtime-center/evidence/evidence-3",
+      entries: [],
+      meta: {
+        artifact_count: 2,
+        replay_count: 1,
+      },
+    };
+    useRuntimeCenterMock.mockReturnValue(state);
+
+    render(<RuntimeCenterPage />);
+
+    expect(screen.getByText("最新证据")).toBeInTheDocument();
+    expect(screen.getByText("今天新增 2 条证据。")).toBeInTheDocument();
+    expect(screen.getByText("产物 2 | 回放 1")).toBeInTheDocument();
+  });
+
   it("prefers backend cockpit content when the formal cockpit payload is present", () => {
     const state: any = createRuntimeCenterState();
     state.mainBrainData.cockpit = {

@@ -31,6 +31,17 @@ class FakeProviderManager:
     def get_fallback_slots(self):
         return list(self._fallback)
 
+    def get_active_models_info(self):
+        return SimpleNamespace(
+            active_llm=self._active,
+            resolved_llm=self._active,
+            fallback_enabled=True,
+            fallback_chain=list(self._fallback),
+            fallback_applied=False,
+            resolution_reason="Using configured active model.",
+            unavailable_candidates=[],
+        )
+
 
 class FakeLoopTask:
     def __init__(
@@ -87,6 +98,17 @@ def build_app(tmp_path: Path) -> FastAPI:
     app.state.cron_manager = object()
     app.state.startup_recovery_summary = {"reason": "startup", "hydrated_tasks": 2}
     app.state.runtime_provider = FakeProviderManager()
+    app.state.remote_skill_discovery_probe = lambda: SimpleNamespace(
+        sources=[SimpleNamespace(source_id="skillhub-featured-core")],
+        items=[SimpleNamespace(title="Automation helper")],
+        warnings=[],
+    )
+    app.state.chat_decision_model_probe = lambda: SimpleNamespace(
+        intent_kind="execute-task",
+        kickoff_allowed=True,
+        risky_actuation_requested=True,
+        confidence=0.95,
+    )
     return app
 
 
@@ -150,9 +172,15 @@ def test_system_self_check_reports_provider_fallback(tmp_path: Path) -> None:
     payload = response.json()
     assert payload["overall_status"] in {"pass", "warn"}
     by_name = {item["name"]: item for item in payload["checks"]}
+    assert by_name["provider_resolution"]["status"] == "pass"
+    assert by_name["provider_resolution"]["meta"]["resolved_model"]["provider_id"] == "openai"
     assert by_name["provider_active_model"]["status"] == "pass"
     assert by_name["provider_fallback"]["status"] == "pass"
     assert by_name["provider_fallback"]["meta"]["count"] == 1
+    assert by_name["chat_decision_model"]["status"] == "pass"
+    assert by_name["chat_decision_model"]["meta"]["intent_kind"] == "execute-task"
+    assert by_name["remote_skill_discovery"]["status"] == "pass"
+    assert by_name["remote_skill_discovery"]["meta"]["item_count"] == 1
     assert "memory_qmd_sidecar" not in by_name
     assert "memory_embedding_config" not in by_name
     assert "memory_vector_ready" not in by_name
@@ -433,6 +461,44 @@ def test_system_self_check_includes_environment_preflight_checks(
     by_name = {item["name"]: item for item in payload["checks"]}
     assert by_name["subprocess_spawn"]["status"] == "warn"
     assert payload["environment_preflight"]["overall_status"] == "warn"
+
+
+def test_system_self_check_warns_when_remote_skill_discovery_is_unavailable(
+    tmp_path: Path,
+) -> None:
+    app = build_app(tmp_path)
+    app.state.remote_skill_discovery_probe = lambda: SimpleNamespace(
+        sources=[SimpleNamespace(source_id="skillhub-featured-core")],
+        items=[],
+        warnings=["Curated remote skill discovery is unavailable."],
+    )
+    client = TestClient(app)
+
+    response = client.get("/system/self-check")
+
+    assert response.status_code == 200
+    payload = response.json()
+    by_name = {item["name"]: item for item in payload["checks"]}
+    assert by_name["remote_skill_discovery"]["status"] == "warn"
+    assert "unavailable" in by_name["remote_skill_discovery"]["summary"]
+
+
+def test_system_self_check_warns_when_chat_decision_model_is_unavailable(
+    tmp_path: Path,
+) -> None:
+    app = build_app(tmp_path)
+    app.state.chat_decision_model_probe = lambda: (_ for _ in ()).throw(
+        RuntimeError("model slot unavailable"),
+    )
+    client = TestClient(app)
+
+    response = client.get("/system/self-check")
+
+    assert response.status_code == 200
+    payload = response.json()
+    by_name = {item["name"]: item for item in payload["checks"]}
+    assert by_name["chat_decision_model"]["status"] == "warn"
+    assert "unavailable" in by_name["chat_decision_model"]["summary"]
 
 
 def test_system_backup_download_streams_workspace_archive(

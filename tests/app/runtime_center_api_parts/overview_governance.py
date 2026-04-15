@@ -3810,6 +3810,151 @@ def test_runtime_center_chat_run_turn_reply_done_includes_intent_shell_payload()
     }
 
 
+def test_runtime_center_chat_run_turn_reply_done_preserves_formal_result_items() -> None:
+    app = build_runtime_center_app()
+    control_thread_id = "industry-chat:industry-v1-ops:result-items"
+    app.state.turn_executor = _CommitAwareTurnExecutor(
+        runtime_context={
+            "query_runtime_state": {
+                "tool_use_summary": {
+                    "summary": "Saved 2 result surfaces for review.",
+                    "artifact_refs": ["artifact://tool-result-1"],
+                    "result_items": [
+                        {
+                            "ref": "artifact://tool-result-1",
+                            "kind": "file",
+                            "label": "文件",
+                            "summary": "执行结果文件",
+                        },
+                        {
+                            "ref": "replay://tool-result-1",
+                            "kind": "replay",
+                            "label": "回放",
+                        },
+                    ],
+                }
+            }
+        }
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/runtime-center/chat/run",
+        json={
+            "id": "req-result-items",
+            "session_id": "session-result-items",
+            "user_id": "ops-user",
+            "channel": "console",
+            "thread_id": control_thread_id,
+            "control_thread_id": control_thread_id,
+            "input": [
+                {
+                    "role": "user",
+                    "type": "message",
+                    "content": [{"type": "text", "text": "show saved results"}],
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    sidecar_events = [
+        event
+        for event in _parse_sse_events(response.text)
+        if event.get("object") == "runtime.sidecar"
+    ]
+    assert sidecar_events[0]["event"] == "turn_reply_done"
+    assert sidecar_events[0]["payload"]["tool_use_summary"] == {
+        "summary": "Saved 2 result surfaces for review.",
+        "artifact_refs": ["artifact://tool-result-1"],
+        "result_items": [
+            {
+                "ref": "artifact://tool-result-1",
+                "kind": "file",
+                "label": "文件",
+                "summary": "执行结果文件",
+            },
+            {
+                "ref": "replay://tool-result-1",
+                "kind": "replay",
+                "label": "回放",
+            },
+        ],
+    }
+
+
+def test_runtime_center_chat_run_turn_reply_done_derives_formal_result_items_from_refs() -> None:
+    app = build_runtime_center_app()
+    control_thread_id = "industry-chat:industry-v1-ops:result-items-derived"
+    app.state.turn_executor = _CommitAwareTurnExecutor(
+        runtime_context={
+            "query_runtime_state": {
+                "tool_use_summary": {
+                    "artifact_refs": [
+                        "file:///tmp/report.md",
+                        "replay://trace-1",
+                        "file://artifacts/screenshot-1.png",
+                        "artifact://tool-result-1",
+                    ]
+                }
+            }
+        }
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/runtime-center/chat/run",
+        json={
+            "id": "req-result-items-derived",
+            "session_id": "session-result-items-derived",
+            "user_id": "ops-user",
+            "channel": "console",
+            "thread_id": control_thread_id,
+            "control_thread_id": control_thread_id,
+            "input": [
+                {
+                    "role": "user",
+                    "type": "message",
+                    "content": [{"type": "text", "text": "show derived results"}],
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    sidecar_events = [
+        event
+        for event in _parse_sse_events(response.text)
+        if event.get("object") == "runtime.sidecar"
+    ]
+    assert sidecar_events[0]["event"] == "turn_reply_done"
+    assert sidecar_events[0]["payload"]["tool_use_summary"] == {
+        "artifact_refs": [
+            "file:///tmp/report.md",
+            "replay://trace-1",
+            "file://artifacts/screenshot-1.png",
+            "artifact://tool-result-1",
+        ],
+        "result_items": [
+            {
+                "ref": "file:///tmp/report.md",
+                "kind": "file",
+                "label": "文件",
+            },
+            {
+                "ref": "replay://trace-1",
+                "kind": "replay",
+                "label": "回放",
+            },
+            {
+                "ref": "file://artifacts/screenshot-1.png",
+                "kind": "screenshot",
+                "label": "截图",
+            },
+        ],
+    }
+
+
 def test_runtime_center_chat_run_keeps_commit_events_in_same_control_thread() -> None:
     app = build_runtime_center_app()
     control_thread_id = "industry-chat:industry-v1-ops:thread-same"

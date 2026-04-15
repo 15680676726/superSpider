@@ -391,6 +391,45 @@
 
 ---
 
+## 1.3.3 `2026-04-15` live 烟雾前置诊断补充
+
+- `tests/app` 分块回归已跑通；本轮新增暴露出的失败均为 bootstrap / execution wiring 测试桩合同漂移，已对齐当前正式合同。
+- 默认被 skip 的两条 opt-in live smoke 已补“前置条件真相分流”：
+  - `test_live_agent_action_smoke.py` 会先检查 chat writeback decision model 是否真的可用
+  - `test_live_optimization_smoke.py` 会先检查 curated remote skill discovery 是否真的可用
+- 当前 live 阻塞已明确归因为环境前提，而不是主链代码断裂：
+  - 浏览器动作 live smoke：缺可用 chat decision model / fallback model slot
+  - 远程技能优化 live smoke：SkillHub curated discovery 当前不可达
+- `/system/self-check` 已新增两类正式诊断：
+  - `provider_resolution`
+  - `chat_decision_model`
+  - `remote_skill_discovery`
+- 目标是把“缺模型 / 缺远程发现”这类外部前提提前暴露在正式读面，而不是运行到中途才以业务失败形式爆出。
+
+---
+
+## 1.3.4 `2026-04-15` live chat writeback 抖动收口
+
+- operator 指出“模型连接本身是通的”后，已补做沙箱外直连与原始 decision probe：
+  - 结论不是 provider 不通，而是 chat writeback decision model 在真实上游链路里存在显著流式抖动；
+  - 同一条浏览器截图指令的原始 decision 调用，实测既可能在 `25s` 左右成功，也可能在 `100s+` 成功，且偶发在 `300s` 内仍超时。
+- 因此，本轮没有继续把问题误归因为“模型不可用”，而是对正式前门做了窄托底：
+  - `query_execution_writeback` 默认 decision timeout 提高到 `300s`
+  - 对“明确浏览器/桌面执行指令”新增 heuristic `direct-execution-request` 判定
+  - 当 model timeout / unavailable，或把这类明确执行指令保守误判成 `chat` 时，正式退回 heuristic execute-task 判定，而不是整条主链中断
+- 该托底当前只覆盖明确执行面，不放宽泛化写回：
+  - 典型命中：`Use the mounted browser capability right now. Open ... and save a screenshot ...`
+  - 非浏览器/桌面明确执行请求仍保留原有 timeout / unavailable 传播语义
+- 当前已完成 fresh verification：
+  - `python -m pytest tests/kernel/test_chat_writeback.py -q` -> `11 passed`
+  - `python -m pytest tests/app/test_system_api.py -q` -> `14 passed`
+  - `python -m pytest tests/kernel/test_turn_executor.py -q -k timeout` -> `1 passed`
+  - `python -m pytest tests/kernel/test_main_brain_orchestrator.py -q -k timeout` -> `1 passed`
+  - `COPAW_RUN_LIVE_AGENT_ACTION_SMOKE=1 python -m pytest tests/app/test_live_agent_action_smoke.py -q -rs` -> `1 passed`
+  - `COPAW_RUN_LIVE_OPTIMIZATION_SMOKE=1 python -m pytest tests/app/test_live_optimization_smoke.py -q -rs` -> `1 passed`
+
+---
+
 ## 1.4 `2026-04-05` Group F 闭环证明口径纠偏（必读）
 
 - `collect-only` 只证明“被收集到哪些测试”，**不证明行为通过**、不证明“默认回归闭环”。

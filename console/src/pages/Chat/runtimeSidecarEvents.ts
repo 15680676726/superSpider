@@ -50,10 +50,35 @@ export type RuntimeIntentShellSurface = {
   payload: Record<string, unknown>;
 };
 
+export type RuntimeReplyResultItemKind =
+  | "artifact"
+  | "file"
+  | "screenshot"
+  | "replay";
+
+export type RuntimeReplyResultItemSurface = {
+  ref: string | null;
+  kind: RuntimeReplyResultItemKind;
+  label: string;
+  summary: string | null;
+  route?: string | null;
+};
+
+export type RuntimeReplyResultSurface = {
+  title: string;
+  summary: string | null;
+  resultCount: number;
+  artifactRefs: string[];
+  resultItems: RuntimeReplyResultItemSurface[];
+  updatedAt: number;
+  payload: Record<string, unknown>;
+};
+
 export type RuntimeSidecarState = {
   controlThreadId: string | null;
   currentCommitStatus: RuntimeCommitStatus | null;
   currentIntentShell: RuntimeIntentShellSurface | null;
+  currentReplyResult: RuntimeReplyResultSurface | null;
   history: RuntimeCommitStatus[];
   lastReplyDoneAt: number | null;
   lastTerminalResponseAt: number | null;
@@ -253,6 +278,179 @@ function asStringArray(value: unknown): string[] {
     .filter((item): item is string => typeof item === "string");
 }
 
+function resolveReplyResultItemKind(
+  value: unknown,
+): RuntimeReplyResultItemKind {
+  const normalized = asNonEmptyString(value)?.toLowerCase();
+  if (normalized === "file") {
+    return "file";
+  }
+  if (normalized === "screenshot") {
+    return "screenshot";
+  }
+  if (normalized === "replay") {
+    return "replay";
+  }
+  return "artifact";
+}
+
+function resolveReplyResultItemLabel(
+  kind: RuntimeReplyResultItemKind,
+  value: unknown,
+): string {
+  const explicitLabel = asNonEmptyString(value);
+  if (explicitLabel) {
+    return explicitLabel;
+  }
+  if (kind === "file") {
+    return "文件";
+  }
+  if (kind === "screenshot") {
+    return "截图";
+  }
+  if (kind === "replay") {
+    return "回放";
+  }
+  return "结果";
+}
+
+function resolveReplyResultItems(
+  value: unknown,
+): RuntimeReplyResultItemSurface[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const items: RuntimeReplyResultItemSurface[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    const record = asRecord(item);
+    if (!record) {
+      continue;
+    }
+    const ref = asNonEmptyString(record.ref);
+    const rawKind = asNonEmptyString(record.kind);
+    const rawLabel = asNonEmptyString(record.label);
+    if (!ref && !rawKind && !rawLabel) {
+      continue;
+    }
+    const kind = resolveReplyResultItemKind(rawKind);
+    const label = resolveReplyResultItemLabel(kind, rawLabel);
+    const summary = asNonEmptyString(record.summary);
+    const route = asNonEmptyString(record.route);
+    const key = `${ref ?? ""}|${kind}|${label}|${summary ?? ""}|${route ?? ""}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    items.push({
+      ref,
+      kind,
+      label,
+      summary,
+      ...(route ? { route } : {}),
+    });
+  }
+  return items;
+}
+
+function looksLikeLocalFileRef(value: string): boolean {
+  return (
+    value.startsWith("file://") ||
+    /^[a-z]:[\\/]/i.test(value) ||
+    value.startsWith("/") ||
+    value.startsWith("./") ||
+    value.startsWith("../")
+  );
+}
+
+function looksLikeScreenshotRef(value: string): boolean {
+  const normalized = value.toLowerCase();
+  return (
+    normalized.includes("screenshot") ||
+    normalized.includes("screen-shot") ||
+    normalized.includes("screen_capture") ||
+    normalized.includes("screencap") ||
+    normalized.includes("snapshot")
+  );
+}
+
+function deriveReplyResultItemsFromRefs(
+  refs: string[],
+): RuntimeReplyResultItemSurface[] {
+  const items: RuntimeReplyResultItemSurface[] = [];
+  const seen = new Set<string>();
+  for (const ref of refs) {
+    const normalizedRef = ref.trim();
+    if (!normalizedRef || seen.has(normalizedRef)) {
+      continue;
+    }
+    seen.add(normalizedRef);
+    const loweredRef = normalizedRef.toLowerCase();
+    if (loweredRef.startsWith("replay://")) {
+      items.push({
+        ref: normalizedRef,
+        kind: "replay",
+        label: resolveReplyResultItemLabel("replay", null),
+        summary: null,
+      });
+      continue;
+    }
+    if (looksLikeScreenshotRef(loweredRef)) {
+      items.push({
+        ref: normalizedRef,
+        kind: "screenshot",
+        label: resolveReplyResultItemLabel("screenshot", null),
+        summary: null,
+      });
+      continue;
+    }
+    if (looksLikeLocalFileRef(normalizedRef)) {
+      items.push({
+        ref: normalizedRef,
+        kind: "file",
+        label: resolveReplyResultItemLabel("file", null),
+        summary: null,
+      });
+    }
+  }
+  return items;
+}
+
+function resolveReplyResultSurface(
+  payload: Record<string, unknown>,
+  now: number,
+): RuntimeReplyResultSurface | null {
+  const toolUseSummary = asRecord(payload.tool_use_summary);
+  const artifactRefs = asStringArray(toolUseSummary?.artifact_refs);
+  const explicitResultItems = resolveReplyResultItems(toolUseSummary?.result_items);
+  const resultItems =
+    explicitResultItems.length > 0
+      ? explicitResultItems
+      : deriveReplyResultItemsFromRefs(artifactRefs);
+  const resultCount =
+    explicitResultItems.length > 0
+      ? explicitResultItems.length
+      : artifactRefs.length;
+  if (resultCount === 0) {
+    return null;
+  }
+  const summary =
+    asNonEmptyString(toolUseSummary?.summary) ??
+    asNonEmptyString(payload.summary) ??
+    (resultCount === 1
+      ? "这轮执行已经产出 1 个可查看结果。"
+      : `这轮执行已经产出 ${resultCount} 个可查看结果。`);
+  return {
+    title: `已生成 ${resultCount} 个结果`,
+    summary,
+    resultCount,
+    artifactRefs,
+    resultItems,
+    updatedAt: now,
+    payload: compactPayload(payload),
+  };
+}
+
 export function resolveDeferredCommitPresentation(payload: Record<string, unknown>): {
   title: string;
   summary: string | null;
@@ -364,6 +562,7 @@ export function createInitialRuntimeSidecarState(
     controlThreadId,
     currentCommitStatus: null,
     currentIntentShell: null,
+    currentReplyResult: null,
     history: [],
     lastReplyDoneAt: null,
     lastTerminalResponseAt: null,
@@ -460,6 +659,7 @@ export function reduceRuntimeSidecarEvent(
     return {
       ...state,
       currentIntentShell: resolveIntentShellSurface(sidecarEvent.payload, now),
+      currentReplyResult: resolveReplyResultSurface(sidecarEvent.payload, now),
       lastReplyDoneAt: now,
       lastTerminalResponseAt: state.lastTerminalResponseAt,
     };
@@ -499,6 +699,7 @@ export function reduceRuntimeSidecarEvent(
     controlThreadId,
     currentCommitStatus: status,
     currentIntentShell: state.currentIntentShell,
+    currentReplyResult: state.currentReplyResult,
     history: trimHistory([...state.history, status]),
     lastReplyDoneAt: state.lastReplyDoneAt,
     lastTerminalResponseAt: state.lastTerminalResponseAt,

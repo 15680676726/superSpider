@@ -350,6 +350,7 @@ export interface EnvironmentObservationItem {
   storage_uri?: string | null;
   content_type?: string | null;
   replay_type?: string;
+  artifact_type?: string;
   artifact_kind?: string;
   created_at?: string | null;
 }
@@ -363,6 +364,7 @@ export interface EnvironmentReplayItem {
   result_summary?: string;
   storage_uri?: string | null;
   content_type?: string | null;
+  artifact_type?: string;
   artifact_kind?: string;
   created_at?: string | null;
 }
@@ -371,6 +373,7 @@ export interface EnvironmentArtifactItem {
   id?: string;
   replay_id?: string;
   artifact_id?: string;
+  artifact_type?: string;
   artifact_kind?: string;
   action_summary?: string;
   result_summary?: string;
@@ -395,6 +398,18 @@ export interface EvidenceListItem {
   metadata?: Record<string, unknown>;
   artifact_count?: number;
   replay_count?: number;
+  artifacts?: Array<{
+    id?: string | null;
+    artifact_type?: string | null;
+    storage_uri?: string | null;
+    summary?: string | null;
+  }>;
+  replay_pointers?: Array<{
+    id?: string | null;
+    replay_type?: string | null;
+    storage_uri?: string | null;
+    summary?: string | null;
+  }>;
 }
 
 export interface WorkTaskDetail {

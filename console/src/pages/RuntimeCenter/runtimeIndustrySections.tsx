@@ -466,6 +466,12 @@ export function buildRuntimeIndustryCockpitSignals(
     signalSource(mainBrainMeta, "patches") ?? patchesCard?.summary ?? patchesCard?.count;
   const assignmentsRoute = routeText(assignmentsSource) || industryRoute;
   const reportsRoute = routeText(agentReportsSource) || industryRoute;
+  const evidenceRoute =
+    routeText(evidenceSource) || textValue(evidenceCard?.entries?.[0]?.route) || null;
+  const decisionsRoute =
+    routeText(decisionsSource) || textValue(decisionsCard?.entries?.[0]?.route) || null;
+  const patchesRoute =
+    routeText(patchesSource) || textValue(patchesCard?.entries?.[0]?.route) || null;
   const unconsumedReports =
     numberValue(recordValue(agentReportsSource)?.unconsumed_count) ||
     numberValue(recordValue(agentReportsSource)?.pending_count) ||
@@ -535,7 +541,7 @@ export function buildRuntimeIndustryCockpitSignals(
       "evidence",
       countText(evidenceSource, textValue(evidenceCard?.count) || "0"),
       detailText(evidenceSource) || textValue(evidenceCard?.summary),
-      textValue(evidenceCard?.entries?.[0]?.route) || null,
+      evidenceRoute,
       "default",
       "证据详情",
     ),
@@ -543,7 +549,7 @@ export function buildRuntimeIndustryCockpitSignals(
       "decisions",
       countText(decisionsSource, textValue(decisionsCard?.count) || "0"),
       detailText(decisionsSource) || textValue(decisionsCard?.summary),
-      textValue(decisionsCard?.entries?.[0]?.route) || null,
+      decisionsRoute,
       "warning",
       "决策详情",
     ),
@@ -551,7 +557,7 @@ export function buildRuntimeIndustryCockpitSignals(
       "patches",
       countText(patchesSource, textValue(patchesCard?.count) || "0"),
       detailText(patchesSource) || textValue(patchesCard?.summary),
-      textValue(patchesCard?.entries?.[0]?.route) || null,
+      patchesRoute,
       "warning",
       "补丁详情",
     ),

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from ..constant import WORKING_DIR
-from ..evidence import ReplayPointer
+from ..evidence import ArtifactRecord, ReplayPointer, serialize_evidence_record
 from ..environments import EnvironmentService
 from .runtime_outcome import classify_runtime_outcome
 from .models import KernelTask
@@ -18,6 +18,14 @@ from .persistence import KernelTaskStore
 
 logger = logging.getLogger(__name__)
 _INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]+')
+_VISIBILITY_MAX_ITEMS = 6
+_SCREENSHOT_TOKENS = (
+    "screenshot",
+    "screen-shot",
+    "screen_capture",
+    "screencap",
+    "snapshot",
+)
 
 
 class KernelToolBridge:
@@ -32,10 +40,14 @@ class KernelToolBridge:
         self._task_store = task_store
         self._environment_service = environment_service
 
-    def record_shell_event(self, task_id: str, payload: dict[str, object]) -> None:
+    def record_shell_event(
+        self,
+        task_id: str,
+        payload: dict[str, object],
+    ) -> dict[str, object] | None:
         task = self._get_task(task_id)
         if task is None:
-            return
+            return None
         payload_metadata = self._payload_metadata(payload)
         status = self._string(payload_metadata.get("status")) or "success"
         command = self._string(payload.get("command")) or "shell"
@@ -82,11 +94,16 @@ class KernelToolBridge:
             last_active_at=self._coerce_datetime(payload.get("finished_at")),
         )
         self._update_task(task, status=status, summary=summary, evidence_id=evidence.id if evidence else None)
+        return self._build_tool_use_summary(evidence)
 
-    def record_file_event(self, task_id: str, payload: dict[str, object]) -> None:
+    def record_file_event(
+        self,
+        task_id: str,
+        payload: dict[str, object],
+    ) -> dict[str, object] | None:
         task = self._get_task(task_id)
         if task is None:
-            return
+            return None
         payload_metadata = self._payload_metadata(payload)
         status = self._string(payload_metadata.get("status")) or "success"
         action = self._string(payload.get("action")) or "write"
@@ -98,6 +115,12 @@ class KernelToolBridge:
             summary,
             success=status == "success",
             phase=self._string(payload_metadata.get("phase")) or status,
+        )
+        artifacts = self._build_file_artifacts(
+            status=status,
+            action=action,
+            resolved_path=resolved_path,
+            summary=result_summary or summary,
         )
         evidence = self._append_evidence(
             task,
@@ -111,6 +134,7 @@ class KernelToolBridge:
                 **payload_metadata,
                 "outcome_kind": outcome_kind,
             },
+            artifacts=artifacts,
         )
         self._touch_environment(
             ref=resolved_path,
@@ -122,11 +146,16 @@ class KernelToolBridge:
             last_active_at=self._coerce_datetime(payload.get("finished_at")),
         )
         self._update_task(task, status=status, summary=summary, evidence_id=evidence.id if evidence else None)
+        return self._build_tool_use_summary(evidence)
 
-    def record_browser_event(self, task_id: str, payload: dict[str, object]) -> None:
+    def record_browser_event(
+        self,
+        task_id: str,
+        payload: dict[str, object],
+    ) -> dict[str, object] | None:
         task = self._get_task(task_id)
         if task is None:
-            return
+            return None
         payload_metadata = self._payload_metadata(payload)
         status = self._string(payload_metadata.get("status")) or "success"
         action = self._string(payload.get("action")) or "browser"
@@ -166,6 +195,7 @@ class KernelToolBridge:
             last_active_at=self._coerce_datetime(payload.get("finished_at")),
         )
         self._update_task(task, status=status, summary=summary, evidence_id=evidence.id if evidence else None)
+        return self._build_tool_use_summary(evidence)
 
     def _get_task(self, task_id: str) -> KernelTask | None:
         try:
@@ -185,6 +215,7 @@ class KernelToolBridge:
         capability_ref: str | None,
         actor_ref: str | None,
         metadata: dict[str, object],
+        artifacts: tuple[ArtifactRecord, ...] | None = None,
         replay_pointers: tuple[ReplayPointer, ...] | None = None,
     ):
         return self._task_store.append_evidence(
@@ -201,8 +232,193 @@ class KernelToolBridge:
             environment_ref=environment_ref,
             capability_ref=capability_ref,
             actor_ref=actor_ref,
+            artifacts=artifacts,
             replay_pointers=replay_pointers,
         )
+
+    @classmethod
+    def _build_tool_use_summary(
+        cls,
+        evidence: object | None,
+    ) -> dict[str, object] | None:
+        if evidence is None:
+            return None
+        try:
+            serialized = serialize_evidence_record(evidence)
+        except Exception:
+            return None
+        artifact_refs: list[str] = []
+        result_items: list[dict[str, str]] = []
+        seen_refs: set[str] = set()
+        seen_signatures: set[tuple[str, str, str, str, str]] = set()
+        for artifact in serialized.get("artifacts", []):
+            if not isinstance(artifact, dict):
+                continue
+            ref = cls._string(artifact.get("storage_uri"))
+            if not ref:
+                continue
+            if ref not in seen_refs:
+                artifact_refs.append(ref)
+                seen_refs.add(ref)
+            kind, label = cls._artifact_result_kind(
+                artifact_type=cls._string(artifact.get("artifact_type")),
+                storage_uri=ref,
+                summary=cls._string(artifact.get("summary")),
+            )
+            result_item = cls._build_result_item(
+                ref=ref,
+                kind=kind,
+                label=label,
+                summary=cls._string(artifact.get("summary")),
+                route=cls._artifact_route(cls._string(artifact.get("id"))),
+            )
+            if result_item is None:
+                continue
+            signature = (
+                result_item.get("ref", ""),
+                result_item.get("kind", ""),
+                result_item.get("label", ""),
+                result_item.get("summary", ""),
+                result_item.get("route", ""),
+            )
+            if signature in seen_signatures:
+                continue
+            seen_signatures.add(signature)
+            result_items.append(result_item)
+            if len(result_items) >= _VISIBILITY_MAX_ITEMS:
+                break
+        if len(result_items) < _VISIBILITY_MAX_ITEMS:
+            for replay in serialized.get("replay_pointers", []):
+                if not isinstance(replay, dict):
+                    continue
+                ref = cls._string(replay.get("storage_uri"))
+                if not ref:
+                    continue
+                if ref not in seen_refs:
+                    artifact_refs.append(ref)
+                    seen_refs.add(ref)
+                result_item = cls._build_result_item(
+                    ref=ref,
+                    kind="replay",
+                    label="回放",
+                    summary=cls._string(replay.get("summary")),
+                    route=cls._replay_route(cls._string(replay.get("id"))),
+                )
+                if result_item is None:
+                    continue
+                signature = (
+                    result_item.get("ref", ""),
+                    result_item.get("kind", ""),
+                    result_item.get("label", ""),
+                    result_item.get("summary", ""),
+                    result_item.get("route", ""),
+                )
+                if signature in seen_signatures:
+                    continue
+                seen_signatures.add(signature)
+                result_items.append(result_item)
+                if len(result_items) >= _VISIBILITY_MAX_ITEMS:
+                    break
+        if not artifact_refs and not result_items:
+            return None
+        payload: dict[str, object] = {
+            "artifact_refs": artifact_refs[:_VISIBILITY_MAX_ITEMS],
+        }
+        if result_items:
+            payload["result_items"] = result_items[:_VISIBILITY_MAX_ITEMS]
+        summary = cls._first_non_empty(
+            next(
+                (
+                    item.get("summary")
+                    for item in result_items
+                    if isinstance(item, dict) and cls._string(item.get("summary"))
+                ),
+                None,
+            ),
+            cls._string(serialized.get("result_summary")),
+        )
+        if summary is not None:
+            payload["summary"] = summary
+        return payload
+
+    @classmethod
+    def _artifact_result_kind(
+        cls,
+        *,
+        artifact_type: str | None,
+        storage_uri: str | None,
+        summary: str | None,
+    ) -> tuple[str, str]:
+        normalized_type = str(artifact_type or "").strip().lower()
+        if normalized_type == "screenshot":
+            return "screenshot", "截图"
+        if normalized_type in {"image", "snapshot"} and cls._looks_like_screenshot(
+            storage_uri,
+            summary,
+            artifact_type,
+        ):
+            return "screenshot", "截图"
+        if cls._looks_like_screenshot(storage_uri, summary, artifact_type):
+            return "screenshot", "截图"
+        return "file", "文件"
+
+    @classmethod
+    def _looks_like_screenshot(cls, *values: str | None) -> bool:
+        for value in values:
+            normalized = str(value or "").strip().lower()
+            if any(token in normalized for token in _SCREENSHOT_TOKENS):
+                return True
+        return False
+
+    @staticmethod
+    def _artifact_route(artifact_id: str | None) -> str | None:
+        if not artifact_id:
+            return None
+        return f"/api/runtime-center/artifacts/{artifact_id}"
+
+    @staticmethod
+    def _replay_route(replay_id: str | None) -> str | None:
+        if not replay_id:
+            return None
+        return f"/api/runtime-center/replays/{replay_id}"
+
+    @classmethod
+    def _build_result_item(
+        cls,
+        *,
+        ref: str | None,
+        kind: str | None,
+        label: str | None,
+        summary: str | None = None,
+        route: str | None = None,
+    ) -> dict[str, str] | None:
+        resolved_ref = cls._string(ref)
+        resolved_kind = cls._string(kind)
+        resolved_label = cls._string(label)
+        if not resolved_ref or not resolved_kind or not resolved_label:
+            return None
+        payload: dict[str, str] = {
+            "ref": resolved_ref,
+            "kind": resolved_kind,
+            "label": resolved_label,
+        }
+        resolved_summary = cls._string(summary)
+        if resolved_summary is not None:
+            payload["summary"] = resolved_summary
+        resolved_route = cls._string(route)
+        if resolved_route is not None:
+            payload["route"] = resolved_route
+        return payload
+
+    @staticmethod
+    def _first_non_empty(*values: object | None) -> str | None:
+        for value in values:
+            if value is None:
+                continue
+            text = str(value).strip()
+            if text:
+                return text
+        return None
 
     def _update_task(
         self,
@@ -246,6 +462,31 @@ class KernelToolBridge:
             )
         except Exception:
             logger.exception("Kernel tool bridge failed to update environment mount")
+
+    @staticmethod
+    def _build_file_artifacts(
+        *,
+        status: str,
+        action: str,
+        resolved_path: str | None,
+        summary: str,
+    ) -> tuple[ArtifactRecord, ...]:
+        if status != "success" or not resolved_path:
+            return ()
+        if action not in {"write", "edit", "append"}:
+            return ()
+        return (
+            ArtifactRecord(
+                artifact_type="file",
+                storage_uri=resolved_path,
+                summary=summary,
+                metadata={
+                    "source": "tool-bridge",
+                    "action": action,
+                    "status": status,
+                },
+            ),
+        )
 
     @staticmethod
     def _string(value: object) -> str | None:

@@ -123,6 +123,26 @@ class _FakeMalformedStructuredDecisionModel:
         )
 
 
+class _FakeConservativeStructuredDecisionModel:
+    stream = False
+
+    async def __call__(self, *, messages, structured_model=None, **kwargs):
+        _ = (messages, kwargs)
+        assert structured_model is not None
+        return SimpleNamespace(
+            metadata=structured_model(
+                intent_kind="chat",
+                intent_confidence=0.92,
+                intent_signals=["too-conservative"],
+                should_writeback=False,
+                approved_targets=[],
+                kickoff_allowed=False,
+                confidence=0.92,
+                rationale="conservative-model",
+            ),
+        )
+
+
 def test_actionable_content_creation_request_does_not_degrade_into_plain_chat(
     monkeypatch,
 ) -> None:
@@ -219,8 +239,35 @@ class _SlowStructuredDecisionModel:
         return SimpleNamespace(metadata={})
 
 
-def test_chat_writeback_model_timeout_default_is_80_seconds() -> None:
-    assert writeback_module._CHAT_WRITEBACK_MODEL_TIMEOUT_SECONDS == 80.0
+def test_chat_writeback_model_timeout_default_is_300_seconds() -> None:
+    assert writeback_module._CHAT_WRITEBACK_MODEL_TIMEOUT_SECONDS == 300.0
+
+
+def test_direct_browser_execution_request_falls_back_to_heuristic_when_model_is_conservative(
+    monkeypatch,
+) -> None:
+    writeback_module.clear_chat_writeback_decision_cache()
+    monkeypatch.setattr(
+        writeback_module,
+        "_CHAT_WRITEBACK_DECISION_MODEL_FACTORY",
+        lambda: _FakeConservativeStructuredDecisionModel(),
+        raising=False,
+    )
+
+    decision = asyncio.run(
+        writeback_module.resolve_chat_writeback_model_decision(
+            text=(
+                "Use the mounted browser capability right now. "
+                "Open https://example.com and save a screenshot to C:\\temp\\probe.png."
+            ),
+        ),
+    )
+
+    assert decision is not None
+    assert decision.intent_kind == "execute-task"
+    assert decision.kickoff_allowed is True
+    assert "direct-execution-request" in decision.intent_signals
+    assert decision.risky_actuation_surface == "browser"
 
 
 def test_actionable_request_raises_when_chat_writeback_model_times_out(
@@ -246,3 +293,36 @@ def test_actionable_request_raises_when_chat_writeback_model_times_out(
                 text="现在去写一篇短篇小说，保存成实际文件，完成后主动告诉我结果。",
             ),
         )
+
+
+def test_direct_browser_execution_request_falls_back_to_heuristic_when_model_times_out(
+    monkeypatch,
+) -> None:
+    writeback_module.clear_chat_writeback_decision_cache()
+    monkeypatch.setattr(
+        writeback_module,
+        "_CHAT_WRITEBACK_DECISION_MODEL_FACTORY",
+        lambda: _SlowStructuredDecisionModel(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        writeback_module,
+        "_CHAT_WRITEBACK_MODEL_TIMEOUT_SECONDS",
+        0.01,
+        raising=False,
+    )
+
+    decision = asyncio.run(
+        writeback_module.resolve_chat_writeback_model_decision(
+            text=(
+                "Use the mounted browser capability right now. "
+                "Open https://example.com and save a screenshot to C:\\temp\\probe.png."
+            ),
+        ),
+    )
+
+    assert decision is not None
+    assert decision.intent_kind == "execute-task"
+    assert decision.kickoff_allowed is True
+    assert "direct-execution-request" in decision.intent_signals
+    assert decision.risky_actuation_surface == "browser"

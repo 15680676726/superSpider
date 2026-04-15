@@ -162,6 +162,7 @@ def test_build_runtime_bootstrap_assembles_domain_services_via_domain_builder(
                 prepare_sidecar_backends=lambda prewarm_backend_ids: calls.setdefault("prewarm_backends", list(prewarm_backend_ids)),
             ),
             "memory-retain-service",
+            "memory-sleep-service",
             "memory-activation-service",
             "agent-experience-service",
         ),

@@ -351,8 +351,16 @@ export interface RuntimeMainBrainToolResultBudget extends RuntimeMainBrainRecord
   budget_remaining?: number | null;
 }
 
+export interface RuntimeMainBrainToolUseResultItem extends RuntimeMainBrainRecord {
+  ref?: string | null;
+  kind?: string | null;
+  label?: string | null;
+  route?: string | null;
+}
+
 export interface RuntimeMainBrainToolUseSummary extends RuntimeMainBrainRecord {
   artifact_refs?: string[];
+  result_items?: RuntimeMainBrainToolUseResultItem[];
 }
 
 export interface RuntimeMainBrainQueryRuntimeEntropy extends RuntimeMainBrainRecord {

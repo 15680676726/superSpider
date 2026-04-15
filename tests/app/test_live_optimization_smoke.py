@@ -8,6 +8,10 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from copaw.capabilities.remote_skill_catalog import (
+    clear_curated_skill_catalog_cache,
+    search_curated_skill_catalog,
+)
 from copaw.evidence.models import EvidenceRecord
 from copaw.state import (
     BacklogItemRecord,
@@ -31,6 +35,19 @@ LIVE_OPTIMIZATION_SMOKE_SKIP_REASON = (
     "Set COPAW_RUN_LIVE_OPTIMIZATION_SMOKE=1 to run live optimization smoke "
     "coverage (opt-in; not part of default regression coverage)."
 )
+
+
+def _skip_when_live_remote_skill_discovery_is_unavailable(query: str) -> None:
+    clear_curated_skill_catalog_cache()
+    response = search_curated_skill_catalog(query, limit=3)
+    if response.items:
+        return
+    reason = (
+        response.warnings[0]
+        if response.warnings
+        else f"No curated remote skill candidates were returned for query '{query}'."
+    )
+    pytest.skip(f"Live remote skill discovery is unavailable: {reason}")
 
 
 def _patch_skill_dirs(monkeypatch, tmp_path) -> tuple[Path, Path]:
@@ -83,11 +100,21 @@ def test_live_remote_skill_optimization_loop_closes_into_planning_writeback(
             assert handoff_response.status_code == 200
 
             trial_recommendation = next(
-                item
-                for item in created["recommendations"]
-                if item["recommendation"]["metadata"].get("gap_kind")
-                == "underperforming_capability"
+                (
+                    item
+                    for item in created["recommendations"]
+                    if item["recommendation"]["metadata"].get("gap_kind")
+                    == "underperforming_capability"
+                ),
+                None,
             )
+            if trial_recommendation is None:
+                _skip_when_live_remote_skill_discovery_is_unavailable(
+                    "legacy outreach",
+                )
+                pytest.fail(
+                    "Prediction case did not materialize an underperforming_capability recommendation.",
+                )
             candidate_id = trial_recommendation["recommendation"]["metadata"]["candidate_id"]
             execution_payload = _execute_prediction_recommendation_direct(
                 app,

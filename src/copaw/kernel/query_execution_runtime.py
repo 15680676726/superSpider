@@ -404,6 +404,93 @@ def _merge_query_tool_trial_attribution(
     return resolved_payload
 
 
+def _normalize_query_tool_result_items(
+    value: Any,
+    *,
+    max_items: int = _DONOR_TRIAL_VISIBILITY_MAX_ITEMS,
+) -> list[dict[str, str]]:
+    if not isinstance(value, (list, tuple)):
+        return []
+    normalized: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str, str, str]] = set()
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        resolved: dict[str, str] = {}
+        for key in ("ref", "kind", "label", "summary", "route"):
+            text = _first_non_empty(item.get(key))
+            if text is not None:
+                resolved[key] = text
+        if not resolved:
+            continue
+        signature = (
+            resolved.get("ref", ""),
+            resolved.get("kind", ""),
+            resolved.get("label", ""),
+            resolved.get("summary", ""),
+            resolved.get("route", ""),
+        )
+        if signature in seen:
+            continue
+        seen.add(signature)
+        normalized.append(resolved)
+        if len(normalized) >= max_items:
+            break
+    return normalized
+
+
+def _mapping_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, (list, tuple)):
+        return []
+    resolved: list[dict[str, Any]] = []
+    for item in value:
+        payload = _mapping_value(item)
+        if payload:
+            resolved.append(payload)
+    return resolved
+
+
+def _merge_query_tool_use_summary(
+    existing: Mapping[str, Any] | None,
+    patch: Mapping[str, Any] | None,
+    *,
+    max_items: int = _DONOR_TRIAL_VISIBILITY_MAX_ITEMS,
+) -> dict[str, Any] | None:
+    existing_payload = _mapping_value(existing)
+    patch_payload = _mapping_value(patch)
+    if not patch_payload:
+        return existing_payload or None
+    artifact_refs: list[str] = []
+    for ref in (
+        *_string_list(existing_payload.get("artifact_refs")),
+        *_string_list(patch_payload.get("artifact_refs")),
+    ):
+        if ref in artifact_refs:
+            continue
+        artifact_refs.append(ref)
+        if len(artifact_refs) >= max_items:
+            break
+    result_items = _normalize_query_tool_result_items(
+        [
+            *_mapping_list(existing_payload.get("result_items")),
+            *_mapping_list(patch_payload.get("result_items")),
+        ],
+        max_items=max_items,
+    )
+    summary = _first_non_empty(
+        patch_payload.get("summary"),
+        existing_payload.get("summary"),
+    )
+    merged: dict[str, Any] = {}
+    if summary is not None:
+        merged["summary"] = summary
+    if artifact_refs:
+        merged["artifact_refs"] = artifact_refs
+    if result_items:
+        merged["result_items"] = result_items
+    return merged or None
+
+
 def _query_environment_ref(execution_context: Mapping[str, Any] | None) -> str | None:
     runtime = _mapping_value((execution_context or {}).get("main_brain_runtime"))
     environment = _mapping_value(runtime.get("environment"))
@@ -1398,18 +1485,21 @@ class _QueryExecutionRuntimeMixin(
                         with bind_shell_evidence_sink(
                             self._make_shell_evidence_sink(
                                 kernel_task_id,
+                                request=request,
                                 capability_trial_attribution=capability_trial_attribution,
                             ),
                         ):
                             with bind_file_evidence_sink(
                                 self._make_file_evidence_sink(
                                     kernel_task_id,
+                                    request=request,
                                     capability_trial_attribution=capability_trial_attribution,
                                 ),
                             ):
                                 with bind_browser_evidence_sink(
                                     self._make_browser_evidence_sink(
                                         kernel_task_id,
+                                        request=request,
                                         capability_trial_attribution=capability_trial_attribution,
                                     ),
                                 ):
@@ -1942,40 +2032,67 @@ class _QueryExecutionRuntimeMixin(
         self,
         kernel_task_id: str | None,
         *,
+        request: Any | None = None,
         capability_trial_attribution: Mapping[str, Any] | None = None,
     ):
         if self._tool_bridge is None or kernel_task_id is None:
             return None
-        return lambda payload: self._tool_bridge.record_shell_event(
-            kernel_task_id,
-            _merge_query_tool_trial_attribution(payload, capability_trial_attribution),
-        )
+        def _sink(payload):
+            tool_use_summary = self._tool_bridge.record_shell_event(
+                kernel_task_id,
+                _merge_query_tool_trial_attribution(payload, capability_trial_attribution),
+            )
+            self._persist_query_tool_use_summary(
+                request=request,
+                tool_use_summary=tool_use_summary,
+            )
+            return tool_use_summary
+
+        return _sink
 
     def _make_file_evidence_sink(
         self,
         kernel_task_id: str | None,
         *,
+        request: Any | None = None,
         capability_trial_attribution: Mapping[str, Any] | None = None,
     ):
         if self._tool_bridge is None or kernel_task_id is None:
             return None
-        return lambda payload: self._tool_bridge.record_file_event(
-            kernel_task_id,
-            _merge_query_tool_trial_attribution(payload, capability_trial_attribution),
-        )
+        def _sink(payload):
+            tool_use_summary = self._tool_bridge.record_file_event(
+                kernel_task_id,
+                _merge_query_tool_trial_attribution(payload, capability_trial_attribution),
+            )
+            self._persist_query_tool_use_summary(
+                request=request,
+                tool_use_summary=tool_use_summary,
+            )
+            return tool_use_summary
+
+        return _sink
 
     def _make_browser_evidence_sink(
         self,
         kernel_task_id: str | None,
         *,
+        request: Any | None = None,
         capability_trial_attribution: Mapping[str, Any] | None = None,
     ):
         if self._tool_bridge is None or kernel_task_id is None:
             return None
-        return lambda payload: self._tool_bridge.record_browser_event(
-            kernel_task_id,
-            _merge_query_tool_trial_attribution(payload, capability_trial_attribution),
-        )
+        def _sink(payload):
+            tool_use_summary = self._tool_bridge.record_browser_event(
+                kernel_task_id,
+                _merge_query_tool_trial_attribution(payload, capability_trial_attribution),
+            )
+            self._persist_query_tool_use_summary(
+                request=request,
+                tool_use_summary=tool_use_summary,
+            )
+            return tool_use_summary
+
+        return _sink
 
     def _build_query_tool_execution_delegate(
         self,
@@ -3326,6 +3443,7 @@ class _QueryExecutionRuntimeMixin(
         request: Any,
         accepted_persistence: dict[str, Any] | None = None,
         commit_outcome: dict[str, Any] | None = None,
+        query_runtime_state_updates: dict[str, Any] | None = None,
     ) -> None:
         runtime_context = update_request_runtime_context(
             request,
@@ -3337,6 +3455,12 @@ class _QueryExecutionRuntimeMixin(
             query_runtime_state["accepted_persistence"] = dict(accepted_persistence)
         if commit_outcome is not None:
             query_runtime_state["commit_outcome"] = dict(commit_outcome)
+        if isinstance(query_runtime_state_updates, dict):
+            for key, value in query_runtime_state_updates.items():
+                if value is None:
+                    query_runtime_state.pop(key, None)
+                    continue
+                query_runtime_state[key] = value
         if not query_runtime_state:
             return
         runtime_context["query_runtime_state"] = query_runtime_state
@@ -3353,6 +3477,32 @@ class _QueryExecutionRuntimeMixin(
         self._save_query_runtime_state_snapshot(
             request=request,
             query_runtime_state=query_runtime_state,
+        )
+
+    def _persist_query_tool_use_summary(
+        self,
+        *,
+        request: Any | None,
+        tool_use_summary: Mapping[str, Any] | None,
+    ) -> None:
+        if request is None:
+            return
+        runtime_context = _mapping_value(
+            getattr(request, "_copaw_main_brain_runtime_context", None),
+        )
+        merged = _merge_query_tool_use_summary(
+            _mapping_value(
+                _mapping_value(runtime_context.get("query_runtime_state")).get(
+                    "tool_use_summary",
+                ),
+            ),
+            tool_use_summary,
+        )
+        if merged is None:
+            return
+        self._persist_query_runtime_state(
+            request=request,
+            query_runtime_state_updates={"tool_use_summary": merged},
         )
 
     def _save_query_runtime_state_snapshot(

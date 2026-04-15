@@ -61,6 +61,37 @@ function formatRuntimeTime(value: string | null | undefined, fallback: string): 
   }).format(parsed);
 }
 
+function firstObservationText(...values: Array<string | null | undefined>): string | null {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) {
+      return localizeWorkbenchText(value.trim());
+    }
+  }
+  return null;
+}
+
+function buildObservationTitle(
+  label: string | null,
+  rawId: string | null,
+  ...summaries: Array<string | null | undefined>
+): string {
+  return firstObservationText(label, ...summaries, rawId) ?? "-";
+}
+
+function buildObservationSummary(
+  title: string,
+  ...summaries: Array<string | null | undefined>
+): string | null {
+  const normalizedTitle = title.trim();
+  for (const summary of summaries) {
+    const text = firstObservationText(summary);
+    if (text && text !== normalizedTitle) {
+      return text;
+    }
+  }
+  return null;
+}
+
 function RuntimeObservationList({
   title,
   emptyText,
@@ -372,20 +403,32 @@ export default function WorkspaceTab({
             emptyText={noReplays}
             items={replays}
             renderLine={(item) => (
-              <Space direction="vertical" size={0}>
-                <Space wrap>
-                  <PlayCircleOutlined />
-                  <Text strong>
-                    {item.replay_type
-                      ? getReplayTypeLabel(item.replay_type)
-                      : item.replay_id || "-"}
-                  </Text>
-                </Space>
-                {item.storage_uri ? <Text type="secondary">{item.storage_uri}</Text> : null}
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  {formatRuntimeTime(item.created_at, runtimeCenterText.noTimestamp)}
-                </Text>
-              </Space>
+              (() => {
+                const title = buildObservationTitle(
+                  item.replay_type ? getReplayTypeLabel(item.replay_type) : null,
+                  item.replay_id || item.id || null,
+                  item.action_summary,
+                  item.result_summary,
+                );
+                const summary = buildObservationSummary(
+                  title,
+                  item.action_summary,
+                  item.result_summary,
+                );
+                return (
+                  <Space direction="vertical" size={0}>
+                    <Space wrap>
+                      <PlayCircleOutlined />
+                      <Text strong>{title}</Text>
+                    </Space>
+                    {summary ? <Text type="secondary">{summary}</Text> : null}
+                    {item.storage_uri ? <Text type="secondary">{item.storage_uri}</Text> : null}
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {formatRuntimeTime(item.created_at, runtimeCenterText.noTimestamp)}
+                    </Text>
+                  </Space>
+                );
+              })()
             )}
           />
           <RuntimeObservationList
@@ -393,22 +436,35 @@ export default function WorkspaceTab({
             emptyText={noArtifacts}
             items={artifacts}
             renderLine={(item) => (
-              <Space direction="vertical" size={0}>
-                <Space wrap>
-                  <InboxOutlined />
-                  <Text strong>
-                    {item.artifact_kind
-                      ? getArtifactKindLabel(item.artifact_kind)
-                      : item.artifact_id || "-"}
-                  </Text>
-                </Space>
-                {item.storage_uri ? <Text type="secondary">{item.storage_uri}</Text> : null}
-                {item.content_type ? (
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    {item.content_type}
-                  </Text>
-                ) : null}
-              </Space>
+              (() => {
+                const artifactKind = item.artifact_type || item.artifact_kind;
+                const title = buildObservationTitle(
+                  artifactKind ? getArtifactKindLabel(artifactKind) : null,
+                  item.artifact_id || item.id || null,
+                  item.action_summary,
+                  item.result_summary,
+                );
+                const summary = buildObservationSummary(
+                  title,
+                  item.action_summary,
+                  item.result_summary,
+                );
+                return (
+                  <Space direction="vertical" size={0}>
+                    <Space wrap>
+                      <InboxOutlined />
+                      <Text strong>{title}</Text>
+                    </Space>
+                    {summary ? <Text type="secondary">{summary}</Text> : null}
+                    {item.storage_uri ? <Text type="secondary">{item.storage_uri}</Text> : null}
+                    {item.content_type ? (
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        {item.content_type}
+                      </Text>
+                    ) : null}
+                  </Space>
+                );
+              })()
             )}
           />
         </div>
