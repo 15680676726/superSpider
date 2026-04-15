@@ -298,6 +298,9 @@ def test_truth_first_recall_contract_has_no_vector_or_sidecar_runtime_surface(tm
     )
 
     assert [descriptor.backend_id for descriptor in descriptors] == ["truth-first"]
+    assert descriptors[0].metadata == {
+        "order": ["profile", "latest", "history", "lexical"],
+    }
     assert response.backend_used == "truth-first"
     assert response.hits
     assert response.hits[0].source_type == "memory_profile"

@@ -1,6 +1,6 @@
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { Button, Modal, message } from "@/ui";
-import api, { type ActiveModelsInfo, type ProviderInfo } from "../../../api";
+import api from "../../../api";
 import { useEnvVars } from "./useEnvVars";
 import {
   PageHeader,
@@ -12,6 +12,15 @@ import {
   type Row,
 } from "./components";
 import styles from "./index.module.less";
+
+const RETIRED_MEMORY_ENV_KEYS = new Set([
+  "COPAW_MEMORY_QMD_PREWARM",
+  "COPAW_MEMORY_QMD_QUERY_MODE",
+  "EMBEDDING_API_KEY",
+  "EMBEDDING_BASE_URL",
+  "EMBEDDING_MODEL_NAME",
+  "EMBEDDING_FOLLOW_ACTIVE_PROVIDER",
+]);
 
 function shiftIndices(prev: Set<number>, removedIdx: number): Set<number> {
   const next = new Set<number>();
@@ -33,21 +42,12 @@ function rowsToEnvDict(rows: Row[]): Record<string, string> {
   return dict;
 }
 
-type MemoryRecallMode = "hybrid-local" | "qmd";
-
-function normalizeMemoryRecallMode(value: string | undefined): MemoryRecallMode {
-  return (value || "").trim().toLowerCase() === "qmd" ? "qmd" : "hybrid-local";
-}
-
 function EnvironmentsPage() {
   const { envVars, loading, error, fetchAll } = useEnvVars();
   const [rows, setRows] = useState<Row[] | null>(null);
   const [saving, setSaving] = useState(false);
   const [keyErrors, setKeyErrors] = useState<Record<number, string>>({});
   const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [providerInfos, setProviderInfos] = useState<ProviderInfo[]>([]);
-  const [activeModelsInfo, setActiveModelsInfo] =
-    useState<ActiveModelsInfo | null>(null);
 
   const workingRows: Row[] = useMemo(
     () => rows ?? envVars.map((e) => ({ key: e.key, value: e.value })),
@@ -55,54 +55,39 @@ function EnvironmentsPage() {
   );
   const envValueMap = useMemo(() => rowsToEnvDict(workingRows), [workingRows]);
   const memoryRecallBackendRaw = envValueMap.COPAW_MEMORY_RECALL_BACKEND ?? "";
-  const memoryRecallMode = normalizeMemoryRecallMode(memoryRecallBackendRaw);
+  const retiredMemoryRowIndexes = useMemo(
+    () =>
+      workingRows
+        .map((row, index) => ({ row, index }))
+        .filter(({ row }) => RETIRED_MEMORY_ENV_KEYS.has(row.key.trim()))
+        .map(({ index }) => index),
+    [workingRows],
+  );
+  const retiredMemoryKeys = useMemo(
+    () =>
+      retiredMemoryRowIndexes
+        .map((index) => workingRows[index]?.key.trim())
+        .filter((value): value is string => Boolean(value)),
+    [retiredMemoryRowIndexes, workingRows],
+  );
+  const visibleRowIndexes = useMemo(
+    () =>
+      workingRows
+        .map((row, index) => ({ row, index }))
+        .filter(({ row }) => !RETIRED_MEMORY_ENV_KEYS.has(row.key.trim()))
+        .map(({ index }) => index),
+    [workingRows],
+  );
 
   const dirty = rows !== null;
   const someSelected = selected.size > 0;
   const allSelected =
-    workingRows.length > 0 && workingRows.every((_, i) => selected.has(i));
-  const resolvedActiveSlot =
-    activeModelsInfo?.resolved_llm ?? activeModelsInfo?.active_llm ?? null;
-  const resolvedActiveProvider = useMemo(
-    () =>
-      resolvedActiveSlot
-        ? (providerInfos.find(
-            (provider) => provider.id === resolvedActiveSlot.provider_id,
-          ) ?? null)
-        : null,
-    [providerInfos, resolvedActiveSlot],
-  );
-
+    visibleRowIndexes.length > 0 &&
+    visibleRowIndexes.every((index) => selected.has(index));
   const ensureLocal = useCallback((): Row[] => {
     if (rows) return [...rows];
     return envVars.map((e) => ({ key: e.key, value: e.value }));
   }, [rows, envVars]);
-
-  useEffect(() => {
-    let disposed = false;
-
-    const loadProviderContext = async () => {
-      try {
-        const [providers, activeModels] = await Promise.all([
-          api.listProviders(),
-          api.getActiveModels(),
-        ]);
-        if (disposed) {
-          return;
-        }
-        setProviderInfos(providers);
-        setActiveModelsInfo(activeModels);
-      } catch (err) {
-        console.error("Failed to load memory provider context:", err);
-      }
-    };
-
-    void loadProviderContext();
-
-    return () => {
-      disposed = true;
-    };
-  }, []);
 
   const toggleSelect = useCallback((idx: number) => {
     setSelected((prev) => {
@@ -117,9 +102,9 @@ function EnvironmentsPage() {
     if (allSelected) {
       setSelected(new Set());
     } else {
-      setSelected(new Set(workingRows.map((_, i) => i)));
+      setSelected(new Set(visibleRowIndexes));
     }
-  }, [allSelected, workingRows]);
+  }, [allSelected, visibleRowIndexes]);
 
   const applyEnvPatch = useCallback(
     (patch: Record<string, string | null>) => {
@@ -159,31 +144,10 @@ function EnvironmentsPage() {
     [ensureLocal, envVars.length],
   );
 
-  const handleManagedTextChange = useCallback(
-    (
-      key: "EMBEDDING_API_KEY" | "EMBEDDING_BASE_URL" | "EMBEDDING_MODEL_NAME",
-      value: string,
-    ) => {
-      applyEnvPatch({
-        [key]: value.trim() === "" ? null : value,
-      });
-    },
-    [applyEnvPatch],
-  );
-
   const handleManagedFtsEnabledChange = useCallback(
     (value: boolean) => {
       applyEnvPatch({
         FTS_ENABLED: value ? "true" : "false",
-      });
-    },
-    [applyEnvPatch],
-  );
-
-  const handleFollowActiveProviderChange = useCallback(
-    (value: boolean) => {
-      applyEnvPatch({
-        EMBEDDING_FOLLOW_ACTIVE_PROVIDER: value ? "true" : "false",
       });
     },
     [applyEnvPatch],
@@ -198,31 +162,15 @@ function EnvironmentsPage() {
     [applyEnvPatch],
   );
 
-  const handleMemoryRecallModeChange = useCallback(
-    (value: MemoryRecallMode) => {
-      if (value === "qmd") {
-        applyEnvPatch({
-          COPAW_MEMORY_RECALL_BACKEND: "qmd",
-          COPAW_MEMORY_QMD_QUERY_MODE: "query",
-          COPAW_MEMORY_QMD_PREWARM: "true",
-        });
-        return;
-      }
-      applyEnvPatch({
-        COPAW_MEMORY_RECALL_BACKEND: "hybrid-local",
-        COPAW_MEMORY_QMD_PREWARM: null,
-      });
-    },
-    [applyEnvPatch],
-  );
-
   const handleApplyRecommendedMemoryDefaults = useCallback(() => {
     applyEnvPatch({
-      COPAW_MEMORY_RECALL_BACKEND: "hybrid-local",
+      COPAW_MEMORY_RECALL_BACKEND: "truth-first",
       COPAW_MEMORY_QMD_PREWARM: null,
+      COPAW_MEMORY_QMD_QUERY_MODE: null,
+      EMBEDDING_API_KEY: null,
       EMBEDDING_BASE_URL: null,
       EMBEDDING_MODEL_NAME: null,
-      EMBEDDING_FOLLOW_ACTIVE_PROVIDER: "true",
+      EMBEDDING_FOLLOW_ACTIVE_PROVIDER: null,
       FTS_ENABLED: "true",
       MEMORY_STORE_BACKEND: "auto",
     });
@@ -419,37 +367,23 @@ function EnvironmentsPage() {
       ) : (
         <div className={styles.contentStack}>
           <MemorySettingsCard
-            memoryRecallMode={memoryRecallMode}
             memoryRecallBackendRaw={memoryRecallBackendRaw}
-            embeddingApiKey={envValueMap.EMBEDDING_API_KEY ?? ""}
-            embeddingBaseUrl={envValueMap.EMBEDDING_BASE_URL ?? ""}
-            embeddingModelName={envValueMap.EMBEDDING_MODEL_NAME ?? ""}
-            followActiveProvider={(
-              envValueMap.EMBEDDING_FOLLOW_ACTIVE_PROVIDER ?? "true"
-            ).toLowerCase() === "true"}
+            retiredMemoryKeys={retiredMemoryKeys}
             ftsEnabled={
               (envValueMap.FTS_ENABLED ?? "true").toLowerCase() === "true"
             }
             memoryStoreBackend={envValueMap.MEMORY_STORE_BACKEND ?? "auto"}
             dirty={dirty}
             saving={saving}
-            activeProviderId={resolvedActiveSlot?.provider_id}
-            activeProviderName={resolvedActiveProvider?.name}
-            activeProviderModel={resolvedActiveSlot?.model}
-            activeProviderBaseUrl={resolvedActiveProvider?.base_url}
-            activeProviderHasApiKey={Boolean(resolvedActiveProvider?.api_key)}
-            onTextChange={handleManagedTextChange}
-            onFollowActiveProviderChange={handleFollowActiveProviderChange}
             onFtsEnabledChange={handleManagedFtsEnabledChange}
             onMemoryStoreBackendChange={handleManagedBackendChange}
-            onMemoryRecallModeChange={handleMemoryRecallModeChange}
             onApplyRecommendedDefaults={handleApplyRecommendedMemoryDefaults}
             onSave={handleSave}
           />
 
           <div className={styles.tableCard}>
             <Toolbar
-              workingRowsLength={workingRows.length}
+              workingRowsLength={visibleRowIndexes.length}
               allSelected={allSelected}
               someSelected={someSelected}
               selectedSize={selected.size}
@@ -463,10 +397,10 @@ function EnvironmentsPage() {
             />
 
             <div className={styles.rowList}>
-              {workingRows.map((row, idx) => (
+              {visibleRowIndexes.map((idx) => (
                 <EnvRow
                   key={idx}
-                  row={row}
+                  row={workingRows[idx]}
                   idx={idx}
                   checked={selected.has(idx)}
                   error={keyErrors[idx]}
@@ -477,7 +411,7 @@ function EnvironmentsPage() {
                 />
               ))}
 
-              {workingRows.length === 0 && <EmptyState />}
+              {visibleRowIndexes.length === 0 && <EmptyState />}
             </div>
 
             <AddButton onClick={addRow} />

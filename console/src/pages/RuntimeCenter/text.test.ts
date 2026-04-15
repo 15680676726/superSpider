@@ -88,7 +88,6 @@ describe("RuntimeCenter text", () => {
     expect(formatRuntimeFieldLabel("headline")).toBe("回顾标题");
     expect(formatRuntimeFieldLabel("objective")).toBe("任务目标");
     expect(formatRuntimeFieldLabel("owner_agent_name")).toBe("负责人");
-    expect(formatRuntimeFieldLabel("embedding_api_key_configured")).toBe("已配置嵌入密钥");
   });
 
   it("labels the main-brain cockpit signals explicitly", () => {

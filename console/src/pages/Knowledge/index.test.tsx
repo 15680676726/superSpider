@@ -35,20 +35,20 @@ afterEach(() => {
 function createAgentProfile(overrides: Record<string, unknown> = {}) {
   return {
     agent_id: "agent-1",
-    name: "执行位甲",
-    role_name: "执行位",
-    role_summary: "正式职责摘要",
+    name: "Execution Agent",
+    role_name: "Operator",
+    role_summary: "Formal role summary",
     agent_class: "business",
     employment_mode: "career",
     activation_mode: "persistent",
     suspendable: true,
     reports_to: null,
-    mission: "负责当前执行闭环。",
+    mission: "Handle the current execution loop.",
     status: "active",
     risk_level: "guarded",
     current_focus_kind: "assignment",
     current_focus_id: "assignment-1",
-    current_focus: "当前聚焦摘要",
+    current_focus: "Current focus summary",
     current_task_id: null,
     current_mailbox_id: null,
     queue_depth: 0,
@@ -66,24 +66,41 @@ function createAgentProfile(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function createStrategyPayload(overrides: Record<string, unknown> = {}) {
+  return {
+    strategy_id: "strategy-1",
+    scope_type: "global",
+    title: "Formal strategy",
+    summary: "Unified runtime truth",
+    mission: "Keep execution aligned",
+    north_star: "Single runtime truth",
+    thinking_axes: ["strategy"],
+    delegation_policy: ["lane-first"],
+    evidence_requirements: ["evidence"],
+    active_goal_titles: ["legacy goal title"],
+    status: "active",
+    ...overrides,
+  };
+}
+
+function createMemorySurfacePayload(overrides: Record<string, unknown> = {}) {
+  return {
+    scope_type: "global",
+    scope_id: "runtime",
+    query: null,
+    activation: null,
+    sleep: {},
+    relation_count: 0,
+    relation_kind_counts: {},
+    relations: [],
+    ...overrides,
+  };
+}
+
 function mockKnowledgePageRequests() {
   requestMock.mockImplementation((url: string) => {
     if (url === "/runtime-center/strategy-memory?status=active&limit=20") {
-      return Promise.resolve([
-        {
-          strategy_id: "strategy-1",
-          scope_type: "global",
-          title: "正式战略",
-          summary: "统一主链",
-          mission: "维持运行一致性",
-          north_star: "单一运行真相",
-          thinking_axes: ["strategy"],
-          delegation_policy: ["lane-first"],
-          evidence_requirements: ["evidence"],
-          active_goal_titles: ["旧活跃目标"],
-          status: "active",
-        },
-      ]);
+      return Promise.resolve([createStrategyPayload()]);
     }
     if (url === "/runtime-center/knowledge/documents") {
       return Promise.resolve([]);
@@ -101,16 +118,13 @@ function mockKnowledgePageRequests() {
       return Promise.resolve({
         agent: {
           agent_id: "agent-1",
-          name: "执行位甲",
+          name: "Execution Agent",
         },
         mailbox: [],
         checkpoints: [],
         leases: [],
         growth: [],
       });
-    }
-    if (url === "/runtime-center/memory/backends") {
-      return Promise.resolve([]);
     }
     if (url.startsWith("/runtime-center/memory/index?")) {
       return Promise.resolve([]);
@@ -123,6 +137,9 @@ function mockKnowledgePageRequests() {
     }
     if (url.startsWith("/runtime-center/memory/reflections?")) {
       return Promise.resolve([]);
+    }
+    if (url.startsWith("/runtime-center/memory/surface?")) {
+      return Promise.resolve(createMemorySurfacePayload());
     }
     throw new Error(`Unexpected request: ${url}`);
   });
@@ -162,20 +179,32 @@ describe("KnowledgePage", () => {
           resolveAgents = resolve;
         });
       }
-      if (url.startsWith("/runtime-center/memory/")) {
-        return Promise.resolve([]);
-      }
       if (url === "/runtime-center/agents/agent-1") {
         return Promise.resolve({
           agent: {
             agent_id: "agent-1",
-            name: "执行位甲",
+            name: "Execution Agent",
           },
           mailbox: [],
           checkpoints: [],
           leases: [],
           growth: [],
         });
+      }
+      if (url.startsWith("/runtime-center/memory/index?")) {
+        return Promise.resolve([]);
+      }
+      if (url.startsWith("/runtime-center/memory/entities?")) {
+        return Promise.resolve([]);
+      }
+      if (url.startsWith("/runtime-center/memory/opinions?")) {
+        return Promise.resolve([]);
+      }
+      if (url.startsWith("/runtime-center/memory/reflections?")) {
+        return Promise.resolve([]);
+      }
+      if (url.startsWith("/runtime-center/memory/surface?")) {
+        return Promise.resolve(createMemorySurfacePayload());
       }
       throw new Error(`Unexpected request: ${url}`);
     });
@@ -185,29 +214,28 @@ describe("KnowledgePage", () => {
     expect(requestMock).toHaveBeenCalledWith(
       "/runtime-center/strategy-memory?status=active&limit=20",
     );
-    expect(requestMock).not.toHaveBeenCalledWith("/runtime-center/memory/backends");
+    expect(
+      requestMock.mock.calls.some(
+        ([url]) =>
+          typeof url === "string" && url.startsWith("/runtime-center/memory/"),
+      ),
+    ).toBe(false);
 
-    resolveStrategies([
-      {
-        strategy_id: "strategy-1",
-        scope_type: "global",
-        title: "正式战略",
-        summary: "统一主链",
-        mission: "维持运行一致性",
-        north_star: "单一运行真相",
-        thinking_axes: ["strategy"],
-        delegation_policy: ["lane-first"],
-        evidence_requirements: ["evidence"],
-        status: "active",
-      },
-    ]);
+    resolveStrategies([createStrategyPayload()]);
     resolveDocuments([]);
     resolveChunks([]);
     resolveKnowledgeMemory([]);
     resolveAgents([createAgentProfile()]);
 
-    expect(await screen.findByText("正式战略")).toBeTruthy();
-    expect(requestMock).toHaveBeenCalledWith("/runtime-center/memory/backends");
+    expect(await screen.findByText("Formal strategy")).toBeTruthy();
+    expect(requestMock).not.toHaveBeenCalledWith("/runtime-center/memory/backends");
+    expect(
+      requestMock.mock.calls.some(
+        ([url]) =>
+          typeof url === "string" &&
+          url.startsWith("/runtime-center/memory/surface?"),
+      ),
+    ).toBe(true);
   });
 
   it("does not render legacy active goal titles in strategy cards", async () => {
@@ -215,9 +243,9 @@ describe("KnowledgePage", () => {
 
     render(<KnowledgePage />);
 
-    expect(await screen.findByText("正式战略")).toBeTruthy();
-    expect(screen.queryByText(/活跃目标:/)).toBeNull();
-    expect(screen.queryByText("旧活跃目标")).toBeNull();
+    expect(await screen.findByText("Formal strategy")).toBeTruthy();
+    expect(screen.queryByText(/active goal/i)).toBeNull();
+    expect(screen.queryByText("legacy goal title")).toBeNull();
   });
 
   it("renders execution summaries from current_focus instead of current_goal", async () => {
@@ -225,10 +253,222 @@ describe("KnowledgePage", () => {
 
     render(<KnowledgePage />);
 
-    expect(await screen.findByText("正式战略")).toBeTruthy();
-    fireEvent.click(screen.getByRole("tab", { name: /执行记录/ }));
+    expect(await screen.findByText("Formal strategy")).toBeTruthy();
+    fireEvent.click(screen.getAllByRole("tab")[3]);
 
-    expect(await screen.findByText("当前聚焦摘要")).toBeTruthy();
-    expect(screen.queryByText("旧目标摘要")).toBeNull();
+    expect(await screen.findByText("Current focus summary")).toBeTruthy();
+    expect(screen.queryByText("legacy goal summary")).toBeNull();
+  });
+
+  it("renders dedicated activation relation surface from aggregated memory route", async () => {
+    requestMock.mockImplementation((url: string) => {
+      if (url === "/runtime-center/strategy-memory?status=active&limit=20") {
+        return Promise.resolve([createStrategyPayload()]);
+      }
+      if (url === "/runtime-center/knowledge/documents") {
+        return Promise.resolve([]);
+      }
+      if (url === "/runtime-center/knowledge") {
+        return Promise.resolve([]);
+      }
+      if (url === "/runtime-center/knowledge/memory") {
+        return Promise.resolve([]);
+      }
+      if (url === "/runtime-center/agents?view=business") {
+        return Promise.resolve([createAgentProfile()]);
+      }
+      if (url === "/runtime-center/agents/agent-1") {
+        return Promise.resolve({
+          agent: {
+            agent_id: "agent-1",
+            name: "Execution Agent",
+          },
+          mailbox: [],
+          checkpoints: [],
+          leases: [],
+          growth: [],
+        });
+      }
+      if (url.startsWith("/runtime-center/memory/index?")) {
+        return Promise.resolve([]);
+      }
+      if (url.startsWith("/runtime-center/memory/entities?")) {
+        return Promise.resolve([]);
+      }
+      if (url.startsWith("/runtime-center/memory/opinions?")) {
+        return Promise.resolve([]);
+      }
+      if (url.startsWith("/runtime-center/memory/reflections?")) {
+        return Promise.resolve([]);
+      }
+      if (url.startsWith("/runtime-center/memory/surface?")) {
+        return Promise.resolve(
+          createMemorySurfacePayload({
+            activation: {
+              scope_type: "global",
+              scope_id: "runtime",
+              activated_count: 2,
+              contradiction_count: 0,
+              top_entities: ["approval", "finance"],
+              top_opinions: ["approval:requirement:must"],
+              top_relations: ["Approval supports finance review"],
+              top_relation_kinds: ["supports"],
+              top_constraints: ["Approval needs evidence review"],
+              top_next_actions: ["Collect finance evidence"],
+              support_refs: ["fact:approval"],
+              top_evidence_refs: ["fact:approval"],
+              evidence_refs: ["fact:approval"],
+              strategy_refs: ["strategy-1"],
+            },
+            relation_count: 1,
+            relation_kind_counts: {
+              supports: 1,
+            },
+            relations: [
+              {
+                relation_id: "rel:approval->finance",
+                source_node_id: "fact:approval",
+                target_node_id: "entity:finance",
+                relation_kind: "supports",
+                scope_type: "global",
+                scope_id: "runtime",
+                summary: "Approval supports finance review.",
+                confidence: 0.91,
+                source_refs: ["fact:approval"],
+                metadata: {
+                  reason: "queue ownership",
+                },
+              },
+            ],
+          }),
+        );
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    render(<KnowledgePage />);
+
+    expect(await screen.findByText("Formal strategy")).toBeTruthy();
+    fireEvent.click(screen.getAllByRole("tab")[2]);
+
+    expect(await screen.findByText("Approval supports finance review.")).toBeTruthy();
+    expect(screen.getByText("Approval needs evidence review")).toBeTruthy();
+    expect(
+      requestMock.mock.calls.some(
+        ([url]) =>
+          typeof url === "string" &&
+          url.startsWith("/runtime-center/memory/surface?") &&
+          url.includes("relation_limit=12"),
+      ),
+    ).toBe(true);
+  });
+
+  it("renders sleep digest, focus, rules, and pending conflicts from aggregated memory route", async () => {
+    requestMock.mockImplementation((url: string) => {
+      if (url === "/runtime-center/strategy-memory?status=active&limit=20") {
+        return Promise.resolve([createStrategyPayload()]);
+      }
+      if (url === "/runtime-center/knowledge/documents") {
+        return Promise.resolve([]);
+      }
+      if (url === "/runtime-center/knowledge") {
+        return Promise.resolve([]);
+      }
+      if (url === "/runtime-center/knowledge/memory") {
+        return Promise.resolve([]);
+      }
+      if (url === "/runtime-center/agents?view=business") {
+        return Promise.resolve([createAgentProfile()]);
+      }
+      if (url === "/runtime-center/agents/agent-1") {
+        return Promise.resolve({
+          agent: {
+            agent_id: "agent-1",
+            name: "Execution Agent",
+          },
+          mailbox: [],
+          checkpoints: [],
+          leases: [],
+          growth: [],
+        });
+      }
+      if (url.startsWith("/runtime-center/memory/index?")) {
+        return Promise.resolve([]);
+      }
+      if (url.startsWith("/runtime-center/memory/entities?")) {
+        return Promise.resolve([]);
+      }
+      if (url.startsWith("/runtime-center/memory/opinions?")) {
+        return Promise.resolve([]);
+      }
+      if (url.startsWith("/runtime-center/memory/reflections?")) {
+        return Promise.resolve([]);
+      }
+      if (url.startsWith("/runtime-center/memory/surface?")) {
+        return Promise.resolve(
+          createMemorySurfacePayload({
+            sleep: {
+              digest: {
+                headline: "Finance review digest",
+                summary: "Outbound approval should wait for finance review before release.",
+                current_constraints: [
+                  "Outbound approval must wait for finance review.",
+                ],
+                current_focus: ["Clear the finance review gate."],
+                top_entities: ["approval", "finance"],
+                top_relations: ["Approval supports finance review."],
+                evidence_refs: ["fact:approval"],
+              },
+              aliases: [],
+              merges: [],
+              soft_rules: [
+                {
+                  rule_id: "rule:finance-review",
+                  rule_text: "Wait for finance review before outbound approval.",
+                  rule_kind: "requirement",
+                  state: "active",
+                  risk_level: "low",
+                  hit_count: 3,
+                  conflict_count: 0,
+                  day_span: 2,
+                  evidence_refs: ["fact:approval"],
+                },
+              ],
+              conflicts: [
+                {
+                  proposal_id: "proposal:legacy-shortcut",
+                  title: "Legacy shortcut conflicts",
+                  summary:
+                    "A legacy note says approval can happen before finance review.",
+                  recommended_action: "Keep finance review as the active rule.",
+                  risk_level: "high",
+                  status: "pending",
+                  conflicting_refs: ["fact:legacy"],
+                  supporting_refs: ["fact:approval"],
+                },
+              ],
+            },
+          }),
+        );
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    render(<KnowledgePage />);
+
+    expect(await screen.findByText("Formal strategy")).toBeTruthy();
+    fireEvent.click(screen.getAllByRole("tab")[2]);
+
+    expect((await screen.findAllByText("Finance review digest")).length).toBeGreaterThan(0);
+    expect(screen.getByText("Clear the finance review gate.")).toBeTruthy();
+    expect(
+      screen.getByText("Wait for finance review before outbound approval."),
+    ).toBeTruthy();
+    expect(screen.getByText("Legacy shortcut conflicts")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "A legacy note says approval can happen before finance review.",
+      ),
+    ).toBeTruthy();
   });
 });

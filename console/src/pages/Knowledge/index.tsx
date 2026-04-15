@@ -91,6 +91,15 @@ type MemoryBackendItem = {
   reason?: string | null;
 };
 
+const FORMAL_MEMORY_BACKENDS: MemoryBackendItem[] = [
+  {
+    backend_id: "truth-first",
+    label: "正式共享记忆（truth-first）",
+    available: true,
+    is_default: true,
+  },
+];
+
 type MemoryRecallHit = {
   entry_id: string;
   kind: string;
@@ -172,6 +181,89 @@ type MemoryOpinionView = {
   updated_at?: string | null;
 };
 
+type MemoryRelationView = {
+  relation_id: string;
+  source_node_id: string;
+  target_node_id: string;
+  relation_kind: string;
+  scope_type: string;
+  scope_id: string;
+  owner_agent_id?: string | null;
+  industry_instance_id?: string | null;
+  summary: string;
+  confidence: number;
+  source_refs: string[];
+  metadata?: Record<string, unknown>;
+  updated_at?: string | null;
+};
+
+type MemoryActivationSummary = {
+  scope_type: string;
+  scope_id: string;
+  activated_count: number;
+  contradiction_count: number;
+  top_entities: string[];
+  top_opinions: string[];
+  top_relations: string[];
+  top_relation_kinds: string[];
+  top_constraints: string[];
+  top_next_actions: string[];
+  support_refs: string[];
+  top_evidence_refs: string[];
+  evidence_refs: string[];
+  strategy_refs: string[];
+};
+
+type MemorySleepDigest = {
+  headline: string;
+  summary: string;
+  current_constraints: string[];
+  current_focus: string[];
+  top_entities: string[];
+  top_relations: string[];
+  evidence_refs: string[];
+};
+
+type MemorySleepSoftRule = {
+  rule_id: string;
+  rule_text: string;
+  rule_kind: string;
+  state: string;
+  risk_level: string;
+  hit_count: number;
+  conflict_count: number;
+  day_span: number;
+  evidence_refs: string[];
+};
+
+type MemorySleepConflict = {
+  proposal_id: string;
+  title: string;
+  summary: string;
+  recommended_action: string;
+  risk_level: string;
+  status: string;
+  conflicting_refs: string[];
+  supporting_refs: string[];
+};
+
+type MemorySleepOverlay = {
+  digest?: MemorySleepDigest | null;
+  soft_rules: MemorySleepSoftRule[];
+  conflicts: MemorySleepConflict[];
+};
+
+type MemorySurfacePayload = {
+  scope_type: string;
+  scope_id: string;
+  query?: string | null;
+  activation?: MemoryActivationSummary | null;
+  sleep?: MemorySleepOverlay | null;
+  relation_count: number;
+  relation_kind_counts: Record<string, number>;
+  relations: MemoryRelationView[];
+};
+
 type MemoryReflectionRun = {
   run_id: string;
   scope_type: string;
@@ -192,6 +284,7 @@ type MemoryReflectionRun = {
 
 type MemoryRebuildSummary = {
   fact_index_count: number;
+  relation_view_count?: number;
   completed_at?: string | null;
 };
 
@@ -290,6 +383,126 @@ function compactText(value: string | null | undefined, maxLength = 180): string 
   return `${normalized.slice(0, maxLength - 3).trimEnd()}...`;
 }
 
+function normalizeTextList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item) => String(item ?? "").trim())
+    .filter(Boolean);
+}
+
+function normalizeMemorySleepDigest(value: unknown): MemorySleepDigest | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const payload = value as Record<string, unknown>;
+  const headline = String(payload.headline || "").trim();
+  const summary = String(payload.summary || "").trim();
+  const currentConstraints = normalizeTextList(payload.current_constraints);
+  const currentFocus = normalizeTextList(payload.current_focus);
+  const topEntities = normalizeTextList(payload.top_entities);
+  const topRelations = normalizeTextList(payload.top_relations);
+  const evidenceRefs = normalizeTextList(payload.evidence_refs);
+  if (
+    !headline &&
+    !summary &&
+    currentConstraints.length === 0 &&
+    currentFocus.length === 0 &&
+    topEntities.length === 0 &&
+    topRelations.length === 0 &&
+    evidenceRefs.length === 0
+  ) {
+    return null;
+  }
+  return {
+    headline: headline || "记忆整理摘要",
+    summary,
+    current_constraints: currentConstraints,
+    current_focus: currentFocus,
+    top_entities: topEntities,
+    top_relations: topRelations,
+    evidence_refs: evidenceRefs,
+  };
+}
+
+function normalizeMemorySleepRules(value: unknown): MemorySleepSoftRule[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item, index) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        return null;
+      }
+      const payload = item as Record<string, unknown>;
+      const ruleText = String(payload.rule_text || "").trim();
+      if (!ruleText) {
+        return null;
+      }
+      return {
+        rule_id: String(payload.rule_id || `rule-${index + 1}`),
+        rule_text: ruleText,
+        rule_kind: String(payload.rule_kind || "guidance"),
+        state: String(payload.state || "candidate"),
+        risk_level: String(payload.risk_level || "low"),
+        hit_count: Number(payload.hit_count || 0),
+        conflict_count: Number(payload.conflict_count || 0),
+        day_span: Number(payload.day_span || 0),
+        evidence_refs: normalizeTextList(payload.evidence_refs),
+      };
+    })
+    .filter((item): item is MemorySleepSoftRule => Boolean(item));
+}
+
+function normalizeMemorySleepConflicts(value: unknown): MemorySleepConflict[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item, index) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        return null;
+      }
+      const payload = item as Record<string, unknown>;
+      const title = String(payload.title || "").trim();
+      const summary = String(payload.summary || "").trim();
+      const recommendedAction = String(payload.recommended_action || "").trim();
+      if (!title && !summary && !recommendedAction) {
+        return null;
+      }
+      return {
+        proposal_id: String(payload.proposal_id || `conflict-${index + 1}`),
+        title: title || "待处理冲突",
+        summary,
+        recommended_action: recommendedAction,
+        risk_level: String(payload.risk_level || "high"),
+        status: String(payload.status || "pending"),
+        conflicting_refs: normalizeTextList(payload.conflicting_refs),
+        supporting_refs: normalizeTextList(payload.supporting_refs),
+      };
+    })
+    .filter((item): item is MemorySleepConflict => Boolean(item));
+}
+
+function normalizeMemorySleepOverlay(value: unknown): MemorySleepOverlay | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const payload = value as Record<string, unknown>;
+  const digest = normalizeMemorySleepDigest(payload.digest);
+  const softRules = normalizeMemorySleepRules(payload.soft_rules);
+  const conflicts = normalizeMemorySleepConflicts(payload.conflicts);
+  if (!digest && softRules.length === 0 && conflicts.length === 0) {
+    return null;
+  }
+  return {
+    digest,
+    soft_rules: softRules,
+    conflicts,
+  };
+}
+
 function stanceColor(stance: string): "default" | "blue" | "gold" | "red" | "green" {
   switch (stance) {
     case "recommendation":
@@ -326,15 +539,17 @@ export default function KnowledgePage() {
   const [memoryScopeType, setMemoryScopeType] = useState<MemoryScopeType>("global");
   const [memoryScopeId, setMemoryScopeId] = useState("runtime");
   const [memoryRole, setMemoryRole] = useState("");
-  const [memoryBackend, setMemoryBackend] = useState("");
+  const [memoryBackend, setMemoryBackend] = useState(
+    FORMAL_MEMORY_BACKENDS[0]?.backend_id || "truth-first",
+  );
   const [recallQuery, setRecallQuery] = useState("");
   const [createLearningProposals, setCreateLearningProposals] = useState(true);
 
-  const [memoryBackends, setMemoryBackends] = useState<MemoryBackendItem[]>([]);
   const [recallResponse, setRecallResponse] = useState<MemoryRecallResponse | null>(null);
   const [memoryIndex, setMemoryIndex] = useState<MemoryFactIndexEntry[]>([]);
   const [entityViews, setEntityViews] = useState<MemoryEntityView[]>([]);
   const [opinionViews, setOpinionViews] = useState<MemoryOpinionView[]>([]);
+  const [memorySurface, setMemorySurface] = useState<MemorySurfacePayload | null>(null);
   const [reflectionRuns, setReflectionRuns] = useState<MemoryReflectionRun[]>([]);
   const [lastRebuildSummary, setLastRebuildSummary] = useState<MemoryRebuildSummary | null>(null);
   const [lastReflectSummary, setLastReflectSummary] = useState<MemoryReflectionSummary | null>(null);
@@ -411,6 +626,7 @@ export default function KnowledgePage() {
     }
     setMemoryLoading(true);
     try {
+      const normalizedRecallQuery = recallQuery.trim();
       const indexSearch = new URLSearchParams(search);
       indexSearch.set("limit", "40");
       const entitySearch = new URLSearchParams(search);
@@ -419,15 +635,19 @@ export default function KnowledgePage() {
       opinionSearch.set("limit", "24");
       const reflectionSearch = new URLSearchParams(search);
       reflectionSearch.set("limit", "20");
+      const surfaceSearch = new URLSearchParams(search);
+      appendSearchParam(surfaceSearch, "query", normalizedRecallQuery || null);
+      appendSearchParam(surfaceSearch, "role", memoryRole.trim() || null);
+      appendSearchParam(surfaceSearch, "limit", 12);
+      appendSearchParam(surfaceSearch, "relation_limit", 12);
 
       const [
-        backendsPayload,
         indexPayload,
         entityPayload,
         opinionPayload,
         reflectionPayload,
+        surfacePayload,
       ] = await Promise.all([
-        request<MemoryBackendItem[]>("/runtime-center/memory/backends"),
         request<MemoryFactIndexEntry[]>(
           `/runtime-center/memory/index?${indexSearch.toString()}`,
         ),
@@ -440,35 +660,42 @@ export default function KnowledgePage() {
         request<MemoryReflectionRun[]>(
           `/runtime-center/memory/reflections?${reflectionSearch.toString()}`,
         ),
+        request<MemorySurfacePayload>(
+          `/runtime-center/memory/surface?${surfaceSearch.toString()}`,
+        ),
       ]);
 
-      setMemoryBackends(Array.isArray(backendsPayload) ? backendsPayload : []);
-      setMemoryBackend((current) => {
-        if (
-          current &&
-          Array.isArray(backendsPayload) &&
-          backendsPayload.some((item) => item.backend_id === current)
-        ) {
-          return current;
-        }
-        return (
-          backendsPayload.find((item) => item.is_default && item.available)
-            ?.backend_id ||
-          backendsPayload.find((item) => item.available)?.backend_id ||
-          ""
-        );
-      });
       setMemoryIndex(Array.isArray(indexPayload) ? indexPayload : []);
       setEntityViews(Array.isArray(entityPayload) ? entityPayload : []);
       setOpinionViews(Array.isArray(opinionPayload) ? opinionPayload : []);
       setReflectionRuns(Array.isArray(reflectionPayload) ? reflectionPayload : []);
+      setMemorySurface(
+        surfacePayload && !Array.isArray(surfacePayload)
+          ? {
+              scope_type: String(surfacePayload.scope_type || memoryScopeType),
+              scope_id: String(surfacePayload.scope_id || scopeId),
+              query: surfacePayload.query || null,
+              activation: surfacePayload.activation || null,
+              sleep: normalizeMemorySleepOverlay(surfacePayload.sleep),
+              relation_count: Number(surfacePayload.relation_count || 0),
+              relation_kind_counts:
+                surfacePayload.relation_kind_counts &&
+                typeof surfacePayload.relation_kind_counts === "object"
+                  ? surfacePayload.relation_kind_counts
+                  : {},
+              relations: Array.isArray(surfacePayload.relations)
+                ? surfacePayload.relations
+                : [],
+            }
+          : null,
+      );
 
       if (options?.includeRecall) {
-        if (!recallQuery.trim()) {
+        if (!normalizedRecallQuery) {
           setRecallResponse(null);
         } else {
           const recallSearch = new URLSearchParams(search);
-          appendSearchParam(recallSearch, "query", recallQuery.trim());
+          appendSearchParam(recallSearch, "query", normalizedRecallQuery);
           appendSearchParam(recallSearch, "role", memoryRole.trim() || null);
           appendSearchParam(recallSearch, "backend", memoryBackend || null);
           appendSearchParam(
@@ -921,7 +1148,7 @@ export default function KnowledgePage() {
                         onChange={(value) => setMemoryBackend(value)}
                         style={{ width: 220 }}
                         placeholder="召回引擎"
-                        options={memoryBackends.map((backend) => ({
+                        options={FORMAL_MEMORY_BACKENDS.map((backend) => ({
                           label: backend.label,
                           value: backend.backend_id,
                           disabled: !backend.available,
@@ -1003,10 +1230,10 @@ export default function KnowledgePage() {
 
                 <Card className="baize-card" title="可用召回引擎">
                   <Space wrap>
-                    {memoryBackends.length === 0 ? (
+                    {FORMAL_MEMORY_BACKENDS.length === 0 ? (
                       <Empty description="尚未接入任何引擎。" />
                     ) : (
-                      memoryBackends.map((backend) => (
+                      FORMAL_MEMORY_BACKENDS.map((backend) => (
                         <Tag
                           key={backend.backend_id}
                           color={backend.available ? "blue" : "default"}
@@ -1026,6 +1253,236 @@ export default function KnowledgePage() {
                   <Spin />
                 ) : (
                   <>
+                    <Card
+                      className="baize-card"
+                      title={`记忆整理 (${memorySurface?.sleep?.soft_rules.length ?? 0} 条规则 / ${memorySurface?.sleep?.conflicts.length ?? 0} 个待处理)`}
+                      data-testid="memory-sleep-surface"
+                    >
+                      {memorySurface?.sleep ? (
+                        <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                          <Descriptions bordered size="small" column={2}>
+                            <Descriptions.Item label="当前作用域">
+                              {formatScope(
+                                memorySurface.scope_type || memoryScopeType,
+                                memorySurface.scope_id || memoryScopeId,
+                              )}
+                            </Descriptions.Item>
+                            <Descriptions.Item label="整理摘要">
+                              {memorySurface.sleep.digest?.headline || "n/a"}
+                            </Descriptions.Item>
+                            <Descriptions.Item label="规则数量">
+                              {memorySurface.sleep.soft_rules.length}
+                            </Descriptions.Item>
+                            <Descriptions.Item label="待处理冲突">
+                              {memorySurface.sleep.conflicts.length}
+                            </Descriptions.Item>
+                          </Descriptions>
+
+                          {memorySurface.sleep.digest ? (
+                            <Space direction="vertical" size={8} style={{ width: "100%" }}>
+                              <div>
+                                <Text strong>{memorySurface.sleep.digest.headline}</Text>
+                              </div>
+                              {memorySurface.sleep.digest.summary ? (
+                                <Paragraph style={{ marginBottom: 0 }}>
+                                  {compactText(memorySurface.sleep.digest.summary, 280)}
+                                </Paragraph>
+                              ) : null}
+                              <Space wrap>
+                                {memorySurface.sleep.digest.current_constraints
+                                  .slice(0, 4)
+                                  .map((constraint) => (
+                                    <Tag key={constraint} color="gold">
+                                      {constraint}
+                                    </Tag>
+                                  ))}
+                                {memorySurface.sleep.digest.current_focus
+                                  .slice(0, 4)
+                                  .map((focus) => (
+                                    <Tag key={focus} color="blue">
+                                      {focus}
+                                    </Tag>
+                                  ))}
+                                {memorySurface.sleep.digest.evidence_refs
+                                  .slice(0, 3)
+                                  .map((ref) => (
+                                    <Tag key={ref} color="green">
+                                      {ref}
+                                    </Tag>
+                                  ))}
+                              </Space>
+                            </Space>
+                          ) : null}
+
+                          {memorySurface.sleep.soft_rules.length > 0 ? (
+                            <List
+                              header={<Text strong>整理后规则</Text>}
+                              dataSource={memorySurface.sleep.soft_rules}
+                              renderItem={(item) => (
+                                <List.Item key={item.rule_id}>
+                                  <Space direction="vertical" size={6} style={{ width: "100%" }}>
+                                    <Space wrap>
+                                      <Tag color="gold">{item.rule_kind}</Tag>
+                                      <Tag>{item.state}</Tag>
+                                      <Tag>{`风险 ${item.risk_level}`}</Tag>
+                                      <Tag>{`命中 ${item.hit_count}`}</Tag>
+                                    </Space>
+                                    <Paragraph style={{ marginBottom: 0 }}>
+                                      {compactText(item.rule_text, 240)}
+                                    </Paragraph>
+                                  </Space>
+                                </List.Item>
+                              )}
+                            />
+                          ) : null}
+
+                          {memorySurface.sleep.conflicts.length > 0 ? (
+                            <List
+                              header={<Text strong>待处理冲突</Text>}
+                              dataSource={memorySurface.sleep.conflicts}
+                              renderItem={(item) => (
+                                <List.Item key={item.proposal_id}>
+                                  <Space direction="vertical" size={6} style={{ width: "100%" }}>
+                                    <Space wrap>
+                                      <Text strong>{item.title}</Text>
+                                      <Tag color="red">{item.status}</Tag>
+                                      <Tag>{`风险 ${item.risk_level}`}</Tag>
+                                    </Space>
+                                    {item.summary ? (
+                                      <Paragraph style={{ marginBottom: 0 }}>
+                                        {compactText(item.summary, 240)}
+                                      </Paragraph>
+                                    ) : null}
+                                    {item.recommended_action ? (
+                                      <Text type="secondary">
+                                        建议处理: {compactText(item.recommended_action, 160)}
+                                      </Text>
+                                    ) : null}
+                                  </Space>
+                                </List.Item>
+                              )}
+                            />
+                          ) : null}
+
+                          {!memorySurface.sleep.digest &&
+                          memorySurface.sleep.soft_rules.length === 0 &&
+                          memorySurface.sleep.conflicts.length === 0 ? (
+                            <Text type="secondary">
+                              当前作用域还没有生成正式的记忆整理结果。
+                            </Text>
+                          ) : null}
+                        </Space>
+                      ) : (
+                        <Text type="secondary">
+                          当前作用域还没有生成正式的记忆整理结果。
+                        </Text>
+                      )}
+                    </Card>
+                    <Card
+                      className="baize-card"
+                      title={`激活与关系 (${memorySurface?.relation_count ?? 0})`}
+                      data-testid="memory-activation-surface"
+                    >
+                      <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                        <Descriptions bordered size="small" column={2}>
+                          <Descriptions.Item label="当前作用域">
+                            {formatScope(
+                              memorySurface?.scope_type || memoryScopeType,
+                              memorySurface?.scope_id || memoryScopeId,
+                            )}
+                          </Descriptions.Item>
+                          <Descriptions.Item label="当前查询">
+                            {memorySurface?.query || "未输入"}
+                          </Descriptions.Item>
+                          <Descriptions.Item label="激活条目">
+                            {memorySurface?.activation?.activated_count ?? 0}
+                          </Descriptions.Item>
+                          <Descriptions.Item label="关系视图">
+                            {memorySurface?.relation_count ?? 0}
+                          </Descriptions.Item>
+                        </Descriptions>
+
+                        {memorySurface?.activation ? (
+                          <Space direction="vertical" size={8} style={{ width: "100%" }}>
+                            <Space wrap>
+                              {memorySurface.activation.top_entities
+                                .slice(0, 4)
+                                .map((entity) => (
+                                  <Tag key={entity} color="blue">
+                                    {entity}
+                                  </Tag>
+                                ))}
+                              {memorySurface.activation.top_constraints
+                                .slice(0, 3)
+                                .map((constraint) => (
+                                  <Tag key={constraint} color="gold">
+                                    {constraint}
+                                  </Tag>
+                                ))}
+                              {memorySurface.activation.top_relation_kinds
+                                .slice(0, 3)
+                                .map((kind) => (
+                                  <Tag key={kind}>{kind}</Tag>
+                                ))}
+                              {memorySurface.activation.top_evidence_refs
+                                .slice(0, 2)
+                                .map((ref) => (
+                                  <Tag key={ref} color="green">
+                                    {ref}
+                                  </Tag>
+                                ))}
+                            </Space>
+                            {memorySurface.activation.top_relations.length > 0 ? (
+                              <Paragraph style={{ marginBottom: 0 }}>
+                                {compactText(memorySurface.activation.top_relations[0], 240)}
+                              </Paragraph>
+                            ) : null}
+                          </Space>
+                        ) : (
+                          <Text type="secondary">
+                            输入查询后，这里会显示当前作用域的激活结果和关系重点。
+                          </Text>
+                        )}
+
+                        <Space wrap>
+                          {Object.entries(memorySurface?.relation_kind_counts || {}).map(
+                            ([kind, count]) => (
+                              <Tag key={kind}>{`${kind} x${count}`}</Tag>
+                            ),
+                          )}
+                        </Space>
+
+                        <List
+                          locale={{
+                            emptyText: <Empty description="当前作用域暂无关系视图。" />,
+                          }}
+                          dataSource={memorySurface?.relations || []}
+                          renderItem={(item) => (
+                            <List.Item key={item.relation_id}>
+                              <Space direction="vertical" size={6} style={{ width: "100%" }}>
+                                <Space wrap>
+                                  <Text strong>{item.relation_kind}</Text>
+                                  <Tag>{formatScope(item.scope_type, item.scope_id)}</Tag>
+                                  <Tag>{item.source_node_id}</Tag>
+                                  <Tag>{item.target_node_id}</Tag>
+                                  <Tag>{`置信度 ${formatPercent(item.confidence)}`}</Tag>
+                                </Space>
+                                <Paragraph style={{ marginBottom: 0 }}>
+                                  {compactText(item.summary, 240)}
+                                </Paragraph>
+                                <Space wrap>
+                                  {item.source_refs.slice(0, 3).map((ref) => (
+                                    <Tag key={ref} color="green">
+                                      {ref}
+                                    </Tag>
+                                  ))}
+                                </Space>
+                              </Space>
+                            </List.Item>
+                          )}
+                        />
+                      </Space>
+                    </Card>
                     <Card
                       className="baize-card"
                       title={

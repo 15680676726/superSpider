@@ -62,6 +62,12 @@ def _text_score(text: str, query_tokens: set[str]) -> float:
     return float(len(query_tokens.intersection(text_tokens)))
 
 
+def _sleep_value(item: object, field_name: str, default: object = None) -> object:
+    if isinstance(item, dict):
+        return item.get(field_name, default)
+    return getattr(item, field_name, default)
+
+
 class MemoryRecallService:
     """Truth-first recall over shared profile/latest/history memory views."""
 
@@ -70,11 +76,15 @@ class MemoryRecallService:
         *,
         derived_index_service,
         default_backend: str = "truth-first",
-        sidecar_backends=None,
+        memory_sleep_service: object | None = None,
     ) -> None:
         self._derived_index_service = derived_index_service
         self._default_backend = "truth-first"
         self._profile_service = MemoryProfileService(derived_index_service=derived_index_service)
+        self._memory_sleep_service = memory_sleep_service
+
+    def set_memory_sleep_service(self, memory_sleep_service: object | None) -> None:
+        self._memory_sleep_service = memory_sleep_service
 
     def list_backends(self) -> list[MemoryBackendDescriptor]:
         return [
@@ -85,8 +95,6 @@ class MemoryRecallService:
                 is_default=True,
                 metadata={
                     "order": ["profile", "latest", "history", "lexical"],
-                    "vector_runtime": False,
-                    "sidecar_runtime": False,
                 },
             ),
         ]
@@ -120,6 +128,11 @@ class MemoryRecallService:
         requested_backend = str(backend or "").strip().lower() or None
         resolved_scope_type, resolved_scope_id = _resolve_scope(selector)
         hit_limit = clamp_recall_hit_limit(limit)
+        query_tokens = self._resolve_query_tokens(
+            query=query,
+            scope_type=resolved_scope_type,
+            scope_id=resolved_scope_id,
+        )
         entries = self._collect_budgeted_entries(
             selector=selector,
             role=role,
@@ -132,7 +145,6 @@ class MemoryRecallService:
             selector=selector,
             entries=entries,
         )
-        query_tokens = set(tokenize(query))
         fallback_reason = None
         if requested_backend and requested_backend != self._default_backend:
             fallback_reason = (
@@ -182,6 +194,13 @@ class MemoryRecallService:
                 ),
             )
 
+        self._append_sleep_hits(
+            hits=hits,
+            query_tokens=query_tokens,
+            scope_type=resolved_scope_type,
+            scope_id=resolved_scope_id,
+        )
+
         for entry in views.latest:
             if not _role_matches(entry, role):
                 continue
@@ -227,6 +246,166 @@ class MemoryRecallService:
             fallback_reason=fallback_reason,
             hits=limited_hits,
         )
+
+    def _resolve_query_tokens(
+        self,
+        *,
+        query: str,
+        scope_type: str,
+        scope_id: str,
+    ) -> set[str]:
+        sleep_service = self._memory_sleep_service
+        expand_alias_terms = getattr(sleep_service, "expand_alias_terms", None)
+        expanded_query = str(query or "").strip()
+        if callable(expand_alias_terms):
+            try:
+                expanded_terms = expand_alias_terms(
+                    scope_type=scope_type,
+                    scope_id=scope_id,
+                    query=expanded_query,
+                )
+            except Exception:
+                expanded_terms = []
+            if expanded_terms:
+                expanded_query = " ".join(str(item or "").strip() for item in expanded_terms if str(item or "").strip())
+        return set(tokenize(expanded_query))
+
+    def _append_sleep_hits(
+        self,
+        *,
+        hits: list[tuple[float, MemoryRecallHit]],
+        query_tokens: set[str],
+        scope_type: str,
+        scope_id: str,
+    ) -> None:
+        sleep_service = self._memory_sleep_service
+        resolve_scope_overlay = getattr(sleep_service, "resolve_scope_overlay", None)
+        if not callable(resolve_scope_overlay):
+            return
+        try:
+            overlay = resolve_scope_overlay(scope_type=scope_type, scope_id=scope_id)
+        except Exception:
+            return
+        if not isinstance(overlay, dict):
+            return
+
+        digest = overlay.get("digest")
+        if digest is not None:
+            title = str(_sleep_value(digest, "headline", "") or "").strip() or "Sleep Digest"
+            summary = str(_sleep_value(digest, "summary", "") or "").strip()
+            content = "\n".join(
+                [
+                    title,
+                    summary,
+                    *list(_sleep_value(digest, "current_constraints", []) or []),
+                    *list(_sleep_value(digest, "current_focus", []) or []),
+                ],
+            )
+            score = 90.0 + _text_score(content, query_tokens)
+            hits.append(
+                (
+                    score,
+                    MemoryRecallHit(
+                        entry_id=str(_sleep_value(digest, "digest_id", f"digest:{scope_type}:{scope_id}") or ""),
+                        kind="memory_sleep_digest",
+                        title=title,
+                        summary=summary,
+                        content_excerpt=content[:320],
+                        source_type="memory_sleep_digest",
+                        source_ref=str(_sleep_value(digest, "digest_id", f"digest:{scope_type}:{scope_id}") or ""),
+                        scope_type=scope_type,
+                        scope_id=scope_id,
+                        evidence_refs=list(_sleep_value(digest, "evidence_refs", []) or []),
+                        entity_keys=list(_sleep_value(digest, "top_entities", []) or []),
+                        confidence=0.92,
+                        quality_score=0.9,
+                        score=score,
+                        backend=self._default_backend,
+                        metadata={"layer": "sleep"},
+                    ),
+                ),
+            )
+
+        for merge in list(overlay.get("merges") or []):
+            title = str(_sleep_value(merge, "merged_title", "") or "").strip()
+            summary = str(_sleep_value(merge, "merged_summary", "") or "").strip()
+            content = "\n".join([title, summary])
+            score = 85.0 + _text_score(content, query_tokens)
+            hits.append(
+                (
+                    score,
+                    MemoryRecallHit(
+                        entry_id=str(_sleep_value(merge, "merge_id", title or "merge") or ""),
+                        kind="memory_merge_result",
+                        title=title or "Merged Memory Topic",
+                        summary=summary,
+                        content_excerpt=content[:320],
+                        source_type="memory_merge_result",
+                        source_ref=str(_sleep_value(merge, "merge_id", title or "merge") or ""),
+                        scope_type=scope_type,
+                        scope_id=scope_id,
+                        evidence_refs=list(_sleep_value(merge, "evidence_refs", []) or []),
+                        confidence=0.85,
+                        quality_score=0.84,
+                        score=score,
+                        backend=self._default_backend,
+                        metadata={"layer": "sleep"},
+                    ),
+                ),
+            )
+
+        for rule in list(overlay.get("soft_rules") or []):
+            title = str(_sleep_value(rule, "rule_text", "") or "").strip()
+            score = 82.0 + _text_score(title, query_tokens)
+            hits.append(
+                (
+                    score,
+                    MemoryRecallHit(
+                        entry_id=str(_sleep_value(rule, "rule_id", title or "rule") or ""),
+                        kind="memory_soft_rule",
+                        title=title or "Soft Rule",
+                        summary=title,
+                        content_excerpt=title[:320],
+                        source_type="memory_soft_rule",
+                        source_ref=str(_sleep_value(rule, "rule_id", title or "rule") or ""),
+                        scope_type=scope_type,
+                        scope_id=scope_id,
+                        evidence_refs=list(_sleep_value(rule, "evidence_refs", []) or []),
+                        confidence=0.83,
+                        quality_score=0.82,
+                        score=score,
+                        backend=self._default_backend,
+                        metadata={"layer": "sleep", "state": _sleep_value(rule, "state", None)},
+                    ),
+                ),
+            )
+
+        for conflict in list(overlay.get("conflicts") or []):
+            title = str(_sleep_value(conflict, "title", "") or "").strip()
+            summary = str(_sleep_value(conflict, "summary", "") or "").strip()
+            score = 78.0 + _text_score("\n".join([title, summary]), query_tokens)
+            hits.append(
+                (
+                    score,
+                    MemoryRecallHit(
+                        entry_id=str(_sleep_value(conflict, "proposal_id", title or "conflict") or ""),
+                        kind="memory_conflict_proposal",
+                        title=title or "Memory Conflict",
+                        summary=summary,
+                        content_excerpt=summary[:320],
+                        source_type="memory_conflict_proposal",
+                        source_ref=str(_sleep_value(conflict, "proposal_id", title or "conflict") or ""),
+                        scope_type=scope_type,
+                        scope_id=scope_id,
+                        evidence_refs=list(_sleep_value(conflict, "supporting_refs", []) or []),
+                        confidence=0.75,
+                        quality_score=0.78,
+                        score=score,
+                        backend=self._default_backend,
+                        metadata={"layer": "sleep", "status": _sleep_value(conflict, "status", None)},
+                    ),
+                ),
+            )
 
     def _collect_budgeted_entries(
         self,

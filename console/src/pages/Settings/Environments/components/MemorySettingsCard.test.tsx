@@ -5,38 +5,33 @@ import { describe, expect, it, vi } from "vitest";
 import { MemorySettingsCard } from "./MemorySettingsCard";
 
 describe("MemorySettingsCard", () => {
-  it("adds hover titles to long status values and model inference text", () => {
-    const activeProviderValue = "超长自定义提供方 / 这是一个明显会超过卡片宽度的超长模型名称用于验证单行省略和悬浮全文";
-    const modelInferenceText = "需显式指定模型或改用自定义提供方";
-
+  it("renders only truth-first memory and real private compaction controls", () => {
     render(
       <MemorySettingsCard
-        memoryRecallMode="hybrid-local"
         memoryRecallBackendRaw="hybrid-local"
-        embeddingApiKey=""
-        embeddingBaseUrl="https://example.invalid/v1"
-        embeddingModelName=""
-        followActiveProvider={false}
+        retiredMemoryKeys={["EMBEDDING_API_KEY", "EMBEDDING_MODEL_NAME"]}
         ftsEnabled
         memoryStoreBackend="local"
         dirty={false}
         saving={false}
-        activeProviderId="custom-provider"
-        activeProviderName="超长自定义提供方"
-        activeProviderModel="这是一个明显会超过卡片宽度的超长模型名称用于验证单行省略和悬浮全文"
-        activeProviderBaseUrl="https://example.invalid/v1"
-        activeProviderHasApiKey={false}
-        onTextChange={vi.fn()}
-        onFollowActiveProviderChange={vi.fn()}
         onFtsEnabledChange={vi.fn()}
         onMemoryStoreBackendChange={vi.fn()}
-        onMemoryRecallModeChange={vi.fn()}
         onApplyRecommendedDefaults={vi.fn()}
         onSave={vi.fn()}
       />,
     );
 
-    expect(screen.getByText(modelInferenceText)).toHaveAttribute("title", modelInferenceText);
-    expect(screen.getByText(activeProviderValue)).toHaveAttribute("title", activeProviderValue);
+    expect(screen.getAllByText("truth-first").length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Hybrid Local/i)).toBeNull();
+    expect(screen.queryByText(/QMD/i)).toBeNull();
+    expect(screen.queryByText(/向量检索/)).toBeNull();
+    expect(screen.queryByText("私有压缩接口密钥")).toBeNull();
+    expect(screen.queryByText("私有压缩服务地址")).toBeNull();
+    expect(screen.queryByText("私有压缩模型")).toBeNull();
+    expect(screen.queryByText("复用当前激活提供方")).toBeNull();
+    expect(screen.getAllByText("本地全文检索").length).toBeGreaterThan(0);
+    expect(screen.getByText("私有压缩存储后端")).toBeInTheDocument();
+    expect(screen.getByText("检测到 2 个退役记忆变量")).toBeInTheDocument();
+    expect(screen.getByText(/EMBEDDING_API_KEY/)).toBeInTheDocument();
   });
 });

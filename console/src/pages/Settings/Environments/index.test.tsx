@@ -22,6 +22,48 @@ vi.mock("@/ui", () => ({
   Button: (props: ButtonHTMLAttributes<HTMLButtonElement>) => (
     <button type="button" {...props} />
   ),
+  Checkbox: ({
+    checked,
+    onChange,
+    className,
+  }: {
+    checked?: boolean;
+    onChange?: () => void;
+    className?: string;
+  }) => (
+    <input
+      type="checkbox"
+      checked={checked}
+      onChange={onChange}
+      className={className}
+      readOnly
+    />
+  ),
+  Input: ({
+    value,
+    onChange,
+    className,
+    disabled,
+    type,
+    placeholder,
+  }: {
+    value?: string;
+    onChange?: (event: { target: { value: string } }) => void;
+    className?: string;
+    disabled?: boolean;
+    type?: string;
+    placeholder?: string;
+  }) => (
+    <input
+      value={value}
+      onChange={(event) => onChange?.({ target: { value: event.target.value } })}
+      className={className}
+      disabled={disabled}
+      type={type}
+      placeholder={placeholder}
+      readOnly
+    />
+  ),
   Card: ({ children, className }: { children: ReactNode; className?: string }) => (
     <div className={className}>{children}</div>
   ),
@@ -39,33 +81,26 @@ describe("EnvironmentsPage", () => {
     vi.resetAllMocks();
   });
 
-  it("renders the env page before provider context finishes loading", async () => {
-    let resolveProviders!: (value: unknown) => void;
-    let resolveActiveModels!: (value: unknown) => void;
-
-    apiMock.listEnvs.mockResolvedValue([]);
-    apiMock.listProviders.mockReturnValue(
-      new Promise((resolve) => {
-        resolveProviders = resolve;
-      }),
-    );
-    apiMock.getActiveModels.mockReturnValue(
-      new Promise((resolve) => {
-        resolveActiveModels = resolve;
-      }),
-    );
+  it("renders the env page with the simplified truth-first memory card", async () => {
+    apiMock.listEnvs.mockResolvedValue([
+      { key: "OPENAI_API_KEY", value: "test-openai" },
+      { key: "EMBEDDING_API_KEY", value: "legacy-key" },
+      { key: "EMBEDDING_MODEL_NAME", value: "legacy-model" },
+    ]);
 
     render(<EnvironmentsPage />);
 
     await waitFor(() => {
-      expect(
-        screen.getByRole("heading", { name: "环境变量" }),
-      ).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "环境变量" })).toBeInTheDocument();
     });
 
-    expect(screen.getByText("记忆 / 向量检索")).toBeInTheDocument();
-
-    resolveProviders([]);
-    resolveActiveModels(null);
+    expect(screen.getByText("记忆配置")).toBeInTheDocument();
+    expect(screen.queryByText("记忆 / 向量检索")).toBeNull();
+    expect(screen.queryByText("私有压缩接口密钥")).toBeNull();
+    expect(screen.queryByText("私有压缩模型")).toBeNull();
+    expect(screen.getAllByText("本地全文检索").length).toBeGreaterThan(0);
+    expect(screen.getByText("检测到 2 个退役记忆变量")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("OPENAI_API_KEY")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("EMBEDDING_API_KEY")).toBeNull();
   });
 });

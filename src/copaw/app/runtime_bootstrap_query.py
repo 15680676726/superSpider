@@ -12,6 +12,8 @@ from ..memory import (
     MemoryRecallService,
     MemoryReflectionService,
     MemoryRetainService,
+    MemorySleepInferenceService,
+    MemorySleepService,
 )
 from ..state.agent_experience_service import AgentExperienceMemoryService
 from ..state.knowledge_service import StateKnowledgeService
@@ -32,6 +34,7 @@ RuntimeQueryServices: TypeAlias = tuple[
     MemoryReflectionService,
     MemoryRecallService,
     MemoryRetainService,
+    MemorySleepService,
     Any | None,
     AgentExperienceMemoryService,
 ]
@@ -131,7 +134,6 @@ def build_runtime_query_services(
     memory_recall_service = MemoryRecallService(
         derived_index_service=derived_memory_index_service,
         default_backend=default_recall_backend,
-        sidecar_backends=[],
     )
     strategy_memory_service = StateStrategyMemoryService(
         repository=repositories.strategy_memory_repository,
@@ -148,6 +150,18 @@ def build_runtime_query_services(
         derived_index_service=derived_memory_index_service,
         reflection_service=memory_reflection_service,
     )
+    memory_sleep_service = MemorySleepService(
+        repository=repositories.memory_sleep_repository,
+        knowledge_service=knowledge_service,
+        strategy_memory_service=strategy_memory_service,
+        derived_index_service=derived_memory_index_service,
+        reflection_service=memory_reflection_service,
+        inference_service=MemorySleepInferenceService(),
+    )
+    knowledge_service.set_memory_sleep_service(memory_sleep_service)
+    strategy_memory_service.set_memory_sleep_service(memory_sleep_service)
+    memory_retain_service.set_memory_sleep_service(memory_sleep_service)
+    memory_recall_service.set_memory_sleep_service(memory_sleep_service)
     memory_activation_service = None
     memory_activation_service_cls = _resolve_memory_activation_service_cls()
     if memory_activation_service_cls is not None:
@@ -168,6 +182,7 @@ def build_runtime_query_services(
         memory_reflection_service,
         memory_recall_service,
         memory_retain_service,
+        memory_sleep_service,
         memory_activation_service,
         experience_memory_service,
     )
