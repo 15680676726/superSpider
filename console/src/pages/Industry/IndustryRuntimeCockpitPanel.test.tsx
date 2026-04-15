@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { IndustryInstanceDetail } from "../../api/modules/industry";
@@ -123,5 +123,113 @@ describe("IndustryRuntimeCockpitPanel", () => {
 
     expect(screen.getAllByText(presentIndustryRuntimeStatus("active")).length).toBe(1);
     expect(screen.getAllByText(presentIndustryRuntimeStatus("idle")).length).toBeGreaterThan(0);
+  });
+
+  it("prefers the latest backlog, assignment, and follow-up report instead of the first array item", () => {
+    const onSelectBacklogFocus = vi.fn();
+    const onSelectAssignmentFocus = vi.fn();
+    const onOpenAgentReportChat = vi.fn();
+    const detail = {
+      ...baseDetail,
+      backlog: [
+        {
+          backlog_item_id: "backlog-old",
+          title: "Old backlog",
+          summary: "Old backlog summary",
+          status: "active",
+          priority: 2,
+          source_kind: "manual",
+          evidence_ids: [],
+          metadata: {},
+          updated_at: "2026-03-26T08:00:00Z",
+        },
+        {
+          backlog_item_id: "backlog-new",
+          title: "Latest backlog",
+          summary: "Latest backlog summary",
+          status: "completed",
+          priority: 1,
+          source_kind: "manual",
+          evidence_ids: [],
+          metadata: {},
+          updated_at: "2026-03-26T10:00:00Z",
+        },
+      ],
+      assignments: [
+        {
+          assignment_id: "assignment-old",
+          title: "Old assignment",
+          summary: "Old assignment summary",
+          status: "active",
+          evidence_ids: [],
+          metadata: {},
+          updated_at: "2026-03-26T08:00:00Z",
+        },
+        {
+          assignment_id: "assignment-new",
+          title: "Latest assignment",
+          summary: "Latest assignment summary",
+          status: "completed",
+          evidence_ids: [],
+          metadata: {},
+          updated_at: "2026-03-26T10:00:00Z",
+        },
+      ],
+      agent_reports: [
+        {
+          report_id: "report-old",
+          headline: "Old follow-up",
+          report_kind: "summary",
+          status: "submitted",
+          summary: "Old summary",
+          findings: [],
+          uncertainties: [],
+          needs_followup: true,
+          followup_reason: "Need old follow-up",
+          evidence_ids: [],
+          decision_ids: [],
+          processed: false,
+          metadata: {},
+          updated_at: "2026-03-26T08:00:00Z",
+        },
+        {
+          report_id: "report-new",
+          headline: "Latest follow-up",
+          report_kind: "summary",
+          status: "recorded",
+          summary: "Latest summary",
+          findings: [],
+          uncertainties: [],
+          needs_followup: true,
+          followup_reason: "Need latest follow-up",
+          evidence_ids: [],
+          decision_ids: [],
+          processed: false,
+          metadata: {},
+          updated_at: "2026-03-26T10:00:00Z",
+        },
+      ],
+    } as IndustryInstanceDetail;
+
+    render(
+      <IndustryRuntimeCockpitPanel
+        detail={detail}
+        locale="zh-CN"
+        onClearRuntimeFocus={vi.fn()}
+        onOpenAgentReportChat={onOpenAgentReportChat}
+        onSelectAssignmentFocus={onSelectAssignmentFocus}
+        onSelectBacklogFocus={onSelectBacklogFocus}
+      />,
+    );
+
+    fireEvent.click(screen.getAllByRole("button", { name: "聚焦待办" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "聚焦派工" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "打开跟进对话" }));
+
+    expect(onSelectBacklogFocus).toHaveBeenCalledWith("backlog-new");
+    expect(onSelectAssignmentFocus).toHaveBeenCalledWith("assignment-new");
+    expect(onOpenAgentReportChat).toHaveBeenCalledWith(
+      expect.objectContaining({ report_id: "report-new" }),
+    );
   });
 });

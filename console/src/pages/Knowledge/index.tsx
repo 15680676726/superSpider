@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
   Button,
@@ -81,7 +81,23 @@ type MemoryItem = {
   tags: string[];
 };
 
-type MemoryScopeType = "global" | "industry" | "agent" | "task";
+type MemoryScopeType =
+  | "global"
+  | "industry"
+  | "agent"
+  | "task"
+  | "work_context";
+
+export const MEMORY_SCOPE_OPTIONS: Array<{
+  label: string;
+  value: MemoryScopeType;
+}> = [
+  { label: "全局", value: "global" },
+  { label: "行业", value: "industry" },
+  { label: "执行位", value: "agent" },
+  { label: "任务", value: "task" },
+  { label: "工作上下文", value: "work_context" },
+];
 
 type MemoryBackendItem = {
   backend_id: string;
@@ -326,7 +342,7 @@ function appendSearchParam(
   search.set(key, normalized);
 }
 
-function buildMemoryScopeSearch(scopeType: MemoryScopeType, scopeId: string) {
+export function buildMemoryScopeSearch(scopeType: MemoryScopeType, scopeId: string) {
   const normalizedScopeId = scopeId.trim() || (scopeType === "global" ? "runtime" : "");
   const search = new URLSearchParams();
   appendSearchParam(search, "scope_type", scopeType);
@@ -340,6 +356,9 @@ function buildMemoryScopeSearch(scopeType: MemoryScopeType, scopeId: string) {
   }
   if (scopeType === "task") {
     appendSearchParam(search, "task_id", normalizedScopeId);
+  }
+  if (scopeType === "work_context") {
+    appendSearchParam(search, "work_context_id", normalizedScopeId);
   }
   if (scopeType === "global") {
     appendSearchParam(search, "global_scope_id", normalizedScopeId);
@@ -553,6 +572,7 @@ export default function KnowledgePage() {
   const [reflectionRuns, setReflectionRuns] = useState<MemoryReflectionRun[]>([]);
   const [lastRebuildSummary, setLastRebuildSummary] = useState<MemoryRebuildSummary | null>(null);
   const [lastReflectSummary, setLastReflectSummary] = useState<MemoryReflectionSummary | null>(null);
+  const detailRequestSeqRef = useRef(0);
 
   const selectedAgent =
     agents.find((agent) => agent.agent_id === selectedAgentId) ||
@@ -601,18 +621,27 @@ export default function KnowledgePage() {
   }, [query]);
 
   async function loadDetail(agentId: string) {
+    const requestSeq = detailRequestSeqRef.current + 1;
+    detailRequestSeqRef.current = requestSeq;
     setDetailLoading(true);
     try {
-      setDetail(
-        await request<AgentDetail>(
-          `/runtime-center/agents/${encodeURIComponent(agentId)}`,
-        ),
+      const payload = await request<AgentDetail>(
+        `/runtime-center/agents/${encodeURIComponent(agentId)}`,
       );
+      if (detailRequestSeqRef.current !== requestSeq) {
+        return;
+      }
+      setDetail(payload);
     } catch (fetchError) {
+      if (detailRequestSeqRef.current !== requestSeq) {
+        return;
+      }
       setDetail(null);
       setError(fetchError instanceof Error ? fetchError.message : String(fetchError));
     } finally {
-      setDetailLoading(false);
+      if (detailRequestSeqRef.current === requestSeq) {
+        setDetailLoading(false);
+      }
     }
   }
 
@@ -993,12 +1022,7 @@ export default function KnowledgePage() {
                   >
                     <Form.Item name="scope_type" label="作用域类型" initialValue="agent">
                       <Select
-                        options={[
-                          { label: "全局", value: "global" },
-                          { label: "行业", value: "industry" },
-                          { label: "执行位", value: "agent" },
-                          { label: "任务", value: "task" },
-                        ]}
+                        options={MEMORY_SCOPE_OPTIONS}
                       />
                     </Form.Item>
                     <Form.Item
@@ -1124,12 +1148,7 @@ export default function KnowledgePage() {
                         value={memoryScopeType}
                         onChange={setMemoryScopeType}
                         style={{ width: 140 }}
-                        options={[
-                          { label: "全局", value: "global" },
-                          { label: "行业", value: "industry" },
-                          { label: "执行位", value: "agent" },
-                          { label: "任务", value: "task" },
-                        ]}
+                        options={MEMORY_SCOPE_OPTIONS}
                       />
                       <Input
                         value={memoryScopeId}

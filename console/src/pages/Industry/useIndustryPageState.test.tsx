@@ -85,6 +85,16 @@ const mockedReadBuddyProfileId = vi.mocked(
   buddyProfileBindingMock.readBuddyProfileId,
 );
 
+function createDeferredPromise<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+  return { promise, resolve, reject };
+}
+
 describe("useIndustryPageState", () => {
   afterEach(() => {
     window.localStorage.clear();
@@ -1089,5 +1099,96 @@ describe("useIndustryPageState", () => {
       }),
       navigate,
     );
+  });
+
+  it("does not let a stale industry detail request override the current instance", async () => {
+    const detailA = createDeferredPromise<unknown>();
+    const detailB = createDeferredPromise<unknown>();
+
+    mockedListIndustryInstances.mockImplementation(async (options) => {
+      const status =
+        typeof options === "object" && options ? options.status : undefined;
+      if (status === "retired") {
+        return [] as never;
+      }
+      return [
+        {
+          instance_id: "industry-a",
+          label: "Industry A",
+          owner_scope: "industry-a",
+          team: { agents: [] },
+        },
+        {
+          instance_id: "industry-b",
+          label: "Industry B",
+          owner_scope: "industry-b",
+          team: { agents: [] },
+        },
+      ] as never;
+    });
+    mockedGetRuntimeIndustryDetail.mockImplementation((instanceId) => {
+      if (instanceId === "industry-a") {
+        return detailA.promise as never;
+      }
+      if (instanceId === "industry-b") {
+        return detailB.promise as never;
+      }
+      throw new Error(`Unexpected industry detail request: ${instanceId}`);
+    });
+
+    const { result } = renderHook(() => {
+      const [briefForm] = Form.useForm();
+      const [draftForm] = Form.useForm();
+      return useIndustryPageState({
+        briefForm,
+        draftForm,
+        navigate: vi.fn() as never,
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.instances.map((item) => item.instance_id)).toEqual([
+        "industry-a",
+        "industry-b",
+      ]);
+      expect(result.current.selectedInstanceId).toBe("industry-a");
+    });
+
+    await act(async () => {
+      result.current.setSelectedInstanceId("industry-b");
+    });
+
+    await act(async () => {
+      detailB.resolve({
+        instance_id: "industry-b",
+        label: "Industry B",
+        owner_scope: "industry-b",
+        profile: { industry: "Retail" },
+        team: { agents: [] },
+        media_analyses: [],
+      });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(result.current.detail?.instance_id).toBe("industry-b");
+    });
+
+    await act(async () => {
+      detailA.resolve({
+        instance_id: "industry-a",
+        label: "Industry A",
+        owner_scope: "industry-a",
+        profile: { industry: "Retail" },
+        team: { agents: [] },
+        media_analyses: [],
+      });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(result.current.selectedInstanceId).toBe("industry-b");
+      expect(result.current.detail?.instance_id).toBe("industry-b");
+    });
   });
 });

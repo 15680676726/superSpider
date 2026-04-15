@@ -64,6 +64,18 @@ interface RuntimeChainNode {
   onAction?: (() => void) | null;
 }
 
+function resolveNewestTimestamp(value: { updated_at?: string | null; created_at?: string | null }) {
+  return Date.parse(value.updated_at || value.created_at || "") || 0;
+}
+
+function sortByNewest<T extends { updated_at?: string | null; created_at?: string | null }>(
+  values: T[],
+) {
+  return [...values].sort(
+    (left, right) => resolveNewestTimestamp(right) - resolveNewestTimestamp(left),
+  );
+}
+
 export default function IndustryRuntimeCockpitPanel({
   detail,
   locale,
@@ -76,11 +88,19 @@ export default function IndustryRuntimeCockpitPanel({
   const staffingPresentation = buildStaffingPresentation(detail.staffing);
   const mediaAnalyses = detail.media_analyses || [];
   const lanes = detail.lanes || [];
+  const sortedBacklog = sortByNewest(detail.backlog);
+  const sortedAssignments = sortByNewest(detail.assignments);
+  const sortedAgentReports = sortByNewest(detail.agent_reports);
   const focusedAssignment =
     detail.assignments.find((assignment) => isFocusedAssignment(assignment, focusSelection)) || null;
   const focusedBacklog =
     detail.backlog.find((backlogItem) => isFocusedBacklog(backlogItem, focusSelection)) || null;
-  const followupReports = detail.agent_reports.filter((report) => report.needs_followup);
+  const followupReports = sortByNewest(
+    detail.agent_reports.filter((report) => report.needs_followup),
+  );
+  const primaryBacklog = focusedBacklog || sortedBacklog[0] || null;
+  const primaryAssignment = focusedAssignment || sortedAssignments[0] || null;
+  const primaryReport = followupReports[0] || sortedAgentReports[0] || null;
   const environmentVisibility = resolveExecutionEnvironmentVisibility(detail);
   const runtimeSignalCounts = {
     assignment: detail.assignments.length,
@@ -128,18 +148,16 @@ export default function IndustryRuntimeCockpitPanel({
       key: "backlog",
       label: "待办",
       value: `${detail.backlog.length} 项`,
-      note: focusedBacklog?.title || detail.backlog[0]?.title || null,
-      status: focusedBacklog?.status || detail.backlog[0]?.status || "idle",
+      note: primaryBacklog?.title || null,
+      status: primaryBacklog?.status || "idle",
       actionLabel:
-        focusedBacklog?.backlog_item_id || detail.backlog[0]?.backlog_item_id
+        primaryBacklog?.backlog_item_id
           ? "聚焦待办"
           : null,
       onAction:
-        focusedBacklog?.backlog_item_id
-          ? () => onSelectBacklogFocus(focusedBacklog.backlog_item_id)
-          : detail.backlog[0]?.backlog_item_id
-            ? () => onSelectBacklogFocus(detail.backlog[0].backlog_item_id)
-            : null,
+        primaryBacklog?.backlog_item_id
+          ? () => onSelectBacklogFocus(primaryBacklog.backlog_item_id)
+          : null,
     },
     {
       key: "cycle",
@@ -154,31 +172,25 @@ export default function IndustryRuntimeCockpitPanel({
       key: "assignment",
       label: "派工",
       value: `${runtimeSignalCounts.assignment} 项`,
-      note: focusedAssignment?.title || detail.assignments[0]?.title || null,
-      status: focusedAssignment?.status || detail.assignments[0]?.status || "idle",
+      note: primaryAssignment?.title || null,
+      status: primaryAssignment?.status || "idle",
       actionLabel:
-        focusedAssignment?.assignment_id || detail.assignments[0]?.assignment_id
+        primaryAssignment?.assignment_id
           ? "聚焦派工"
           : null,
       onAction:
-        focusedAssignment?.assignment_id
-          ? () => onSelectAssignmentFocus(focusedAssignment.assignment_id)
-          : detail.assignments[0]?.assignment_id
-            ? () => onSelectAssignmentFocus(detail.assignments[0].assignment_id)
-            : null,
+        primaryAssignment?.assignment_id
+          ? () => onSelectAssignmentFocus(primaryAssignment.assignment_id)
+          : null,
     },
     {
       key: "report",
       label: "汇报",
       value: `${runtimeSignalCounts.report} 项`,
-      note:
-        followupReports[0]?.headline ||
-        detail.agent_reports[0]?.headline ||
-        detail.agent_reports[0]?.report_id ||
-        null,
-      status: followupReports[0]?.status || detail.agent_reports[0]?.status || "idle",
-      actionLabel: detail.agent_reports[0] ? "打开汇报对话" : null,
-      onAction: detail.agent_reports[0] ? () => onOpenAgentReportChat(detail.agent_reports[0]) : null,
+      note: primaryReport?.headline || primaryReport?.report_id || null,
+      status: primaryReport?.status || "idle",
+      actionLabel: primaryReport ? "打开汇报对话" : null,
+      onAction: primaryReport ? () => onOpenAgentReportChat(primaryReport) : null,
     },
     {
       key: "environment",
@@ -214,7 +226,7 @@ export default function IndustryRuntimeCockpitPanel({
     focusSelection,
     focusedAssignment,
     focusedBacklog,
-    followupReport: followupReports[0] || null,
+    followupReport: primaryReport,
     executionCurrentFocus: detail.execution?.current_focus || null,
     mainChainCurrentFocus: detail.main_chain?.current_focus || null,
   });
@@ -880,7 +892,7 @@ export default function IndustryRuntimeCockpitPanel({
           <List
             size="small"
             style={{ marginTop: 8 }}
-            dataSource={detail.backlog}
+            dataSource={sortedBacklog}
             renderItem={(backlogItem) => {
               const selected = isFocusedBacklog(backlogItem, focusSelection);
               return (
@@ -940,7 +952,7 @@ export default function IndustryRuntimeCockpitPanel({
           <List
             size="small"
             style={{ marginTop: 8 }}
-            dataSource={detail.assignments}
+            dataSource={sortedAssignments}
             renderItem={(assignment) => {
               const selected = isFocusedAssignment(assignment, focusSelection);
               return (
@@ -1002,7 +1014,7 @@ export default function IndustryRuntimeCockpitPanel({
           <List
             size="small"
             style={{ marginTop: 8 }}
-            dataSource={detail.agent_reports}
+            dataSource={sortedAgentReports}
             renderItem={(report) => {
               const workContextId = resolveReportWorkContextId(report);
               const summary =

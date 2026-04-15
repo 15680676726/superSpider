@@ -232,6 +232,7 @@ export function useIndustryPageState({
   const [briefModalOpen, setBriefModalOpen] = useState(false);
   const briefUploadInputRef = useRef<HTMLInputElement | null>(null);
   const selectedInstanceIdRef = useRef<string | null>(null);
+  const detailRequestSeqRef = useRef(0);
   const [briefMediaItems, setBriefMediaItems] = useState<IndustryBriefMediaItem[]>([]);
   const [briefMediaLink, setBriefMediaLink] = useState("");
   const [briefMediaBusy, setBriefMediaBusy] = useState(false);
@@ -434,7 +435,10 @@ export function useIndustryPageState({
     instanceId: string | null,
     options?: IndustryDetailLoadOptions,
   ) => {
+    const requestSeq = detailRequestSeqRef.current + 1;
+    detailRequestSeqRef.current = requestSeq;
     if (!instanceId) {
+      setLoadingDetail(false);
       setDetail(null);
       return null;
     }
@@ -446,6 +450,9 @@ export function useIndustryPageState({
     try {
       setError(null);
       const payload = await api.getRuntimeIndustryDetail(instanceId, options);
+      if (detailRequestSeqRef.current !== requestSeq) {
+        return null;
+      }
       setDetail(payload);
       if (canUseCachedDetail) {
         industryPageStateCache = {
@@ -458,6 +465,9 @@ export function useIndustryPageState({
       }
       return payload;
     } catch (fetchError) {
+      if (detailRequestSeqRef.current !== requestSeq) {
+        return null;
+      }
       setError(
         fetchError instanceof Error ? fetchError.message : String(fetchError),
       );
@@ -466,7 +476,9 @@ export function useIndustryPageState({
       }
       return null;
     } finally {
-      setLoadingDetail(false);
+      if (detailRequestSeqRef.current === requestSeq) {
+        setLoadingDetail(false);
+      }
     }
   }, []);
 

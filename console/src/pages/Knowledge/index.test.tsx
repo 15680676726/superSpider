@@ -1,9 +1,13 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import KnowledgePage from "./index";
+import KnowledgePage, {
+  MEMORY_SCOPE_OPTIONS,
+  buildMemoryScopeSearch,
+} from "./index";
 
 const requestMock = vi.fn();
 
@@ -95,6 +99,34 @@ function createMemorySurfacePayload(overrides: Record<string, unknown> = {}) {
     relations: [],
     ...overrides,
   };
+}
+
+function createAgentDetail(
+  agentId: string,
+  agentName: string,
+  overrides: Record<string, unknown> = {},
+) {
+  return {
+    agent: {
+      agent_id: agentId,
+      name: agentName,
+    },
+    mailbox: [],
+    checkpoints: [],
+    leases: [],
+    growth: [],
+    ...overrides,
+  };
+}
+
+function createDeferredPromise<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+  return { promise, resolve, reject };
 }
 
 function mockKnowledgePageRequests() {
@@ -470,5 +502,124 @@ describe("KnowledgePage", () => {
         "A legacy note says approval can happen before finance review.",
       ),
     ).toBeTruthy();
+  });
+
+  it("supports work_context scope in the memory workspace query chain", async () => {
+    const { scopeId, search } = buildMemoryScopeSearch("work_context", "wc-123");
+
+    expect(scopeId).toBe("wc-123");
+    expect(search.get("scope_type")).toBe("work_context");
+    expect(search.get("scope_id")).toBe("wc-123");
+    expect(search.get("work_context_id")).toBe("wc-123");
+  });
+
+  it("exposes work_context in the shared memory scope options", () => {
+    expect(MEMORY_SCOPE_OPTIONS).toEqual(
+      expect.arrayContaining([
+        { label: "全局", value: "global" },
+        { label: "行业", value: "industry" },
+        { label: "执行位", value: "agent" },
+        { label: "任务", value: "task" },
+        { label: "工作上下文", value: "work_context" },
+      ]),
+    );
+  });
+
+  it("does not let a stale agent detail request override the current selection", async () => {
+    const detailA = createDeferredPromise<ReturnType<typeof createAgentDetail>>();
+    const detailB = createDeferredPromise<ReturnType<typeof createAgentDetail>>();
+
+    requestMock.mockImplementation((url: string) => {
+      if (url === "/runtime-center/strategy-memory?status=active&limit=20") {
+        return Promise.resolve([createStrategyPayload()]);
+      }
+      if (url === "/runtime-center/knowledge/documents") {
+        return Promise.resolve([]);
+      }
+      if (url === "/runtime-center/knowledge") {
+        return Promise.resolve([]);
+      }
+      if (url === "/runtime-center/knowledge/memory") {
+        return Promise.resolve([]);
+      }
+      if (url === "/runtime-center/agents?view=business") {
+        return Promise.resolve([
+          createAgentProfile({
+            agent_id: "agent-a",
+            name: "Agent A",
+            role_name: "Planner",
+            role_summary: "Agent A summary",
+          }),
+          createAgentProfile({
+            agent_id: "agent-b",
+            name: "Agent B",
+            role_name: "Operator",
+            role_summary: "Agent B summary",
+          }),
+        ]);
+      }
+      if (url === "/runtime-center/agents/agent-a") {
+        return detailA.promise;
+      }
+      if (url === "/runtime-center/agents/agent-b") {
+        return detailB.promise;
+      }
+      if (url.startsWith("/runtime-center/memory/index?")) {
+        return Promise.resolve([]);
+      }
+      if (url.startsWith("/runtime-center/memory/entities?")) {
+        return Promise.resolve([]);
+      }
+      if (url.startsWith("/runtime-center/memory/opinions?")) {
+        return Promise.resolve([]);
+      }
+      if (url.startsWith("/runtime-center/memory/reflections?")) {
+        return Promise.resolve([]);
+      }
+      if (url.startsWith("/runtime-center/memory/surface?")) {
+        return Promise.resolve(createMemorySurfacePayload());
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    render(<KnowledgePage />);
+
+    expect(await screen.findByText("Formal strategy")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("tab", { name: /执行记录/ }));
+    fireEvent.click(await screen.findByText("Agent B"));
+
+    await waitFor(() => {
+      expect(
+        requestMock.mock.calls.some(
+          ([url]) => url === "/runtime-center/agents/agent-b",
+        ),
+      ).toBe(true);
+    });
+
+    await act(async () => {
+      detailB.resolve(
+        createAgentDetail("agent-b", "Agent B", {
+          mailbox: [{ title: "B mailbox", status: "open" }],
+        }),
+      );
+      await Promise.resolve();
+    });
+
+    expect(await screen.findByText(/B mailbox/)).toBeTruthy();
+
+    await act(async () => {
+      detailA.resolve(
+        createAgentDetail("agent-a", "Agent A", {
+          mailbox: [{ title: "A mailbox", status: "open" }],
+        }),
+      );
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/B mailbox/)).toBeTruthy();
+      expect(screen.queryByText(/A mailbox/)).toBeNull();
+    });
   });
 });
