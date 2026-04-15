@@ -419,6 +419,66 @@ def test_memory_recall_prefers_sleep_digest_and_expands_alias_terms(tmp_path) ->
     assert any(hit.source_type == "memory_soft_rule" for hit in recalled.hits)
 
 
+def test_memory_recall_profile_uses_work_context_overlay_as_primary_read_layer(tmp_path) -> None:
+    _store, knowledge, strategy, _retain, recall, _reflection, _derived, sleep = _build_memory_services_with_sleep(
+        tmp_path,
+    )
+
+    strategy.upsert_strategy(
+        StrategyMemoryRecord(
+            strategy_id="strategy:industry:industry-overlay-1:main-brain",
+            scope_type="industry",
+            scope_id="industry-overlay-1",
+            owner_agent_id="main-brain",
+            industry_instance_id="industry-overlay-1",
+            title="证据先行",
+            summary="外呼审批必须先完成财务复核。",
+            execution_constraints=["外呼审批必须先完成财务复核。"],
+            current_focuses=["先完成财务复核，再处理审批。"],
+        ),
+    )
+    knowledge.remember_fact(
+        title="行业共享规则",
+        content="财务复核是行业共享规则。",
+        scope_type="industry",
+        scope_id="industry-overlay-1",
+        source_ref="fact:industry-overlay-1:1",
+        tags=["approval", "finance"],
+    )
+    sleep.run_sleep(scope_type="industry", scope_id="industry-overlay-1", trigger_kind="manual")
+
+    knowledge.remember_fact(
+        title="当前工作焦点",
+        content="当前工作上下文正在处理财务复核与外呼审批的先后顺序。",
+        scope_type="work_context",
+        scope_id="ctx-overlay-read",
+        source_ref="fact:ctx-overlay-read:1",
+        tags=["approval", "finance"],
+    )
+    sleep.mark_scope_dirty(
+        scope_type="work_context",
+        scope_id="ctx-overlay-read",
+        industry_instance_id="industry-overlay-1",
+        reason="bind-industry",
+        source_ref="fact:ctx-overlay-read:1",
+    )
+    sleep.run_sleep(scope_type="work_context", scope_id="ctx-overlay-read", trigger_kind="manual")
+
+    recalled = recall.recall(
+        query="财务复核",
+        scope_type="work_context",
+        scope_id="ctx-overlay-read",
+        limit=5,
+    )
+
+    assert recalled.hits
+    profile_hit = recalled.hits[0]
+    assert profile_hit.source_type == "memory_profile"
+    assert "财务复核" in profile_hit.summary
+    assert profile_hit.metadata["read_layer"] == "work_context_overlay"
+    assert str(profile_hit.metadata["overlay_id"]).startswith("overlay:")
+
+
 def test_memory_retain_service_routes_report_outcome_to_work_context_memory(tmp_path) -> None:
     _store, knowledge, _strategy, retain, _recall, _reflection, _derived = _build_memory_services(tmp_path)
 

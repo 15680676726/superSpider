@@ -8,13 +8,16 @@ from typing import Any
 from pydantic import BaseModel
 
 from ..models_memory import (
+    IndustryMemoryProfileRecord,
     MemoryAliasMapRecord,
     MemoryConflictProposalRecord,
     MemoryMergeResultRecord,
+    MemoryStructureProposalRecord,
     MemoryScopeDigestRecord,
     MemorySleepJobRecord,
     MemorySleepScopeStateRecord,
     MemorySoftRuleRecord,
+    WorkContextMemoryOverlayRecord,
 )
 from ..store import SQLiteStateStore
 from .base import BaseMemorySleepRepository
@@ -139,6 +142,66 @@ _CONFLICT_COLUMNS = (
     "created_at",
     "updated_at",
 )
+_INDUSTRY_PROFILE_COLUMNS = (
+    "profile_id",
+    "industry_instance_id",
+    "headline",
+    "summary",
+    "strategic_direction",
+    "active_constraints_json",
+    "active_focuses_json",
+    "key_entities_json",
+    "key_relations_json",
+    "evidence_refs_json",
+    "source_job_id",
+    "source_digest_id",
+    "version",
+    "status",
+    "metadata_json",
+    "created_at",
+    "updated_at",
+)
+_WORK_CONTEXT_OVERLAY_COLUMNS = (
+    "overlay_id",
+    "work_context_id",
+    "industry_instance_id",
+    "base_profile_id",
+    "headline",
+    "summary",
+    "focus_summary",
+    "active_constraints_json",
+    "active_focuses_json",
+    "active_entities_json",
+    "active_relations_json",
+    "evidence_refs_json",
+    "source_job_id",
+    "source_digest_id",
+    "version",
+    "status",
+    "metadata_json",
+    "created_at",
+    "updated_at",
+)
+_STRUCTURE_PROPOSAL_COLUMNS = (
+    "proposal_id",
+    "scope_type",
+    "scope_id",
+    "industry_instance_id",
+    "work_context_id",
+    "proposal_kind",
+    "title",
+    "summary",
+    "recommended_action",
+    "candidate_profile_id",
+    "candidate_overlay_id",
+    "source_job_id",
+    "evidence_refs_json",
+    "risk_level",
+    "status",
+    "metadata_json",
+    "created_at",
+    "updated_at",
+)
 
 
 def _json_list(values: list[str]) -> str:
@@ -240,6 +303,45 @@ def _conflict_from_row(row: sqlite3.Row | None) -> MemoryConflictProposalRecord 
         ),
     )
     return record if isinstance(record, MemoryConflictProposalRecord) else None
+
+
+def _industry_profile_from_row(row: sqlite3.Row | None) -> IndustryMemoryProfileRecord | None:
+    record = _decode_record(
+        IndustryMemoryProfileRecord,
+        row,
+        list_fields=(
+            ("active_constraints", "active_constraints_json"),
+            ("active_focuses", "active_focuses_json"),
+            ("key_entities", "key_entities_json"),
+            ("key_relations", "key_relations_json"),
+            ("evidence_refs", "evidence_refs_json"),
+        ),
+    )
+    return record if isinstance(record, IndustryMemoryProfileRecord) else None
+
+
+def _work_context_overlay_from_row(row: sqlite3.Row | None) -> WorkContextMemoryOverlayRecord | None:
+    record = _decode_record(
+        WorkContextMemoryOverlayRecord,
+        row,
+        list_fields=(
+            ("active_constraints", "active_constraints_json"),
+            ("active_focuses", "active_focuses_json"),
+            ("active_entities", "active_entities_json"),
+            ("active_relations", "active_relations_json"),
+            ("evidence_refs", "evidence_refs_json"),
+        ),
+    )
+    return record if isinstance(record, WorkContextMemoryOverlayRecord) else None
+
+
+def _structure_proposal_from_row(row: sqlite3.Row | None) -> MemoryStructureProposalRecord | None:
+    record = _decode_record(
+        MemoryStructureProposalRecord,
+        row,
+        list_fields=(("evidence_refs", "evidence_refs_json"),),
+    )
+    return record if isinstance(record, MemoryStructureProposalRecord) else None
 
 
 class SqliteMemorySleepRepository(BaseMemorySleepRepository):
@@ -666,3 +768,208 @@ class SqliteMemorySleepRepository(BaseMemorySleepRepository):
             },
         )
         return saved if isinstance(saved, MemoryConflictProposalRecord) else record
+
+    def get_active_industry_profile(
+        self,
+        industry_instance_id: str,
+    ) -> IndustryMemoryProfileRecord | None:
+        with self._store.connection() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM memory_industry_profiles
+                WHERE industry_instance_id = ? AND status = 'active'
+                ORDER BY version DESC, updated_at DESC, created_at DESC
+                LIMIT 1
+                """,
+                (industry_instance_id,),
+            ).fetchone()
+        return _industry_profile_from_row(row)
+
+    def list_industry_profiles(
+        self,
+        *,
+        industry_instance_id: str | None = None,
+        status: str | None = None,
+        limit: int | None = None,
+    ) -> list[IndustryMemoryProfileRecord]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if industry_instance_id is not None:
+            clauses.append("industry_instance_id = ?")
+            params.append(industry_instance_id)
+        if status is not None:
+            clauses.append("status = ?")
+            params.append(status)
+        return self._list(
+            table="memory_industry_profiles",
+            clauses=clauses,
+            params=params,
+            order_by="CASE status WHEN 'active' THEN 0 ELSE 1 END, version DESC, updated_at DESC, created_at DESC",
+            limit=limit,
+            parser=_industry_profile_from_row,
+        )
+
+    def upsert_industry_profile(
+        self,
+        record: IndustryMemoryProfileRecord,
+    ) -> IndustryMemoryProfileRecord:
+        record = IndustryMemoryProfileRecord.model_validate(record.model_dump(mode="python"))
+
+        def _supersede(conn: sqlite3.Connection, payload: dict[str, Any], current: BaseModel) -> None:
+            if not isinstance(current, IndustryMemoryProfileRecord) or current.status != "active":
+                return
+            conn.execute(
+                """
+                UPDATE memory_industry_profiles
+                SET status = 'superseded',
+                    updated_at = ?
+                WHERE industry_instance_id = ?
+                  AND profile_id != ?
+                  AND status = 'active'
+                """,
+                (payload["updated_at"], current.industry_instance_id, current.profile_id),
+            )
+
+        saved = self._upsert(
+            table="memory_industry_profiles",
+            pk="profile_id",
+            columns=_INDUSTRY_PROFILE_COLUMNS,
+            record=record,
+            extra_payload={
+                "active_constraints_json": _json_list(record.active_constraints),
+                "active_focuses_json": _json_list(record.active_focuses),
+                "key_entities_json": _json_list(record.key_entities),
+                "key_relations_json": _json_list(record.key_relations),
+                "evidence_refs_json": _json_list(record.evidence_refs),
+                "metadata_json": _encode_json(record.metadata),
+            },
+            before_write=_supersede,
+        )
+        return saved if isinstance(saved, IndustryMemoryProfileRecord) else record
+
+    def get_active_work_context_overlay(
+        self,
+        work_context_id: str,
+    ) -> WorkContextMemoryOverlayRecord | None:
+        with self._store.connection() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM memory_work_context_overlays
+                WHERE work_context_id = ? AND status = 'active'
+                ORDER BY version DESC, updated_at DESC, created_at DESC
+                LIMIT 1
+                """,
+                (work_context_id,),
+            ).fetchone()
+        return _work_context_overlay_from_row(row)
+
+    def list_work_context_overlays(
+        self,
+        *,
+        work_context_id: str | None = None,
+        industry_instance_id: str | None = None,
+        status: str | None = None,
+        limit: int | None = None,
+    ) -> list[WorkContextMemoryOverlayRecord]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if work_context_id is not None:
+            clauses.append("work_context_id = ?")
+            params.append(work_context_id)
+        if industry_instance_id is not None:
+            clauses.append("industry_instance_id = ?")
+            params.append(industry_instance_id)
+        if status is not None:
+            clauses.append("status = ?")
+            params.append(status)
+        return self._list(
+            table="memory_work_context_overlays",
+            clauses=clauses,
+            params=params,
+            order_by="CASE status WHEN 'active' THEN 0 ELSE 1 END, version DESC, updated_at DESC, created_at DESC",
+            limit=limit,
+            parser=_work_context_overlay_from_row,
+        )
+
+    def upsert_work_context_overlay(
+        self,
+        record: WorkContextMemoryOverlayRecord,
+    ) -> WorkContextMemoryOverlayRecord:
+        record = WorkContextMemoryOverlayRecord.model_validate(record.model_dump(mode="python"))
+
+        def _supersede(conn: sqlite3.Connection, payload: dict[str, Any], current: BaseModel) -> None:
+            if not isinstance(current, WorkContextMemoryOverlayRecord) or current.status != "active":
+                return
+            conn.execute(
+                """
+                UPDATE memory_work_context_overlays
+                SET status = 'superseded',
+                    updated_at = ?
+                WHERE work_context_id = ?
+                  AND overlay_id != ?
+                  AND status = 'active'
+                """,
+                (payload["updated_at"], current.work_context_id, current.overlay_id),
+            )
+
+        saved = self._upsert(
+            table="memory_work_context_overlays",
+            pk="overlay_id",
+            columns=_WORK_CONTEXT_OVERLAY_COLUMNS,
+            record=record,
+            extra_payload={
+                "active_constraints_json": _json_list(record.active_constraints),
+                "active_focuses_json": _json_list(record.active_focuses),
+                "active_entities_json": _json_list(record.active_entities),
+                "active_relations_json": _json_list(record.active_relations),
+                "evidence_refs_json": _json_list(record.evidence_refs),
+                "metadata_json": _encode_json(record.metadata),
+            },
+            before_write=_supersede,
+        )
+        return saved if isinstance(saved, WorkContextMemoryOverlayRecord) else record
+
+    def list_structure_proposals(
+        self,
+        *,
+        scope_type: str | None = None,
+        scope_id: str | None = None,
+        status: str | None = None,
+        limit: int | None = None,
+    ) -> list[MemoryStructureProposalRecord]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if scope_type is not None:
+            clauses.append("scope_type = ?")
+            params.append(scope_type)
+        if scope_id is not None:
+            clauses.append("scope_id = ?")
+            params.append(scope_id)
+        if status is not None:
+            clauses.append("status = ?")
+            params.append(status)
+        return self._list(
+            table="memory_structure_proposals",
+            clauses=clauses,
+            params=params,
+            order_by="CASE status WHEN 'pending' THEN 0 ELSE 1 END, updated_at DESC, created_at DESC",
+            limit=limit,
+            parser=_structure_proposal_from_row,
+        )
+
+    def upsert_structure_proposal(
+        self,
+        record: MemoryStructureProposalRecord,
+    ) -> MemoryStructureProposalRecord:
+        record = MemoryStructureProposalRecord.model_validate(record.model_dump(mode="python"))
+        saved = self._upsert(
+            table="memory_structure_proposals",
+            pk="proposal_id",
+            columns=_STRUCTURE_PROPOSAL_COLUMNS,
+            record=record,
+            extra_payload={
+                "evidence_refs_json": _json_list(record.evidence_refs),
+                "metadata_json": _encode_json(record.metadata),
+            },
+        )
+        return saved if isinstance(saved, MemoryStructureProposalRecord) else record

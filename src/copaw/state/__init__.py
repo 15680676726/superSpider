@@ -67,6 +67,7 @@ from .models import (
 )
 from .models_knowledge import KnowledgeChunkRecord
 from .models_memory import (
+    IndustryMemoryProfileRecord,
     MemoryAliasMapRecord,
     MemoryConflictProposalRecord,
     MemoryEntityViewRecord,
@@ -78,7 +79,9 @@ from .models_memory import (
     MemoryScopeDigestRecord,
     MemorySleepJobRecord,
     MemorySleepScopeStateRecord,
+    MemoryStructureProposalRecord,
     MemorySoftRuleRecord,
+    WorkContextMemoryOverlayRecord,
 )
 from .models_work_context import WorkContextRecord
 from .work_context_service import WorkContextService
@@ -147,6 +150,7 @@ __all__ = [
     "HumanAssistVerificationResult",
     "HumanProfile",
     "IndustryInstanceRecord",
+    "IndustryMemoryProfileRecord",
     "MediaAnalysisRecord",
     "KnowledgeChunkRecord",
     "LaneBudgetRecord",
@@ -161,6 +165,7 @@ __all__ = [
     "MemoryScopeDigestRecord",
     "MemorySleepJobRecord",
     "MemorySleepScopeStateRecord",
+    "MemoryStructureProposalRecord",
     "MemorySoftRuleRecord",
     "MetricRecord",
     "OperatingCycleService",
@@ -192,4 +197,5 @@ __all__ = [
     "WorkflowPresetRecord",
     "WorkflowRunRecord",
     "WorkflowTemplateRecord",
+    "WorkContextMemoryOverlayRecord",
 ]

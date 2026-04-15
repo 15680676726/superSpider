@@ -80,11 +80,17 @@ class MemoryRecallService:
     ) -> None:
         self._derived_index_service = derived_index_service
         self._default_backend = "truth-first"
-        self._profile_service = MemoryProfileService(derived_index_service=derived_index_service)
+        self._profile_service = MemoryProfileService(
+            derived_index_service=derived_index_service,
+            memory_sleep_service=memory_sleep_service,
+        )
         self._memory_sleep_service = memory_sleep_service
 
     def set_memory_sleep_service(self, memory_sleep_service: object | None) -> None:
         self._memory_sleep_service = memory_sleep_service
+        setter = getattr(self._profile_service, "set_memory_sleep_service", None)
+        if callable(setter):
+            setter(memory_sleep_service)
 
     def list_backends(self) -> list[MemoryBackendDescriptor]:
         return [
@@ -189,6 +195,9 @@ class MemoryRecallService:
                             "active_constraints": list(views.profile.active_constraints),
                             "current_operating_context": list(views.profile.current_operating_context),
                             "source_refs": list(views.profile.source_refs),
+                            "read_layer": views.profile.read_layer,
+                            "overlay_id": views.profile.overlay_id,
+                            "industry_profile_id": views.profile.industry_profile_id,
                         },
                     ),
                 ),

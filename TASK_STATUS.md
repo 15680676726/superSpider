@@ -356,6 +356,9 @@
   - `MemoryMergeResult`
   - `MemorySoftRule`
   - `MemoryConflictProposal`
+  - `IndustryMemoryProfileRecord`
+  - `WorkContextMemoryOverlayRecord`
+  - `MemoryStructureProposalRecord`
 - 第二天正式主读链目标已定为：
   - `canonical object / graph truth`
   - `sleep digest / alias / merge / soft-rule`
@@ -368,6 +371,15 @@
 - 状态说明：
   - 当前已完成“正式设计收口 + 首轮代码落地”，不是只停留在设计稿
   - 当前仓库已落地 `industry / work_context` 两类 scope 的 `B+` sleep layer 与对应测试；`C` 仍只保留路线规划，不在本轮实现
+  - Runtime Center 已新增：
+    - `GET /runtime-center/memory/sleep/industry-profiles`
+    - `GET /runtime-center/memory/sleep/work-context-overlays`
+    - `GET /runtime-center/memory/sleep/structure-proposals`
+  - `MemoryProfileService` 已把 sleep-derived `industry_profile / work_context_overlay` 接入 profile 主读层
+  - `MemoryRecallService` 与 `/runtime-center/memory/profiles*` 现都会显式暴露：
+    - `read_layer`
+    - `overlay_id`
+    - `industry_profile_id`
 
 ---
 

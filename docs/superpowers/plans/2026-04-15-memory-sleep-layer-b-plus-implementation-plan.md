@@ -8,6 +8,35 @@
 
 **Tech Stack:** Python, Pydantic, SQLite state store, FastAPI, pytest
 
+## Current Landed Status
+
+截至当前仓库状态，这份计划的 Task 1 ~ Task 3 已进入已落地状态，不再是纯待施工草案。
+
+当前已经落地的内容：
+
+- 正式状态对象除了初始 6 类 sleep artifact 外，已补到：
+  - `IndustryMemoryProfileRecord`
+  - `WorkContextMemoryOverlayRecord`
+  - `MemoryStructureProposalRecord`
+- `MemorySleepService` 已能为：
+  - `industry` scope 生成 `IndustryMemoryProfileRecord`
+  - `work_context` scope 生成 `WorkContextMemoryOverlayRecord`
+  - `work_context` scope 生成 `MemoryStructureProposalRecord`
+- Runtime Center 已新增正式读路由：
+  - `GET /runtime-center/memory/sleep/industry-profiles`
+  - `GET /runtime-center/memory/sleep/work-context-overlays`
+  - `GET /runtime-center/memory/sleep/structure-proposals`
+- Recall / profile 主读链已开始显式暴露：
+  - `read_layer`
+  - `overlay_id`
+  - `industry_profile_id`
+- `/runtime-center/memory/profiles*` 已和 `MemoryProfileService` 对齐，不再停留在旧的首条 summary 拼装逻辑
+
+当前这份计划剩余的主要意义：
+
+- 作为 B+ 实现范围与边界的施工清单
+- 继续约束 Task 4 的聚合回归、相邻回归和 diff sanity
+
 ---
 
 ### Task 1: 落地 B+ 状态层对象、表结构与仓储

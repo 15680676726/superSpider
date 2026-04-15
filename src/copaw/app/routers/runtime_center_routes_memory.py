@@ -516,11 +516,42 @@ def _list_truth_first_scope_entries(
 
 def _build_memory_profile_payload(
     *,
+    request: Request,
     scope_type: str,
     scope_id: str,
     entries: list[object],
+    role: str | None = None,
 ) -> dict[str, object]:
+    recall_service = _get_memory_recall_service(request)
+    profile_service = getattr(recall_service, "_profile_service", None)
+    build_views = getattr(profile_service, "build_views", None)
     latest_entries = entries[:4]
+    updated_at = _memory_timestamp_json(_memory_entry_timestamp(latest_entries[0])) if latest_entries else None
+    if callable(build_views):
+        views = build_views(
+            scope_type=scope_type,
+            scope_id=scope_id,
+            role=role,
+            entries=entries,
+        )
+        profile = getattr(views, "profile", None)
+        if profile is not None:
+            return {
+                "scope_type": scope_type,
+                "scope_id": scope_id,
+                "static_profile": list(getattr(profile, "static_profile", []) or []),
+                "dynamic_profile": list(getattr(profile, "dynamic_profile", []) or []),
+                "active_preferences": list(getattr(profile, "active_preferences", []) or []),
+                "active_constraints": list(getattr(profile, "active_constraints", []) or []),
+                "current_focus_summary": str(getattr(profile, "current_focus_summary", "") or "").strip(),
+                "current_operating_context": list(getattr(profile, "current_operating_context", []) or []),
+                "source_refs": list(getattr(profile, "source_refs", []) or []),
+                "read_layer": str(getattr(profile, "read_layer", "truth-first") or "truth-first"),
+                "overlay_id": getattr(profile, "overlay_id", None),
+                "industry_profile_id": getattr(profile, "industry_profile_id", None),
+                "updated_at": updated_at,
+            }
+
     latest_summaries = [
         _first_non_empty(
             getattr(entry, "summary", None),
@@ -540,17 +571,20 @@ def _build_memory_profile_payload(
         for item in normalized_summaries
         if "must" in item.lower() or "only" in item.lower() or "required" in item.lower()
     ]
-    updated_at = _memory_timestamp_json(_memory_entry_timestamp(latest_entries[0])) if latest_entries else None
     return {
         "scope_type": scope_type,
         "scope_id": scope_id,
-        "static_profile": {
-            "headline": _first_non_empty(
-                getattr(latest_entries[0], "title", None) if latest_entries else None,
-                scope_id,
-            ),
-            "summary": normalized_summaries[0] if normalized_summaries else "",
-        },
+        "static_profile": [
+            item
+            for item in [
+                _first_non_empty(
+                    getattr(latest_entries[0], "title", None) if latest_entries else None,
+                    scope_id,
+                ),
+                normalized_summaries[0] if normalized_summaries else "",
+            ]
+            if item
+        ],
         "dynamic_profile": normalized_summaries[:4],
         "active_preferences": preference_lines[:3],
         "active_constraints": constraint_lines[:3],
@@ -558,7 +592,11 @@ def _build_memory_profile_payload(
             getattr(latest_entries[0], "title", None) if latest_entries else None,
             normalized_summaries[0] if normalized_summaries else None,
         ),
-        "current_operating_context": normalized_summaries[0] if normalized_summaries else "",
+        "current_operating_context": normalized_summaries[:1],
+        "source_refs": [],
+        "read_layer": "truth-first",
+        "overlay_id": None,
+        "industry_profile_id": None,
         "updated_at": updated_at,
     }
 
@@ -643,7 +681,13 @@ async def list_memory_profiles(
             industry_instance_id=industry_instance_id,
             limit=max(limit * 4, 12),
         )
-        payload = _build_memory_profile_payload(scope_type=scope_type, scope_id=scope_id, entries=entries)
+        payload = _build_memory_profile_payload(
+            request=request,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            entries=entries,
+            role=role,
+        )
         activation = _maybe_build_activation_payload(
             request=request,
             include_activation=include_activation,
@@ -684,6 +728,7 @@ async def list_memory_profiles(
             break
     return [
         _build_memory_profile_payload(
+            request=request,
             scope_type=resolved_scope_type,
             scope_id=resolved_scope_id,
             entries=[
@@ -692,6 +737,7 @@ async def list_memory_profiles(
                 if getattr(entry, "scope_type", None) == resolved_scope_type
                 and getattr(entry, "scope_id", None) == resolved_scope_id
             ],
+            role=role,
         )
         for resolved_scope_type, resolved_scope_id in scopes
     ]
@@ -722,7 +768,13 @@ async def get_memory_profile(
         industry_instance_id=industry_instance_id,
         limit=20,
     )
-    payload = _build_memory_profile_payload(scope_type=scope_type, scope_id=scope_id, entries=entries)
+    payload = _build_memory_profile_payload(
+        request=request,
+        scope_type=scope_type,
+        scope_id=scope_id,
+        entries=entries,
+        role=role,
+    )
     activation = _maybe_build_activation_payload(
         request=request,
         include_activation=include_activation,
@@ -1094,6 +1146,70 @@ async def list_memory_sleep_conflicts(
     return [
         item.model_dump(mode="json")
         for item in service.list_conflict_proposals(
+            scope_type=scope_type,
+            scope_id=scope_id,
+            status=status,
+            limit=limit,
+        )
+    ]
+
+
+@router.get("/memory/sleep/industry-profiles", response_model=list[dict[str, object]])
+async def list_memory_sleep_industry_profiles(
+    request: Request,
+    response: Response,
+    industry_instance_id: str | None = None,
+    status: str | None = None,
+    limit: int = 100,
+) -> list[dict[str, object]]:
+    apply_runtime_center_surface_headers(response, surface="runtime-center")
+    service = _get_memory_sleep_service(request)
+    return [
+        item.model_dump(mode="json")
+        for item in service.list_industry_profiles(
+            industry_instance_id=industry_instance_id,
+            status=status,
+            limit=limit,
+        )
+    ]
+
+
+@router.get("/memory/sleep/work-context-overlays", response_model=list[dict[str, object]])
+async def list_memory_sleep_work_context_overlays(
+    request: Request,
+    response: Response,
+    work_context_id: str | None = None,
+    industry_instance_id: str | None = None,
+    status: str | None = None,
+    limit: int = 100,
+) -> list[dict[str, object]]:
+    apply_runtime_center_surface_headers(response, surface="runtime-center")
+    service = _get_memory_sleep_service(request)
+    return [
+        item.model_dump(mode="json")
+        for item in service.list_work_context_overlays(
+            work_context_id=work_context_id,
+            industry_instance_id=industry_instance_id,
+            status=status,
+            limit=limit,
+        )
+    ]
+
+
+@router.get("/memory/sleep/structure-proposals", response_model=list[dict[str, object]])
+async def list_memory_sleep_structure_proposals(
+    request: Request,
+    response: Response,
+    scope_type: Literal["global", "industry", "agent", "task", "work_context"] | None = None,
+    scope_id: str | None = None,
+    status: str | None = None,
+    limit: int = 100,
+) -> list[dict[str, object]]:
+    apply_runtime_center_surface_headers(response, surface="runtime-center")
+    service = _get_memory_sleep_service(request)
+    return [
+        item.model_dump(mode="json")
+        for item in service.list_structure_proposals(
             scope_type=scope_type,
             scope_id=scope_id,
             status=status,

@@ -2115,6 +2115,9 @@ Derived objects reserved for this layer:
 - `MemoryMergeResult`
 - `MemorySoftRule`
 - `MemoryConflictProposal`
+- `IndustryMemoryProfileRecord`
+- `WorkContextMemoryOverlayRecord`
+- `MemoryStructureProposalRecord`
 
 Next-day read-order target:
 
@@ -2122,6 +2125,19 @@ Next-day read-order target:
 - sleep `digest / alias / merge / soft-rule`
 - raw text memory
 - lexical fallback
+
+Current landed read-surface supplement:
+
+- `industry` profile read may surface `IndustryMemoryProfileRecord`
+- `work_context` profile read may surface `WorkContextMemoryOverlayRecord` layered on top of `IndustryMemoryProfileRecord`
+- recall/profile surfaces may explicitly expose:
+  - `read_layer`
+  - `overlay_id`
+  - `industry_profile_id`
+- Runtime Center sleep operator routes now include:
+  - `GET /runtime-center/memory/sleep/industry-profiles`
+  - `GET /runtime-center/memory/sleep/work-context-overlays`
+  - `GET /runtime-center/memory/sleep/structure-proposals`
 
 Auto-apply boundary:
 

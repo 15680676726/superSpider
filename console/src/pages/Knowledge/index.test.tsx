@@ -622,4 +622,105 @@ describe("KnowledgePage", () => {
       expect(screen.queryByText(/A mailbox/)).toBeNull();
     });
   });
+
+  it("renders industry profile, work overlay, and structure proposals from the memory sleep surface", async () => {
+    requestMock.mockImplementation((url: string) => {
+      if (url === "/runtime-center/strategy-memory?status=active&limit=20") {
+        return Promise.resolve([createStrategyPayload()]);
+      }
+      if (url === "/runtime-center/knowledge/documents") {
+        return Promise.resolve([]);
+      }
+      if (url === "/runtime-center/knowledge") {
+        return Promise.resolve([]);
+      }
+      if (url === "/runtime-center/knowledge/memory") {
+        return Promise.resolve([]);
+      }
+      if (url === "/runtime-center/agents?view=business") {
+        return Promise.resolve([createAgentProfile()]);
+      }
+      if (url === "/runtime-center/agents/agent-1") {
+        return Promise.resolve(createAgentDetail("agent-1", "Execution Agent"));
+      }
+      if (url.startsWith("/runtime-center/memory/index?")) {
+        return Promise.resolve([]);
+      }
+      if (url.startsWith("/runtime-center/memory/entities?")) {
+        return Promise.resolve([]);
+      }
+      if (url.startsWith("/runtime-center/memory/opinions?")) {
+        return Promise.resolve([]);
+      }
+      if (url.startsWith("/runtime-center/memory/reflections?")) {
+        return Promise.resolve([]);
+      }
+      if (url.startsWith("/runtime-center/memory/surface?")) {
+        return Promise.resolve(
+          createMemorySurfacePayload({
+            scope_type: "work_context",
+            scope_id: "ctx-1",
+            sleep: {
+              digest: {
+                headline: "工作记忆摘要",
+                summary: "当前工作上下文正在处理财务复核和外呼审批。",
+                current_constraints: ["外呼审批必须先完成财务复核。"],
+                current_focus: ["先完成财务复核，再处理审批。"],
+                top_entities: ["外呼审批", "财务复核"],
+                top_relations: ["外呼审批依赖财务复核"],
+                evidence_refs: ["evidence:1"],
+              },
+              industry_profile: {
+                profile_id: "industry-profile:1",
+                industry_instance_id: "industry-1",
+                headline: "行业长期记忆",
+                summary: "行业长期基线强调先证据后动作。",
+                strategic_direction: "证据先行",
+                active_constraints: ["外呼审批必须先完成财务复核。"],
+                active_focuses: ["收口共享行业规则"],
+                key_entities: ["外呼审批"],
+                key_relations: ["外呼审批依赖财务复核"],
+                evidence_refs: ["evidence:1"],
+              },
+              work_context_overlay: {
+                overlay_id: "overlay:1",
+                work_context_id: "ctx-1",
+                headline: "工作记忆 overlay",
+                summary: "当前上下文明确承接行业长期规则。",
+                focus_summary: "先完成财务复核，再处理外呼审批",
+                active_constraints: ["当前工作上下文继承行业复核规则"],
+                active_focuses: ["财务复核", "外呼审批"],
+                active_entities: ["跟进线程"],
+                active_relations: ["跟进线程依赖审批门"],
+                evidence_refs: ["evidence:1"],
+              },
+              structure_proposals: [
+                {
+                  proposal_id: "structure:1",
+                  title: "把财务复核提升为工作记忆首条",
+                  summary: "建议只调整 overlay 的默认读顺序。",
+                  recommended_action: "保持事实不变，只调整 overlay 的默认读顺序。",
+                  risk_level: "medium",
+                  status: "pending",
+                },
+              ],
+              soft_rules: [],
+              conflicts: [],
+            },
+          }),
+        );
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    render(<KnowledgePage />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: /检索与反思/ }));
+
+    await waitFor(() => {
+      expect(screen.getByText("行业长期记忆")).toBeTruthy();
+    });
+    expect(screen.getByText("工作记忆 overlay")).toBeTruthy();
+    expect(screen.getByText("把财务复核提升为工作记忆首条")).toBeTruthy();
+  });
 });

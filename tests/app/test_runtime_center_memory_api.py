@@ -761,6 +761,90 @@ def test_runtime_center_memory_sleep_routes_expose_scopes_jobs_and_artifacts(tmp
     assert rules_response.json()
 
 
+def test_runtime_center_memory_sleep_routes_expose_profiles_overlays_and_structure_proposals(tmp_path) -> None:
+    client = _build_client(tmp_path)
+
+    industry_response = client.post(
+        "/runtime-center/knowledge/memory",
+        json={
+            "title": "行业长期规则",
+            "content": "行业当前要求所有外呼审批都必须先完成财务复核。",
+            "scope_type": "industry",
+            "scope_id": "industry-1",
+            "source_ref": "memory:industry-1:1",
+            "tags": ["approval", "finance"],
+        },
+    )
+    assert industry_response.status_code == 200
+    run_industry_response = client.post(
+        "/runtime-center/memory/sleep/run",
+        json={
+            "scope_type": "industry",
+            "scope_id": "industry-1",
+            "trigger_kind": "manual",
+        },
+    )
+    assert run_industry_response.status_code == 200
+
+    work_context_response = client.post(
+        "/runtime-center/knowledge/memory",
+        json={
+            "title": "工作上下文焦点",
+            "content": "当前工作上下文正在收口财务复核和外呼审批之间的先后顺序。",
+            "scope_type": "work_context",
+            "scope_id": "ctx-structured-memory",
+            "source_ref": "memory:ctx-structured-memory:1",
+            "tags": ["approval", "finance"],
+        },
+    )
+    assert work_context_response.status_code == 200
+    client.app.state.memory_sleep_service.mark_scope_dirty(
+        scope_type="work_context",
+        scope_id="ctx-structured-memory",
+        industry_instance_id="industry-1",
+        reason="bind-industry",
+        source_ref="memory:ctx-structured-memory:1",
+    )
+    run_work_context_response = client.post(
+        "/runtime-center/memory/sleep/run",
+        json={
+            "scope_type": "work_context",
+            "scope_id": "ctx-structured-memory",
+            "trigger_kind": "manual",
+        },
+    )
+    assert run_work_context_response.status_code == 200
+
+    profiles_response = client.get(
+        "/runtime-center/memory/sleep/industry-profiles",
+        params={"industry_instance_id": "industry-1"},
+    )
+    overlays_response = client.get(
+        "/runtime-center/memory/sleep/work-context-overlays",
+        params={"work_context_id": "ctx-structured-memory"},
+    )
+    proposals_response = client.get(
+        "/runtime-center/memory/sleep/structure-proposals",
+        params={"scope_type": "work_context", "scope_id": "ctx-structured-memory"},
+    )
+    surface_response = client.get(
+        "/runtime-center/memory/surface",
+        params={"work_context_id": "ctx-structured-memory", "industry_instance_id": "industry-1"},
+    )
+
+    assert profiles_response.status_code == 200
+    assert overlays_response.status_code == 200
+    assert proposals_response.status_code == 200
+    assert surface_response.status_code == 200
+    assert profiles_response.json()[0]["industry_instance_id"] == "industry-1"
+    assert overlays_response.json()[0]["work_context_id"] == "ctx-structured-memory"
+    assert proposals_response.json()[0]["candidate_overlay_id"] == overlays_response.json()[0]["overlay_id"]
+    sleep_payload = surface_response.json()["sleep"]
+    assert sleep_payload["industry_profile"]["industry_instance_id"] == "industry-1"
+    assert sleep_payload["work_context_overlay"]["work_context_id"] == "ctx-structured-memory"
+    assert sleep_payload["structure_proposals"]
+
+
 def test_runtime_center_memory_surface_filters_internal_noise_from_entities_and_relation_summaries(tmp_path) -> None:
     client = _build_client(tmp_path)
 
@@ -1159,6 +1243,77 @@ def test_runtime_center_memory_profile_includes_activation_summary_when_requeste
     assert payload["activation"]["activated_count"] >= 1
     assert payload["activation"]["top_constraints"] == ["Only approve outbound after evidence review."]
     assert "activated_neurons" not in payload["activation"]
+
+
+def test_runtime_center_memory_profile_detail_uses_sleep_overlay_read_layer(tmp_path) -> None:
+    client = _build_client(tmp_path)
+
+    industry_response = client.post(
+        "/runtime-center/knowledge/memory",
+        json={
+            "title": "行业总规则",
+            "content": "行业要求所有外呼审批都必须先完成财务复核。",
+            "scope_type": "industry",
+            "scope_id": "industry-1",
+            "source_ref": "memory:industry-1:profile",
+            "tags": ["approval", "finance"],
+        },
+    )
+    assert industry_response.status_code == 200
+    run_industry_response = client.post(
+        "/runtime-center/memory/sleep/run",
+        json={
+            "scope_type": "industry",
+            "scope_id": "industry-1",
+            "trigger_kind": "manual",
+        },
+    )
+    assert run_industry_response.status_code == 200
+
+    work_context_response = client.post(
+        "/runtime-center/knowledge/memory",
+        json={
+            "title": "工作上下文焦点",
+            "content": "当前工作上下文正在收口财务复核和外呼审批的先后顺序。",
+            "scope_type": "work_context",
+            "scope_id": "ctx-profile-overlay",
+            "source_ref": "memory:ctx-profile-overlay:1",
+            "tags": ["approval", "finance"],
+        },
+    )
+    assert work_context_response.status_code == 200
+    client.app.state.memory_sleep_service.mark_scope_dirty(
+        scope_type="work_context",
+        scope_id="ctx-profile-overlay",
+        industry_instance_id="industry-1",
+        reason="bind-industry",
+        source_ref="memory:ctx-profile-overlay:1",
+    )
+    run_work_context_response = client.post(
+        "/runtime-center/memory/sleep/run",
+        json={
+            "scope_type": "work_context",
+            "scope_id": "ctx-profile-overlay",
+            "trigger_kind": "manual",
+        },
+    )
+    assert run_work_context_response.status_code == 200
+
+    response = client.get(
+        "/runtime-center/memory/profiles/work_context/ctx-profile-overlay",
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["scope_type"] == "work_context"
+    assert payload["scope_id"] == "ctx-profile-overlay"
+    assert payload["read_layer"] == "work_context_overlay"
+    assert str(payload["overlay_id"]).startswith("overlay:")
+    assert str(payload["industry_profile_id"]).startswith("industry-profile:")
+    assert any("财务复核" in item for item in payload["static_profile"])
+    assert any("工作上下文" in item for item in payload["dynamic_profile"])
+    assert isinstance(payload["current_operating_context"], list)
+    assert payload["current_operating_context"]
 
 
 def test_runtime_center_memory_episodes_can_include_activation_refs(tmp_path) -> None:

@@ -810,10 +810,17 @@
   - 不允许把 sidecar、Markdown memory 文件或已退役 `MemoryManager` 重新升级为第二真相源
   - `2026-04-15` 设计补充：shared memory 的下一步不再是恢复任何 manager shell，而是新增 derived `B+` sleep layer
     - 目标对象：`MemorySleepJob / MemoryScopeDigest / MemoryAliasMap / MemoryMergeResult / MemorySoftRule / MemoryConflictProposal`
+    - 当前已补充的正式派生对象：`IndustryMemoryProfileRecord / WorkContextMemoryOverlayRecord / MemoryStructureProposalRecord`
     - 首轮 scope：`industry / work_context`
     - 次日主读优先级目标：`canonical truth -> sleep artifacts -> raw text memory -> lexical fallback`
     - `ConversationCompactionService` 明确排除在这条正式共享记忆链之外
     - 当前状态已进入首轮代码落地：`industry / work_context` 两类 scope 的 `B+` sleep layer 已接入当前仓库实现与测试，不应继续误写成 `implementation pending`
+    - 当前 Runtime Center 正式读路由已补到：
+      - `GET /runtime-center/memory/sleep/industry-profiles`
+      - `GET /runtime-center/memory/sleep/work-context-overlays`
+      - `GET /runtime-center/memory/sleep/structure-proposals`
+    - `/runtime-center/memory/profiles*` 已改为复用 `MemoryProfileService` 正式读层，不再允许继续保留旧的首条摘要 heuristics
+    - recall/profile 正式读面元数据已补到：`read_layer / overlay_id / industry_profile_id`
 
 ---
 

@@ -88,6 +88,7 @@ from .models_governance import (
 from .models_industry import IndustryInstanceRecord, MediaAnalysisRecord
 from .models_knowledge import KnowledgeChunkRecord
 from .models_memory import (
+    IndustryMemoryProfileRecord,
     MemoryAliasMapRecord,
     MemoryConflictProposalRecord,
     MemoryEntityViewRecord,
@@ -101,7 +102,9 @@ from .models_memory import (
     MemoryScopeType,
     MemorySleepJobRecord,
     MemorySleepScopeStateRecord,
+    MemoryStructureProposalRecord,
     MemorySoftRuleRecord,
+    WorkContextMemoryOverlayRecord,
 )
 from .models_prediction import (
     PredictionCaseRecord,
@@ -178,6 +181,7 @@ __all__ = [
     "GoalStatus",
     "GovernanceControlRecord",
     "IndustryInstanceRecord",
+    "IndustryMemoryProfileRecord",
     "KnowledgeChunkRecord",
     "LaneBudgetRecord",
     "MediaAnalysisRecord",
@@ -194,6 +198,7 @@ __all__ = [
     "MemoryScopeType",
     "MemorySleepJobRecord",
     "MemorySleepScopeStateRecord",
+    "MemoryStructureProposalRecord",
     "MemorySoftRuleRecord",
     "MetricRecord",
     "OperatingCycleKind",
@@ -237,6 +242,7 @@ __all__ = [
     "TaskStatus",
     "WorkContextRecord",
     "WorkContextStatus",
+    "WorkContextMemoryOverlayRecord",
     "WorkflowPresetRecord",
     "WorkflowRunRecord",
     "WorkflowTemplateRecord",

@@ -45,6 +45,7 @@ from ..models import (
 from ..models_external_runtime import ExternalCapabilityRuntimeInstanceRecord
 from ..models_knowledge import KnowledgeChunkRecord
 from ..models_memory import (
+    IndustryMemoryProfileRecord,
     MemoryAliasMapRecord,
     MemoryConflictProposalRecord,
     MemoryEntityViewRecord,
@@ -56,7 +57,9 @@ from ..models_memory import (
     MemoryScopeDigestRecord,
     MemorySleepJobRecord,
     MemorySleepScopeStateRecord,
+    MemoryStructureProposalRecord,
     MemorySoftRuleRecord,
+    WorkContextMemoryOverlayRecord,
 )
 from ..models_work_context import WorkContextRecord
 
@@ -1512,4 +1515,71 @@ class BaseMemorySleepRepository(ABC):
         self,
         record: MemoryConflictProposalRecord,
     ) -> MemoryConflictProposalRecord:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_active_industry_profile(
+        self,
+        industry_instance_id: str,
+    ) -> Optional[IndustryMemoryProfileRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_industry_profiles(
+        self,
+        *,
+        industry_instance_id: str | None = None,
+        status: str | None = None,
+        limit: int | None = None,
+    ) -> list[IndustryMemoryProfileRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upsert_industry_profile(
+        self,
+        record: IndustryMemoryProfileRecord,
+    ) -> IndustryMemoryProfileRecord:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_active_work_context_overlay(
+        self,
+        work_context_id: str,
+    ) -> Optional[WorkContextMemoryOverlayRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_work_context_overlays(
+        self,
+        *,
+        work_context_id: str | None = None,
+        industry_instance_id: str | None = None,
+        status: str | None = None,
+        limit: int | None = None,
+    ) -> list[WorkContextMemoryOverlayRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upsert_work_context_overlay(
+        self,
+        record: WorkContextMemoryOverlayRecord,
+    ) -> WorkContextMemoryOverlayRecord:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_structure_proposals(
+        self,
+        *,
+        scope_type: str | None = None,
+        scope_id: str | None = None,
+        status: str | None = None,
+        limit: int | None = None,
+    ) -> list[MemoryStructureProposalRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upsert_structure_proposal(
+        self,
+        record: MemoryStructureProposalRecord,
+    ) -> MemoryStructureProposalRecord:
         raise NotImplementedError

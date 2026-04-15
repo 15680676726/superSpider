@@ -263,8 +263,46 @@ type MemorySleepConflict = {
   supporting_refs: string[];
 };
 
+type MemoryIndustryProfile = {
+  profile_id: string;
+  industry_instance_id: string;
+  headline: string;
+  summary: string;
+  strategic_direction: string;
+  active_constraints: string[];
+  active_focuses: string[];
+  key_entities: string[];
+  key_relations: string[];
+  evidence_refs: string[];
+};
+
+type MemoryWorkContextOverlay = {
+  overlay_id: string;
+  work_context_id: string;
+  headline: string;
+  summary: string;
+  focus_summary: string;
+  active_constraints: string[];
+  active_focuses: string[];
+  active_entities: string[];
+  active_relations: string[];
+  evidence_refs: string[];
+};
+
+type MemoryStructureProposal = {
+  proposal_id: string;
+  title: string;
+  summary: string;
+  recommended_action: string;
+  risk_level: string;
+  status: string;
+};
+
 type MemorySleepOverlay = {
   digest?: MemorySleepDigest | null;
+  industry_profile?: MemoryIndustryProfile | null;
+  work_context_overlay?: MemoryWorkContextOverlay | null;
+  structure_proposals: MemoryStructureProposal[];
   soft_rules: MemorySleepSoftRule[];
   conflicts: MemorySleepConflict[];
 };
@@ -504,19 +542,136 @@ function normalizeMemorySleepConflicts(value: unknown): MemorySleepConflict[] {
     .filter((item): item is MemorySleepConflict => Boolean(item));
 }
 
+function normalizeMemoryIndustryProfile(value: unknown): MemoryIndustryProfile | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const payload = value as Record<string, unknown>;
+  const industryInstanceId = String(payload.industry_instance_id || "").trim();
+  const headline = String(payload.headline || "").trim();
+  const summary = String(payload.summary || "").trim();
+  const strategicDirection = String(payload.strategic_direction || "").trim();
+  const activeConstraints = normalizeTextList(payload.active_constraints);
+  const activeFocuses = normalizeTextList(payload.active_focuses);
+  const keyEntities = normalizeTextList(payload.key_entities);
+  const keyRelations = normalizeTextList(payload.key_relations);
+  const evidenceRefs = normalizeTextList(payload.evidence_refs);
+  if (
+    !industryInstanceId &&
+    !headline &&
+    !summary &&
+    !strategicDirection &&
+    activeConstraints.length === 0 &&
+    activeFocuses.length === 0
+  ) {
+    return null;
+  }
+  return {
+    profile_id: String(payload.profile_id || ""),
+    industry_instance_id: industryInstanceId,
+    headline: headline || "行业长期记忆",
+    summary,
+    strategic_direction: strategicDirection,
+    active_constraints: activeConstraints,
+    active_focuses: activeFocuses,
+    key_entities: keyEntities,
+    key_relations: keyRelations,
+    evidence_refs: evidenceRefs,
+  };
+}
+
+function normalizeMemoryWorkContextOverlay(value: unknown): MemoryWorkContextOverlay | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const payload = value as Record<string, unknown>;
+  const workContextId = String(payload.work_context_id || "").trim();
+  const headline = String(payload.headline || "").trim();
+  const summary = String(payload.summary || "").trim();
+  const focusSummary = String(payload.focus_summary || "").trim();
+  const activeConstraints = normalizeTextList(payload.active_constraints);
+  const activeFocuses = normalizeTextList(payload.active_focuses);
+  const activeEntities = normalizeTextList(payload.active_entities);
+  const activeRelations = normalizeTextList(payload.active_relations);
+  const evidenceRefs = normalizeTextList(payload.evidence_refs);
+  if (
+    !workContextId &&
+    !headline &&
+    !summary &&
+    !focusSummary &&
+    activeConstraints.length === 0 &&
+    activeFocuses.length === 0
+  ) {
+    return null;
+  }
+  return {
+    overlay_id: String(payload.overlay_id || ""),
+    work_context_id: workContextId,
+    headline: headline || "工作记忆 overlay",
+    summary,
+    focus_summary: focusSummary,
+    active_constraints: activeConstraints,
+    active_focuses: activeFocuses,
+    active_entities: activeEntities,
+    active_relations: activeRelations,
+    evidence_refs: evidenceRefs,
+  };
+}
+
+function normalizeMemoryStructureProposals(value: unknown): MemoryStructureProposal[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item, index) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        return null;
+      }
+      const payload = item as Record<string, unknown>;
+      const title = String(payload.title || "").trim();
+      const summary = String(payload.summary || "").trim();
+      const recommendedAction = String(payload.recommended_action || "").trim();
+      if (!title && !summary && !recommendedAction) {
+        return null;
+      }
+      return {
+        proposal_id: String(payload.proposal_id || `structure-${index + 1}`),
+        title: title || "记忆结构优化提案",
+        summary,
+        recommended_action: recommendedAction,
+        risk_level: String(payload.risk_level || "medium"),
+        status: String(payload.status || "pending"),
+      };
+    })
+    .filter((item): item is MemoryStructureProposal => Boolean(item));
+}
+
 function normalizeMemorySleepOverlay(value: unknown): MemorySleepOverlay | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
   }
   const payload = value as Record<string, unknown>;
   const digest = normalizeMemorySleepDigest(payload.digest);
+  const industryProfile = normalizeMemoryIndustryProfile(payload.industry_profile);
+  const workContextOverlay = normalizeMemoryWorkContextOverlay(payload.work_context_overlay);
+  const structureProposals = normalizeMemoryStructureProposals(payload.structure_proposals);
   const softRules = normalizeMemorySleepRules(payload.soft_rules);
   const conflicts = normalizeMemorySleepConflicts(payload.conflicts);
-  if (!digest && softRules.length === 0 && conflicts.length === 0) {
+  if (
+    !digest &&
+    !industryProfile &&
+    !workContextOverlay &&
+    structureProposals.length === 0 &&
+    softRules.length === 0 &&
+    conflicts.length === 0
+  ) {
     return null;
   }
   return {
     digest,
+    industry_profile: industryProfile,
+    work_context_overlay: workContextOverlay,
+    structure_proposals: structureProposals,
     soft_rules: softRules,
     conflicts,
   };
@@ -1274,7 +1429,7 @@ export default function KnowledgePage() {
                   <>
                     <Card
                       className="baize-card"
-                      title={`记忆整理 (${memorySurface?.sleep?.soft_rules.length ?? 0} 条规则 / ${memorySurface?.sleep?.conflicts.length ?? 0} 个待处理)`}
+                      title={`记忆整理 (${memorySurface?.sleep?.soft_rules.length ?? 0} 条规则 / ${memorySurface?.sleep?.structure_proposals.length ?? 0} 个结构提案 / ${memorySurface?.sleep?.conflicts.length ?? 0} 个待处理)`}
                       data-testid="memory-sleep-surface"
                     >
                       {memorySurface?.sleep ? (
@@ -1291,6 +1446,9 @@ export default function KnowledgePage() {
                             </Descriptions.Item>
                             <Descriptions.Item label="规则数量">
                               {memorySurface.sleep.soft_rules.length}
+                            </Descriptions.Item>
+                            <Descriptions.Item label="结构提案">
+                              {memorySurface.sleep.structure_proposals.length}
                             </Descriptions.Item>
                             <Descriptions.Item label="待处理冲突">
                               {memorySurface.sleep.conflicts.length}
@@ -1327,6 +1485,77 @@ export default function KnowledgePage() {
                                   .map((ref) => (
                                     <Tag key={ref} color="green">
                                       {ref}
+                                    </Tag>
+                                  ))}
+                              </Space>
+                            </Space>
+                          ) : null}
+
+                          {memorySurface.sleep.industry_profile ? (
+                            <Space direction="vertical" size={8} style={{ width: "100%" }}>
+                              <Text strong>{memorySurface.sleep.industry_profile.headline}</Text>
+                              {memorySurface.sleep.industry_profile.summary ? (
+                                <Paragraph style={{ marginBottom: 0 }}>
+                                  {compactText(memorySurface.sleep.industry_profile.summary, 280)}
+                                </Paragraph>
+                              ) : null}
+                              {memorySurface.sleep.industry_profile.strategic_direction ? (
+                                <Text type="secondary">
+                                  长期方向:{" "}
+                                  {compactText(
+                                    memorySurface.sleep.industry_profile.strategic_direction,
+                                    180,
+                                  )}
+                                </Text>
+                              ) : null}
+                              <Space wrap>
+                                {memorySurface.sleep.industry_profile.active_constraints
+                                  .slice(0, 4)
+                                  .map((constraint) => (
+                                    <Tag key={constraint} color="gold">
+                                      {constraint}
+                                    </Tag>
+                                  ))}
+                                {memorySurface.sleep.industry_profile.active_focuses
+                                  .slice(0, 4)
+                                  .map((focus) => (
+                                    <Tag key={focus} color="blue">
+                                      {focus}
+                                    </Tag>
+                                  ))}
+                              </Space>
+                            </Space>
+                          ) : null}
+
+                          {memorySurface.sleep.work_context_overlay ? (
+                            <Space direction="vertical" size={8} style={{ width: "100%" }}>
+                              <Text strong>{memorySurface.sleep.work_context_overlay.headline}</Text>
+                              {memorySurface.sleep.work_context_overlay.focus_summary ? (
+                                <Paragraph style={{ marginBottom: 0 }}>
+                                  {compactText(
+                                    memorySurface.sleep.work_context_overlay.focus_summary,
+                                    240,
+                                  )}
+                                </Paragraph>
+                              ) : null}
+                              {memorySurface.sleep.work_context_overlay.summary ? (
+                                <Text type="secondary">
+                                  {compactText(memorySurface.sleep.work_context_overlay.summary, 220)}
+                                </Text>
+                              ) : null}
+                              <Space wrap>
+                                {memorySurface.sleep.work_context_overlay.active_constraints
+                                  .slice(0, 4)
+                                  .map((constraint) => (
+                                    <Tag key={constraint} color="gold">
+                                      {constraint}
+                                    </Tag>
+                                  ))}
+                                {memorySurface.sleep.work_context_overlay.active_focuses
+                                  .slice(0, 4)
+                                  .map((focus) => (
+                                    <Tag key={focus} color="blue">
+                                      {focus}
                                     </Tag>
                                   ))}
                               </Space>
@@ -1381,9 +1610,40 @@ export default function KnowledgePage() {
                                 </List.Item>
                               )}
                             />
+                              ) : null}
+
+                          {memorySurface.sleep.structure_proposals.length > 0 ? (
+                            <List
+                              header={<Text strong>结构优化提案</Text>}
+                              dataSource={memorySurface.sleep.structure_proposals}
+                              renderItem={(item) => (
+                                <List.Item key={item.proposal_id}>
+                                  <Space direction="vertical" size={6} style={{ width: "100%" }}>
+                                    <Space wrap>
+                                      <Text strong>{item.title}</Text>
+                                      <Tag color="blue">{item.status}</Tag>
+                                      <Tag>{`风险 ${item.risk_level}`}</Tag>
+                                    </Space>
+                                    {item.summary ? (
+                                      <Paragraph style={{ marginBottom: 0 }}>
+                                        {compactText(item.summary, 220)}
+                                      </Paragraph>
+                                    ) : null}
+                                    {item.recommended_action ? (
+                                      <Text type="secondary">
+                                        建议处理: {compactText(item.recommended_action, 160)}
+                                      </Text>
+                                    ) : null}
+                                  </Space>
+                                </List.Item>
+                              )}
+                            />
                           ) : null}
 
                           {!memorySurface.sleep.digest &&
+                          !memorySurface.sleep.industry_profile &&
+                          !memorySurface.sleep.work_context_overlay &&
+                          memorySurface.sleep.structure_proposals.length === 0 &&
                           memorySurface.sleep.soft_rules.length === 0 &&
                           memorySurface.sleep.conflicts.length === 0 ? (
                             <Text type="secondary">

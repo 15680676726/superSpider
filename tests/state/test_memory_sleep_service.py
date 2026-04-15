@@ -278,3 +278,81 @@ def test_memory_sleep_service_marks_job_failed_and_keeps_scope_dirty_on_inferenc
     assert scope_state.last_sleep_job_id == job.job_id
     assert scope_state.last_sleep_at is None
     assert sleep.get_active_digest("work_context", "ctx-sleep-4") is None
+
+
+def test_memory_sleep_service_builds_industry_profile_work_overlay_and_structure_proposal(tmp_path) -> None:
+    _store, knowledge, strategy, _retain, sleep = _build_memory_sleep_services(tmp_path)
+
+    strategy.upsert_strategy(
+        StrategyMemoryRecord(
+            strategy_id="strategy:industry:industry-memory-1:main-brain",
+            scope_type="industry",
+            scope_id="industry-memory-1",
+            owner_agent_id="main-brain",
+            industry_instance_id="industry-memory-1",
+            title="证据先行行业基线",
+            summary="行业当前要求任何外呼动作都必须先通过财务复核。",
+            execution_constraints=["外呼动作前必须先完成财务复核。"],
+            current_focuses=["先收口共享行业规则，再放行外呼执行。"],
+        ),
+    )
+    knowledge.remember_fact(
+        title="共享行业规则",
+        content="财务复核是当前行业共享规则，所有外呼审批都要先等它完成。",
+        scope_type="industry",
+        scope_id="industry-memory-1",
+        source_ref="knowledge:industry-memory-1:1",
+        tags=["approval", "finance"],
+    )
+    sleep.run_sleep(
+        scope_type="industry",
+        scope_id="industry-memory-1",
+        trigger_kind="manual",
+    )
+
+    knowledge.remember_fact(
+        title="当前工作焦点",
+        content="当前工作上下文正在处理财务复核和外呼审批的先后顺序。",
+        scope_type="work_context",
+        scope_id="ctx-memory-overlay-1",
+        source_ref="knowledge:ctx-memory-overlay-1:1",
+        tags=["approval", "finance"],
+    )
+    scope_state = sleep.mark_scope_dirty(
+        scope_type="work_context",
+        scope_id="ctx-memory-overlay-1",
+        industry_instance_id="industry-memory-1",
+        reason="manual-bind-industry",
+        source_ref="knowledge:ctx-memory-overlay-1:1",
+    )
+    assert scope_state.industry_instance_id == "industry-memory-1"
+
+    job = sleep.run_sleep(
+        scope_type="work_context",
+        scope_id="ctx-memory-overlay-1",
+        trigger_kind="manual",
+    )
+
+    assert job.status == "completed"
+    industry_profile = sleep.get_active_industry_profile("industry-memory-1")
+    assert industry_profile is not None
+    assert industry_profile.strategic_direction
+    assert "财务复核" in " ".join(industry_profile.active_constraints + industry_profile.active_focuses)
+
+    overlay = sleep.get_active_work_context_overlay("ctx-memory-overlay-1")
+    assert overlay is not None
+    assert overlay.base_profile_id == industry_profile.profile_id
+    assert overlay.industry_instance_id == "industry-memory-1"
+    assert overlay.focus_summary
+    assert "财务复核" in " ".join(
+        [overlay.focus_summary, *overlay.active_constraints, *overlay.active_focuses],
+    )
+
+    proposals = sleep.list_structure_proposals(
+        scope_type="work_context",
+        scope_id="ctx-memory-overlay-1",
+        status="pending",
+    )
+    assert proposals
+    assert proposals[0].candidate_overlay_id == overlay.overlay_id
+    assert proposals[0].candidate_profile_id == industry_profile.profile_id

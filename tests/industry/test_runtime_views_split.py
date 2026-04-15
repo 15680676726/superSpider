@@ -1301,6 +1301,53 @@ def test_live_focus_payload_keeps_focus_selection_without_overriding_runtime_foc
     assert payload["current_focus_title"] is None
 
 
+def test_task_entry_continuity_refs_tolerates_missing_kernel_metadata() -> None:
+    strategy = StrategyMemoryRecord(
+        strategy_id="strategy-industry-1",
+        scope_type="industry",
+        scope_id="industry-1",
+        title="Planning truth",
+    )
+    runtime_views = _RuntimeViewsHarness(strategy)
+
+    refs = runtime_views._task_entry_continuity_refs(
+        {
+            "task": {
+                "id": "task-1",
+                "acceptance_criteria": None,
+            },
+            "runtime": {},
+        }
+    )
+
+    assert refs == []
+
+
+def test_extract_execution_task_trigger_tolerates_missing_kernel_metadata() -> None:
+    strategy = StrategyMemoryRecord(
+        strategy_id="strategy-industry-1",
+        scope_type="industry",
+        scope_id="industry-1",
+        title="Planning truth",
+    )
+    runtime_views = _RuntimeViewsHarness(strategy)
+
+    trigger = runtime_views._extract_execution_task_trigger(
+        {
+            "task": {
+                "id": "task-1",
+                "acceptance_criteria": None,
+            },
+        }
+    )
+
+    assert trigger == {
+        "source": None,
+        "actor": None,
+        "reason": None,
+    }
+
+
 def test_instance_detail_keeps_selected_assignment_without_fabricating_execution_focus(
     tmp_path: Path,
 ) -> None:

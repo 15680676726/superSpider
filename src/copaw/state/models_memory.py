@@ -29,6 +29,7 @@ MemorySleepJobStatus = Literal["queued", "running", "completed", "failed", "skip
 MemorySleepArtifactStatus = Literal["active", "superseded"]
 MemorySoftRuleState = Literal["candidate", "active", "promoted", "rejected", "expired"]
 MemoryConflictProposalStatus = Literal["pending", "accepted", "rejected", "expired"]
+MemoryStructureProposalStatus = MemoryConflictProposalStatus
 MemoryOpinionStance = Literal[
     "supporting",
     "neutral",
@@ -538,4 +539,96 @@ class MemoryConflictProposalRecord(UpdatedRecord):
     @field_validator("conflicting_refs", "supporting_refs", mode="before")
     @classmethod
     def _normalize_proposal_lists(cls, value: object) -> list[str]:
+        return _normalize_text_list(value)
+
+
+class IndustryMemoryProfileRecord(UpdatedRecord):
+    """Industry-first long-term memory baseline derived from canonical truth."""
+
+    profile_id: str = Field(default_factory=_new_record_id, min_length=1)
+    industry_instance_id: str = Field(..., min_length=1)
+    headline: str = Field(..., min_length=1)
+    summary: str = ""
+    strategic_direction: str = ""
+    active_constraints: list[str] = Field(default_factory=list)
+    active_focuses: list[str] = Field(default_factory=list)
+    key_entities: list[str] = Field(default_factory=list)
+    key_relations: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
+    source_job_id: str | None = None
+    source_digest_id: str | None = None
+    version: int = Field(default=1, ge=1)
+    status: MemorySleepArtifactStatus = "active"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator(
+        "active_constraints",
+        "active_focuses",
+        "key_entities",
+        "key_relations",
+        "evidence_refs",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_profile_lists(cls, value: object) -> list[str]:
+        return _normalize_text_list(value)
+
+
+class WorkContextMemoryOverlayRecord(UpdatedRecord):
+    """Live work-context memory overlay layered over the industry baseline."""
+
+    overlay_id: str = Field(default_factory=_new_record_id, min_length=1)
+    work_context_id: str = Field(..., min_length=1)
+    industry_instance_id: str | None = None
+    base_profile_id: str | None = None
+    headline: str = Field(..., min_length=1)
+    summary: str = ""
+    focus_summary: str = ""
+    active_constraints: list[str] = Field(default_factory=list)
+    active_focuses: list[str] = Field(default_factory=list)
+    active_entities: list[str] = Field(default_factory=list)
+    active_relations: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
+    source_job_id: str | None = None
+    source_digest_id: str | None = None
+    version: int = Field(default=1, ge=1)
+    status: MemorySleepArtifactStatus = "active"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator(
+        "active_constraints",
+        "active_focuses",
+        "active_entities",
+        "active_relations",
+        "evidence_refs",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_overlay_lists(cls, value: object) -> list[str]:
+        return _normalize_text_list(value)
+
+
+class MemoryStructureProposalRecord(UpdatedRecord):
+    """Proposal-only optimization for memory structure, ordering, and weights."""
+
+    proposal_id: str = Field(default_factory=_new_record_id, min_length=1)
+    scope_type: MemoryScopeType = "global"
+    scope_id: str = Field(default="runtime", min_length=1)
+    industry_instance_id: str | None = None
+    work_context_id: str | None = None
+    proposal_kind: str = Field(default="structure", min_length=1)
+    title: str = Field(..., min_length=1)
+    summary: str = ""
+    recommended_action: str = ""
+    candidate_profile_id: str | None = None
+    candidate_overlay_id: str | None = None
+    source_job_id: str | None = None
+    evidence_refs: list[str] = Field(default_factory=list)
+    risk_level: str = Field(default="medium", min_length=1)
+    status: MemoryStructureProposalStatus = "pending"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("evidence_refs", mode="before")
+    @classmethod
+    def _normalize_structure_lists(cls, value: object) -> list[str]:
         return _normalize_text_list(value)

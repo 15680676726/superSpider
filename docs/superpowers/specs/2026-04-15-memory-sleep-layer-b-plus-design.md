@@ -30,6 +30,40 @@
 - 软规则的自动生效与升级条件
 - 冲突/长期规则变更的提案化处理
 
+### 2.1.1 当前仓库已落地补充
+
+当前代码库在上述基础上，已经把 `B+` 的正式派生对象扩到 3 类读模型：
+
+- 通用睡眠产物：
+  - `MemorySleepJob`
+  - `MemoryScopeDigest`
+  - `MemoryAliasMap`
+  - `MemoryMergeResult`
+  - `MemorySoftRule`
+  - `MemoryConflictProposal`
+- 行业长期基线：
+  - `IndustryMemoryProfileRecord`
+- 工作上下文主读覆盖层：
+  - `WorkContextMemoryOverlayRecord`
+- 结构优化提案：
+  - `MemoryStructureProposalRecord`
+
+当前正式 operator/read surface 也已落地：
+
+- `GET /runtime-center/memory/sleep/industry-profiles`
+- `GET /runtime-center/memory/sleep/work-context-overlays`
+- `GET /runtime-center/memory/sleep/structure-proposals`
+- `/runtime-center/memory/profiles*` 已对齐 `MemoryProfileService` 新读层，不再走旧的首条摘要 heuristics
+
+当前 profile / recall 主读口径已明确为：
+
+- `work_context`：`WorkContextMemoryOverlay -> IndustryMemoryProfile -> canonical truth`
+- `industry`：`IndustryMemoryProfile -> canonical truth`
+- recall hit metadata / profile API 都会显式暴露：
+  - `read_layer`
+  - `overlay_id`
+  - `industry_profile_id`
+
 ### 2.2 本轮不做什么
 
 本轮明确不做：

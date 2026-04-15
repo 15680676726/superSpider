@@ -27,6 +27,9 @@ class MemoryProfile:
     current_focus_summary: str = ""
     current_operating_context: list[str] = field(default_factory=list)
     source_refs: list[str] = field(default_factory=list)
+    read_layer: str = "truth-first"
+    overlay_id: str | None = None
+    industry_profile_id: str | None = None
 
     def as_text(self) -> str:
         parts = [
@@ -55,9 +58,14 @@ class MemoryProfileService:
         *,
         derived_index_service,
         precedence_service: MemoryPrecedenceService | None = None,
+        memory_sleep_service: object | None = None,
     ) -> None:
         self._derived_index_service = derived_index_service
         self._precedence_service = precedence_service or MemoryPrecedenceService()
+        self._memory_sleep_service = memory_sleep_service
+
+    def set_memory_sleep_service(self, memory_sleep_service: object | None) -> None:
+        self._memory_sleep_service = memory_sleep_service
 
     def build_views(
         self,
@@ -223,7 +231,91 @@ class MemoryProfileService:
             profile.current_focus_summary = profile.dynamic_profile[0]
         if not profile.current_focus_summary and profile.current_operating_context:
             profile.current_focus_summary = profile.current_operating_context[0]
+        self._apply_sleep_layers(profile=profile, scope_type=scope_type, scope_id=scope_id)
         return profile
+
+    def _apply_sleep_layers(
+        self,
+        *,
+        profile: MemoryProfile,
+        scope_type: str,
+        scope_id: str,
+    ) -> None:
+        sleep_service = self._memory_sleep_service
+        if sleep_service is None:
+            return
+        get_active_industry_profile = getattr(sleep_service, "get_active_industry_profile", None)
+        get_active_work_context_overlay = getattr(sleep_service, "get_active_work_context_overlay", None)
+
+        industry_profile = None
+        overlay = None
+        if scope_type == "industry" and callable(get_active_industry_profile):
+            industry_profile = get_active_industry_profile(scope_id)
+        elif scope_type == "work_context" and callable(get_active_work_context_overlay):
+            overlay = get_active_work_context_overlay(scope_id)
+            if overlay is not None and callable(get_active_industry_profile):
+                industry_id = str(getattr(overlay, "industry_instance_id", "") or "").strip()
+                if industry_id:
+                    industry_profile = get_active_industry_profile(industry_id)
+
+        if industry_profile is not None:
+            profile.static_profile = list(
+                dict.fromkeys(
+                    [
+                        *profile.static_profile,
+                        str(getattr(industry_profile, "headline", "") or "").strip(),
+                        str(getattr(industry_profile, "summary", "") or "").strip(),
+                        str(getattr(industry_profile, "strategic_direction", "") or "").strip(),
+                    ]
+                )
+            )
+            profile.active_constraints = list(
+                dict.fromkeys(
+                    [
+                        *list(getattr(industry_profile, "active_constraints", []) or []),
+                        *profile.active_constraints,
+                    ]
+                )
+            )
+            if not profile.current_focus_summary:
+                profile.current_focus_summary = (
+                    str(getattr(industry_profile, "summary", "") or "").strip()
+                    or str(getattr(industry_profile, "headline", "") or "").strip()
+                )
+            profile.industry_profile_id = str(getattr(industry_profile, "profile_id", "") or "").strip() or None
+            profile.read_layer = "industry_profile"
+
+        if overlay is not None:
+            overlay_summary = str(getattr(overlay, "summary", "") or "").strip()
+            focus_summary = str(getattr(overlay, "focus_summary", "") or "").strip()
+            headline = str(getattr(overlay, "headline", "") or "").strip()
+            profile.dynamic_profile = list(
+                dict.fromkeys(
+                    [
+                        *(item for item in [headline, overlay_summary] if item),
+                        *profile.dynamic_profile,
+                    ]
+                )
+            )
+            profile.active_constraints = list(
+                dict.fromkeys(
+                    [
+                        *list(getattr(overlay, "active_constraints", []) or []),
+                        *profile.active_constraints,
+                    ]
+                )
+            )
+            profile.current_operating_context = list(
+                dict.fromkeys(
+                    [
+                        *(item for item in [overlay_summary, focus_summary] if item),
+                        *profile.current_operating_context,
+                    ]
+                )
+            )
+            profile.current_focus_summary = focus_summary or overlay_summary or headline or profile.current_focus_summary
+            profile.overlay_id = str(getattr(overlay, "overlay_id", "") or "").strip() or None
+            profile.read_layer = "work_context_overlay"
 
 
 __all__ = [

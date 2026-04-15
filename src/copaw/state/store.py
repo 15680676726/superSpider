@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-STATE_SCHEMA_VERSION = 38
+STATE_SCHEMA_VERSION = 39
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS human_profiles (
@@ -1685,6 +1685,86 @@ CREATE INDEX IF NOT EXISTS idx_memory_conflict_proposals_scope
     ON memory_conflict_proposals(scope_type, scope_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_memory_conflict_proposals_status
     ON memory_conflict_proposals(status, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS memory_industry_profiles (
+    profile_id TEXT PRIMARY KEY,
+    industry_instance_id TEXT NOT NULL,
+    headline TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    strategic_direction TEXT NOT NULL DEFAULT '',
+    active_constraints_json TEXT NOT NULL DEFAULT '[]',
+    active_focuses_json TEXT NOT NULL DEFAULT '[]',
+    key_entities_json TEXT NOT NULL DEFAULT '[]',
+    key_relations_json TEXT NOT NULL DEFAULT '[]',
+    evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+    source_job_id TEXT,
+    source_digest_id TEXT,
+    version INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'active',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_memory_industry_profiles_scope
+    ON memory_industry_profiles(industry_instance_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_industry_profiles_status
+    ON memory_industry_profiles(industry_instance_id, status, version DESC, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS memory_work_context_overlays (
+    overlay_id TEXT PRIMARY KEY,
+    work_context_id TEXT NOT NULL,
+    industry_instance_id TEXT,
+    base_profile_id TEXT,
+    headline TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    focus_summary TEXT NOT NULL DEFAULT '',
+    active_constraints_json TEXT NOT NULL DEFAULT '[]',
+    active_focuses_json TEXT NOT NULL DEFAULT '[]',
+    active_entities_json TEXT NOT NULL DEFAULT '[]',
+    active_relations_json TEXT NOT NULL DEFAULT '[]',
+    evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+    source_job_id TEXT,
+    source_digest_id TEXT,
+    version INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'active',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_memory_work_context_overlays_scope
+    ON memory_work_context_overlays(work_context_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_work_context_overlays_status
+    ON memory_work_context_overlays(work_context_id, status, version DESC, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_work_context_overlays_industry
+    ON memory_work_context_overlays(industry_instance_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS memory_structure_proposals (
+    proposal_id TEXT PRIMARY KEY,
+    scope_type TEXT NOT NULL DEFAULT 'global',
+    scope_id TEXT NOT NULL,
+    industry_instance_id TEXT,
+    work_context_id TEXT,
+    proposal_kind TEXT NOT NULL DEFAULT 'structure',
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    recommended_action TEXT NOT NULL DEFAULT '',
+    candidate_profile_id TEXT,
+    candidate_overlay_id TEXT,
+    source_job_id TEXT,
+    evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+    risk_level TEXT NOT NULL DEFAULT 'medium',
+    status TEXT NOT NULL DEFAULT 'pending',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_memory_structure_proposals_scope
+    ON memory_structure_proposals(scope_type, scope_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_structure_proposals_status
+    ON memory_structure_proposals(status, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS capability_candidates (
     candidate_id TEXT PRIMARY KEY,

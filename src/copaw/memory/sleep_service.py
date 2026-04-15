@@ -6,13 +6,16 @@ import re
 from typing import Any
 
 from ..state import (
+    IndustryMemoryProfileRecord,
     MemoryAliasMapRecord,
     MemoryConflictProposalRecord,
     MemoryMergeResultRecord,
     MemoryScopeDigestRecord,
     MemorySleepJobRecord,
     MemorySleepScopeStateRecord,
+    MemoryStructureProposalRecord,
     MemorySoftRuleRecord,
+    WorkContextMemoryOverlayRecord,
 )
 from .sleep_inference_service import (
     _normalize_conflict_status,
@@ -127,6 +130,21 @@ class MemorySleepService:
     def list_conflict_proposals(self, **kwargs: Any) -> list[MemoryConflictProposalRecord]:
         return self._repository.list_conflict_proposals(**kwargs)
 
+    def get_active_industry_profile(self, industry_instance_id: str) -> IndustryMemoryProfileRecord | None:
+        return self._repository.get_active_industry_profile(industry_instance_id)
+
+    def list_industry_profiles(self, **kwargs: Any) -> list[IndustryMemoryProfileRecord]:
+        return self._repository.list_industry_profiles(**kwargs)
+
+    def get_active_work_context_overlay(self, work_context_id: str) -> WorkContextMemoryOverlayRecord | None:
+        return self._repository.get_active_work_context_overlay(work_context_id)
+
+    def list_work_context_overlays(self, **kwargs: Any) -> list[WorkContextMemoryOverlayRecord]:
+        return self._repository.list_work_context_overlays(**kwargs)
+
+    def list_structure_proposals(self, **kwargs: Any) -> list[MemoryStructureProposalRecord]:
+        return self._repository.list_structure_proposals(**kwargs)
+
     def run_sleep(
         self,
         *,
@@ -152,6 +170,7 @@ class MemorySleepService:
             fact_entries = list(self._derived_index_service.list_fact_entries(scope_type=scope_type, scope_id=scope_id, limit=None))
             entity_views = list(self._derived_index_service.list_entity_views(scope_type=scope_type, scope_id=scope_id, limit=None))
             relation_views = list(self._derived_index_service.list_relation_views(scope_type=scope_type, scope_id=scope_id, limit=None))
+            scope_state = self.get_scope_state(scope_type=scope_type, scope_id=scope_id)
             inferred = self._inference_service.infer(
                 scope_type=scope_type,
                 scope_id=scope_id,
@@ -249,6 +268,160 @@ class MemorySleepService:
                     ),
                 )
                 output_refs.append(record.proposal_id)
+            resolved_industry_instance_id = self._resolve_scope_industry_instance_id(
+                scope_type=scope_type,
+                scope_id=scope_id,
+                scope_state=scope_state,
+                fact_entries=fact_entries,
+                knowledge_chunks=knowledge_chunks,
+            )
+            if scope_type == "industry":
+                profile = self._repository.upsert_industry_profile(
+                    IndustryMemoryProfileRecord(
+                        profile_id=f"industry-profile:{scope_id}:v{len(self.list_industry_profiles(industry_instance_id=scope_id, limit=None)) + 1}",
+                        industry_instance_id=scope_id,
+                        headline=str(
+                            inferred.get("industry_profile", {}).get("headline")
+                            or digest.headline
+                            or f"Industry profile {scope_id}"
+                        ),
+                        summary=str(
+                            inferred.get("industry_profile", {}).get("summary")
+                            or digest.summary
+                            or ""
+                        ),
+                        strategic_direction=str(
+                            inferred.get("industry_profile", {}).get("strategic_direction")
+                            or digest.current_focus[0]
+                            if digest.current_focus
+                            else digest.headline
+                        ),
+                        active_constraints=list(
+                            inferred.get("industry_profile", {}).get("active_constraints")
+                            or digest.current_constraints
+                            or []
+                        ),
+                        active_focuses=list(
+                            inferred.get("industry_profile", {}).get("active_focuses")
+                            or digest.current_focus
+                            or []
+                        ),
+                        key_entities=list(
+                            inferred.get("industry_profile", {}).get("key_entities")
+                            or digest.top_entities
+                            or []
+                        ),
+                        key_relations=list(
+                            inferred.get("industry_profile", {}).get("key_relations")
+                            or digest.top_relations
+                            or []
+                        ),
+                        evidence_refs=list(digest.evidence_refs or []),
+                        source_job_id=running_job.job_id,
+                        source_digest_id=digest.digest_id,
+                        version=len(self.list_industry_profiles(industry_instance_id=scope_id, limit=None)) + 1,
+                        status="active",
+                        metadata={"read_order": ["industry_profile", "graph", "evidence"]},
+                    ),
+                )
+                output_refs.append(profile.profile_id)
+            else:
+                profile = (
+                    self.get_active_industry_profile(resolved_industry_instance_id)
+                    if resolved_industry_instance_id
+                    else None
+                )
+            overlay = None
+            if scope_type == "work_context":
+                overlay = self._repository.upsert_work_context_overlay(
+                    WorkContextMemoryOverlayRecord(
+                        overlay_id=f"overlay:{scope_id}:v{len(self.list_work_context_overlays(work_context_id=scope_id, limit=None)) + 1}",
+                        work_context_id=scope_id,
+                        industry_instance_id=resolved_industry_instance_id,
+                        base_profile_id=profile.profile_id if profile is not None else None,
+                        headline=str(
+                            inferred.get("work_context_overlay", {}).get("headline")
+                            or digest.headline
+                            or f"Work overlay {scope_id}"
+                        ),
+                        summary=str(
+                            inferred.get("work_context_overlay", {}).get("summary")
+                            or digest.summary
+                            or ""
+                        ),
+                        focus_summary=str(
+                            inferred.get("work_context_overlay", {}).get("focus_summary")
+                            or " / ".join(
+                                self._unique_text(
+                                    [
+                                        *(list(profile.active_constraints[:1]) if profile is not None else []),
+                                        *(list(digest.current_constraints or [])[:2]),
+                                        *(list(digest.current_focus or [])[:2]),
+                                        str(digest.summary or "").strip(),
+                                    ],
+                                )[:3]
+                            ).strip(" /")
+                            or digest.summary
+                        ),
+                        active_constraints=self._unique_text(
+                            list(inferred.get("work_context_overlay", {}).get("active_constraints") or [])
+                            + list(digest.current_constraints or [])
+                            + list(profile.active_constraints if profile is not None else []),
+                        ),
+                        active_focuses=self._unique_text(
+                            list(inferred.get("work_context_overlay", {}).get("active_focuses") or [])
+                            + list(digest.current_focus or [])
+                            + list(profile.active_focuses if profile is not None else []),
+                        ),
+                        active_entities=self._unique_text(
+                            list(inferred.get("work_context_overlay", {}).get("active_entities") or [])
+                            + list(digest.top_entities or []),
+                        ),
+                        active_relations=self._unique_text(
+                            list(inferred.get("work_context_overlay", {}).get("active_relations") or [])
+                            + list(digest.top_relations or []),
+                        ),
+                        evidence_refs=list(digest.evidence_refs or []),
+                        source_job_id=running_job.job_id,
+                        source_digest_id=digest.digest_id,
+                        version=len(self.list_work_context_overlays(work_context_id=scope_id, limit=None)) + 1,
+                        status="active",
+                        metadata={"read_order": ["work_context_overlay", "industry_profile", "graph", "evidence"]},
+                    ),
+                )
+                output_refs.append(overlay.overlay_id)
+                structure_payloads = list(inferred.get("structure_proposals") or [])
+                if not structure_payloads and overlay.focus_summary:
+                    structure_payloads = [
+                        {
+                            "proposal_kind": "read-order-optimization",
+                            "title": f"把{overlay.active_focuses[0] if overlay.active_focuses else '当前焦点'}提升为工作记忆首条",
+                            "summary": "当前工作上下文已经形成稳定焦点，建议只调整 overlay 的默认读顺序，不改原始事实。",
+                            "recommended_action": "保持事实不变，只调整 overlay 的默认读顺序。",
+                            "risk_level": "medium",
+                        }
+                    ]
+                for index, payload in enumerate(structure_payloads, start=1):
+                    proposal = self._repository.upsert_structure_proposal(
+                        MemoryStructureProposalRecord(
+                            proposal_id=f"structure:{scope_type}:{scope_id}:{index}",
+                            scope_type=scope_type,
+                            scope_id=scope_id,
+                            industry_instance_id=resolved_industry_instance_id,
+                            work_context_id=scope_id,
+                            proposal_kind=str(payload.get("proposal_kind") or "structure"),
+                            title=str(payload.get("title") or "Memory structure proposal"),
+                            summary=str(payload.get("summary") or ""),
+                            recommended_action=str(payload.get("recommended_action") or ""),
+                            candidate_profile_id=profile.profile_id if profile is not None else None,
+                            candidate_overlay_id=overlay.overlay_id,
+                            source_job_id=running_job.job_id,
+                            evidence_refs=list(digest.evidence_refs or []),
+                            risk_level=str(payload.get("risk_level") or "medium"),
+                            status=_normalize_conflict_status(payload.get("status")),
+                        ),
+                    )
+                    output_refs.append(proposal.proposal_id)
             completed_at = _utc_now()
             completed_job = self._repository.upsert_sleep_job(
                 running_job.model_copy(
@@ -328,18 +501,46 @@ class MemorySleepService:
         ]
 
     def run_idle_catchup(self, *, limit: int | None = 5) -> list[MemorySleepJobRecord]:
-        return [
+            return [
             self.run_sleep(scope_type=item.scope_type, scope_id=item.scope_id, trigger_kind="idle")
             for item in self._repository.list_scope_states(dirty_only=True, limit=limit)
         ]
 
     def resolve_scope_overlay(self, *, scope_type: str, scope_id: str) -> dict[str, Any]:
+        scope_state = self.get_scope_state(scope_type=scope_type, scope_id=scope_id)
+        resolved_industry_instance_id = self._resolve_scope_industry_instance_id(
+            scope_type=scope_type,
+            scope_id=scope_id,
+            scope_state=scope_state,
+            fact_entries=[],
+            knowledge_chunks=[],
+        )
         return {
             "digest": self.get_active_digest(scope_type, scope_id),
             "aliases": self.list_alias_maps(scope_type=scope_type, scope_id=scope_id, status="active", limit=None),
             "merges": self.list_merge_results(scope_type=scope_type, scope_id=scope_id, status="active", limit=None),
             "soft_rules": self.list_soft_rules(scope_type=scope_type, scope_id=scope_id, limit=None),
             "conflicts": self.list_conflict_proposals(scope_type=scope_type, scope_id=scope_id, status="pending", limit=None),
+            "industry_profile": (
+                self.get_active_industry_profile(scope_id)
+                if scope_type == "industry"
+                else (
+                    self.get_active_industry_profile(resolved_industry_instance_id)
+                    if resolved_industry_instance_id
+                    else None
+                )
+            ),
+            "work_context_overlay": (
+                self.get_active_work_context_overlay(scope_id)
+                if scope_type == "work_context"
+                else None
+            ),
+            "structure_proposals": self.list_structure_proposals(
+                scope_type=scope_type,
+                scope_id=scope_id,
+                status="pending",
+                limit=None,
+            ),
         }
 
     def expand_alias_terms(self, *, scope_type: str, scope_id: str, query: str) -> list[str]:
@@ -397,3 +598,31 @@ class MemorySleepService:
             self._repository.upsert_soft_rule(record.model_copy(update={"state": "expired", "updated_at": now}))
         for record in self.list_conflict_proposals(scope_type=scope_type, scope_id=scope_id, status="pending", limit=None):
             self._repository.upsert_conflict_proposal(record.model_copy(update={"status": "expired", "updated_at": now}))
+        for record in self.list_structure_proposals(scope_type=scope_type, scope_id=scope_id, status="pending", limit=None):
+            self._repository.upsert_structure_proposal(record.model_copy(update={"status": "expired", "updated_at": now}))
+
+    def _resolve_scope_industry_instance_id(
+        self,
+        *,
+        scope_type: str,
+        scope_id: str,
+        scope_state: object | None,
+        fact_entries: list[object],
+        knowledge_chunks: list[object],
+    ) -> str | None:
+        if scope_type == "industry":
+            return scope_id
+        if str(getattr(scope_state, "industry_instance_id", "") or "").strip():
+            return str(getattr(scope_state, "industry_instance_id", "") or "").strip()
+        for entry in fact_entries:
+            value = str(getattr(entry, "industry_instance_id", "") or "").strip()
+            if value:
+                return value
+        for chunk in knowledge_chunks:
+            source_ref = str(getattr(chunk, "source_ref", "") or "").strip()
+            if source_ref.startswith("industry:"):
+                return source_ref.split(":", 1)[1] or None
+        return None
+
+    def _unique_text(self, values: list[str]) -> list[str]:
+        return _unique(values)

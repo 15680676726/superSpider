@@ -5,11 +5,14 @@ from copaw.state import (
     MemoryAliasMapRecord,
     MemoryConflictProposalRecord,
     MemoryMergeResultRecord,
+    MemoryStructureProposalRecord,
     MemoryScopeDigestRecord,
     MemorySleepJobRecord,
     MemorySleepScopeStateRecord,
     MemorySoftRuleRecord,
+    IndustryMemoryProfileRecord,
     SQLiteStateStore,
+    WorkContextMemoryOverlayRecord,
 )
 from copaw.state.repositories import SqliteMemorySleepRepository
 
@@ -191,3 +194,126 @@ def test_memory_sleep_repository_persists_sleep_artifacts_by_scope(tmp_path) -> 
         status="pending",
     )
     assert proposals[0].title == "审批顺序冲突"
+
+
+def test_memory_sleep_repository_persists_profiles_overlays_and_structure_proposals(tmp_path) -> None:
+    store = SQLiteStateStore(tmp_path / "state.db")
+    repository = SqliteMemorySleepRepository(store)
+
+    first_profile = repository.upsert_industry_profile(
+        IndustryMemoryProfileRecord(
+            profile_id="industry-profile:industry-1:v1",
+            industry_instance_id="industry-1",
+            headline="旧行业长期记忆",
+            summary="旧版行业基线。",
+            strategic_direction="旧方向",
+            active_constraints=["旧约束"],
+            active_focuses=["旧焦点"],
+            key_entities=["旧实体"],
+            key_relations=["旧关系"],
+            evidence_refs=["evidence:old"],
+            source_job_id="sleep-job-1",
+            source_digest_id="digest:industry-1:v1",
+            version=1,
+            status="active",
+        )
+    )
+    active_profile = repository.upsert_industry_profile(
+        IndustryMemoryProfileRecord(
+            profile_id="industry-profile:industry-1:v2",
+            industry_instance_id="industry-1",
+            headline="当前行业长期记忆",
+            summary="行业当前阶段强调先证据后动作。",
+            strategic_direction="证据先行",
+            active_constraints=["外呼前必须完成证据复核"],
+            active_focuses=["收口共享行业规则"],
+            key_entities=["外呼审批", "财务复核"],
+            key_relations=["外呼审批依赖财务复核"],
+            evidence_refs=["evidence:new"],
+            source_job_id="sleep-job-2",
+            source_digest_id="digest:industry-1:v2",
+            version=2,
+            status="active",
+        )
+    )
+    first_overlay = repository.upsert_work_context_overlay(
+        WorkContextMemoryOverlayRecord(
+            overlay_id="overlay:ctx-1:v1",
+            work_context_id="ctx-1",
+            industry_instance_id="industry-1",
+            base_profile_id=active_profile.profile_id,
+            headline="旧工作记忆",
+            summary="旧工作上下文整理结果。",
+            focus_summary="旧焦点",
+            active_constraints=["旧上下文约束"],
+            active_focuses=["旧跟进"],
+            active_entities=["旧任务"],
+            active_relations=["旧依赖"],
+            evidence_refs=["evidence:ctx-old"],
+            source_job_id="sleep-job-3",
+            source_digest_id="digest:ctx-1:v1",
+            version=1,
+            status="active",
+        )
+    )
+    active_overlay = repository.upsert_work_context_overlay(
+        WorkContextMemoryOverlayRecord(
+            overlay_id="overlay:ctx-1:v2",
+            work_context_id="ctx-1",
+            industry_instance_id="industry-1",
+            base_profile_id=active_profile.profile_id,
+            headline="当前工作记忆",
+            summary="当前工作上下文明确承接行业长期规则。",
+            focus_summary="先完成财务复核，再处理外呼审批",
+            active_constraints=["当前工作上下文继承行业复核规则"],
+            active_focuses=["财务复核", "外呼审批"],
+            active_entities=["跟进线程", "审批门"],
+            active_relations=["跟进线程依赖审批门"],
+            evidence_refs=["evidence:ctx-new"],
+            source_job_id="sleep-job-4",
+            source_digest_id="digest:ctx-1:v2",
+            version=2,
+            status="active",
+        )
+    )
+    pending_structure = repository.upsert_structure_proposal(
+        MemoryStructureProposalRecord(
+            proposal_id="structure:ctx-1:1",
+            scope_type="work_context",
+            scope_id="ctx-1",
+            industry_instance_id="industry-1",
+            work_context_id="ctx-1",
+            proposal_kind="read-order-optimization",
+            title="把财务复核提升为工作记忆首条",
+            summary="当前上下文已稳定围绕财务复核展开，建议把它固定为 overlay 首条。",
+            recommended_action="保持事实不变，只调整 overlay 的默认读顺序。",
+            candidate_profile_id=active_profile.profile_id,
+            candidate_overlay_id=active_overlay.overlay_id,
+            source_job_id="sleep-job-4",
+            evidence_refs=["evidence:ctx-new"],
+            risk_level="medium",
+            status="pending",
+        )
+    )
+
+    profiles = repository.list_industry_profiles(industry_instance_id="industry-1")
+    assert profiles[0] == active_profile
+    assert profiles[1].profile_id == first_profile.profile_id
+    assert profiles[1].status == "superseded"
+    assert [item.profile_id for item in profiles] == [
+        "industry-profile:industry-1:v2",
+        "industry-profile:industry-1:v1",
+    ]
+
+    overlays = repository.list_work_context_overlays(work_context_id="ctx-1")
+    assert overlays[0] == active_overlay
+    assert overlays[1].overlay_id == first_overlay.overlay_id
+    assert overlays[1].status == "superseded"
+    assert [item.overlay_id for item in overlays] == ["overlay:ctx-1:v2", "overlay:ctx-1:v1"]
+
+    proposals = repository.list_structure_proposals(
+        scope_type="work_context",
+        scope_id="ctx-1",
+        status="pending",
+    )
+    assert proposals == [pending_structure]
