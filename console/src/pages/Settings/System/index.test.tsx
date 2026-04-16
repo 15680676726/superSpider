@@ -156,4 +156,34 @@ describe("SystemSettingsPage", () => {
       expect(screen.getByText("工作目录")).toBeInTheDocument();
     });
   });
+  it("renders fallback candidates that come from provider extra_models", async () => {
+    apiMock.getProviderFallback.mockResolvedValue({
+      enabled: true,
+      candidates: [
+        {
+          provider_id: "code998",
+          model: "qwen/qwen3.5-397b-a17b",
+        },
+      ],
+    });
+    apiMock.listProviders.mockResolvedValue([
+      {
+        id: "code998",
+        name: "998",
+        models: [],
+        extra_models: [
+          {
+            id: "qwen/qwen3.5-397b-a17b",
+            name: "Qwen 3.5 397B",
+          },
+        ],
+      },
+    ]);
+
+    render(<SystemSettingsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("998 / Qwen 3.5 397B")).toBeInTheDocument();
+    });
+  });
 });

@@ -59,14 +59,24 @@ function formatBytes(value?: number) {
 }
 
 function providerModelOptions(providers: ProviderInfo[]) {
-  return providers.flatMap((provider) =>
-    provider.models.map((model) => ({
-      value: `${provider.id}::${model.id}`,
-      label: `${provider.name} / ${model.name}`,
-      provider_id: provider.id,
-      model: model.id,
-    })),
-  );
+  return providers.flatMap((provider) => {
+    const mergedModels = [...(provider.models || []), ...(provider.extra_models || [])];
+    const seenModelIds = new Set<string>();
+    return mergedModels
+      .filter((model) => {
+        if (!model?.id || seenModelIds.has(model.id)) {
+          return false;
+        }
+        seenModelIds.add(model.id);
+        return true;
+      })
+      .map((model) => ({
+        value: `${provider.id}::${model.id}`,
+        label: `${provider.name} / ${model.name}`,
+        provider_id: provider.id,
+        model: model.id,
+      }));
+  });
 }
 
 function parseCandidate(value: string) {
