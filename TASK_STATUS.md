@@ -12,28 +12,41 @@
 1. `AGENTS.md`
 2. `COPAW_CARRIER_UPGRADE_MASTERPLAN.md`
 3. 本文档 `TASK_STATUS.md`
-4. `docs/superpowers/specs/2026-03-27-intent-native-universal-carrier-and-symbiotic-host-runtime.md`（如任务涉及上位 carrier 目标 / symbiotic host runtime / seat runtime / workspace / host event）
-5. `implementation_plan.md`
-6. `V6_ROUTINE_MUSCLE_MEMORY_PLAN.md`
-7. `V7_MAIN_BRAIN_AUTONOMY_PLAN.md`
-8. `docs/superpowers/specs/2026-04-01-formal-planning-capability-gap-design.md`（如任务涉及短中长期 formal planner 缺口、Claude Code planning shell donor 边界、assignment/cycle/strategy planning 能力建设）
-9. `docs/superpowers/plans/2026-04-01-formal-planning-capability-gap-implementation-plan.md`（如任务涉及 formal planner 施工顺序、P-2/P-3/P-4/P-5 分阶段实现、planner file/test map）
-10. `MAIN_BRAIN_CHAT_ORCHESTRATION_SPLIT_PLAN.md`
-11. `CHAT_RUNTIME_ALIGNMENT_PLAN.md`
-12. `docs/superpowers/specs/2026-03-25-copaw-runtime-first-computer-control-alignment.md`（如任务涉及 runtime-first / computer-control / orchestrator / environment plane 视角）
-13. `docs/superpowers/specs/2026-03-26-agent-body-grid-computer-runtime.md`（如任务涉及 execution agent computer bodies / browser-desktop-document runtime / contention / recovery）
-14. `docs/superpowers/specs/2026-03-26-native-fixed-sop-kernel-and-n8n-retirement.md`（如任务涉及 fixed SOP / automation / `n8n` 退役 / runtime automation IA）
-15. `docs/superpowers/plans/2026-03-26-native-fixed-sop-kernel-and-n8n-retirement.md`（如任务涉及 fixed SOP kernel 施工顺序）
-16. `docs/superpowers/specs/2026-04-03-multi-seat-capability-autonomy-design.md`（如任务涉及 skill/MCP 自动安装、角色原型能力包、执行位实例能力快照、多执行位能力治理、升级替换与回滚）
-17. `docs/superpowers/plans/2026-04-03-multi-seat-capability-autonomy-implementation-plan.md`（如任务涉及多执行位能力自治的后端施工顺序、快/慢循环接线、seat 作用域 MCP 挂载与技能生命周期落地）
-18. `docs/superpowers/specs/2026-04-04-external-capability-assimilation-architecture.md`（如任务涉及 donor-first 能力吸纳、外部项目/skill/MCP/adapter/provider 供给面、source chain、opportunity radar、多源去重与能力组合治理）
-19. `docs/superpowers/plans/2026-04-04-external-capability-assimilation-implementation-plan.md`（如任务涉及 donor-first 外部能力吸纳的对象落地、discovery source chain、自主 scout、portfolio governance 与 Runtime Center 接线）
-20. `docs/superpowers/specs/2026-04-04-next-round-discipline-closure-spec.md`（如任务涉及下一轮 runtime/capability 纪律收口、熵控制、source chain、去重归一、写串行合同、child-run shell、MCP 生命周期、skill/package 元数据与 portfolio compaction）
-21. `docs/superpowers/plans/2026-04-04-donor-first-capability-evolution-priority-plan.md`（如任务涉及纠偏后的 capability evolution 下一轮施工顺序、donor-first 复用优先级、baseline import、MCP-native candidate、fallback-only local authored 边界）
-22. `docs/superpowers/specs/2026-04-06-universal-donor-execution-contract-design.md`（如任务涉及 donor formal provider injection、universal execution envelope、host compatibility contract、真实 donor “安装后不等于真正可用”的平台收口）
-23. 与当前任务直接相关的源码和测试
+4. `UNIFIED_ACCEPTANCE_STANDARD.md`（如任务涉及测试、验收、发布、完成声明、live smoke、long soak、真实运行结论）
+5. `docs/superpowers/specs/2026-03-27-intent-native-universal-carrier-and-symbiotic-host-runtime.md`（如任务涉及上位 carrier 目标 / symbiotic host runtime / seat runtime / workspace / host event）
+6. `implementation_plan.md`
+7. `V6_ROUTINE_MUSCLE_MEMORY_PLAN.md`
+8. `V7_MAIN_BRAIN_AUTONOMY_PLAN.md`
+9. `docs/superpowers/specs/2026-04-01-formal-planning-capability-gap-design.md`（如任务涉及短中长期 formal planner 缺口、Claude Code planning shell donor 边界、assignment/cycle/strategy planning 能力建设）
+10. `docs/superpowers/plans/2026-04-01-formal-planning-capability-gap-implementation-plan.md`（如任务涉及 formal planner 施工顺序、P-2/P-3/P-4/P-5 分阶段实现、planner file/test map）
+11. `MAIN_BRAIN_CHAT_ORCHESTRATION_SPLIT_PLAN.md`
+12. `CHAT_RUNTIME_ALIGNMENT_PLAN.md`
+13. `docs/superpowers/specs/2026-03-25-copaw-runtime-first-computer-control-alignment.md`（如任务涉及 runtime-first / computer-control / orchestrator / environment plane 视角）
+14. `docs/superpowers/specs/2026-03-26-agent-body-grid-computer-runtime.md`（如任务涉及 execution agent computer bodies / browser-desktop-document runtime / contention / recovery）
+15. `docs/superpowers/specs/2026-03-26-native-fixed-sop-kernel-and-n8n-retirement.md`（如任务涉及 fixed SOP / automation / `n8n` 退役 / runtime automation IA）
+16. `docs/superpowers/plans/2026-03-26-native-fixed-sop-kernel-and-n8n-retirement.md`（如任务涉及 fixed SOP kernel 施工顺序）
+17. `docs/superpowers/specs/2026-04-03-multi-seat-capability-autonomy-design.md`（如任务涉及 skill/MCP 自动安装、角色原型能力包、执行位实例能力快照、多执行位能力治理、升级替换与回滚）
+18. `docs/superpowers/plans/2026-04-03-multi-seat-capability-autonomy-implementation-plan.md`（如任务涉及多执行位能力自治的后端施工顺序、快/慢循环接线、seat 作用域 MCP 挂载与技能生命周期落地）
+19. `docs/superpowers/specs/2026-04-04-external-capability-assimilation-architecture.md`（如任务涉及 donor-first 能力吸纳、外部项目/skill/MCP/adapter/provider 供给面、source chain、opportunity radar、多源去重与能力组合治理）
+20. `docs/superpowers/plans/2026-04-04-external-capability-assimilation-implementation-plan.md`（如任务涉及 donor-first 外部能力吸纳的对象落地、discovery source chain、自主 scout、portfolio governance 与 Runtime Center 接线）
+21. `docs/superpowers/specs/2026-04-04-next-round-discipline-closure-spec.md`（如任务涉及下一轮 runtime/capability 纪律收口、熵控制、source chain、去重归一、写串行合同、child-run shell、MCP 生命周期、skill/package 元数据与 portfolio compaction）
+22. `docs/superpowers/plans/2026-04-04-donor-first-capability-evolution-priority-plan.md`（如任务涉及纠偏后的 capability evolution 下一轮施工顺序、donor-first 复用优先级、baseline import、MCP-native candidate、fallback-only local authored 边界）
+23. `docs/superpowers/specs/2026-04-06-universal-donor-execution-contract-design.md`（如任务涉及 donor formal provider injection、universal execution envelope、host compatibility contract、真实 donor “安装后不等于真正可用”的平台收口）
+24. 与当前任务直接相关的源码和测试
 
 ---
+
+## 1.0 `2026-04-16` 统一验收口径
+
+- 自今日起，`TASK_STATUS.md` 里所有“已完成 / 已通过 / 已闭环 / 可放行”记录，都必须显式标明对应的验收层级：
+  - `L1` 单元验证
+  - `L2` 集成 / 合同验证
+  - `L3` 真实运行 smoke
+  - `L4` 长链 soak
+- `default regression`、`focused regression`、`live smoke`、`long soak` 必须拆开写，不允许再混成一句“测试通过”。
+- 以后凡是只证明了代码基线、局部回归、仓库内默认回归通过，都不能直接写成“真实运行已完成”。
+- 如果 live 或 soak 没跑，必须明确写“没跑”和原因；不允许默认省略。
+- 统一口径以仓库根目录 `UNIFIED_ACCEPTANCE_STANDARD.md` 为准；本文件里的阶段状态记录以后都按该文档表达完成度。
 
 ## 1.1.1 `2026-04-07` Buddy 领域能力阶段收口补充
 
