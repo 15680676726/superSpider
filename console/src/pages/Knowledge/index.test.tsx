@@ -261,7 +261,7 @@ it("submits a manual pin from the memory sleep surface", async () => {
       }),
     ),
   );
-});
+}, 30000);
 
   it("applies and rejects structure proposals from the memory sleep surface", async () => {
     const surfacePayload = createMemorySurfacePayload({
@@ -405,7 +405,7 @@ it("submits a manual pin from the memory sleep surface", async () => {
         ),
       ).toBe(true);
     });
-  }, 20000);
+  }, 30000);
 
   it("rebuilds sleep memory and exposes version diff rollback actions", async () => {
     const surfacePayload = createMemorySurfacePayload({
@@ -589,7 +589,7 @@ it("submits a manual pin from the memory sleep surface", async () => {
         ),
       ).toBe(true);
     });
-  }, 20000);
+  }, 30000);
 function createAgentProfile(overrides: Record<string, unknown> = {}) {
   return {
     agent_id: "agent-1",

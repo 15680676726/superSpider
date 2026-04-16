@@ -341,6 +341,14 @@ describe("RuntimeCenterPage", () => {
         },
         evening_report: null,
         trend: [],
+        trace: [
+          {
+            timestamp: "2026-04-16T09:20:00Z",
+            level: "warn",
+            message: "后端正式主脑追溯",
+            route: "/api/runtime-center/decisions/decision-1",
+          },
+        ],
         approvals: [],
         stage_summary: null,
       },
@@ -362,6 +370,13 @@ describe("RuntimeCenterPage", () => {
           },
           evening_report: null,
           trend: [],
+          trace: [
+            {
+              timestamp: "2026-04-16T09:10:00Z",
+              level: "info",
+              message: "后端正式运营追溯",
+            },
+          ],
         },
       ],
     };
@@ -370,10 +385,14 @@ describe("RuntimeCenterPage", () => {
     render(<RuntimeCenterPage />);
 
     expect(screen.getByText("后端正式主脑摘要")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "追溯" }));
+    expect(screen.getByText("后端正式主脑追溯")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /后端运营 运营/i }));
 
     expect(screen.getByText("后端正式运营摘要")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "追溯" }));
+    expect(screen.getByText("后端正式运营追溯")).toBeInTheDocument();
   });
 
   it("uses the latest legacy agent assignment in summary and morning report when cockpit payload is absent", () => {

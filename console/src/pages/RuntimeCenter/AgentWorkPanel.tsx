@@ -2,6 +2,7 @@ import { Button, Card, Empty, Progress, Tabs, Typography, type TabsProps } from 
 import { useMemo, useState, type ReactNode } from "react";
 
 import { normalizeDisplayChinese } from "../../text";
+import CockpitTraceSection, { type CockpitTraceLine } from "./CockpitTraceSection";
 import styles from "./index.module.less";
 
 const { Text } = Typography;
@@ -33,6 +34,7 @@ export type AgentWorkPanelProps = {
   morningReport?: CockpitReportBlock | null;
   eveningReport?: CockpitReportBlock | null;
   trend?: CockpitTrendPoint[];
+  trace?: CockpitTraceLine[];
   dayMode: DayMode;
 };
 
@@ -245,6 +247,7 @@ export default function AgentWorkPanel({
   morningReport,
   eveningReport,
   trend,
+  trace,
   dayMode,
 }: AgentWorkPanelProps) {
   const tabItems = useMemo<TabsProps["items"]>(
@@ -270,8 +273,17 @@ export default function AgentWorkPanel({
         label: "统计",
         children: <CockpitTrendSection trend={trend} />,
       },
+      {
+        key: "trace",
+        label: "追溯",
+        children: (
+          <CockpitTraceSection
+            trace={trace ?? []}
+          />
+        ),
+      },
     ],
-    [dayMode, eveningReport, morningReport, summaryFields, trend],
+    [dayMode, eveningReport, morningReport, summaryFields, trace, trend],
   );
 
   return (
