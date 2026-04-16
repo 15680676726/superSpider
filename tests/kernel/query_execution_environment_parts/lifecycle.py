@@ -118,6 +118,52 @@ def test_query_execution_service_manages_environment_lease_lifecycle(
     assert session_mount.lease_owner == "copaw-agent-runner"
 
 
+def test_query_execution_service_passes_runtime_provider_into_copaw_agent(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _FakeAgent.created.clear()
+    monkeypatch.setattr(query_execution_module, "CoPawAgent", _FakeAgent)
+    monkeypatch.setattr(
+        query_execution_module,
+        "stream_printing_messages",
+        _fake_stream_printing_messages,
+    )
+    monkeypatch.setattr(
+        query_execution_module,
+        "load_config",
+        lambda: SimpleNamespace(
+            agents=SimpleNamespace(
+                running=SimpleNamespace(max_iters=1, max_input_length=512),
+            ),
+        ),
+    )
+
+    runtime_provider = object()
+    session_backend = _FakeSessionBackend()
+    service = KernelQueryExecutionService(
+        session_backend=session_backend,
+        provider_manager=runtime_provider,
+    )
+
+    async def _run():
+        async for _item in service.execute_stream(
+            msgs=[SimpleNamespace(get_text_content=lambda: "hello")],
+            request=SimpleNamespace(
+                session_id="sess-runtime-provider",
+                user_id="user-1",
+                channel="console",
+            ),
+            kernel_task_id="chat:runtime-provider",
+        ):
+            pass
+
+    asyncio.run(_run())
+
+    assert len(_FakeAgent.created) == 1
+    assert _FakeAgent.created[0].kwargs["runtime_provider"] is runtime_provider
+
+
 def test_query_execution_service_returns_busy_message_when_actor_runtime_is_already_leased(
     tmp_path,
     monkeypatch,

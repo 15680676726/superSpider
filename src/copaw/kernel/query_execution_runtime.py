@@ -1371,6 +1371,7 @@ class _QueryExecutionRuntimeMixin(
                     allowed_skill_names=skill_names,
                     capability_layers=capability_layers,
                     extra_tool_functions=system_tool_functions,
+                    runtime_provider=self._provider_manager,
                 ),
             )
             prep_timings.append(("resident_agent", perf_counter() - segment_started_at))

@@ -433,6 +433,7 @@ class CoPawAgent(ReActAgent):
         allowed_skill_names: Iterable[str] | None = None,
         capability_layers: IndustrySeatCapabilityLayers | None = None,
         extra_tool_functions: Iterable[Callable[..., Any]] | None = None,
+        runtime_provider: Any | None = None,
     ):
         """Initialize CoPawAgent.
 
@@ -467,6 +468,7 @@ class CoPawAgent(ReActAgent):
         )
         self._capability_layers = capability_layers
         self._extra_tool_functions = list(extra_tool_functions or [])
+        self._runtime_provider = runtime_provider
 
         # Memory compaction threshold: configurable ratio of max_input_length
         self._memory_compact_threshold = int(
@@ -483,7 +485,9 @@ class CoPawAgent(ReActAgent):
         sys_prompt = self._build_sys_prompt()
 
         # Create model and formatter using factory method
-        model, formatter = create_model_and_formatter()
+        model, formatter = create_model_and_formatter(
+            runtime_provider=self._runtime_provider,
+        )
 
         # Initialize parent ReActAgent
         super().__init__(

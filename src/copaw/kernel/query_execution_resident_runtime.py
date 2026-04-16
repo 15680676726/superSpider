@@ -92,7 +92,9 @@ class _QueryExecutionResidentRuntimeMixin:
         try:
             from copaw.agents.model_factory import build_runtime_model_fingerprint
 
-            runtime_model_fingerprint = build_runtime_model_fingerprint()
+            runtime_model_fingerprint = build_runtime_model_fingerprint(
+                runtime_provider=self._provider_manager,
+            )
         except Exception:
             runtime_model_fingerprint = ""
         payload = {
