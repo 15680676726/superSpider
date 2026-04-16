@@ -789,7 +789,7 @@ def _build_kickoff_staffing_suffix(detail: object | None) -> str:
         pending_signal_count = researcher.get("pending_signal_count")
         researcher_line = f"{researcher_name} 当前状态：{researcher_status}"
         if isinstance(pending_signal_count, int):
-            researcher_line = f"{researcher_line}，待处理信号 {pending_signal_count}"
+            researcher_line = f"{researcher_line}，待主脑处理研究汇报 {pending_signal_count}"
         lines.append(f"{researcher_line}。")
     return f"\n{'\n'.join(lines)}" if lines else ""
 

@@ -35,9 +35,9 @@
   - `/industry` 最小前端入口
 - 当前系统已经有固定团队根岗：
   - canonical `execution-core`（唯一物理 agent：`copaw-agent-runner`，产品可见名：`Spider Mesh 执行中枢`）
-- 当前系统的 `researcher` 已收敛为可选支援岗，而不是任何行业团队都必须常驻的固定系统岗
+- 当前代码主链里，`researcher` 仍是默认补齐的常驻研究支援岗；它负责持续收集行业/客户/竞争/平台信号并把研究汇报回流给主脑，不是一个单独对外展示的“知识库 builder”
 - `2026-03-13` 语义补充：内部 canonical `execution-core` 与物理 runtime `copaw-agent-runner` 当前继续保留；但 `V4` 起产品语义应把它收敛为“团队总控核”，默认负责规划、分派、监督、治理与汇报，而不是长期承担叶子执行
-- `2026-03-14` 组团语义补充：行业 draft/compiler 现已按 `solo / lead-plus-support / pod / full-team` 选择最小合理拓扑；`researcher` 仅在 brief 真的存在独立证据/调研环路时才进入团队
+- `2026-03-14` 组团语义补充：产品规划目标仍是按 `solo / lead-plus-support / pod / full-team` 收敛最小合理拓扑；但当前运行真相里，draft/compiler 在缺失 `researcher` 时仍会自动补齐，所以正式主链应把它视为默认存在的研究位
 - `2026-03-13` 补充：`IndustryInstance` 现持有显式 `IndustryExecutionCoreIdentity` 绑定对象；系统仍只有一个物理 `Spider Mesh 执行中枢`，但会按行业实例挂载不同的行业身份壳，`industry detail / goal detail / query execution` 都从同一对象读取行业使命、思考维度、约束与证据要求，不再靠默认 profile 猜测行业执行框架
 - `2026-03-16` 补充：行业创建入口现已显式区分 `system-led / operator-guided` 两种规划模式；`IndustryProfile` 已持久化 `experience_mode / experience_notes / operator_requirements`，可把操作方已有经验、硬要求与缺失环路正式写入草案生成与战略记忆；控制台创建团队默认提交 `auto_dispatch + execute`，信号型 brief 若遗漏 `researcher` 或默认研究/巡检 schedule，compiler canonicalize 会自动补齐。
 - `2026-03-16` 补充：执行中枢在行业聊天中收到“新增任务 / 改规划 / 加长期节奏”后，已不再只是 prompt 里理解；当前会经正式 chat writeback 路径把 operator 指令写回 `IndustryProfile.operator_requirements`、`StrategyMemoryRecord`、新增 goal override 与 recurring schedule，并在同一轮 query prompt 中直接读到回写后的正式状态。新建 goal 也会立刻进入正式 `dispatch_goal` 主链；长期节奏支持工作日 / 季度 / 年度 / 每 N 天(周/月) 等通用 cadence，而不是写死某个行业模板。若指令与团队中现有专业执行位匹配，goal / schedule owner 会直接落到该角色；只有没有合适执行位时才保留在 `execution-core`。
@@ -178,7 +178,7 @@
 | `implementation_plan1.md` 主题 | 新计划落点 | 说明 |
 |---|---|---|
 | 行业初始化引导 / 行业激活 | `V1-B3` | 升级为正式启动控制面和系统自检入口 |
-| `Manager` 固定核心岗 + `Researcher` 可选支援岗 | `V1-B2` 基线继承 | `execution-core` 是固定团队总控核；`researcher` 只在需要独立调研环路时加入 |
+| `Manager` 固定核心岗 + `Researcher` 默认研究支援岗 | `V1-B2` 基线继承 | `execution-core` 是固定团队总控核；当前运行主链会默认补齐 `researcher`，由它负责研究回流与证据补充 |
 | 行业业务岗位自动生成 | `V1-B2` | 这是 `V1` 的核心新增项 |
 | 行业对象仓储 / repository / instance 持久化 | `V1-B1` | 从 carrier 迁到正式对象仓储 |
 | 报告中心 | `V2-B2` | 从当前 snapshot 升级为正式 report 对象和页面 |
@@ -305,7 +305,7 @@
 
 目标：
 
-- 保留 `Manager` 作为固定系统核心岗，并允许 `Researcher` 作为可选支援岗
+- 保留 `Manager` 作为固定系统核心岗，并保留 `Researcher` 作为当前默认补齐的研究支援岗
 - 基于行业画像与团队复杂度自动生成最小合理的业务专员 Agent
 - 让编译链稳定产出业务角色蓝图、goal seed、初始 capability/risk/env 约束
 
@@ -321,7 +321,7 @@
 明确要求：
 
 - 不删 `Manager`
-- 不删 `Researcher` 这类证据支援角色，但不再把它写死为所有团队的必备岗
+- 不删 `Researcher` 这类证据支援角色；当前运行真相仍保留默认补齐，后续若要收敛成按需加入，必须先同步修改 compiler/activation 真主链
 - 不把业务专员生成写死成固定行业模板
 - 不生成没有 capability/risk/env 边界的空壳 Agent
 
@@ -332,7 +332,7 @@
 
 验收标准：
 
-- 任一行业初始化后，系统至少能生成 `Manager + >=1 business role`；只有存在独立调研环路时才额外生成 `Researcher`
+- 任一行业初始化后，系统至少能生成 `Manager + Researcher + >=1 business role`；其中 `Researcher` 负责持续研究回流、正式记忆保留与图谱投影的上游输入
 - 业务专员在 Runtime Center / Agent Workbench / `/industry` 可见
 - Manager 能将任务稳定委派给业务专员
 

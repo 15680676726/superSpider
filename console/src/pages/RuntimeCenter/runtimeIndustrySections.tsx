@@ -123,7 +123,7 @@ function renderMainBrainPlanningSection({
           <Tag>{`临时席位 ${payload.staffing.temporary_seats.length}`}</Tag>
         ) : null}
         {pendingSignalCount > 0 ? (
-          <Tag color="warning">{`待处理信号 ${pendingSignalCount}`}</Tag>
+          <Tag color="warning">{`待主脑处理研究汇报 ${pendingSignalCount}`}</Tag>
         ) : null}
         {payload.current_cycle?.status ? (
           <Tag color={runtimeStatusColor(payload.current_cycle.status)}>

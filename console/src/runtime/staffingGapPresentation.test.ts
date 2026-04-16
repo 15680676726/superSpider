@@ -99,8 +99,9 @@ describe("staffingGapPresentation", () => {
     expect(presentation.pendingProposals[0]).toContain("decision-seat-1");
     expect(presentation.temporarySeats[0]).toContain("Desktop Clerk");
     expect(presentation.temporarySeats[0]).toContain("auto-retire");
-    expect(presentation.researcher?.headline).toContain("Researcher");
-    expect(presentation.researcher?.detail).toContain("pending signals 2");
+    expect(presentation.researcher?.headline).toContain("研究位");
+    expect(presentation.researcher?.detail).toContain("待主脑处理研究汇报 2");
+    expect(presentation.researcher?.badges).toContain("待主脑处理");
   });
 
   it("maps seat lifecycle states for Agent Workbench", () => {

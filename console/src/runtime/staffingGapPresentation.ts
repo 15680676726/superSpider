@@ -40,6 +40,14 @@ function nonEmpty(value: string | null | undefined): string | null {
   return normalized ? normalized : null;
 }
 
+function presentResearcherLabel(value: string | null | undefined): string {
+  const label = nonEmpty(value);
+  if (!label || label === "Researcher") {
+    return "研究位";
+  }
+  return label;
+}
+
 function describeGap(gap: IndustryStaffingGap): StaffingPresentationCard {
   const roleName =
     nonEmpty(gap.target_role_name) ||
@@ -101,20 +109,20 @@ export function buildStaffingPresentation(
   const researcher = staffing?.researcher
     ? {
         headline: [
-          staffing.researcher.role_name || "Researcher",
+          presentResearcherLabel(staffing.researcher.role_name),
           presentRuntimeStatusLabel(staffing.researcher.status),
         ].join(" | "),
         detail: [
           nonEmpty(staffing.researcher.current_assignment?.title),
           typeof staffing.researcher.pending_signal_count === "number"
-            ? `pending signals ${staffing.researcher.pending_signal_count}`
+            ? `待主脑处理研究汇报 ${staffing.researcher.pending_signal_count}`
             : null,
           nonEmpty(staffing.researcher.latest_report?.headline),
         ]
           .filter(Boolean)
           .join(" | "),
         badges: [
-          ...(staffing.researcher.waiting_for_main_brain ? ["Waiting for main brain"] : []),
+          ...(staffing.researcher.waiting_for_main_brain ? ["待主脑处理"] : []),
         ],
       }
     : null;
