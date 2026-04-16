@@ -31,7 +31,7 @@ from .patch_runtime import LearningPatchRuntimeService
 from .runtime_support import (
     _MAIN_BRAIN_ACTOR,
     _compiler_context_snapshot,
-    _is_failure_record,
+    _is_strategy_actionable_failure_record,
     _merge_string_lists,
     _patch_acceptance_criteria,
     _patch_constraints_summary,
@@ -567,7 +567,7 @@ class LearningRuntimeCore:
     ) -> dict[str, dict[str, object]]:
         failures: dict[str, dict[str, object]] = {}
         for record in records:
-            if not _is_failure_record(record):
+            if not _is_strategy_actionable_failure_record(record):
                 continue
             capability_ref = record.capability_ref or "unknown"
             bucket = failures.setdefault(

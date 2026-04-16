@@ -506,6 +506,62 @@ class TestLearningStrategy:
         assert decisions
         assert evidence_ledger.count_records() >= 4
 
+    def test_strategy_cycle_ignores_learning_internal_failures(self, tmp_path):
+        engine = _make_learning_engine(tmp_path)
+        evidence_ledger = EvidenceLedger(database_path=tmp_path / "evidence.sqlite3")
+        state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
+        decision_repo = SqliteDecisionRequestRepository(state_store)
+        task_repo = SqliteTaskRepository(state_store)
+        capability_override_repo = SqliteCapabilityOverrideRepository(state_store)
+        service = LearningService(
+            engine=engine,
+            patch_executor=PatchExecutor(
+                override_repository=capability_override_repo,
+            ),
+            decision_request_repository=decision_repo,
+            task_repository=task_repo,
+            evidence_ledger=evidence_ledger,
+        )
+
+        for idx in range(2):
+            evidence_ledger.append(
+                EvidenceRecord(
+                    task_id=f"acq-plan-{idx}",
+                    actor_ref="copaw-main-brain",
+                    capability_ref="learning:install-plan",
+                    risk_level="guarded",
+                    action_summary="install plan failed",
+                    result_summary="error: onboarding blocked",
+                    status="failed",
+                ),
+            )
+        for idx in range(3):
+            evidence_ledger.append(
+                EvidenceRecord(
+                    task_id=f"task-{idx}",
+                    actor_ref="kernel",
+                    capability_ref="tool:execute_shell_command",
+                    risk_level="guarded",
+                    action_summary="kernel task failed",
+                    result_summary="error: test failure",
+                    status="failed",
+                ),
+            )
+
+        result = service.run_strategy_cycle(
+            actor="tester",
+            failure_threshold=2,
+            confirm_threshold=5,
+        )
+
+        assert result["success"] is True
+        assert result["observed_failures"] == {"tool:execute_shell_command": 3}
+        assert result["proposals_created"] == 1
+        assert result["patches_created"] == 1
+        assert result["proposals"][0]["title"] == (
+            "Reduce failure rate for tool:execute_shell_command"
+        )
+
 
 def test_patch_executor_applies_profile_role_and_plan_side_effects(tmp_path):
     engine = _make_learning_engine(tmp_path)
