@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 import logging
+import os
 from typing import Any, Dict, List, Literal, TYPE_CHECKING
 
 from agentscope.mcp import HttpStatefulClient, StdIOStatefulClient
@@ -165,6 +166,23 @@ class MCPClientManager:
         async with self._lock:
             record = self._runtime_records.get((scope_ref, key))
             return record.model_copy(deep=True) if record is not None else None
+
+    async def get_client_config(
+        self,
+        key: str,
+        *,
+        scope_ref: str | None = None,
+    ) -> MCPClientConfig | None:
+        """Return the canonical client config used to build this runtime client."""
+        async with self._lock:
+            if scope_ref is not None:
+                overlay = self._overlay_scopes.get(scope_ref)
+                if overlay is not None:
+                    scoped_config = overlay.configs.get(key)
+                    if scoped_config is not None:
+                        return scoped_config.model_copy(deep=True)
+            config = self._client_configs.get(key)
+            return config.model_copy(deep=True) if config is not None else None
 
     async def replace_client(
         self,
@@ -514,7 +532,7 @@ class MCPClientManager:
                 )
 
         logger.debug("Closing all MCP clients")
-        for key, client in base_clients_snapshot:
+        for key, client in reversed(base_clients_snapshot):
             if client is None:
                 continue
             close_error = await self._close_client_with_timeout(client)
@@ -568,11 +586,13 @@ class MCPClientManager:
         ).as_client_attribute()
 
         if client_config.transport == "stdio":
+            child_env = dict(os.environ)
+            child_env.update(client_config.env)
             client = StdIOStatefulClient(
                 name=client_config.name,
                 command=client_config.command,
                 args=client_config.args,
-                env=client_config.env,
+                env=child_env,
                 cwd=client_config.cwd or None,
             )
             setattr(client, "_copaw_rebuild_info", rebuild_info)
@@ -803,6 +823,9 @@ class MCPClientManager:
 
     @staticmethod
     def _resolve_close_operations(client: Any) -> list[Any]:
+        close = getattr(client, "close", None)
+        if callable(close):
+            return [close]
         operations: list[Any] = []
         context = getattr(client, "client", None)
         generator = getattr(context, "gen", None)
@@ -817,9 +840,6 @@ class MCPClientManager:
         stack_aclose = getattr(stack, "aclose", None)
         if callable(stack_aclose):
             operations.append(stack_aclose)
-        close = getattr(client, "close", None)
-        if callable(close) and not operations:
-            operations.append(close)
         return operations
 
     async def _close_client_with_timeout(self, client: Any | None) -> str | None:
@@ -857,7 +877,7 @@ class MCPClientManager:
         *,
         label_prefix: str = "",
     ) -> None:
-        for key, client in clients.items():
+        for key, client in reversed(list(clients.items())):
             if client is None:
                 continue
             close_error = await self._close_client_with_timeout(client)

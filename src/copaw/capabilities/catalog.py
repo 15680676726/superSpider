@@ -8,6 +8,7 @@ from threading import RLock
 from time import perf_counter
 from typing import TYPE_CHECKING, Any, Callable
 
+from ..config.config import MCPClientConfig
 from ..skill_service import SkillFrontmatterError, parse_skill_frontmatter
 from ..industry.identity import normalize_industry_role_id
 from .mcp_registry import resolve_mcp_registry_package_binding
@@ -449,6 +450,11 @@ class CapabilityCatalogFacade:
             if client.get("key") == client_key:
                 return client
         return None
+
+    def get_mcp_client_config(self, client_key: str) -> MCPClientConfig | None:
+        config = self._load_config()
+        client = config.mcp.clients.get(client_key)
+        return client.model_copy(deep=True) if client is not None else None
 
     def _apply_overrides(
         self,

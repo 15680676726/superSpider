@@ -1038,22 +1038,34 @@ def test_capability_market_cooperative_adapter_templates_expose_phase2_runtime_s
     assert browser_companion.json()["routes"]["example_run"] == (
         "/api/capability-market/install-templates/browser-companion/example-run"
     )
+    assert browser_companion.json()["routes"]["activate"] == (
+        "/api/capability-market/install-templates/browser-companion/activate"
+    )
     assert browser_companion.json()["manifest"]["capability_ids"] == [
         "system:browser_companion_runtime"
     ]
 
     assert document_bridge.status_code == 200
+    assert document_bridge.json()["routes"]["activate"] == (
+        "/api/capability-market/install-templates/document-office-bridge/activate"
+    )
     assert document_bridge.json()["manifest"]["capability_ids"] == [
         "system:document_bridge_runtime"
     ]
     assert document_bridge.json()["config_schema"]["scope"] == "runtime"
 
     assert host_watchers.status_code == 200
+    assert host_watchers.json()["routes"]["activate"] == (
+        "/api/capability-market/install-templates/host-watchers/activate"
+    )
     assert host_watchers.json()["manifest"]["capability_ids"] == [
         "system:host_watchers_runtime"
     ]
 
     assert windows_apps.status_code == 200
+    assert windows_apps.json()["routes"]["activate"] == (
+        "/api/capability-market/install-templates/windows-app-adapters/activate"
+    )
     assert windows_apps.json()["manifest"]["capability_ids"] == [
         "system:windows_app_adapter_runtime"
     ]
@@ -3273,6 +3285,280 @@ def test_capability_market_browser_local_session_start_resolves_to_attached_brow
     assert payload["channel_resolution"]["selection_status"] == "ready"
     assert payload["channel_resolution"]["fail_closed"] is False
     mocked_browser_use.assert_not_called()
+
+
+def test_capability_market_browser_companion_doctor_stays_read_only_while_activate_repairs_session(
+    tmp_path,
+) -> None:
+    app = build_runtime_app(tmp_path)
+    client = TestClient(app)
+    environment_service = app.state.environment_service
+
+    async def _fake_start_session(self, options):
+        _ = self
+        return {
+            "status": "started",
+            "session_id": options.session_id,
+            "environment_rebind": {
+                "session_mount_id": options.session_mount_id,
+            },
+            "result": {
+                "ok": True,
+                "message": "Managed browser runtime started.",
+            },
+            "runtime": {
+                "running": True,
+                "sessions": [
+                    {
+                        "session_id": options.session_id,
+                        "page_count": 1,
+                        "page_ids": ["page-1"],
+                    }
+                ],
+                "current_session_id": options.session_id,
+                "page_count": 1,
+                "page_ids": ["page-1"],
+            },
+        }
+
+    with (
+        patch(
+            "copaw.capabilities.install_templates.get_browser_support_snapshot",
+            return_value={
+                "playwright_ready": True,
+                "playwright_error": "",
+                "container_mode": False,
+                "default_browser_kind": "chromium",
+                "default_browser_path": "C:/Program Files/Browser/browser.exe",
+            },
+        ),
+        patch(
+            "copaw.capabilities.browser_runtime.BrowserRuntimeService.start_session",
+            new=_fake_start_session,
+        ),
+        patch(
+            "copaw.capabilities.browser_runtime.get_browser_runtime_snapshot",
+            return_value={
+                "running": True,
+                "sessions": [
+                    {
+                        "session_id": "market-browser-companion-1",
+                        "page_count": 1,
+                        "page_ids": ["page-1"],
+                    }
+                ],
+                "current_session_id": "market-browser-companion-1",
+                "page_count": 1,
+                "page_ids": ["page-1"],
+            },
+        ),
+    ):
+        doctor = client.get("/capability-market/install-templates/browser-companion/doctor")
+        assert doctor.status_code == 200
+        assert environment_service.list_sessions(channel="browser") == []
+
+        activate = client.post(
+            "/capability-market/install-templates/browser-companion/activate",
+            json={
+                "config": {
+                    "session_id": "market-browser-companion-1",
+                }
+            },
+        )
+
+    assert activate.status_code == 200
+    payload = activate.json()
+    assert payload["template_id"] == "browser-companion"
+    assert payload["status"] == "ready"
+    assert payload["activation_class"] == "host-attached"
+    assert payload["auto_heal_attempted"] is True
+    sessions = environment_service.list_sessions(channel="browser")
+    assert len(sessions) == 1
+    detail = environment_service.get_session_detail(sessions[0].id, limit=5) or {}
+    assert (detail.get("cooperative_adapter_availability") or {}).get(
+        "preferred_execution_path"
+    ) == "cooperative-native-first"
+
+
+def test_capability_market_browser_companion_example_run_auto_activates_when_unmounted(
+    tmp_path,
+) -> None:
+    app = build_runtime_app(tmp_path)
+    client = TestClient(app)
+    environment_service = app.state.environment_service
+
+    async def _fake_start_session(self, options):
+        _ = self
+        return {
+            "status": "started",
+            "session_id": options.session_id,
+            "environment_rebind": {
+                "session_mount_id": options.session_mount_id,
+            },
+            "result": {
+                "ok": True,
+                "message": "Managed browser runtime started.",
+            },
+            "runtime": {
+                "running": True,
+                "sessions": [
+                    {
+                        "session_id": options.session_id,
+                        "page_count": 1,
+                        "page_ids": ["page-1"],
+                    }
+                ],
+                "current_session_id": options.session_id,
+                "page_count": 1,
+                "page_ids": ["page-1"],
+            },
+        }
+
+    with (
+        patch(
+            "copaw.capabilities.install_templates.get_browser_support_snapshot",
+            return_value={
+                "playwright_ready": True,
+                "playwright_error": "",
+                "container_mode": False,
+                "default_browser_kind": "chromium",
+                "default_browser_path": "C:/Program Files/Browser/browser.exe",
+            },
+        ),
+        patch(
+            "copaw.capabilities.browser_runtime.BrowserRuntimeService.start_session",
+            new=_fake_start_session,
+        ),
+        patch(
+            "copaw.capabilities.browser_runtime.get_browser_runtime_snapshot",
+            return_value={
+                "running": True,
+                "sessions": [
+                    {
+                        "session_id": "market-browser-companion-2",
+                        "page_count": 1,
+                        "page_ids": ["page-1"],
+                    }
+                ],
+                "current_session_id": "market-browser-companion-2",
+                "page_count": 1,
+                "page_ids": ["page-1"],
+            },
+        ),
+    ):
+        response = client.post(
+            "/capability-market/install-templates/browser-companion/example-run",
+            json={
+                "config": {
+                    "session_id": "market-browser-companion-2",
+                }
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "success"
+    assert payload["activation"]["status"] == "ready"
+    assert payload["activation"]["auto_heal_attempted"] is True
+    assert "activate" in payload["operations"]
+    sessions = environment_service.list_sessions(channel="browser")
+    assert len(sessions) == 1
+
+
+def test_capability_market_document_bridge_doctor_stays_read_only_while_activate_repairs_session(
+    tmp_path,
+) -> None:
+    app = build_runtime_app(tmp_path)
+    client = TestClient(app)
+    environment_service = app.state.environment_service
+
+    doctor = client.get("/capability-market/install-templates/document-office-bridge/doctor")
+    assert doctor.status_code == 200
+    assert environment_service.list_sessions(channel="desktop") == []
+
+    activate = client.post(
+        "/capability-market/install-templates/document-office-bridge/activate",
+        json={
+            "config": {
+                "session_id": "market-document-bridge-1",
+                "document_family": "documents",
+            }
+        },
+    )
+
+    assert activate.status_code == 200
+    payload = activate.json()
+    assert payload["template_id"] == "document-office-bridge"
+    assert payload["status"] == "ready"
+    assert payload["activation_class"] == "host-attached"
+    assert payload["auto_heal_attempted"] is True
+    sessions = environment_service.list_sessions(channel="desktop")
+    assert len(sessions) == 1
+    snapshot = environment_service.document_bridge_snapshot(
+        session_mount_id=sessions[0].id,
+        document_family="documents",
+    )
+    assert snapshot["document_bridge"]["available"] is True
+
+
+def test_capability_market_host_watchers_example_run_auto_activates_when_unmounted(
+    tmp_path,
+) -> None:
+    app = build_runtime_app(tmp_path)
+    client = TestClient(app)
+    environment_service = app.state.environment_service
+
+    response = client.post(
+        "/capability-market/install-templates/host-watchers/example-run",
+        json={
+            "config": {
+                "session_id": "market-host-watchers-1",
+                "watcher_family": "downloads",
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "success"
+    assert payload["activation"]["status"] == "ready"
+    assert payload["activation"]["auto_heal_attempted"] is True
+    assert "activate" in payload["operations"]
+    sessions = environment_service.list_sessions(channel="desktop")
+    assert len(sessions) == 1
+    snapshot = environment_service.host_watchers_snapshot(sessions[0].id)
+    assert snapshot["watchers"]["downloads"]["available"] is True
+
+
+def test_capability_market_windows_app_adapters_example_run_auto_activates_when_unmounted(
+    tmp_path,
+) -> None:
+    app = build_runtime_app(tmp_path)
+    client = TestClient(app)
+    environment_service = app.state.environment_service
+
+    response = client.post(
+        "/capability-market/install-templates/windows-app-adapters/example-run",
+        json={
+            "config": {
+                "session_id": "market-windows-apps-1",
+                "adapter_ref": "app-adapter:excel",
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "success"
+    assert payload["activation"]["status"] == "ready"
+    assert payload["activation"]["auto_heal_attempted"] is True
+    assert "activate" in payload["operations"]
+    sessions = environment_service.list_sessions(channel="desktop")
+    assert len(sessions) == 1
+    snapshot = environment_service.windows_app_adapter_snapshot(
+        session_mount_id=sessions[0].id,
+    )
+    assert snapshot["windows_app_adapters"]["adapter_refs"] == ["app-adapter:excel"]
 
 
 def test_capability_market_browser_local_install_defaults_to_visible_profile(

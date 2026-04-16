@@ -40,6 +40,7 @@ from ...capabilities.browser_runtime import (
 )
 from ...capabilities.install_templates import (
     CapabilityInstallTemplateSpec,
+    InstallTemplateActivationRecord,
     InstallTemplateDoctorReport,
     InstallTemplateExampleRunRecord,
     build_install_template_doctor,
@@ -47,6 +48,7 @@ from ...capabilities.install_templates import (
     list_install_templates,
     match_install_template_capability_ids,
     normalize_install_template_config,
+    run_install_template_activate,
     run_install_template_example,
 )
 from ...capabilities.lifecycle_assignment import (
@@ -427,6 +429,10 @@ class CapabilityMarketInstallTemplateInstallRequest(BaseModel):
 
 
 class CapabilityMarketInstallTemplateExampleRunRequest(BaseModel):
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class CapabilityMarketInstallTemplateActivateRequest(BaseModel):
     config: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -3199,6 +3205,50 @@ async def get_market_install_template_doctor(
     if report is None:
         raise HTTPException(404, detail=f"Install template '{template_id}' not found")
     return report
+
+
+@router.post(
+    "/install-templates/{template_id}/activate",
+    response_model=InstallTemplateActivationRecord,
+)
+async def run_market_install_template_activate(
+    request: Request,
+    template_id: str,
+    payload: CapabilityMarketInstallTemplateActivateRequest | None = None,
+) -> InstallTemplateActivationRecord:
+    service = _get_capability_service(request)
+    environment_service = _get_environment_service(request, required=False)
+    browser_runtime_service = _get_browser_runtime_service(request)
+    request_payload = payload or CapabilityMarketInstallTemplateActivateRequest()
+    template = _call_install_template_surface(
+        get_install_template,
+        template_id,
+        capability_service=service,
+        decision_request_repository=_get_decision_request_repository(request),
+        browser_runtime_service=browser_runtime_service,
+        environment_service=environment_service,
+        include_runtime=False,
+    )
+    if template is None:
+        raise HTTPException(404, detail=f"Install template '{template_id}' not found")
+    try:
+        normalized_config = normalize_install_template_config(
+            template.config_schema,
+            request_payload.config,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, detail=str(exc)) from exc
+    result = await _call_install_template_surface(
+        run_install_template_activate,
+        template_id,
+        capability_service=service,
+        browser_runtime_service=browser_runtime_service,
+        environment_service=environment_service,
+        config=normalized_config,
+    )
+    if result is None:
+        raise HTTPException(404, detail=f"Install template '{template_id}' not found")
+    return result
 
 
 @router.post(

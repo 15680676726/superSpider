@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
+from pathlib import Path
+import tempfile
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -18,7 +20,8 @@ import copaw.capabilities.execution as capability_execution_module
 from copaw.capabilities import CapabilityMount, CapabilityService
 from copaw.capabilities.system_team_handlers import SystemTeamCapabilityFacade
 from copaw.capabilities.remote_skill_contract import RemoteSkillCandidate
-from copaw.config.config import Config, ExternalCapabilityPackageConfig
+from copaw.app.mcp.runtime_contract import build_mcp_reload_state, build_mcp_runtime_record
+from copaw.config.config import Config, ExternalCapabilityPackageConfig, MCPClientConfig
 from copaw.evidence import EvidenceLedger
 from copaw.goals import GoalService
 from copaw.kernel import (
@@ -110,6 +113,196 @@ class FakeMCPClient:
 class FakeMCPManager:
     async def get_client(self, client_key: str):
         if client_key in {"browser", "openspace"}:
+            return FakeMCPClient()
+        return None
+
+
+class FakeStatelessActivationMCPManager:
+    def __init__(self) -> None:
+        self._ready = False
+        self.replace_calls: list[tuple[str, float]] = []
+        self._config = MCPClientConfig(
+            name="browser",
+            enabled=True,
+            transport="stdio",
+            command="npx",
+            args=["-y", "@scope/browser"],
+        )
+
+    async def get_runtime_record(self, client_key: str, *, scope_ref: str | None = None):
+        _ = scope_ref
+        if client_key != "browser":
+            return None
+        if not self._ready:
+            return build_mcp_runtime_record(
+                client_key,
+                self._config,
+                status="failed",
+                init_mode="warn",
+                connect_timeout_seconds=10.0,
+                error="connection refused",
+                connected=False,
+            )
+        return build_mcp_runtime_record(
+            client_key,
+            self._config,
+            status="ready",
+            init_mode="warn",
+            connect_timeout_seconds=10.0,
+            connected=True,
+        )
+
+    async def get_client_config(
+        self,
+        client_key: str,
+        *,
+        scope_ref: str | None = None,
+    ):
+        _ = scope_ref
+        if client_key != "browser":
+            return None
+        return self._config.model_copy(deep=True)
+
+    async def replace_client(
+        self,
+        client_key: str,
+        client_config: MCPClientConfig,
+        timeout: float = 60.0,
+    ) -> None:
+        assert client_key == "browser"
+        assert client_config.command == "npx"
+        self.replace_calls.append((client_key, timeout))
+        self._ready = True
+
+    async def get_client(self, client_key: str, *, scope_ref: str | None = None):
+        _ = scope_ref
+        if client_key == "browser" and self._ready:
+            return FakeMCPClient()
+        return None
+
+
+class FakeAuthActivationMCPManager(FakeStatelessActivationMCPManager):
+    def __init__(self) -> None:
+        super().__init__()
+        self._config = MCPClientConfig(
+            name="browser",
+            enabled=True,
+            transport="streamable_http",
+            url="https://mcp.example.com/browser",
+            headers={"Authorization": "Bearer stale"},
+        )
+
+    async def get_runtime_record(self, client_key: str, *, scope_ref: str | None = None):
+        _ = scope_ref
+        if client_key != "browser":
+            return None
+        if not self._ready:
+            return build_mcp_runtime_record(
+                client_key,
+                self._config,
+                status="failed",
+                init_mode="warn",
+                connect_timeout_seconds=10.0,
+                error="OAuth token expired",
+                connected=False,
+            )
+        return build_mcp_runtime_record(
+            client_key,
+            self._config,
+            status="ready",
+            init_mode="warn",
+            connect_timeout_seconds=10.0,
+            connected=True,
+        )
+
+    async def replace_client(
+        self,
+        client_key: str,
+        client_config: MCPClientConfig,
+        timeout: float = 60.0,
+    ) -> None:
+        assert client_key == "browser"
+        assert client_config.transport == "streamable_http"
+        self.replace_calls.append((client_key, timeout))
+        self._ready = True
+
+
+class FakeWorkspaceActivationMCPManager:
+    def __init__(self) -> None:
+        self.mount_calls: list[dict[str, object]] = []
+        self._config = MCPClientConfig(
+            name="browser",
+            enabled=True,
+            transport="stdio",
+            command="npx",
+            args=["-y", "@scope/browser"],
+        )
+        self._ready_scopes: set[str] = set()
+
+    async def get_runtime_record(self, client_key: str, *, scope_ref: str | None = None):
+        if client_key != "browser":
+            return None
+        if scope_ref in self._ready_scopes:
+            return build_mcp_runtime_record(
+                client_key,
+                self._config,
+                status="ready",
+                init_mode="warn",
+                connect_timeout_seconds=10.0,
+                connected=True,
+                cache_scope="manager-overlay-scope",
+                reload_state=build_mcp_reload_state(
+                    overlay_scope=scope_ref,
+                    overlay_mode="additive",
+                    last_outcome="overlay_mounted",
+                ),
+            )
+        if scope_ref is not None:
+            return None
+        return build_mcp_runtime_record(
+            client_key,
+            self._config,
+            status="ready",
+            init_mode="warn",
+            connect_timeout_seconds=10.0,
+            connected=True,
+        )
+
+    async def get_client_config(
+        self,
+        client_key: str,
+        *,
+        scope_ref: str | None = None,
+    ):
+        _ = scope_ref
+        if client_key != "browser":
+            return None
+        return self._config.model_copy(deep=True)
+
+    async def mount_scope_overlay(
+        self,
+        scope_ref: str,
+        config,
+        *,
+        parent_scope_ref: str | None = None,
+        additive: bool = True,
+        timeout: float = 60.0,
+    ) -> None:
+        self.mount_calls.append(
+            {
+                "scope_ref": scope_ref,
+                "parent_scope_ref": parent_scope_ref,
+                "additive": additive,
+                "timeout": timeout,
+                "clients": sorted(config.clients.keys()),
+            }
+        )
+        self._ready_scopes.add(scope_ref)
+
+    async def get_client(self, client_key: str, *, scope_ref: str | None = None):
+        if client_key != "browser":
+            return None
+        if scope_ref in self._ready_scopes:
             return FakeMCPClient()
         return None
 
@@ -924,6 +1117,138 @@ def test_mcp_capability_execute_marks_tool_errors_as_failed() -> None:
     assert payload["output"]["tool_output"]["error"] == payload["error"]
 
 
+def test_mcp_capability_execute_auto_activates_stateless_runtime_before_tool_call() -> None:
+    capability_service = CapabilityService(
+        registry=StaticCapabilityRegistry(
+            CapabilityMount(
+                id="mcp:browser",
+                name="browser",
+                summary="Run MCP browser tools.",
+                kind="remote-mcp",
+                source_kind="mcp",
+                risk_level="auto",
+                environment_requirements=["mcp"],
+                evidence_contract=["call-record"],
+                role_access_policy=["operator"],
+                enabled=True,
+            ),
+        ),
+        evidence_ledger=EvidenceLedger(),
+        mcp_manager=FakeStatelessActivationMCPManager(),
+    )
+    dispatcher = KernelDispatcher(capability_service=capability_service)
+
+    payload = _execute_capability_direct(
+        capability_service,
+        dispatcher,
+        capability_id="mcp:browser",
+        payload={"tool_name": "open_page", "tool_args": {"url": "https://example.com"}},
+    )
+
+    assert payload["success"] is True
+    assert payload["output"]["activation"]["status"] == "ready"
+    assert payload["output"]["activation"]["auto_heal_attempted"] is True
+    assert payload["output"]["activation"]["operations"] == [
+        "reconnect-runtime-client"
+    ]
+
+
+def test_mcp_capability_execute_auto_activates_auth_bound_runtime_before_tool_call() -> None:
+    capability_service = CapabilityService(
+        registry=StaticCapabilityRegistry(
+            CapabilityMount(
+                id="mcp:browser",
+                name="browser",
+                summary="Run MCP browser tools.",
+                kind="remote-mcp",
+                source_kind="mcp",
+                risk_level="auto",
+                environment_requirements=["mcp"],
+                evidence_contract=["call-record"],
+                role_access_policy=["operator"],
+                enabled=True,
+            ),
+        ),
+        evidence_ledger=EvidenceLedger(),
+        mcp_manager=FakeAuthActivationMCPManager(),
+    )
+    dispatcher = KernelDispatcher(capability_service=capability_service)
+
+    payload = _execute_capability_direct(
+        capability_service,
+        dispatcher,
+        capability_id="mcp:browser",
+        payload={"tool_name": "open_page", "tool_args": {"url": "https://example.com"}},
+    )
+
+    assert payload["success"] is True
+    assert payload["output"]["activation"]["status"] == "ready"
+    assert payload["output"]["activation"]["auto_heal_attempted"] is True
+    assert payload["output"]["activation"]["operations"] == ["refresh-auth-runtime"]
+
+
+def test_mcp_capability_execute_auto_mounts_workspace_overlay_before_tool_call() -> None:
+    manager = FakeWorkspaceActivationMCPManager()
+    capability_service = CapabilityService(
+        registry=StaticCapabilityRegistry(
+            CapabilityMount(
+                id="mcp:browser",
+                name="browser",
+                summary="Run MCP browser tools.",
+                kind="remote-mcp",
+                source_kind="mcp",
+                risk_level="auto",
+                environment_requirements=["mcp"],
+                evidence_contract=["call-record"],
+                role_access_policy=["operator"],
+                enabled=True,
+            ),
+        ),
+        evidence_ledger=EvidenceLedger(),
+        mcp_manager=manager,
+    )
+    dispatcher = KernelDispatcher(capability_service=capability_service)
+
+    payload = _execute_capability_direct(
+        capability_service,
+        dispatcher,
+        capability_id="mcp:browser",
+        payload={
+            "tool_name": "open_page",
+            "tool_args": {"url": "https://example.com"},
+            "scope_ref": "assignment:task-9",
+            "mcp_scope_overlay": {
+                "scope_ref": "assignment:task-9",
+                "parent_scope_ref": "seat:primary",
+                "overlay_mode": "additive",
+                "clients": {
+                    "browser": {
+                        "name": "browser",
+                        "enabled": True,
+                        "transport": "stdio",
+                        "command": "npx",
+                        "args": ["-y", "@scope/browser"],
+                    }
+                },
+            },
+        },
+    )
+
+    assert payload["success"] is True
+    assert payload["output"]["activation"]["status"] == "ready"
+    assert payload["output"]["activation"]["auto_heal_attempted"] is True
+    assert payload["output"]["activation"]["operations"] == ["mount-scope-overlay"]
+    assert manager.mount_calls == [
+        {
+            "scope_ref": "assignment:task-9",
+            "parent_scope_ref": "seat:primary",
+            "additive": True,
+            "timeout": 60.0,
+            "clients": ["browser"],
+        }
+    ]
+
+
 def test_execution_failure_contract_classifies_cancellation_separately() -> None:
     capability_service = CapabilityService(
         registry=StaticCapabilityRegistry(
@@ -1000,6 +1325,182 @@ def test_execution_failure_contract_classifies_tool_error_as_failed() -> None:
     assert result["success"] is False
     assert result["error_kind"] == "failed"
     assert "Error executing tool focus_window" in result["error"]
+
+
+def test_system_browser_companion_runtime_frontdoor_auto_activates() -> None:
+    from copaw.app.runtime_events import RuntimeEventBus
+    from copaw.environments.registry import EnvironmentRegistry
+    from copaw.environments.repository import EnvironmentRepository, SessionMountRepository
+    from copaw.environments.service import EnvironmentService
+
+    tmp_path = Path(tempfile.mkdtemp(prefix="copaw-browser-companion-exec-"))
+    state_store = SQLiteStateStore(tmp_path / "state.db")
+    evidence_ledger = EvidenceLedger(tmp_path / "evidence.db")
+    environment_repository = EnvironmentRepository(state_store)
+    session_mount_repository = SessionMountRepository(state_store)
+    environment_registry = EnvironmentRegistry(
+        repository=environment_repository,
+        session_repository=session_mount_repository,
+    )
+    environment_service = EnvironmentService(registry=environment_registry)
+    environment_service.set_session_repository(session_mount_repository)
+    runtime_event_bus = RuntimeEventBus()
+    environment_service.set_runtime_event_bus(runtime_event_bus)
+
+    async def _fake_start_session(self, options):
+        _ = self
+        return {
+            "status": "started",
+            "session_id": options.session_id,
+            "environment_rebind": {
+                "session_mount_id": options.session_mount_id,
+            },
+            "result": {
+                "ok": True,
+                "message": "Managed browser runtime started.",
+            },
+            "runtime": {
+                "running": True,
+                "sessions": [
+                    {
+                        "session_id": options.session_id,
+                        "page_count": 1,
+                        "page_ids": ["page-1"],
+                    }
+                ],
+                "current_session_id": options.session_id,
+                "page_count": 1,
+                "page_ids": ["page-1"],
+            },
+        }
+
+    capability_service = CapabilityService(
+        evidence_ledger=evidence_ledger,
+        state_store=state_store,
+        environment_service=environment_service,
+    )
+    dispatcher = KernelDispatcher(capability_service=capability_service)
+
+    with (
+        patch(
+            "copaw.capabilities.install_templates.get_browser_support_snapshot",
+            return_value={
+                "playwright_ready": True,
+                "playwright_error": "",
+                "container_mode": False,
+                "default_browser_kind": "chromium",
+                "default_browser_path": "C:/Program Files/Browser/browser.exe",
+            },
+        ),
+        patch(
+            "copaw.capabilities.browser_runtime.BrowserRuntimeService.start_session",
+            new=_fake_start_session,
+        ),
+        patch(
+            "copaw.capabilities.browser_runtime.get_browser_runtime_snapshot",
+            return_value={
+                "running": True,
+                "sessions": [
+                    {
+                        "session_id": "exec-browser-companion-1",
+                        "page_count": 1,
+                        "page_ids": ["page-1"],
+                    }
+                ],
+                "current_session_id": "exec-browser-companion-1",
+                "page_count": 1,
+                "page_ids": ["page-1"],
+            },
+        ),
+    ):
+        payload = _execute_capability_direct(
+            capability_service,
+            dispatcher,
+            capability_id="system:browser_companion_runtime",
+            payload={"session_id": "exec-browser-companion-1"},
+        )
+
+    assert payload["success"] is True
+    assert payload["phase"] == "completed"
+    assert payload["output"]["activation"]["status"] == "ready"
+    assert payload["output"]["activation"]["auto_heal_attempted"] is True
+    sessions = environment_service.list_sessions(channel="browser")
+    assert len(sessions) == 1
+    evidence = evidence_ledger.list_by_task(payload["task_id"])
+    assert len(evidence) == 1
+    assert evidence[0].capability_ref == "system:browser_companion_runtime"
+
+
+def test_system_browser_companion_runtime_frontdoor_returns_activation_blocker() -> None:
+    capability_service = CapabilityService(
+        evidence_ledger=EvidenceLedger(),
+    )
+    dispatcher = KernelDispatcher(capability_service=capability_service)
+
+    payload = _execute_capability_direct(
+        capability_service,
+        dispatcher,
+        capability_id="system:browser_companion_runtime",
+    )
+
+    assert payload["success"] is False
+    assert payload["phase"] == "failed"
+    assert payload["output"]["activation"]["status"] == "blocked"
+    assert payload["output"]["activation"]["reason"] == "adapter_offline"
+    assert payload["error"] != "error: Learning service is not available"
+
+
+def test_system_document_bridge_runtime_frontdoor_auto_activates() -> None:
+    from copaw.app.runtime_events import RuntimeEventBus
+    from copaw.environments.registry import EnvironmentRegistry
+    from copaw.environments.repository import EnvironmentRepository, SessionMountRepository
+    from copaw.environments.service import EnvironmentService
+
+    tmp_path = Path(tempfile.mkdtemp(prefix="copaw-document-bridge-exec-"))
+    state_store = SQLiteStateStore(tmp_path / "state.db")
+    evidence_ledger = EvidenceLedger(tmp_path / "evidence.db")
+    environment_repository = EnvironmentRepository(state_store)
+    session_mount_repository = SessionMountRepository(state_store)
+    environment_registry = EnvironmentRegistry(
+        repository=environment_repository,
+        session_repository=session_mount_repository,
+    )
+    environment_service = EnvironmentService(registry=environment_registry)
+    environment_service.set_session_repository(session_mount_repository)
+    runtime_event_bus = RuntimeEventBus()
+    environment_service.set_runtime_event_bus(runtime_event_bus)
+
+    capability_service = CapabilityService(
+        evidence_ledger=evidence_ledger,
+        state_store=state_store,
+        environment_service=environment_service,
+    )
+    dispatcher = KernelDispatcher(capability_service=capability_service)
+
+    payload = _execute_capability_direct(
+        capability_service,
+        dispatcher,
+        capability_id="system:document_bridge_runtime",
+        payload={
+            "session_id": "exec-document-bridge-1",
+            "document_family": "documents",
+        },
+    )
+
+    assert payload["success"] is True
+    assert payload["phase"] == "completed"
+    assert payload["output"]["activation"]["status"] == "ready"
+    assert payload["output"]["activation"]["auto_heal_attempted"] is True
+    sessions = environment_service.list_sessions(channel="desktop")
+    assert len(sessions) == 1
+    snapshot = environment_service.document_bridge_snapshot(
+        session_mount_id=sessions[0].id,
+        document_family="documents",
+    )
+    assert snapshot["document_bridge"]["available"] is True
+    evidence = evidence_ledger.list_by_task(payload["task_id"])
+    assert len(evidence) == 1
+    assert evidence[0].capability_ref == "system:document_bridge_runtime"
 
 
 def test_execution_result_contract_normalizes_missing_capability_failure() -> None:

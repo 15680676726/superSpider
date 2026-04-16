@@ -16,6 +16,7 @@ server = FastMCP(
         "Control a local Windows desktop session through structured app/window/"
         "mouse/keyboard tools."
     ),
+    log_level="WARNING",
 )
 _HOST = WindowsDesktopHost()
 

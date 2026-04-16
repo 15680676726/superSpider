@@ -7,6 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from ...capabilities.activation_models import ActivationClass, ActivationState
 from ...config.config import MCPClientConfig
 
 MCPTransport = Literal["stdio", "streamable_http", "sse"]
@@ -262,6 +263,279 @@ def build_mcp_trial_contract(
     )
 
 
+def infer_mcp_activation_class(
+    record: MCPClientRuntimeRecord | None,
+    *,
+    requested_scope_ref: str | None = None,
+) -> ActivationClass:
+    if requested_scope_ref:
+        return "workspace-bound"
+    if record is not None and (
+        record.reload_state.overlay_scope is not None
+        or record.session_policy.cache_scope == "manager-overlay-scope"
+    ):
+        return "workspace-bound"
+    if record is not None and record.auth_policy.mode != "none":
+        return "auth-bound"
+    return "stateless"
+
+
+def build_mcp_activation_state(
+    record: MCPClientRuntimeRecord | None,
+    *,
+    activation_class: ActivationClass,
+    requested_scope_ref: str | None = None,
+) -> ActivationState:
+    runtime = (
+        record.model_dump(mode="json")
+        if record is not None
+        else {
+            "status": "missing",
+            "connected": False,
+        }
+    )
+    support = {
+        "auth_mode": record.auth_policy.mode if record is not None else "none",
+        "cache_scope": (
+            record.session_policy.cache_scope
+            if record is not None
+            else "manager-client-registry"
+        ),
+        "overlay_scope": (
+            record.reload_state.overlay_scope
+            if record is not None
+            else requested_scope_ref
+        ),
+        "overlay_mode": (
+            record.reload_state.overlay_mode if record is not None else "base"
+        ),
+        "dirty": record.reload_state.dirty if record is not None else False,
+        "pending_reload": (
+            record.reload_state.pending_reload if record is not None else False
+        ),
+    }
+
+    if record is None:
+        if activation_class == "workspace-bound":
+            return ActivationState(
+                status="blocked",
+                reason="scope_unbound",
+                summary="Workspace-scoped MCP overlay is not mounted yet.",
+                required_action="system-auto-heal",
+                auto_heal_supported=True,
+                retryable=True,
+                scope_ref=requested_scope_ref,
+                runtime=runtime,
+                support=support,
+            )
+        return ActivationState(
+            status="blocked",
+            reason="runtime_unavailable",
+            summary="MCP runtime client is not connected yet.",
+            required_action="system-auto-heal",
+            auto_heal_supported=True,
+            retryable=True,
+            scope_ref=requested_scope_ref,
+            runtime=runtime,
+            support=support,
+        )
+
+    if record.status == "disabled" or not record.enabled:
+        return ActivationState(
+            status="blocked",
+            reason="policy_blocked",
+            summary=f"MCP client '{record.key}' is disabled by policy.",
+            retryable=False,
+            scope_ref=requested_scope_ref,
+            runtime=runtime,
+            support=support,
+        )
+
+    runtime_reason = _runtime_reason_for_record(record, activation_class)
+    if activation_class == "auth-bound" and runtime_reason == "token_expired":
+        human_boundary = None
+    else:
+        human_boundary = _detect_human_boundary_reason(record.last_error)
+    if human_boundary is not None:
+        return ActivationState(
+            status="waiting_human",
+            reason=human_boundary,
+            summary=_human_boundary_summary(human_boundary),
+            required_action=_human_boundary_action(human_boundary),
+            retryable=False,
+            scope_ref=requested_scope_ref,
+            runtime=runtime,
+            support=support,
+        )
+
+    if activation_class == "workspace-bound":
+        overlay_scope = record.reload_state.overlay_scope
+        if requested_scope_ref and overlay_scope != requested_scope_ref:
+            return ActivationState(
+                status="blocked",
+                reason="scope_unbound",
+                summary="Workspace-scoped MCP overlay is not mounted yet.",
+                required_action="system-auto-heal",
+                auto_heal_supported=True,
+                retryable=True,
+                scope_ref=requested_scope_ref,
+                runtime=runtime,
+                support=support,
+            )
+        if record.reload_state.pending_reload or record.reload_state.dirty:
+            return ActivationState(
+                status="healing",
+                reason="scope_unbound",
+                summary="Workspace-scoped MCP overlay is being refreshed.",
+                required_action="system-auto-heal",
+                auto_heal_supported=True,
+                retryable=True,
+                scope_ref=requested_scope_ref or overlay_scope,
+                runtime=runtime,
+                support=support,
+            )
+        if record.status == "ready" and record.connected:
+            return ActivationState(
+                status="ready",
+                summary="Workspace-scoped MCP overlay is ready.",
+                retryable=True,
+                scope_ref=requested_scope_ref or overlay_scope,
+                runtime=runtime,
+                support=support,
+            )
+        return ActivationState(
+            status="blocked",
+            reason="scope_unbound",
+            summary="Workspace-scoped MCP overlay is not ready.",
+            required_action="system-auto-heal",
+            auto_heal_supported=True,
+            retryable=True,
+            scope_ref=requested_scope_ref or overlay_scope,
+            runtime=runtime,
+            support=support,
+        )
+
+    if record.status == "connecting":
+        return ActivationState(
+            status="activating",
+            reason="runtime_unavailable",
+            summary=f"MCP client '{record.key}' is connecting.",
+            auto_heal_supported=True,
+            retryable=True,
+            scope_ref=requested_scope_ref,
+            runtime=runtime,
+            support=support,
+        )
+
+    if (
+        record.status == "reloading"
+        or record.reload_state.pending_reload
+        or record.reload_state.dirty
+    ):
+        reason = runtime_reason
+        return ActivationState(
+            status="healing",
+            reason=reason,
+            summary=f"MCP client '{record.key}' is being refreshed.",
+            required_action="system-auto-heal",
+            auto_heal_supported=True,
+            retryable=True,
+            scope_ref=requested_scope_ref,
+            runtime=runtime,
+            support=support,
+        )
+
+    if record.status == "ready" and record.connected:
+        return ActivationState(
+            status="ready",
+            summary=f"MCP client '{record.key}' is ready.",
+            retryable=True,
+            scope_ref=requested_scope_ref,
+            runtime=runtime,
+            support=support,
+        )
+
+    reason = runtime_reason
+    return ActivationState(
+        status="blocked",
+        reason=reason,
+        summary=f"MCP client '{record.key}' is not ready.",
+        required_action="system-auto-heal" if reason != "policy_blocked" else None,
+        auto_heal_supported=reason != "policy_blocked",
+        retryable=reason != "policy_blocked",
+        scope_ref=requested_scope_ref,
+        runtime=runtime,
+        support=support,
+    )
+
+
+def _runtime_reason_for_record(
+    record: MCPClientRuntimeRecord,
+    activation_class: ActivationClass,
+) -> str:
+    error_text = f"{record.last_error or ''} {record.reload_state.pending_reason or ''}".lower()
+    if activation_class == "auth-bound" and _looks_like_token_expired(error_text):
+        return "token_expired"
+    if "unsupported host" in error_text:
+        return "unsupported_host"
+    if "invalid contract" in error_text:
+        return "invalid_capability_contract"
+    if "broken installation" in error_text:
+        return "broken_installation"
+    return "runtime_unavailable"
+
+
+def _detect_human_boundary_reason(error: str | None) -> str | None:
+    text = str(error or "").strip().lower()
+    if not text:
+        return None
+    if "captcha" in text:
+        return "captcha_required"
+    if "2fa" in text or "two-factor" in text or "two factor" in text or "otp" in text:
+        return "two_factor_required"
+    if "confirm" in text or "approval" in text or "approve in app" in text:
+        return "explicit_human_confirm_required"
+    if "open host" in text or "open the app" in text:
+        return "host_open_required"
+    if "auth required" in text or "oauth" in text or "consent" in text or "login required" in text:
+        return "human_auth_required"
+    return None
+
+
+def _looks_like_token_expired(error: str | None) -> bool:
+    text = str(error or "").strip().lower()
+    if not text:
+        return False
+    return any(
+        token in text
+        for token in (
+            "token expired",
+            "expired token",
+            "refresh token",
+            "unauthorized",
+            "401",
+        )
+    )
+
+
+def _human_boundary_summary(reason: str) -> str:
+    if reason == "captcha_required":
+        return "MCP runtime needs a captcha to continue."
+    if reason == "two_factor_required":
+        return "MCP runtime needs a 2FA confirmation to continue."
+    if reason == "explicit_human_confirm_required":
+        return "MCP runtime needs a human confirmation to continue."
+    if reason == "host_open_required":
+        return "The target host application must be opened first."
+    return "MCP runtime needs a human authorization step to continue."
+
+
+def _human_boundary_action(reason: str) -> str:
+    if reason == "host_open_required":
+        return "open-target-application"
+    return "complete-human-auth"
+
+
 def _default_summary(
     *,
     key: str,
@@ -293,9 +567,11 @@ __all__ = [
     "MCPTrialContract",
     "MCPTrialRollbackContract",
     "MCPTrialScope",
+    "build_mcp_activation_state",
     "build_mcp_trial_contract",
-    "MCPTransport",
     "build_mcp_reload_state",
     "build_mcp_rebuild_spec",
     "build_mcp_runtime_record",
+    "infer_mcp_activation_class",
+    "MCPTransport",
 ]

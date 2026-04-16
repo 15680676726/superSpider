@@ -72,6 +72,15 @@ class _AsyncMcpStopper:
         self._events.append(self._label)
 
 
+class _AsyncBrowserRuntimeStopper:
+    def __init__(self, label: str, events: list[str]) -> None:
+        self._label = label
+        self._events = events
+
+    async def shutdown(self) -> None:
+        self._events.append(self._label)
+
+
 def _build_bootstrap() -> RuntimeBootstrap:
     repositories = RuntimeRepositories(
         task_repository=object(),
@@ -1081,6 +1090,7 @@ async def test_stop_runtime_manager_stack_stops_in_expected_order() -> None:
         cron_manager=_AsyncStopper("cron", events),
         config_watcher=_AsyncStopper("config", events),
         mcp_watcher=_AsyncStopper("mcp-watcher", events),
+        browser_runtime_service=_AsyncBrowserRuntimeStopper("browser", events),
     )
 
     await stop_runtime_manager_stack(
@@ -1090,7 +1100,7 @@ async def test_stop_runtime_manager_stack_stops_in_expected_order() -> None:
         context="test",
     )
 
-    assert events == ["config", "mcp-watcher", "cron", "channel", "mcp"]
+    assert events == ["config", "mcp-watcher", "cron", "channel", "browser", "mcp"]
 
 
 @pytest.mark.asyncio

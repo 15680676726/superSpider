@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from ..media import MediaService
     from ..capabilities import CapabilityService
+    from ..capabilities.browser_runtime import BrowserRuntimeService
     from ..evidence import EvidenceLedger
     from ..environments import EnvironmentRegistry, EnvironmentService, SessionMountRepository
     from ..goals import GoalService
@@ -246,3 +247,4 @@ class RuntimeManagerStack:
     job_repository: StateBackedJobRepository | None = None
     config_watcher: object | None = None
     mcp_watcher: MCPConfigWatcher | None = None
+    browser_runtime_service: BrowserRuntimeService | None = None

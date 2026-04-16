@@ -10,6 +10,7 @@ wait_for, pdf, close. Uses refs from snapshot for ref-based actions.
 """
 
 import asyncio
+from contextlib import suppress
 import atexit
 import inspect
 import json
@@ -804,6 +805,14 @@ def _reset_browser_state() -> None:
     _state["current_session_id"] = None
     _state["last_activity_time"] = 0.0
     _state["headless"] = False
+
+
+async def _await_cancelled_task(task) -> None:
+    if task is None or task.done():
+        return
+    task.cancel()
+    with suppress(asyncio.CancelledError):
+        await task
 
 
 async def _idle_watchdog(idle_seconds: float = _BROWSER_IDLE_TIMEOUT) -> None:

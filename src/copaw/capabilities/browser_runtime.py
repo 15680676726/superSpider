@@ -846,6 +846,39 @@ class BrowserRuntimeService:
             "result": self._tool_response_json(text),
         }
 
+    async def shutdown(self) -> dict[str, Any]:
+        runtime_before = self.runtime_snapshot()
+        session_ids: list[str] = []
+        for item in list(runtime_before.get("sessions") or []):
+            if not isinstance(item, dict):
+                continue
+            session_id = str(item.get("session_id") or "").strip()
+            if session_id and session_id not in session_ids:
+                session_ids.append(session_id)
+
+        stopped_session_ids: list[str] = []
+        stop_errors: dict[str, str] = {}
+        for session_id in session_ids:
+            try:
+                await self.stop_session(session_id)
+            except Exception as exc:  # pragma: no cover - defensive live shutdown path
+                stop_errors[session_id] = str(exc) or exc.__class__.__name__
+                continue
+            stopped_session_ids.append(session_id)
+
+        runtime_after = get_browser_runtime_snapshot()
+        remaining_session_ids = [
+            str(item.get("session_id") or "").strip()
+            for item in list(runtime_after.get("sessions") or [])
+            if isinstance(item, dict) and str(item.get("session_id") or "").strip()
+        ]
+        return {
+            "stopped_session_ids": stopped_session_ids,
+            "failed_session_ids": dict(stop_errors),
+            "remaining_session_ids": remaining_session_ids,
+            "runtime": runtime_after,
+        }
+
     def attach_session(self, session_id: str) -> dict[str, Any]:
         normalized = str(session_id or "").strip()
         attach_result = attach_browser_session(normalized)

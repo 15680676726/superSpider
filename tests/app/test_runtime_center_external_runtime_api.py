@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from copaw.app.routers.runtime_center import router as runtime_center_router
 from copaw.app.runtime_center.state_query import RuntimeCenterStateQueryService
-from copaw.capabilities import CapabilityService
+from copaw.capabilities import CapabilityMount, CapabilityService
 from copaw.capabilities.sources.external_packages import list_external_package_capabilities
 from copaw.config.config import Config, ExternalCapabilityPackageConfig
 from copaw.kernel import KernelResult
@@ -247,3 +247,80 @@ def test_runtime_center_stop_action_omits_start_only_fields(tmp_path, monkeypatc
     assert "health_path_override" not in task.payload
     assert execute_calls == []
     assert response.json()["phase"] == "waiting-confirm"
+
+
+def test_runtime_center_action_route_passes_mcp_tool_execution_fields(tmp_path) -> None:
+    captured: dict[str, object] = {}
+
+    capability_service = CapabilityService(
+        registry=_StaticCapabilityRegistry(
+            [
+                CapabilityMount(
+                    id="mcp:desktop_windows",
+                    name="desktop_windows",
+                    summary="Windows desktop MCP adapter",
+                    kind="remote-mcp",
+                    source_kind="mcp",
+                    risk_level="guarded",
+                    environment_requirements=["desktop"],
+                    evidence_contract=["call-record"],
+                    role_access_policy=["all"],
+                    enabled=True,
+                ),
+            ]
+        ),
+    )
+
+    class _Dispatcher:
+        def submit(self, task):
+            captured["task"] = task
+            return KernelResult(
+                task_id=task.id,
+                trace_id=task.trace_id,
+                success=True,
+                phase="executing",
+                summary="admitted",
+            )
+
+        async def execute_task(self, task_id: str):
+            task = captured["task"]
+            return KernelResult(
+                task_id=task_id,
+                trace_id=task.trace_id,
+                success=True,
+                phase="completed",
+                summary="executed",
+                output=dict(task.payload or {}),
+            )
+
+    app = FastAPI()
+    app.include_router(runtime_center_router)
+    app.state.capability_service = capability_service
+    app.state.kernel_dispatcher = _Dispatcher()
+    client = TestClient(app)
+
+    response = client.post(
+        "/runtime-center/external-runtimes/actions",
+        json={
+            "capability_id": "mcp:desktop_windows",
+            "action": "run",
+            "tool_name": "get_foreground_window",
+            "tool_args": {"include_process": True},
+            "scope_ref": "assignment:mcp-live-1",
+            "mcp_scope_overlay": {
+                "scope_ref": "assignment:mcp-live-1",
+                "overlay_mode": "additive",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    task = captured["task"]
+    assert task.capability_ref == "mcp:desktop_windows"
+    assert task.payload["tool_name"] == "get_foreground_window"
+    assert task.payload["tool_args"] == {"include_process": True}
+    assert task.payload["scope_ref"] == "assignment:mcp-live-1"
+    assert task.payload["mcp_scope_overlay"] == {
+        "scope_ref": "assignment:mcp-live-1",
+        "overlay_mode": "additive",
+    }

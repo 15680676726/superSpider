@@ -22,6 +22,15 @@ from ..agents.tools.browser_control import (
     get_browser_runtime_snapshot,
     get_browser_support_snapshot,
 )
+from .activation_models import (
+    ActivationClass,
+    ActivationReason,
+    ActivationRequest,
+    ActivationResult,
+    ActivationState,
+    ActivationStatus,
+)
+from .activation_runtime import ActivationRuntime
 from .browser_runtime import BrowserRuntimeService, BrowserSessionStartOptions
 
 
@@ -387,7 +396,30 @@ class InstallTemplateExampleRunRecord(BaseModel):
     runtime: dict[str, Any] = Field(default_factory=dict)
     support: dict[str, Any] = Field(default_factory=dict)
     payload: dict[str, Any] = Field(default_factory=dict)
+    activation: InstallTemplateActivationRecord | None = None
     error: ExecutionErrorDetail | None = None
+
+
+class InstallTemplateActivationRecord(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    template_id: str
+    activation_class: ActivationClass
+    status: ActivationStatus
+    started_at: str
+    finished_at: str
+    summary: str = ""
+    reason: ActivationReason | None = None
+    auto_heal_supported: bool = False
+    auto_heal_attempted: bool = False
+    operations: list[str] = Field(default_factory=list)
+    runtime: dict[str, Any] = Field(default_factory=dict)
+    support: dict[str, Any] = Field(default_factory=dict)
+    payload: dict[str, Any] = Field(default_factory=dict)
+    error: ExecutionErrorDetail | None = None
+
+
+InstallTemplateExampleRunRecord.model_rebuild()
 
 
 def normalize_install_template_config(
@@ -1278,6 +1310,42 @@ def build_install_template_doctor(
     return None
 
 
+async def run_install_template_activate(
+    template_id: str,
+    *,
+    capability_service: object | None = None,
+    browser_runtime_service: BrowserRuntimeService | None = None,
+    environment_service: object | None = None,
+    config: dict[str, Any] | None = None,
+) -> InstallTemplateActivationRecord | None:
+    if template_id == "browser-companion":
+        return await _browser_companion_activate(
+            capability_service=capability_service,
+            browser_runtime_service=browser_runtime_service,
+            environment_service=environment_service,
+            config=config,
+        )
+    if template_id == "document-office-bridge":
+        return await _document_bridge_activate(
+            capability_service=capability_service,
+            environment_service=environment_service,
+            config=config,
+        )
+    if template_id == "host-watchers":
+        return await _host_watchers_activate(
+            capability_service=capability_service,
+            environment_service=environment_service,
+            config=config,
+        )
+    if template_id == "windows-app-adapters":
+        return await _windows_app_adapters_activate(
+            capability_service=capability_service,
+            environment_service=environment_service,
+            config=config,
+        )
+    return None
+
+
 async def run_install_template_example(
     template_id: str,
     *,
@@ -1715,7 +1783,7 @@ def _build_browser_companion_install_template(
         notes=[
             "Built on top of canonical EnvironmentService browser/session projections instead of a parallel state cache.",
             "Best used when a managed browser runtime or continuity seat is already mounted and needs cooperative-native execution hints.",
-            "Doctor and example-run stay read-only unless a browser runtime service is explicitly provided for inspection.",
+            "Doctor stays read-only; activate may repair a canonical managed browser seat before example-run consumes the same truth.",
         ],
         risk_level="guarded",
         capability_budget_cost=1,
@@ -1743,6 +1811,14 @@ def _build_browser_companion_install_template(
                     default="",
                     description="Optional environment mount id used to resolve browser companion context when no session id is provided.",
                 ),
+                InstallTemplateConfigField(
+                    key="session_id",
+                    label="Managed browser session id",
+                    field_type="string",
+                    required=False,
+                    default="",
+                    description="Optional managed browser session id used when activate/example-run needs to create a canonical browser seat.",
+                ),
             ],
         ),
         lifecycle=[
@@ -1757,6 +1833,12 @@ def _build_browser_companion_install_template(
                 label="Run browser companion doctor",
                 summary="Inspect canonical browser companion projection, browser support, and runtime continuity state.",
                 risk_level="auto",
+            ),
+            InstallTemplateLifecycleAction(
+                action="activate",
+                label="Activate browser companion runtime",
+                summary="Create or repair a canonical managed browser seat before re-reading browser companion truth.",
+                risk_level="guarded",
             ),
             InstallTemplateLifecycleAction(
                 action="example-run",
@@ -1807,7 +1889,10 @@ def _build_browser_companion_install_template(
             if include_runtime
             else {}
         ),
-        routes=_cooperative_template_routes("browser-companion"),
+        routes={
+            **_cooperative_template_routes("browser-companion"),
+            "activate": "/api/capability-market/install-templates/browser-companion/activate",
+        },
     )
 
 
@@ -1890,6 +1975,14 @@ def _build_document_bridge_install_template(
                     description="Optional session mount id used to inspect a specific document bridge registration.",
                 ),
                 InstallTemplateConfigField(
+                    key="session_id",
+                    label="Session id",
+                    field_type="string",
+                    required=False,
+                    default="",
+                    description="Optional session id used when activation needs to create a canonical desktop session.",
+                ),
+                InstallTemplateConfigField(
                     key="document_family",
                     label="Document family",
                     field_type="choice",
@@ -1912,6 +2005,12 @@ def _build_document_bridge_install_template(
                 label="Run document bridge doctor",
                 summary="Inspect cooperative document bridge registration, supported families, and execution-path hints.",
                 risk_level="auto",
+            ),
+            InstallTemplateLifecycleAction(
+                action="activate",
+                label="Activate document bridge runtime",
+                summary="Create or repair the canonical document bridge session mount before example-run.",
+                risk_level="guarded",
             ),
             InstallTemplateLifecycleAction(
                 action="example-run",
@@ -1954,7 +2053,10 @@ def _build_document_bridge_install_template(
             if include_runtime
             else {}
         ),
-        routes=_cooperative_template_routes("document-office-bridge"),
+        routes={
+            **_cooperative_template_routes("document-office-bridge"),
+            "activate": "/api/capability-market/install-templates/document-office-bridge/activate",
+        },
     )
 
 
@@ -2035,6 +2137,14 @@ def _build_host_watchers_install_template(
                     description="Optional session mount id used to inspect a specific watcher runtime.",
                 ),
                 InstallTemplateConfigField(
+                    key="session_id",
+                    label="Session id",
+                    field_type="string",
+                    required=False,
+                    default="",
+                    description="Optional session id used when activation needs to create a canonical watcher session.",
+                ),
+                InstallTemplateConfigField(
                     key="watcher_family",
                     label="Watcher family",
                     field_type="choice",
@@ -2056,6 +2166,12 @@ def _build_host_watchers_install_template(
                 action="doctor",
                 label="Run host watcher doctor",
                 summary="Inspect canonical filesystem, download, and notification watcher availability.",
+                risk_level="auto",
+            ),
+            InstallTemplateLifecycleAction(
+                action="activate",
+                label="Activate host watcher runtime",
+                summary="Create or repair the canonical watcher session mount before example-run.",
                 risk_level="auto",
             ),
             InstallTemplateLifecycleAction(
@@ -2099,7 +2215,10 @@ def _build_host_watchers_install_template(
             if include_runtime
             else {}
         ),
-        routes=_cooperative_template_routes("host-watchers"),
+        routes={
+            **_cooperative_template_routes("host-watchers"),
+            "activate": "/api/capability-market/install-templates/host-watchers/activate",
+        },
     )
 
 
@@ -2180,6 +2299,14 @@ def _build_windows_app_adapters_install_template(
                     description="Optional session mount id used to inspect a specific Windows app adapter registration.",
                 ),
                 InstallTemplateConfigField(
+                    key="session_id",
+                    label="Session id",
+                    field_type="string",
+                    required=False,
+                    default="",
+                    description="Optional session id used when activation needs to create a canonical desktop app session.",
+                ),
+                InstallTemplateConfigField(
                     key="adapter_ref",
                     label="Adapter ref",
                     field_type="string",
@@ -2201,6 +2328,12 @@ def _build_windows_app_adapters_install_template(
                 label="Run Windows app adapter doctor",
                 summary="Inspect canonical Windows app adapter refs, app identity, and control channel.",
                 risk_level="auto",
+            ),
+            InstallTemplateLifecycleAction(
+                action="activate",
+                label="Activate Windows app adapters",
+                summary="Create or repair the canonical Windows app adapter session before example-run.",
+                risk_level="guarded",
             ),
             InstallTemplateLifecycleAction(
                 action="example-run",
@@ -2243,7 +2376,10 @@ def _build_windows_app_adapters_install_template(
             if include_runtime
             else {}
         ),
-        routes=_cooperative_template_routes("windows-app-adapters"),
+        routes={
+            **_cooperative_template_routes("windows-app-adapters"),
+            "activate": "/api/capability-market/install-templates/windows-app-adapters/activate",
+        },
     )
 
 
@@ -2266,6 +2402,7 @@ def _install_template_error_record(
     operations: list[str],
     runtime: dict[str, Any] | None = None,
     support: dict[str, Any] | None = None,
+    activation: InstallTemplateActivationRecord | None = None,
     code: str,
     detail: str = "",
     retryable: bool,
@@ -2281,6 +2418,7 @@ def _install_template_error_record(
         operations=operations,
         runtime=runtime or {},
         support=support or {},
+        activation=activation,
         error=ExecutionErrorDetail(
             code=code,
             summary=summary,
@@ -2289,6 +2427,111 @@ def _install_template_error_record(
             source=source,
         ),
     )
+
+
+def _install_template_activation_error_record(
+    *,
+    template_id: str,
+    activation_class: ActivationClass,
+    started_at: datetime,
+    summary: str,
+    reason: ActivationReason | None,
+    operations: list[str],
+    runtime: dict[str, Any] | None = None,
+    support: dict[str, Any] | None = None,
+    payload: dict[str, Any] | None = None,
+    code: str,
+    detail: str = "",
+    retryable: bool,
+    source: str,
+    auto_heal_supported: bool = False,
+    auto_heal_attempted: bool = False,
+) -> InstallTemplateActivationRecord:
+    finished_at = _utc_now()
+    return InstallTemplateActivationRecord(
+        template_id=template_id,
+        activation_class=activation_class,
+        status="blocked",
+        started_at=started_at.isoformat(),
+        finished_at=finished_at.isoformat(),
+        summary=summary,
+        reason=reason,
+        auto_heal_supported=auto_heal_supported,
+        auto_heal_attempted=auto_heal_attempted,
+        operations=operations,
+        runtime=runtime or {},
+        support=support or {},
+        payload=payload or {},
+        error=ExecutionErrorDetail(
+            code=code,
+            summary=summary,
+            detail=detail,
+            retryable=retryable,
+            source=source,
+        ),
+    )
+
+
+def _activation_summary(
+    *,
+    template_id: str,
+    result: ActivationResult,
+) -> str:
+    if template_id == "browser-companion":
+        if result.status == "ready":
+            return "Browser companion runtime is ready"
+        if result.reason == "session_unbound":
+            return "Browser companion runtime still needs a canonical browser session"
+        if result.reason == "dependency_missing":
+            return "Managed browser runtime support is not ready"
+        if result.reason == "adapter_offline":
+            return "Browser companion runtime is not currently available"
+    if template_id == "document-office-bridge":
+        if result.status == "ready":
+            return "Document bridge runtime is ready"
+        if result.reason == "session_unbound":
+            return "Document bridge runtime still needs a canonical desktop session"
+        if result.reason == "adapter_offline":
+            return "Document bridge runtime is not currently available"
+    if template_id == "host-watchers":
+        if result.status == "ready":
+            return "Host watcher runtime is ready"
+        if result.reason == "session_unbound":
+            return "Host watcher runtime still needs a canonical desktop session"
+        if result.reason == "adapter_offline":
+            return "Requested host watcher family is not currently available"
+    if template_id == "windows-app-adapters":
+        if result.status == "ready":
+            return "Windows app adapter runtime is ready"
+        if result.reason == "session_unbound":
+            return "Windows app adapter runtime still needs a canonical desktop session"
+        if result.reason == "adapter_offline":
+            return "Windows app adapter runtime is not currently available"
+    return f"{template_id} activation state is {result.status}"
+
+
+def _activation_payload_from_runtime(runtime: dict[str, Any]) -> dict[str, Any]:
+    payload = {
+        "session_mount_id": runtime.get("session_mount_id"),
+        "environment_id": runtime.get("environment_id"),
+    }
+    companion = dict(runtime.get("browser_companion") or {})
+    if companion:
+        payload["transport_ref"] = companion.get("transport_ref")
+        payload["provider_session_ref"] = companion.get("provider_session_ref")
+    document_bridge = dict(runtime.get("document_bridge") or {})
+    if document_bridge:
+        payload["bridge_ref"] = (document_bridge.get("document_bridge") or {}).get("bridge_ref")
+        payload["document_family"] = document_bridge.get("document_family")
+    host_watchers = dict(runtime.get("host_watchers") or {})
+    if host_watchers:
+        payload["available_families"] = host_watchers.get("available_families") or []
+    windows_apps = dict(runtime.get("windows_app_adapters") or {})
+    if windows_apps:
+        payload["adapter_refs"] = (windows_apps.get("windows_app_adapters") or {}).get(
+            "adapter_refs"
+        ) or []
+    return payload
 
 
 def _cooperative_missing_environment_report(
@@ -2352,6 +2595,610 @@ def _cooperative_template_support(runtime_context: dict[str, Any]) -> dict[str, 
         "session_ids": runtime_context["session_ids"],
         "environment_ids": runtime_context["environment_ids"],
     }
+
+
+def _cooperative_acquire_host_attached_session(
+    *,
+    environment_service: object | None,
+    owner: str,
+    session_id: str,
+    host_mode: str,
+) -> tuple[str | None, str | None, list[str]]:
+    if environment_service is None:
+        return (None, None, [])
+    lease = _safe_environment_call(
+        environment_service,
+        "acquire_session_lease",
+        channel="desktop",
+        session_id=session_id,
+        user_id="copaw-operator",
+        owner=owner,
+        ttl_seconds=300,
+        metadata={
+            "host_mode": host_mode,
+            "lease_class": "exclusive-writer",
+            "access_mode": "writer",
+            "session_scope": "desktop-user-session",
+        },
+    )
+    if lease is None:
+        return (None, None, [])
+    session_mount_id = str(getattr(lease, "id", "") or "").strip() or None
+    environment_id = str(getattr(lease, "environment_id", "") or "").strip() or None
+    return (session_mount_id, environment_id, ["acquire-session-lease"])
+
+
+class _BrowserCompanionActivationStrategy:
+    def __init__(
+        self,
+        *,
+        capability_service: object | None = None,
+        browser_runtime_service: BrowserRuntimeService | None = None,
+        environment_service: object | None = None,
+        config: dict[str, Any] | None = None,
+    ) -> None:
+        self._capability_service = capability_service
+        self._browser_runtime_service = browser_runtime_service
+        self._environment_service = environment_service
+        self._config = dict(config or {})
+        self._browser_support = get_browser_support_snapshot()
+
+    async def resolve_context(self, request: ActivationRequest) -> dict[str, Any]:
+        requested_session_mount_id = _string_value(self._config.get("session_mount_id"))
+        requested_environment_id = _string_value(self._config.get("environment_id"))
+        requested_session_id = (
+            _string_value(self._config.get("session_id"))
+            or f"{request.subject_id}-managed-session"
+        )
+        return {
+            "subject_id": request.subject_id,
+            "session_id": requested_session_id,
+            "session_mount_id": requested_session_mount_id,
+            "environment_id": requested_environment_id,
+        }
+
+    async def read_state(self, context: dict[str, Any]) -> ActivationState:
+        runtime_context = _cooperative_template_runtime_context(
+            "browser-companion",
+            environment_service=self._environment_service,
+            session_mount_id=context.get("session_mount_id"),
+            environment_id=context.get("environment_id"),
+        )
+        context["session_mount_id"] = runtime_context.get("session_mount_id")
+        context["environment_id"] = runtime_context.get("environment_id")
+        runtime = _cooperative_runtime_snapshot(
+            "browser-companion",
+            environment_service=self._environment_service,
+            runtime_context=runtime_context,
+            browser_runtime_service=self._browser_runtime_service,
+        )
+        support = _cooperative_browser_companion_support(
+            runtime_context,
+            self._browser_support,
+        )
+        if not _mount_enabled(self._capability_service, "system:browser_companion_runtime"):
+            return ActivationState(
+                status="blocked",
+                reason="policy_blocked",
+                runtime=runtime,
+                support=support,
+            )
+        if self._environment_service is None or self._browser_runtime_service is None:
+            return ActivationState(
+                status="blocked",
+                reason="adapter_offline",
+                runtime=runtime,
+                support=support,
+            )
+        if not bool(self._browser_support.get("playwright_ready")):
+            return ActivationState(
+                status="blocked",
+                reason="dependency_missing",
+                runtime=runtime,
+                support=support,
+            )
+        projection = dict(runtime_context.get("projection") or {})
+        companion = dict(runtime.get("browser_companion") or {})
+        available = _bool_value(companion.get("available"))
+        if available is None:
+            available = _bool_value((projection.get("browser_companion") or {}).get("available"))
+        if runtime_context.get("session_mount_id") is None and runtime_context.get("environment_id") is None:
+            return ActivationState(
+                status="blocked",
+                reason="session_unbound",
+                auto_heal_supported=True,
+                runtime=runtime,
+                support=support,
+            )
+        if not available:
+            return ActivationState(
+                status="blocked",
+                reason="adapter_offline",
+                auto_heal_supported=True,
+                runtime=runtime,
+                support=support,
+            )
+        return ActivationState(
+            status="ready",
+            runtime=runtime,
+            support=support,
+        )
+
+    async def remediate(
+        self,
+        context: dict[str, Any],
+        state: ActivationState,
+    ) -> list[str]:
+        _ = state
+        if self._environment_service is None or self._browser_runtime_service is None:
+            return []
+        operations: list[str] = []
+        session_mount_id = _string_value(context.get("session_mount_id"))
+        environment_id = _string_value(context.get("environment_id"))
+        session_id = _string_value(context.get("session_id")) or "browser-companion-managed-session"
+        if session_mount_id is None:
+            lease = _safe_environment_call(
+                self._environment_service,
+                "acquire_session_lease",
+                channel="browser",
+                session_id=session_id,
+                user_id="copaw-operator",
+                owner="capability-market/browser-companion-activate",
+                ttl_seconds=300,
+                metadata={
+                    "host_mode": "managed-browser-companion",
+                    "lease_class": "exclusive-writer",
+                    "access_mode": "writer",
+                    "session_scope": "browser-user-session",
+                    "browser_mode": "managed-isolated",
+                },
+            )
+            if lease is not None:
+                session_mount_id = str(getattr(lease, "id", "") or "").strip() or None
+                environment_id = str(getattr(lease, "environment_id", "") or "").strip() or None
+                context["session_mount_id"] = session_mount_id
+                context["environment_id"] = environment_id
+                operations.append("acquire-session-lease")
+        start_payload = await self._browser_runtime_service.start_session(
+            BrowserSessionStartOptions(
+                session_id=session_id,
+                session_mount_id=session_mount_id,
+                environment_id=environment_id,
+                reuse_running_session=True,
+                persist_login_state=True,
+            )
+        )
+        start_result = dict(start_payload.get("result") or {})
+        if not start_result.get("ok"):
+            raise RuntimeError(str(start_result.get("error") or "Managed browser runtime start failed"))
+        operations.append(
+            "reuse-managed-browser-runtime"
+            if start_payload.get("status") == "attached"
+            else "start-managed-browser-runtime"
+        )
+        transport_ref = f"transport:managed-browser:{session_id}"
+        provider_session_ref = f"browser-session:{session_id}"
+        _safe_environment_call(
+            self._environment_service,
+            "register_browser_companion",
+            session_mount_id=session_mount_id,
+            transport_ref=transport_ref,
+            status="attached",
+            available=True,
+            provider_session_ref=provider_session_ref,
+        )
+        operations.append("register-browser-companion")
+        _safe_environment_call(
+            self._environment_service,
+            "register_browser_attach_transport",
+            session_mount_id=session_mount_id,
+            transport_ref=transport_ref,
+            status="attached",
+            browser_session_ref=provider_session_ref,
+            browser_scope_ref=f"browser-scope:{session_id}",
+            reconnect_token=f"reconnect:{session_id}",
+        )
+        operations.append("register-browser-attach-transport")
+        return operations
+
+
+class _DocumentBridgeActivationStrategy:
+    def __init__(
+        self,
+        *,
+        capability_service: object | None = None,
+        environment_service: object | None = None,
+        config: dict[str, Any] | None = None,
+    ) -> None:
+        self._capability_service = capability_service
+        self._environment_service = environment_service
+        self._config = dict(config or {})
+
+    async def resolve_context(self, request: ActivationRequest) -> dict[str, Any]:
+        requested_session_mount_id = _string_value(self._config.get("session_mount_id"))
+        requested_environment_id = _string_value(self._config.get("environment_id"))
+        requested_session_id = (
+            _string_value(self._config.get("session_id"))
+            or f"{request.subject_id}-managed-session"
+        )
+        return {
+            "subject_id": request.subject_id,
+            "session_id": requested_session_id,
+            "session_mount_id": requested_session_mount_id,
+            "environment_id": requested_environment_id,
+            "document_family": (
+                _string_value(self._config.get("document_family")) or "documents"
+            ),
+        }
+
+    async def read_state(self, context: dict[str, Any]) -> ActivationState:
+        runtime_context = _cooperative_template_runtime_context(
+            "document-office-bridge",
+            environment_service=self._environment_service,
+            session_mount_id=context.get("session_mount_id"),
+            environment_id=context.get("environment_id"),
+        )
+        context["session_mount_id"] = runtime_context.get("session_mount_id")
+        context["environment_id"] = runtime_context.get("environment_id")
+        runtime = _cooperative_runtime_snapshot(
+            "document-office-bridge",
+            environment_service=self._environment_service,
+            runtime_context=runtime_context,
+            document_family=_string_value(context.get("document_family")) or "documents",
+        )
+        support = _cooperative_template_support(runtime_context)
+        if not _mount_enabled(self._capability_service, "system:document_bridge_runtime"):
+            return ActivationState(
+                status="blocked",
+                reason="policy_blocked",
+                runtime=runtime,
+                support=support,
+            )
+        if self._environment_service is None:
+            return ActivationState(
+                status="blocked",
+                reason="adapter_offline",
+                runtime=runtime,
+                support=support,
+            )
+        if runtime_context.get("session_mount_id") is None and runtime_context.get("environment_id") is None:
+            return ActivationState(
+                status="blocked",
+                reason="session_unbound",
+                auto_heal_supported=True,
+                runtime=runtime,
+                support=support,
+            )
+        snapshot = dict(runtime.get("document_bridge") or {})
+        bridge = dict(snapshot.get("document_bridge") or {})
+        projection = dict(runtime_context.get("projection") or {})
+        projection_bridge = dict(projection.get("document_bridge") or {})
+        available = _bool_value(bridge.get("available"))
+        if available is None:
+            available = _bool_value(projection_bridge.get("available"))
+        blocker = _string_value(snapshot.get("adapter_gap_or_blocker"))
+        if blocker or available is not True:
+            return ActivationState(
+                status="blocked",
+                reason="adapter_offline",
+                auto_heal_supported=True,
+                runtime=runtime,
+                support=support,
+            )
+        return ActivationState(
+            status="ready",
+            runtime=runtime,
+            support=support,
+        )
+
+    async def remediate(
+        self,
+        context: dict[str, Any],
+        state: ActivationState,
+    ) -> list[str]:
+        _ = state
+        if self._environment_service is None:
+            return []
+        operations: list[str] = []
+        session_mount_id = _string_value(context.get("session_mount_id"))
+        environment_id = _string_value(context.get("environment_id"))
+        session_id = (
+            _string_value(context.get("session_id"))
+            or "document-office-bridge-managed-session"
+        )
+        if session_mount_id is None:
+            session_mount_id, environment_id, lease_operations = (
+                _cooperative_acquire_host_attached_session(
+                    environment_service=self._environment_service,
+                    owner="capability-market/document-office-bridge-activate",
+                    session_id=session_id,
+                    host_mode="managed-document-bridge",
+                )
+            )
+            if session_mount_id is not None:
+                context["session_mount_id"] = session_mount_id
+                context["environment_id"] = environment_id
+                operations.extend(lease_operations)
+        if session_mount_id is None:
+            return operations
+        _safe_environment_call(
+            self._environment_service,
+            "register_document_bridge",
+            session_mount_id=session_mount_id,
+            bridge_ref="document-bridge:office",
+            status="ready",
+            supported_families=["documents", "spreadsheets", "presentations"],
+            available=True,
+        )
+        operations.append("register-document-bridge")
+        return operations
+
+
+class _HostWatchersActivationStrategy:
+    def __init__(
+        self,
+        *,
+        capability_service: object | None = None,
+        environment_service: object | None = None,
+        config: dict[str, Any] | None = None,
+    ) -> None:
+        self._capability_service = capability_service
+        self._environment_service = environment_service
+        self._config = dict(config or {})
+
+    async def resolve_context(self, request: ActivationRequest) -> dict[str, Any]:
+        requested_session_mount_id = _string_value(self._config.get("session_mount_id"))
+        requested_environment_id = _string_value(self._config.get("environment_id"))
+        requested_session_id = (
+            _string_value(self._config.get("session_id"))
+            or f"{request.subject_id}-managed-session"
+        )
+        return {
+            "subject_id": request.subject_id,
+            "session_id": requested_session_id,
+            "session_mount_id": requested_session_mount_id,
+            "environment_id": requested_environment_id,
+            "watcher_family": (
+                _string_value(self._config.get("watcher_family")) or "downloads"
+            ),
+        }
+
+    async def read_state(self, context: dict[str, Any]) -> ActivationState:
+        runtime_context = _cooperative_template_runtime_context(
+            "host-watchers",
+            environment_service=self._environment_service,
+            session_mount_id=context.get("session_mount_id"),
+            environment_id=context.get("environment_id"),
+        )
+        context["session_mount_id"] = runtime_context.get("session_mount_id")
+        context["environment_id"] = runtime_context.get("environment_id")
+        runtime = _cooperative_runtime_snapshot(
+            "host-watchers",
+            environment_service=self._environment_service,
+            runtime_context=runtime_context,
+        )
+        support = _cooperative_template_support(runtime_context)
+        if not _mount_enabled(self._capability_service, "system:host_watchers_runtime"):
+            return ActivationState(
+                status="blocked",
+                reason="policy_blocked",
+                runtime=runtime,
+                support=support,
+            )
+        if self._environment_service is None:
+            return ActivationState(
+                status="blocked",
+                reason="adapter_offline",
+                runtime=runtime,
+                support=support,
+            )
+        if runtime_context.get("session_mount_id") is None and runtime_context.get("environment_id") is None:
+            return ActivationState(
+                status="blocked",
+                reason="session_unbound",
+                auto_heal_supported=True,
+                runtime=runtime,
+                support=support,
+            )
+        snapshot = dict(runtime.get("host_watchers") or {})
+        watchers = dict(snapshot.get("watchers") or {})
+        watcher_family = _string_value(context.get("watcher_family")) or "downloads"
+        family_key = "downloads" if watcher_family == "downloads" else watcher_family
+        family_snapshot = watchers.get(family_key)
+        available = None
+        if isinstance(family_snapshot, dict):
+            available = _bool_value(family_snapshot.get("available"))
+        if available is not True:
+            return ActivationState(
+                status="blocked",
+                reason="adapter_offline",
+                auto_heal_supported=True,
+                runtime=runtime,
+                support=support,
+            )
+        return ActivationState(
+            status="ready",
+            runtime=runtime,
+            support=support,
+        )
+
+    async def remediate(
+        self,
+        context: dict[str, Any],
+        state: ActivationState,
+    ) -> list[str]:
+        _ = state
+        if self._environment_service is None:
+            return []
+        operations: list[str] = []
+        session_mount_id = _string_value(context.get("session_mount_id"))
+        environment_id = _string_value(context.get("environment_id"))
+        session_id = (
+            _string_value(context.get("session_id")) or "host-watchers-managed-session"
+        )
+        if session_mount_id is None:
+            session_mount_id, environment_id, lease_operations = (
+                _cooperative_acquire_host_attached_session(
+                    environment_service=self._environment_service,
+                    owner="capability-market/host-watchers-activate",
+                    session_id=session_id,
+                    host_mode="managed-host-watchers",
+                )
+            )
+            if session_mount_id is not None:
+                context["session_mount_id"] = session_mount_id
+                context["environment_id"] = environment_id
+                operations.extend(lease_operations)
+        if session_mount_id is None:
+            return operations
+        _safe_environment_call(
+            self._environment_service,
+            "register_host_watchers",
+            session_mount_id,
+            filesystem={"status": "healthy"},
+            downloads={
+                "status": "healthy",
+                "download_policy": "download-bucket:workspace-main",
+            },
+            notifications={"status": "healthy"},
+            adapter_gap_or_blocker=None,
+        )
+        operations.append("register-host-watchers")
+        return operations
+
+
+class _WindowsAppAdaptersActivationStrategy:
+    def __init__(
+        self,
+        *,
+        capability_service: object | None = None,
+        environment_service: object | None = None,
+        config: dict[str, Any] | None = None,
+    ) -> None:
+        self._capability_service = capability_service
+        self._environment_service = environment_service
+        self._config = dict(config or {})
+
+    async def resolve_context(self, request: ActivationRequest) -> dict[str, Any]:
+        requested_session_mount_id = _string_value(self._config.get("session_mount_id"))
+        requested_environment_id = _string_value(self._config.get("environment_id"))
+        requested_session_id = (
+            _string_value(self._config.get("session_id"))
+            or f"{request.subject_id}-managed-session"
+        )
+        return {
+            "subject_id": request.subject_id,
+            "session_id": requested_session_id,
+            "session_mount_id": requested_session_mount_id,
+            "environment_id": requested_environment_id,
+            "adapter_ref": _string_value(self._config.get("adapter_ref")),
+        }
+
+    async def read_state(self, context: dict[str, Any]) -> ActivationState:
+        runtime_context = _cooperative_template_runtime_context(
+            "windows-app-adapters",
+            environment_service=self._environment_service,
+            session_mount_id=context.get("session_mount_id"),
+            environment_id=context.get("environment_id"),
+        )
+        context["session_mount_id"] = runtime_context.get("session_mount_id")
+        context["environment_id"] = runtime_context.get("environment_id")
+        runtime = _cooperative_runtime_snapshot(
+            "windows-app-adapters",
+            environment_service=self._environment_service,
+            runtime_context=runtime_context,
+        )
+        support = _cooperative_template_support(runtime_context)
+        if not _mount_enabled(self._capability_service, "system:windows_app_adapter_runtime"):
+            return ActivationState(
+                status="blocked",
+                reason="policy_blocked",
+                runtime=runtime,
+                support=support,
+            )
+        if self._environment_service is None:
+            return ActivationState(
+                status="blocked",
+                reason="adapter_offline",
+                runtime=runtime,
+                support=support,
+            )
+        if runtime_context.get("session_mount_id") is None and runtime_context.get("environment_id") is None:
+            return ActivationState(
+                status="blocked",
+                reason="session_unbound",
+                auto_heal_supported=True,
+                runtime=runtime,
+                support=support,
+            )
+        snapshot = dict(runtime.get("windows_app_adapters") or {})
+        adapters = dict(snapshot.get("windows_app_adapters") or {})
+        adapter_refs = _string_list_value(adapters.get("adapter_refs"))
+        expected_adapter_ref = _string_value(context.get("adapter_ref"))
+        if expected_adapter_ref and expected_adapter_ref not in adapter_refs:
+            return ActivationState(
+                status="blocked",
+                reason="adapter_offline",
+                auto_heal_supported=True,
+                runtime=runtime,
+                support=support,
+            )
+        if not adapter_refs:
+            return ActivationState(
+                status="blocked",
+                reason="adapter_offline",
+                auto_heal_supported=True,
+                runtime=runtime,
+                support=support,
+            )
+        return ActivationState(
+            status="ready",
+            runtime=runtime,
+            support=support,
+        )
+
+    async def remediate(
+        self,
+        context: dict[str, Any],
+        state: ActivationState,
+    ) -> list[str]:
+        _ = state
+        if self._environment_service is None:
+            return []
+        operations: list[str] = []
+        session_mount_id = _string_value(context.get("session_mount_id"))
+        environment_id = _string_value(context.get("environment_id"))
+        session_id = (
+            _string_value(context.get("session_id"))
+            or "windows-app-adapters-managed-session"
+        )
+        if session_mount_id is None:
+            session_mount_id, environment_id, lease_operations = (
+                _cooperative_acquire_host_attached_session(
+                    environment_service=self._environment_service,
+                    owner="capability-market/windows-app-adapters-activate",
+                    session_id=session_id,
+                    host_mode="managed-windows-app-adapters",
+                )
+            )
+            if session_mount_id is not None:
+                context["session_mount_id"] = session_mount_id
+                context["environment_id"] = environment_id
+                operations.extend(lease_operations)
+        if session_mount_id is None:
+            return operations
+        adapter_ref = _string_value(context.get("adapter_ref")) or "app-adapter:file-explorer"
+        app_identity = adapter_ref.rsplit(":", 1)[-1]
+        _safe_environment_call(
+            self._environment_service,
+            "register_windows_app_adapter",
+            session_mount_id=session_mount_id,
+            adapter_refs=[adapter_ref],
+            app_identity=app_identity,
+            control_channel="accessibility-tree",
+        )
+        operations.append("register-windows-app-adapter")
+        return operations
 
 
 def _cooperative_runtime_snapshot(
@@ -2449,6 +3296,268 @@ def _cooperative_runtime_snapshot(
         "environment_id": environment_id,
         "cooperative_adapter_availability": projection,
     }
+
+
+async def _browser_companion_activate(
+    *,
+    capability_service: object | None = None,
+    browser_runtime_service: BrowserRuntimeService | None = None,
+    environment_service: object | None = None,
+    config: dict[str, Any] | None = None,
+) -> InstallTemplateActivationRecord:
+    started_at = _utc_now()
+    strategy = _BrowserCompanionActivationStrategy(
+        capability_service=capability_service,
+        browser_runtime_service=browser_runtime_service,
+        environment_service=environment_service,
+        config=config,
+    )
+    try:
+        result = await ActivationRuntime().activate(
+            ActivationRequest(
+                subject_id="browser-companion",
+                activation_class="host-attached",
+            ),
+            strategy,
+        )
+    except Exception as exc:
+        return _install_template_activation_error_record(
+            template_id="browser-companion",
+            activation_class="host-attached",
+            started_at=started_at,
+            summary="Browser companion activation failed",
+            reason="adapter_offline",
+            operations=["activate"],
+            code="activation-exception",
+            detail=str(exc),
+            retryable=True,
+            source="browser-runtime",
+            auto_heal_supported=True,
+            auto_heal_attempted=True,
+        )
+    finished_at = _utc_now()
+    summary = _activation_summary(template_id="browser-companion", result=result)
+    return InstallTemplateActivationRecord(
+        template_id="browser-companion",
+        activation_class="host-attached",
+        status=result.status,
+        started_at=started_at.isoformat(),
+        finished_at=finished_at.isoformat(),
+        summary=summary,
+        reason=result.reason,
+        auto_heal_supported=result.auto_heal_supported,
+        auto_heal_attempted=result.auto_heal_attempted,
+        operations=list(result.operations),
+        runtime=dict(result.runtime),
+        support=dict(result.support),
+        payload=_activation_payload_from_runtime(dict(result.runtime)),
+        error=(
+            ExecutionErrorDetail(
+                code=str(result.reason or "activation-blocked"),
+                summary=summary,
+                detail=str(result.reason or ""),
+                retryable=bool(result.auto_heal_supported),
+                source="activation-runtime",
+            )
+            if result.status != "ready"
+            else None
+        ),
+    )
+
+
+async def _document_bridge_activate(
+    *,
+    capability_service: object | None = None,
+    environment_service: object | None = None,
+    config: dict[str, Any] | None = None,
+) -> InstallTemplateActivationRecord:
+    started_at = _utc_now()
+    strategy = _DocumentBridgeActivationStrategy(
+        capability_service=capability_service,
+        environment_service=environment_service,
+        config=config,
+    )
+    try:
+        result = await ActivationRuntime().activate(
+            ActivationRequest(
+                subject_id="document-office-bridge",
+                activation_class="host-attached",
+            ),
+            strategy,
+        )
+    except Exception as exc:
+        return _install_template_activation_error_record(
+            template_id="document-office-bridge",
+            activation_class="host-attached",
+            started_at=started_at,
+            summary="Document bridge activation failed",
+            reason="adapter_offline",
+            operations=["activate"],
+            code="activation-exception",
+            detail=str(exc),
+            retryable=True,
+            source="environment-service",
+            auto_heal_supported=True,
+            auto_heal_attempted=True,
+        )
+    finished_at = _utc_now()
+    summary = _activation_summary(template_id="document-office-bridge", result=result)
+    return InstallTemplateActivationRecord(
+        template_id="document-office-bridge",
+        activation_class="host-attached",
+        status=result.status,
+        started_at=started_at.isoformat(),
+        finished_at=finished_at.isoformat(),
+        summary=summary,
+        reason=result.reason,
+        auto_heal_supported=result.auto_heal_supported,
+        auto_heal_attempted=result.auto_heal_attempted,
+        operations=list(result.operations),
+        runtime=dict(result.runtime),
+        support=dict(result.support),
+        payload=_activation_payload_from_runtime(dict(result.runtime)),
+        error=(
+            ExecutionErrorDetail(
+                code=str(result.reason or "activation-blocked"),
+                summary=summary,
+                detail=str(result.reason or ""),
+                retryable=bool(result.auto_heal_supported),
+                source="activation-runtime",
+            )
+            if result.status != "ready"
+            else None
+        ),
+    )
+
+
+async def _host_watchers_activate(
+    *,
+    capability_service: object | None = None,
+    environment_service: object | None = None,
+    config: dict[str, Any] | None = None,
+) -> InstallTemplateActivationRecord:
+    started_at = _utc_now()
+    strategy = _HostWatchersActivationStrategy(
+        capability_service=capability_service,
+        environment_service=environment_service,
+        config=config,
+    )
+    try:
+        result = await ActivationRuntime().activate(
+            ActivationRequest(
+                subject_id="host-watchers",
+                activation_class="host-attached",
+            ),
+            strategy,
+        )
+    except Exception as exc:
+        return _install_template_activation_error_record(
+            template_id="host-watchers",
+            activation_class="host-attached",
+            started_at=started_at,
+            summary="Host watcher activation failed",
+            reason="adapter_offline",
+            operations=["activate"],
+            code="activation-exception",
+            detail=str(exc),
+            retryable=True,
+            source="environment-service",
+            auto_heal_supported=True,
+            auto_heal_attempted=True,
+        )
+    finished_at = _utc_now()
+    summary = _activation_summary(template_id="host-watchers", result=result)
+    return InstallTemplateActivationRecord(
+        template_id="host-watchers",
+        activation_class="host-attached",
+        status=result.status,
+        started_at=started_at.isoformat(),
+        finished_at=finished_at.isoformat(),
+        summary=summary,
+        reason=result.reason,
+        auto_heal_supported=result.auto_heal_supported,
+        auto_heal_attempted=result.auto_heal_attempted,
+        operations=list(result.operations),
+        runtime=dict(result.runtime),
+        support=dict(result.support),
+        payload=_activation_payload_from_runtime(dict(result.runtime)),
+        error=(
+            ExecutionErrorDetail(
+                code=str(result.reason or "activation-blocked"),
+                summary=summary,
+                detail=str(result.reason or ""),
+                retryable=bool(result.auto_heal_supported),
+                source="activation-runtime",
+            )
+            if result.status != "ready"
+            else None
+        ),
+    )
+
+
+async def _windows_app_adapters_activate(
+    *,
+    capability_service: object | None = None,
+    environment_service: object | None = None,
+    config: dict[str, Any] | None = None,
+) -> InstallTemplateActivationRecord:
+    started_at = _utc_now()
+    strategy = _WindowsAppAdaptersActivationStrategy(
+        capability_service=capability_service,
+        environment_service=environment_service,
+        config=config,
+    )
+    try:
+        result = await ActivationRuntime().activate(
+            ActivationRequest(
+                subject_id="windows-app-adapters",
+                activation_class="host-attached",
+            ),
+            strategy,
+        )
+    except Exception as exc:
+        return _install_template_activation_error_record(
+            template_id="windows-app-adapters",
+            activation_class="host-attached",
+            started_at=started_at,
+            summary="Windows app adapter activation failed",
+            reason="adapter_offline",
+            operations=["activate"],
+            code="activation-exception",
+            detail=str(exc),
+            retryable=True,
+            source="environment-service",
+            auto_heal_supported=True,
+            auto_heal_attempted=True,
+        )
+    finished_at = _utc_now()
+    summary = _activation_summary(template_id="windows-app-adapters", result=result)
+    return InstallTemplateActivationRecord(
+        template_id="windows-app-adapters",
+        activation_class="host-attached",
+        status=result.status,
+        started_at=started_at.isoformat(),
+        finished_at=finished_at.isoformat(),
+        summary=summary,
+        reason=result.reason,
+        auto_heal_supported=result.auto_heal_supported,
+        auto_heal_attempted=result.auto_heal_attempted,
+        operations=list(result.operations),
+        runtime=dict(result.runtime),
+        support=dict(result.support),
+        payload=_activation_payload_from_runtime(dict(result.runtime)),
+        error=(
+            ExecutionErrorDetail(
+                code=str(result.reason or "activation-blocked"),
+                summary=summary,
+                detail=str(result.reason or ""),
+                retryable=bool(result.auto_heal_supported),
+                source="activation-runtime",
+            )
+            if result.status != "ready"
+            else None
+        ),
+    )
 
 
 def _browser_companion_doctor(
@@ -3289,41 +4398,45 @@ async def _browser_companion_example_run(
 ) -> InstallTemplateExampleRunRecord:
     started_at = _utc_now()
     normalized_config = dict(config or {})
-    browser_support = get_browser_support_snapshot()
-    requested_session_mount_id = _string_value(normalized_config.get("session_mount_id"))
-    requested_environment_id = _string_value(normalized_config.get("environment_id"))
+    activation = await _browser_companion_activate(
+        capability_service=capability_service,
+        browser_runtime_service=browser_runtime_service,
+        environment_service=environment_service,
+        config=normalized_config,
+    )
+    if activation.status != "ready":
+        return _install_template_error_record(
+            template_id="browser-companion",
+            started_at=started_at,
+            summary=activation.summary,
+            operations=["activate", *list(activation.operations)],
+            runtime=dict(activation.runtime),
+            support=dict(activation.support),
+            activation=activation,
+            code=str((activation.error or ExecutionErrorDetail(code="activation-blocked", summary=activation.summary)).code),
+            detail=str((activation.error or ExecutionErrorDetail(code="activation-blocked", summary=activation.summary)).detail or ""),
+            retryable=bool((activation.error or ExecutionErrorDetail(code="activation-blocked", summary=activation.summary)).retryable),
+            source=str((activation.error or ExecutionErrorDetail(code="activation-blocked", summary=activation.summary)).source or "activation-runtime"),
+        )
+    requested_session_mount_id = _string_value(
+        normalized_config.get("session_mount_id")
+        or activation.payload.get("session_mount_id")
+    )
+    requested_environment_id = _string_value(
+        normalized_config.get("environment_id")
+        or activation.payload.get("environment_id")
+    )
     runtime_context = _cooperative_template_runtime_context(
         "browser-companion",
         environment_service=environment_service,
         session_mount_id=requested_session_mount_id,
         environment_id=requested_environment_id,
     )
-    support = _cooperative_browser_companion_support(runtime_context, browser_support)
-    operations = ["resolve-runtime-context"]
-    if not _mount_enabled(capability_service, "system:browser_companion_runtime"):
-        return _install_template_error_record(
-            template_id="browser-companion",
-            started_at=started_at,
-            summary="Browser companion runtime is disabled or unavailable",
-            operations=["check-capability-state"],
-            support=support,
-            code="capability-disabled",
-            detail="Enable system:browser_companion_runtime before reading the browser companion runtime.",
-            retryable=True,
-            source="capability",
-        )
-    if environment_service is None:
-        return _install_template_error_record(
-            template_id="browser-companion",
-            started_at=started_at,
-            summary="EnvironmentService runtime projection is unavailable",
-            operations=operations,
-            support=support,
-            code="environment-service-missing",
-            detail="Example run requires the canonical EnvironmentService facade to resolve browser companion state.",
-            retryable=True,
-            source="environment-service",
-        )
+    support = _cooperative_browser_companion_support(
+        runtime_context,
+        get_browser_support_snapshot(),
+    )
+    operations = ["activate", *list(activation.operations), "resolve-runtime-context"]
     runtime = _cooperative_runtime_snapshot(
         "browser-companion",
         environment_service=environment_service,
@@ -3381,6 +4494,7 @@ async def _browser_companion_example_run(
         operations=operations,
         runtime=runtime,
         support=support,
+        activation=activation,
         payload={
             "session_mount_id": runtime_context["session_mount_id"],
             "environment_id": runtime_context["environment_id"],
@@ -3398,15 +4512,37 @@ async def _document_bridge_example_run(
 ) -> InstallTemplateExampleRunRecord:
     started_at = _utc_now()
     normalized_config = dict(config or {})
+    activation = await _document_bridge_activate(
+        capability_service=capability_service,
+        environment_service=environment_service,
+        config=normalized_config,
+    )
+    if activation.status != "ready":
+        return _install_template_error_record(
+            template_id="document-office-bridge",
+            started_at=started_at,
+            summary=activation.summary,
+            operations=["activate", *list(activation.operations)],
+            runtime=dict(activation.runtime),
+            support=dict(activation.support),
+            activation=activation,
+            code=str((activation.error or ExecutionErrorDetail(code="activation-blocked", summary=activation.summary)).code),
+            detail=str((activation.error or ExecutionErrorDetail(code="activation-blocked", summary=activation.summary)).detail or ""),
+            retryable=bool((activation.error or ExecutionErrorDetail(code="activation-blocked", summary=activation.summary)).retryable),
+            source=str((activation.error or ExecutionErrorDetail(code="activation-blocked", summary=activation.summary)).source or "activation-runtime"),
+        )
     document_family = _string_value(normalized_config.get("document_family")) or "documents"
-    requested_session_mount_id = _string_value(normalized_config.get("session_mount_id"))
+    requested_session_mount_id = _string_value(
+        normalized_config.get("session_mount_id")
+        or activation.payload.get("session_mount_id")
+    )
     runtime_context = _cooperative_template_runtime_context(
         "document-office-bridge",
         environment_service=environment_service,
         session_mount_id=requested_session_mount_id,
     )
     support = _cooperative_template_support(runtime_context)
-    operations = ["resolve-runtime-context"]
+    operations = ["activate", *list(activation.operations), "resolve-runtime-context"]
     if not _mount_enabled(capability_service, "system:document_bridge_runtime"):
         return _install_template_error_record(
             template_id="document-office-bridge",
@@ -3487,6 +4623,7 @@ async def _document_bridge_example_run(
         operations=operations,
         runtime=runtime,
         support=support,
+        activation=activation,
         payload={
             "session_mount_id": runtime_context["session_mount_id"],
             "environment_id": runtime_context["environment_id"],
@@ -3504,15 +4641,37 @@ async def _host_watchers_example_run(
 ) -> InstallTemplateExampleRunRecord:
     started_at = _utc_now()
     normalized_config = dict(config or {})
+    activation = await _host_watchers_activate(
+        capability_service=capability_service,
+        environment_service=environment_service,
+        config=normalized_config,
+    )
+    if activation.status != "ready":
+        return _install_template_error_record(
+            template_id="host-watchers",
+            started_at=started_at,
+            summary=activation.summary,
+            operations=["activate", *list(activation.operations)],
+            runtime=dict(activation.runtime),
+            support=dict(activation.support),
+            activation=activation,
+            code=str((activation.error or ExecutionErrorDetail(code="activation-blocked", summary=activation.summary)).code),
+            detail=str((activation.error or ExecutionErrorDetail(code="activation-blocked", summary=activation.summary)).detail or ""),
+            retryable=bool((activation.error or ExecutionErrorDetail(code="activation-blocked", summary=activation.summary)).retryable),
+            source=str((activation.error or ExecutionErrorDetail(code="activation-blocked", summary=activation.summary)).source or "activation-runtime"),
+        )
     watcher_family = _string_value(normalized_config.get("watcher_family")) or "downloads"
-    requested_session_mount_id = _string_value(normalized_config.get("session_mount_id"))
+    requested_session_mount_id = _string_value(
+        normalized_config.get("session_mount_id")
+        or activation.payload.get("session_mount_id")
+    )
     runtime_context = _cooperative_template_runtime_context(
         "host-watchers",
         environment_service=environment_service,
         session_mount_id=requested_session_mount_id,
     )
     support = _cooperative_template_support(runtime_context)
-    operations = ["resolve-runtime-context"]
+    operations = ["activate", *list(activation.operations), "resolve-runtime-context"]
     if not _mount_enabled(capability_service, "system:host_watchers_runtime"):
         return _install_template_error_record(
             template_id="host-watchers",
@@ -3589,6 +4748,7 @@ async def _host_watchers_example_run(
         operations=operations,
         runtime=runtime,
         support=support,
+        activation=activation,
         payload={
             "session_mount_id": runtime_context["session_mount_id"],
             "environment_id": runtime_context["environment_id"],
@@ -3606,15 +4766,37 @@ async def _windows_app_adapters_example_run(
 ) -> InstallTemplateExampleRunRecord:
     started_at = _utc_now()
     normalized_config = dict(config or {})
+    activation = await _windows_app_adapters_activate(
+        capability_service=capability_service,
+        environment_service=environment_service,
+        config=normalized_config,
+    )
+    if activation.status != "ready":
+        return _install_template_error_record(
+            template_id="windows-app-adapters",
+            started_at=started_at,
+            summary=activation.summary,
+            operations=["activate", *list(activation.operations)],
+            runtime=dict(activation.runtime),
+            support=dict(activation.support),
+            activation=activation,
+            code=str((activation.error or ExecutionErrorDetail(code="activation-blocked", summary=activation.summary)).code),
+            detail=str((activation.error or ExecutionErrorDetail(code="activation-blocked", summary=activation.summary)).detail or ""),
+            retryable=bool((activation.error or ExecutionErrorDetail(code="activation-blocked", summary=activation.summary)).retryable),
+            source=str((activation.error or ExecutionErrorDetail(code="activation-blocked", summary=activation.summary)).source or "activation-runtime"),
+        )
     expected_adapter_ref = _string_value(normalized_config.get("adapter_ref"))
-    requested_session_mount_id = _string_value(normalized_config.get("session_mount_id"))
+    requested_session_mount_id = _string_value(
+        normalized_config.get("session_mount_id")
+        or activation.payload.get("session_mount_id")
+    )
     runtime_context = _cooperative_template_runtime_context(
         "windows-app-adapters",
         environment_service=environment_service,
         session_mount_id=requested_session_mount_id,
     )
     support = _cooperative_template_support(runtime_context)
-    operations = ["resolve-runtime-context"]
+    operations = ["activate", *list(activation.operations), "resolve-runtime-context"]
     if not _mount_enabled(capability_service, "system:windows_app_adapter_runtime"):
         return _install_template_error_record(
             template_id="windows-app-adapters",
@@ -3699,6 +4881,7 @@ async def _windows_app_adapters_example_run(
         operations=operations,
         runtime=runtime,
         support=support,
+        activation=activation,
         payload={
             "session_mount_id": runtime_context["session_mount_id"],
             "environment_id": runtime_context["environment_id"],

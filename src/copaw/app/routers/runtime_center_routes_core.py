@@ -41,6 +41,10 @@ class RuntimeCenterExternalRuntimeActionRequest(BaseModel):
     work_context_id: str | None = None
     environment_ref: str | None = None
     owner_agent_id: str | None = None
+    tool_name: str | None = None
+    tool_args: dict[str, object] = Field(default_factory=dict)
+    scope_ref: str | None = None
+    mcp_scope_overlay: dict[str, object] = Field(default_factory=dict)
     args: list[str] = Field(default_factory=list)
     retention_policy: str | None = None
     port_override: int | None = None
@@ -1263,6 +1267,14 @@ async def act_on_runtime_center_external_runtime(
         "owner_agent_id": payload.owner_agent_id or "runtime-center",
         "metadata": dict(payload.metadata or {}),
     }
+    if payload.tool_name is not None:
+        task_payload["tool_name"] = payload.tool_name
+    if payload.tool_args:
+        task_payload["tool_args"] = dict(payload.tool_args)
+    if payload.scope_ref is not None:
+        task_payload["scope_ref"] = payload.scope_ref
+    if payload.mcp_scope_overlay:
+        task_payload["mcp_scope_overlay"] = dict(payload.mcp_scope_overlay)
     if payload.runtime_id is not None:
         task_payload["runtime_id"] = payload.runtime_id
     if resolved_action in {"run", "start", "restart"}:

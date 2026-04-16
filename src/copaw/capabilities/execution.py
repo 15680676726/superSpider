@@ -29,6 +29,11 @@ from ..kernel.runtime_outcome import (
     classify_runtime_outcome,
     evidence_status_for_outcome,
 )
+from ..app.mcp.runtime_contract import infer_mcp_activation_class
+from .activation_models import ActivationRequest
+from .activation_runtime import ActivationRuntime
+from .activation_strategies import build_mcp_activation_strategy
+from .browser_runtime import BrowserRuntimeService
 from .execution_context import CapabilityExecutionContext
 from .execution_support import (
     _build_script_command,
@@ -46,6 +51,10 @@ from .execution_support import (
 from .external_runtime_actions import parse_external_runtime_action_payload
 from .external_adapter_execution import ExternalAdapterExecution
 from .external_runtime_execution import ExternalRuntimeExecution
+from .install_templates import (
+    resolve_install_template_ids_for_capability,
+    run_install_template_activate,
+)
 from .skill_service import CapabilitySkillService
 from .tool_execution_contracts import ToolExecutionContract, get_tool_execution_contract
 
@@ -117,6 +126,8 @@ class CapabilityExecutionFacade:
         external_adapter_execution: ExternalAdapterExecution | None = None,
         external_runtime_execution: ExternalRuntimeExecution | None = None,
         tool_bridge: "KernelToolBridge | None" = None,
+        capability_service: object | None = None,
+        state_store: object | None = None,
         environment_service: object | None = None,
         mcp_manager: object | None = None,
         system_handler: "SystemCapabilityHandler | None" = None,
@@ -132,6 +143,9 @@ class CapabilityExecutionFacade:
         self._external_adapter_execution = external_adapter_execution
         self._external_runtime_execution = external_runtime_execution
         self._tool_bridge = tool_bridge
+        self._capability_service = capability_service
+        self._state_store = state_store
+        self._browser_runtime_service: BrowserRuntimeService | None = None
         self._environment_service = environment_service
         self._mcp_manager = mcp_manager
         self._system_handler = system_handler
@@ -141,6 +155,12 @@ class CapabilityExecutionFacade:
 
     def set_environment_service(self, environment_service: object | None) -> None:
         self._environment_service = environment_service
+        if self._browser_runtime_service is not None:
+            setattr(
+                self._browser_runtime_service,
+                "_environment_service",
+                environment_service,
+            )
         if self._external_adapter_execution is not None:
             self._external_adapter_execution.set_environment_service(environment_service)
 
@@ -157,6 +177,18 @@ class CapabilityExecutionFacade:
 
     def set_system_handler(self, system_handler: "SystemCapabilityHandler | None") -> None:
         self._system_handler = system_handler
+
+    def _get_browser_runtime_service(self) -> BrowserRuntimeService | None:
+        if self._browser_runtime_service is None and self._state_store is not None:
+            self._browser_runtime_service = BrowserRuntimeService(self._state_store)
+        if self._browser_runtime_service is None:
+            return None
+        setattr(
+            self._browser_runtime_service,
+            "_environment_service",
+            self._environment_service,
+        )
+        return self._browser_runtime_service
 
     def resolve_executor(self, capability_id: str):
         executor = _TOOL_EXECUTORS.get(capability_id)
@@ -1152,8 +1184,24 @@ class CapabilityExecutionFacade:
                 },
             )
         timeout = timeout or resolved_payload.get("timeout")
+        scope_ref = self._resolve_mcp_scope_ref(resolved_payload)
+        activation_result = await self._ensure_mcp_activation(
+            client_key,
+            payload=resolved_payload,
+            scope_ref=scope_ref,
+        )
+        if activation_result is not None and activation_result.status != "ready":
+            return _json_tool_response(
+                {
+                    "success": False,
+                    "summary": activation_result.summary or f"MCP client '{client_key}' is blocked.",
+                    "client_key": client_key,
+                    "activation": activation_result.model_dump(mode="json"),
+                    "error": activation_result.summary or f"MCP client '{client_key}' is blocked.",
+                },
+            )
 
-        client = await self._mcp_manager.get_client(client_key)
+        client = await self._get_mcp_client(client_key, scope_ref=scope_ref)
         if client is None:
             return _json_tool_response(
                 {
@@ -1181,12 +1229,103 @@ class CapabilityExecutionFacade:
                 "success": success,
                 "summary": summary,
                 "client_key": client_key,
+                "scope_ref": scope_ref,
                 "tool_name": tool_name,
                 "payload": tool_args,
                 "tool_output": response_payload,
+                "activation": (
+                    activation_result.model_dump(mode="json")
+                    if activation_result is not None
+                    else None
+                ),
                 "error": None if success else summary,
             },
         )
+
+    async def _ensure_mcp_activation(
+        self,
+        client_key: str,
+        *,
+        payload: dict[str, object],
+        scope_ref: str | None,
+    ):
+        if self._mcp_manager is None:
+            return None
+        runtime_getter = getattr(self._mcp_manager, "get_runtime_record", None)
+        if not callable(runtime_getter):
+            return None
+        scoped_record = await self._get_mcp_runtime_record(client_key, scope_ref=scope_ref)
+        base_record = (
+            await self._get_mcp_runtime_record(client_key)
+            if scope_ref is not None
+            else scoped_record
+        )
+        activation_class = infer_mcp_activation_class(
+            scoped_record or base_record,
+            requested_scope_ref=scope_ref,
+        )
+        strategy = build_mcp_activation_strategy(
+            activation_class=activation_class,
+            client_key=client_key,
+            mcp_manager=self._mcp_manager,
+            capability_service=self._capability_service,
+            config=payload,
+        )
+        return await ActivationRuntime().activate(
+            ActivationRequest(
+                subject_id=f"mcp:{client_key}",
+                activation_class=activation_class,
+                metadata=dict(payload),
+            ),
+            strategy,
+        )
+
+    async def _get_mcp_runtime_record(
+        self,
+        client_key: str,
+        *,
+        scope_ref: str | None = None,
+    ):
+        if self._mcp_manager is None:
+            return None
+        getter = getattr(self._mcp_manager, "get_runtime_record", None)
+        if not callable(getter):
+            return None
+        try:
+            return await getter(client_key, scope_ref=scope_ref)
+        except TypeError:
+            return await getter(client_key)
+
+    async def _get_mcp_client(
+        self,
+        client_key: str,
+        *,
+        scope_ref: str | None = None,
+    ):
+        if self._mcp_manager is None:
+            return None
+        getter = getattr(self._mcp_manager, "get_client", None)
+        if not callable(getter):
+            return None
+        try:
+            return await getter(client_key, scope_ref=scope_ref)
+        except TypeError:
+            return await getter(client_key)
+
+    @staticmethod
+    def _resolve_mcp_scope_ref(payload: dict[str, object]) -> str | None:
+        overlay = payload.get("mcp_scope_overlay")
+        overlay_payload = overlay if isinstance(overlay, dict) else {}
+        for candidate in (
+            payload.get("scope_ref"),
+            overlay_payload.get("scope_ref"),
+            overlay_payload.get("session_scope_ref"),
+            overlay_payload.get("seat_scope_ref"),
+        ):
+            value = str(candidate or "").strip()
+            if value:
+                return value
+        return None
 
     async def _execute_external_package(
         self,
@@ -1393,6 +1532,12 @@ class CapabilityExecutionFacade:
         payload: dict[str, object] | None = None,
         **kwargs,
     ) -> dict[str, object]:
+        activation_response = await self._execute_install_template_activation_frontdoor(
+            capability_id,
+            payload=payload,
+        )
+        if activation_response is not None:
+            return activation_response
         if self._system_handler is None:
             return {
                 "success": False,
@@ -1403,3 +1548,37 @@ class CapabilityExecutionFacade:
             payload=payload,
             **kwargs,
         )
+
+    async def _execute_install_template_activation_frontdoor(
+        self,
+        capability_id: str,
+        *,
+        payload: dict[str, object] | None = None,
+    ) -> dict[str, object] | None:
+        template_ids = resolve_install_template_ids_for_capability(capability_id)
+        if not template_ids:
+            return None
+        if not capability_id.startswith("system:"):
+            return None
+        for template_id in template_ids:
+            result = await run_install_template_activate(
+                template_id,
+                capability_service=self._capability_service,
+                browser_runtime_service=self._get_browser_runtime_service(),
+                environment_service=self._environment_service,
+                config=dict(payload or {}),
+            )
+            if result is None:
+                continue
+            activation_payload = result.model_dump(mode="json")
+            success = result.status == "ready"
+            return _json_tool_response(
+                {
+                    "success": success,
+                    "summary": result.summary,
+                    "template_id": template_id,
+                    "activation": activation_payload,
+                    "error": None if success else result.summary,
+                },
+            )
+        return None

@@ -118,6 +118,7 @@ def runtime_manager_stack_from_app_state(app_state: Any) -> RuntimeManagerStack:
         job_repository=getattr(app_state, "job_repository", None),
         config_watcher=getattr(app_state, "config_watcher", None),
         mcp_watcher=getattr(app_state, "mcp_watcher", None),
+        browser_runtime_service=getattr(app_state, "browser_runtime_service", None),
     )
 
 
@@ -175,6 +176,18 @@ async def stop_runtime_manager_stack(
                 error_mode=error_mode,
                 context=context,
                 target="channel_manager.stop_all",
+            )
+    if stack.browser_runtime_service is not None:
+        try:
+            await stack.browser_runtime_service.shutdown()
+        except BaseException as exc:
+            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                raise
+            _log_stop_error(
+                logger,
+                error_mode=error_mode,
+                context=context,
+                target="browser_runtime_service.shutdown",
             )
     if stack.mcp_manager is not None:
         try:

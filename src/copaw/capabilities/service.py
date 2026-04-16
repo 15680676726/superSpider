@@ -157,6 +157,8 @@ class CapabilityService:
                 else None
             ),
             tool_bridge=self._tool_bridge,
+            capability_service=self,
+            state_store=self._state_store,
             environment_service=self._environment_service,
             mcp_manager=self._mcp_manager,
             system_handler=self._system_handler,
@@ -373,6 +375,9 @@ class CapabilityService:
 
     def get_mcp_client_info(self, client_key: str) -> dict[str, object] | None:
         return self._catalog.get_mcp_client_info(client_key)
+
+    def get_mcp_client_config(self, client_key: str):
+        return self._catalog.get_mcp_client_config(client_key)
 
     def resolve_executor(self, capability_id: str):
         return self._execution.resolve_executor(capability_id)

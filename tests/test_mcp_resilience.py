@@ -135,6 +135,52 @@ def test_build_client_attaches_rebuild_info(tmp_path: Path) -> None:
     assert rebuild_info["cwd"] == str(tmp_path)
 
 
+def test_build_client_merges_process_env_into_stdio_child_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _RecordingStdIOClient:
+        def __init__(
+            self,
+            *,
+            name: str,
+            command: str,
+            args: list[str],
+            env: dict[str, str],
+            cwd: str | None,
+        ) -> None:
+            captured["name"] = name
+            captured["command"] = command
+            captured["args"] = list(args)
+            captured["env"] = dict(env)
+            captured["cwd"] = cwd
+
+    monkeypatch.setenv("PYTHONWARNINGS", "ignore:from-parent")
+    monkeypatch.setenv("COPAW_PARENT_ONLY", "present")
+    monkeypatch.setattr(
+        "copaw.app.mcp.manager.StdIOStatefulClient",
+        _RecordingStdIOClient,
+    )
+
+    cfg = MCPClientConfig(
+        name="mcp_everything",
+        enabled=True,
+        transport="stdio",
+        command="python",
+        args=["-m", "demo.server"],
+        env={"COPAW_CHILD_ONLY": "present"},
+    )
+
+    MCPClientManager._build_client(cfg)
+
+    child_env = captured["env"]
+    assert isinstance(child_env, dict)
+    assert child_env["PYTHONWARNINGS"] == "ignore:from-parent"
+    assert child_env["COPAW_PARENT_ONLY"] == "present"
+    assert child_env["COPAW_CHILD_ONLY"] == "present"
+
+
 @pytest.mark.asyncio
 async def test_register_mcp_clients_retries_once_on_closed_resource() -> None:
     toolkit = _FakeToolkit(fail_once_names={"flaky"})

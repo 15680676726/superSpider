@@ -248,6 +248,47 @@ def test_browser_runtime_service_exposes_companion_snapshot_and_registration_hel
     assert companion_snapshot["transport_ref"] == "transport:browser-companion:localhost"
 
 
+@pytest.mark.asyncio
+async def test_browser_runtime_service_shutdown_stops_all_active_sessions(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    (
+        _environment_service,
+        _env_repo,
+        _session_repo,
+        _event_bus,
+        _environment,
+        _session,
+        _companion_runtime,
+        browser_runtime,
+    ) = _build_services(tmp_path)
+    stopped: list[str] = []
+
+    monkeypatch.setattr(
+        browser_runtime,
+        "runtime_snapshot",
+        lambda **kwargs: {
+            "sessions": [
+                {"session_id": "first"},
+                {"session_id": "second"},
+            ],
+        },
+    )
+
+    async def _fake_stop_session(session_id: str) -> dict[str, object]:
+        stopped.append(session_id)
+        return {"session_id": session_id, "result": {"ok": True}}
+
+    monkeypatch.setattr(browser_runtime, "stop_session", _fake_stop_session)
+
+    result = await browser_runtime.shutdown()
+
+    assert stopped == ["first", "second"]
+    assert result["stopped_session_ids"] == ["first", "second"]
+    assert result["remaining_session_ids"] == []
+
+
 def test_browser_companion_registration_persists_execution_guardrails(
     tmp_path,
 ) -> None:

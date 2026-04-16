@@ -122,6 +122,26 @@ class _FakeProcessBackedClient(_FakeClient):
         )
 
 
+class _FakePreferredCloseClient(_FakeClient):
+    def __init__(self, name: str, events: list[str] | None = None) -> None:
+        super().__init__(name)
+        self.stack = _FakeAsyncExitStack()
+        self.process = _FakeProcessHandle()
+        self.client = SimpleNamespace(
+            gen=SimpleNamespace(
+                ag_frame=SimpleNamespace(
+                    f_locals={"process": self.process},
+                ),
+            ),
+        )
+        self._events = events
+
+    async def close(self) -> None:
+        self.close_calls += 1
+        if self._events is not None:
+            self._events.append(self.name)
+
+
 def test_build_mcp_trial_contract_projects_local_scope_and_rollback_boundary() -> None:
     contract = build_mcp_trial_contract(
         baseline_ref="mcp:desktop_windows",
@@ -142,6 +162,67 @@ def test_build_mcp_trial_contract_projects_local_scope_and_rollback_boundary() -
     assert contract.rollback.client_key == "desktop_windows"
     assert contract.rollback.rollback_target_ids == ["mcp:desktop_windows"]
     assert contract.rollback.fallback_action == "disable_mcp_client"
+
+
+def test_mcp_runtime_contract_projects_workspace_bound_activation_from_overlay_state() -> None:
+    from copaw.app.mcp.runtime_contract import (
+        build_mcp_activation_state,
+        build_mcp_reload_state,
+        build_mcp_runtime_record,
+    )
+
+    config = MCPClientConfig(
+        name="scoped_worker",
+        enabled=True,
+        transport="stdio",
+        command="python",
+        args=["-m", "scoped_worker"],
+    )
+    record = build_mcp_runtime_record(
+        "scoped_worker",
+        config,
+        status="ready",
+        init_mode="warn",
+        connect_timeout_seconds=5.0,
+        connected=True,
+        cache_scope="manager-overlay-scope",
+        reload_state=build_mcp_reload_state(
+            dirty=True,
+            pending_reload=True,
+            overlay_scope="assignment:task-9",
+            overlay_mode="replace",
+        ),
+    )
+
+    projected = build_mcp_activation_state(
+        record,
+        activation_class="workspace-bound",
+        requested_scope_ref="assignment:task-9",
+    )
+
+    assert projected.status == "healing"
+    assert projected.reason == "scope_unbound"
+    assert projected.auto_heal_supported is True
+    assert projected.scope_ref == "assignment:task-9"
+    assert projected.support["overlay_scope"] == "assignment:task-9"
+    assert projected.support["overlay_mode"] == "replace"
+    assert projected.support["dirty"] is True
+    assert projected.support["pending_reload"] is True
+
+
+def test_mcp_runtime_contract_projects_missing_workspace_overlay_as_scope_unbound() -> None:
+    from copaw.app.mcp.runtime_contract import build_mcp_activation_state
+
+    projected = build_mcp_activation_state(
+        None,
+        activation_class="workspace-bound",
+        requested_scope_ref="session:seat-1:runtime",
+    )
+
+    assert projected.status == "blocked"
+    assert projected.reason == "scope_unbound"
+    assert projected.auto_heal_supported is True
+    assert projected.scope_ref == "session:seat-1:runtime"
 
 
 def _child_run_overlay_payload(
@@ -407,6 +488,64 @@ async def test_mcp_manager_close_all_clears_shutdown_cancellation_residue(
         if callable(uncancel):
             while current.cancelling():
                 uncancel()
+
+
+@pytest.mark.asyncio
+async def test_mcp_manager_close_prefers_client_close_contract_over_internal_stack_handles() -> None:
+    manager = MCPClientManager()
+    client = _FakePreferredCloseClient("worker")
+
+    close_error = await manager._close_client_with_timeout(client)
+
+    assert close_error is None
+    assert client.close_calls == 1
+    assert client.stack.aclose_calls == 0
+    assert client.process.aclose_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_mcp_manager_close_all_uses_lifo_order_for_stateful_clients(
+    monkeypatch,
+) -> None:
+    manager = MCPClientManager()
+    events: list[str] = []
+
+    monkeypatch.setattr(
+        MCPClientManager,
+        "_build_client",
+        staticmethod(lambda cfg: _FakePreferredCloseClient(cfg.name, events)),
+    )
+
+    config = MCPConfig(
+        clients={
+            "first": MCPClientConfig(
+                name="first",
+                enabled=True,
+                transport="stdio",
+                command="python",
+                args=["-m", "worker"],
+            ),
+            "second": MCPClientConfig(
+                name="second",
+                enabled=True,
+                transport="stdio",
+                command="python",
+                args=["-m", "worker"],
+            ),
+            "third": MCPClientConfig(
+                name="third",
+                enabled=True,
+                transport="stdio",
+                command="python",
+                args=["-m", "worker"],
+            ),
+        },
+    )
+    await manager.init_from_config(config)
+
+    await manager.close_all()
+
+    assert events == ["third", "second", "first"]
 
 
 @pytest.mark.asyncio
@@ -1003,7 +1142,7 @@ async def test_mcp_manager_close_all_clears_self_cancelled_close_residue(
 
 
 @pytest.mark.asyncio
-async def test_mcp_manager_close_all_prefers_stack_aclose_for_stack_backed_clients(
+async def test_mcp_manager_close_all_prefers_stateful_close_for_stack_backed_clients(
     monkeypatch,
 ) -> None:
     manager = MCPClientManager()
@@ -1029,12 +1168,12 @@ async def test_mcp_manager_close_all_prefers_stack_aclose_for_stack_backed_clien
     await manager.close_all()
 
     assert built_client is not None
-    assert built_client.stack.aclose_calls == 1
-    assert built_client.close_calls == 0
+    assert built_client.close_calls == 1
+    assert built_client.stack.aclose_calls == 0
 
 
 @pytest.mark.asyncio
-async def test_mcp_manager_close_all_runs_process_aclose_before_stack_for_stdio_clients(
+async def test_mcp_manager_close_all_prefers_stateful_close_for_stdio_backed_clients(
     monkeypatch,
 ) -> None:
     manager = MCPClientManager()
@@ -1060,6 +1199,6 @@ async def test_mcp_manager_close_all_runs_process_aclose_before_stack_for_stdio_
     await manager.close_all()
 
     assert built_client is not None
-    assert built_client.process.aclose_calls == 1
-    assert built_client.stack.aclose_calls == 1
-    assert built_client.close_calls == 0
+    assert built_client.close_calls == 1
+    assert built_client.process.aclose_calls == 0
+    assert built_client.stack.aclose_calls == 0

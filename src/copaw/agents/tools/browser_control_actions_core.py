@@ -398,7 +398,9 @@ async def _action_start(
 
 
 async def _action_stop(session_id: str | None = None) -> ToolResponse:
+    idle_task = _state.get("_idle_task")
     _cancel_idle_watchdog()
+    await _await_cancelled_task(idle_task)
 
     # Check browser state based on mode
     if not _is_browser_running():
