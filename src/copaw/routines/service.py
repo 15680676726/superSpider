@@ -2714,6 +2714,10 @@ class RoutineService:
     def _get_browser_runtime_service(self) -> BrowserRuntimeService | None:
         if self._browser_runtime_service is None and self._state_store is not None:
             self._browser_runtime_service = BrowserRuntimeService(self._state_store)
+        if self._browser_runtime_service is not None:
+            self._browser_runtime_service.set_environment_service(
+                self._environment_service,
+            )
         return self._browser_runtime_service
 
     def _validate_routine_definition(

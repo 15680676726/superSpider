@@ -33,6 +33,10 @@ class FakeBrowserRuntimeService:
     def __init__(self) -> None:
         self.start_calls = []
         self.stop_calls = []
+        self.environment_service = None
+
+    def set_environment_service(self, environment_service) -> None:
+        self.environment_service = environment_service
 
     async def start_session(self, options):
         self.start_calls.append(options)
@@ -112,6 +116,36 @@ def build_routine_service(tmp_path, *, learning_service=None):
 
 def make_browser_tool_response(payload: dict[str, object]):
     return SimpleNamespace(content=[{"text": json.dumps(payload)}])
+
+
+def test_routine_service_lazy_browser_runtime_rebinds_environment_service(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _InjectedBrowserRuntimeService:
+        def __init__(self, state_store) -> None:
+            captured["state_store"] = state_store
+            captured["instance"] = self
+            self.environment_service = None
+
+        def set_environment_service(self, environment_service) -> None:
+            self.environment_service = environment_service
+
+    monkeypatch.setattr(
+        routine_service_module,
+        "BrowserRuntimeService",
+        _InjectedBrowserRuntimeService,
+    )
+    harness = build_routine_service(tmp_path)
+    harness.service._browser_runtime_service = None
+
+    browser_runtime = harness.service._get_browser_runtime_service()
+
+    assert captured["state_store"] is harness.service._state_store
+    assert browser_runtime is captured["instance"]
+    assert browser_runtime.environment_service is harness.environment_service
 
 
 @pytest.mark.parametrize(
