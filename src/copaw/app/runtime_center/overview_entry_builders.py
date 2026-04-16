@@ -440,6 +440,9 @@ class _RuntimeCenterOverviewEntryBuildersMixin:
                 return dumped
         if isinstance(item, SimpleNamespace):
             return vars(item)
+        namespace = getattr(item, "__dict__", None)
+        if isinstance(namespace, Mapping):
+            return namespace
         return None
 
     def _dt(self, value: Any) -> datetime | None:

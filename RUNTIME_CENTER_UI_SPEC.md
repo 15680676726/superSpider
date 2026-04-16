@@ -168,6 +168,7 @@ Legacy delete-gate surfaces 已从 Runtime Center UI 中移除，不再提供专
 - 快捷入口：
   - 工作台
   - 日报
+  - 追溯（今天的日志流，一行一条，时间在前、内容在后，旧日志在上、新日志在下）
   - 周报
   - 成长轨迹
 

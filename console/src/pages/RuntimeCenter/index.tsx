@@ -10,7 +10,7 @@ import type {
   RuntimeHumanCockpitReportBlock,
   RuntimeHumanCockpitStageSummary,
   RuntimeHumanCockpitSummaryField,
-  RuntimeHumanCockpitTraceEntry,
+  RuntimeHumanCockpitTraceLine,
   RuntimeHumanCockpitTrendPoint,
   RuntimeMainBrainRecord,
   RuntimeMainBrainResponse,
@@ -26,10 +26,10 @@ import AgentCardStrip, { type AgentCardStripItem } from "./AgentCardStrip";
 import AgentWorkPanel, {
   type CockpitReportBlock,
   type CockpitSummaryField,
+  type CockpitTraceLine,
   type CockpitTrendPoint,
   type DayMode,
 } from "./AgentWorkPanel";
-import { type CockpitTraceLine } from "./CockpitTraceSection";
 import MainBrainCockpitPanel, {
   type MainBrainStageSummary,
   type PendingApprovalItem,
@@ -620,7 +620,7 @@ function mapCockpitTrend(
 }
 
 function mapCockpitTrace(
-  trace: RuntimeHumanCockpitTraceEntry[] | undefined,
+  trace: RuntimeHumanCockpitTraceLine[] | undefined,
 ): CockpitTraceLine[] {
   return (trace ?? []).map((item) => ({
     timestamp: item.timestamp,
