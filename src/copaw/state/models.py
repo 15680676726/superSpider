@@ -89,8 +89,10 @@ from .models_industry import IndustryInstanceRecord, MediaAnalysisRecord
 from .models_knowledge import KnowledgeChunkRecord
 from .models_memory import (
     IndustryMemoryProfileRecord,
+    IndustryMemorySlotPreferenceRecord,
     MemoryAliasMapRecord,
     MemoryConflictProposalRecord,
+    MemoryContinuityDetailRecord,
     MemoryEntityViewRecord,
     MemoryFactIndexRecord,
     MemoryMergeResultRecord,
@@ -182,6 +184,7 @@ __all__ = [
     "GovernanceControlRecord",
     "IndustryInstanceRecord",
     "IndustryMemoryProfileRecord",
+    "IndustryMemorySlotPreferenceRecord",
     "KnowledgeChunkRecord",
     "LaneBudgetRecord",
     "MediaAnalysisRecord",
@@ -189,6 +192,7 @@ __all__ = [
     "MemoryFactIndexRecord",
     "MemoryAliasMapRecord",
     "MemoryConflictProposalRecord",
+    "MemoryContinuityDetailRecord",
     "MemoryMergeResultRecord",
     "MemoryOpinionStance",
     "MemoryOpinionViewRecord",

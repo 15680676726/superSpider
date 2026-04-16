@@ -14,7 +14,23 @@ from ..utils.model_response import materialize_model_response
 _SENTENCE_SPLIT_RE = re.compile(r"[\r\n]+|(?<=[.!?])\s+")
 _WORD_RE = re.compile(r"[A-Za-z][A-Za-z0-9_-]*")
 _SPACE_RE = re.compile(r"\s+")
+_NOISE_TITLE_RE = re.compile(r"^noise(?:[-_\s]*\d+)?$", re.IGNORECASE)
 _RULE_CUES = ("must", "wait for", "before", "after", "only", "cannot", "needs to", "required")
+_WEAK_TITLE_MARKERS = frozenset({"round", "update", "entry", "fact", "note", "memory", "status"})
+_WEAK_TITLE_FILLERS = frozenset(
+    {
+        "core",
+        "story",
+        "research",
+        "trading",
+        "industry",
+        "work",
+        "context",
+        "ctx",
+        "main",
+        "brain",
+    }
+)
 _DEFAULT_REASONING_TIMEOUT_SECONDS = 45.0
 
 logger = logging.getLogger(__name__)
@@ -75,6 +91,83 @@ def _normalize_conflict_status(value: object) -> str:
 
 def _title_tokens(title: str) -> list[str]:
     return [token.lower() for token in _WORD_RE.findall(str(title or ""))]
+
+
+def _first_text(*values: object) -> str:
+    for value in values:
+        text = _SPACE_RE.sub(" ", str(value or "").strip())
+        if text:
+            return text
+    return ""
+
+
+def _is_rule_like(text: object) -> bool:
+    lowered = _SPACE_RE.sub(" ", str(text or "").strip()).lower()
+    return bool(lowered) and any(cue in lowered for cue in _RULE_CUES)
+
+
+def _looks_like_noise(text: object) -> bool:
+    normalized = _SPACE_RE.sub(" ", str(text or "").strip()).lower()
+    return bool(normalized) and bool(_NOISE_TITLE_RE.match(normalized))
+
+
+def _looks_like_noise_text(text: object) -> bool:
+    normalized = _SPACE_RE.sub(" ", str(text or "").strip()).lower()
+    if not normalized:
+        return False
+    return (
+        _looks_like_noise(normalized)
+        or normalized.startswith("noise ")
+        or normalized.startswith("noise:")
+        or normalized.startswith("noise-")
+    )
+
+
+def _looks_like_weak_title(text: object) -> bool:
+    normalized = _SPACE_RE.sub(" ", str(text or "").strip()).lower()
+    if not normalized:
+        return False
+    if not any(ch.isdigit() for ch in normalized):
+        return False
+    tokens = _title_tokens(normalized)
+    if not tokens:
+        return False
+    if not any(marker in tokens for marker in _WEAK_TITLE_MARKERS):
+        return False
+    meaningful = [
+        token
+        for token in tokens
+        if token not in _WEAK_TITLE_MARKERS
+        and token not in _WEAK_TITLE_FILLERS
+        and not token.isdigit()
+    ]
+    return len(meaningful) <= 1
+
+
+def _item_noise_tags(item: object) -> set[str]:
+    raw_tags = list(getattr(item, "tags", []) or [])
+    metadata = getattr(item, "metadata", None)
+    if isinstance(metadata, dict):
+        raw_tags.extend(list(metadata.get("tags") or []))
+    return {str(tag or "").strip().lower() for tag in raw_tags if str(tag or "").strip()}
+
+
+def _clean_signal_values(
+    values: list[object],
+    *,
+    drop_weak_titles: bool = False,
+) -> list[str]:
+    cleaned: list[str] = []
+    for value in values:
+        text = _first_text(value)
+        if not text:
+            continue
+        if _looks_like_noise_text(text):
+            continue
+        if drop_weak_titles and _looks_like_weak_title(text):
+            continue
+        cleaned.append(text)
+    return _unique(cleaned)
 
 
 def _shared_alias_payloads(titles: list[str]) -> list[dict[str, Any]]:
@@ -268,12 +361,58 @@ class _SleepConflictProposalResponse(BaseModel):
         return _normalize_conflict_status(value)
 
 
+class _SleepIndustryProfileResponse(BaseModel):
+    headline: str = ""
+    summary: str = ""
+    strategic_direction: str = ""
+    active_constraints: list[str] = Field(default_factory=list)
+    active_focuses: list[str] = Field(default_factory=list)
+    key_entities: list[str] = Field(default_factory=list)
+    key_relations: list[str] = Field(default_factory=list)
+    dynamic_slots: list[str] = Field(default_factory=list)
+
+
+class _SleepWorkContextOverlayResponse(BaseModel):
+    headline: str = ""
+    summary: str = ""
+    focus_summary: str = ""
+    active_constraints: list[str] = Field(default_factory=list)
+    active_focuses: list[str] = Field(default_factory=list)
+    active_entities: list[str] = Field(default_factory=list)
+    active_relations: list[str] = Field(default_factory=list)
+    dynamic_slots: list[str] = Field(default_factory=list)
+
+
+class _SleepStructureProposalResponse(BaseModel):
+    proposal_kind: str = "structure"
+    title: str = ""
+    summary: str = ""
+    recommended_action: str = ""
+    risk_level: str = "medium"
+    status: str = "pending"
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def _normalize_status(cls, value: object) -> str:
+        return _normalize_conflict_status(value)
+
+
+class _SleepContinuityDetailResponse(BaseModel):
+    detail_key: str = ""
+    detail_text: str = ""
+    importance_score: float = 0.75
+
+
 class _SleepInferenceResponse(BaseModel):
     digest: _SleepDigestResponse = Field(default_factory=_SleepDigestResponse)
     alias_maps: list[_SleepAliasResponse] = Field(default_factory=list)
     merge_results: list[_SleepMergeResponse] = Field(default_factory=list)
     soft_rules: list[_SleepSoftRuleResponse] = Field(default_factory=list)
     conflict_proposals: list[_SleepConflictProposalResponse] = Field(default_factory=list)
+    industry_profile: _SleepIndustryProfileResponse = Field(default_factory=_SleepIndustryProfileResponse)
+    work_context_overlay: _SleepWorkContextOverlayResponse = Field(default_factory=_SleepWorkContextOverlayResponse)
+    structure_proposals: list[_SleepStructureProposalResponse] = Field(default_factory=list)
+    continuity_details: list[_SleepContinuityDetailResponse] = Field(default_factory=list)
 
 
 _SLEEP_INFERENCE_SYSTEM_PROMPT = """
@@ -312,6 +451,8 @@ def build_memory_sleep_model_runner(
         fact_entries: list[object],
         entity_views: list[object],
         relation_views: list[object],
+        graph_focus: dict[str, Any] | None = None,
+        activation_summary: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         model = model_factory()
         if not callable(model):
@@ -324,6 +465,8 @@ def build_memory_sleep_model_runner(
             "fact_entries": _jsonable_list(fact_entries, limit=8),
             "entity_views": _jsonable_list(entity_views, limit=8),
             "relation_views": _jsonable_list(relation_views, limit=8),
+            "graph_focus": dict(graph_focus or {}),
+            "activation_summary": dict(activation_summary or {}),
         }
         messages = [
             {"role": "system", "content": _SLEEP_INFERENCE_SYSTEM_PROMPT},
@@ -372,6 +515,8 @@ class MemorySleepInferenceService:
         fact_entries: list[object],
         entity_views: list[object],
         relation_views: list[object],
+        graph_focus: dict[str, Any] | None = None,
+        activation_summary: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         runner = self._model_runner
         if callable(runner):
@@ -384,12 +529,23 @@ class MemorySleepInferenceService:
                     fact_entries=fact_entries,
                     entity_views=entity_views,
                     relation_views=relation_views,
+                    graph_focus=graph_focus,
+                    activation_summary=activation_summary,
                 )
                 if isinstance(result, dict):
-                    return result
+                    return self._stabilize_payload(
+                        payload=result,
+                        scope_type=scope_type,
+                        scope_id=scope_id,
+                        knowledge_chunks=knowledge_chunks,
+                        strategies=strategies,
+                        fact_entries=fact_entries,
+                        graph_focus=graph_focus,
+                        activation_summary=activation_summary,
+                    )
             except Exception:
                 logger.debug("memory sleep model runner failed; falling back", exc_info=True)
-        return self._fallback(
+        fallback_payload = self._fallback(
             scope_type=scope_type,
             scope_id=scope_id,
             knowledge_chunks=knowledge_chunks,
@@ -397,6 +553,18 @@ class MemorySleepInferenceService:
             fact_entries=fact_entries,
             entity_views=entity_views,
             relation_views=relation_views,
+            graph_focus=graph_focus,
+            activation_summary=activation_summary,
+        )
+        return self._stabilize_payload(
+            payload=fallback_payload,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            knowledge_chunks=knowledge_chunks,
+            strategies=strategies,
+            fact_entries=fact_entries,
+            graph_focus=graph_focus,
+            activation_summary=activation_summary,
         )
 
     def _fallback(
@@ -409,7 +577,11 @@ class MemorySleepInferenceService:
         fact_entries: list[object],
         entity_views: list[object],
         relation_views: list[object],
+        graph_focus: dict[str, Any] | None,
+        activation_summary: dict[str, Any] | None,
     ) -> dict[str, Any]:
+        graph_focus = dict(graph_focus or {})
+        activation_summary = dict(activation_summary or {})
         titles = _unique([str(getattr(item, "title", "") or "").strip() for item in knowledge_chunks])
         chunk_summaries = _unique(
             [
@@ -433,11 +605,15 @@ class MemorySleepInferenceService:
             ],
         )
         entity_candidates = _unique(
-            [str(getattr(item, "entity_key", "") or "").strip() for item in entity_views]
+            list(activation_summary.get("top_entities") or [])
+            + list(graph_focus.get("top_entities") or [])
+            + [str(getattr(item, "entity_key", "") or "").strip() for item in entity_views]
             + titles
         )[:5]
         relation_candidates = _unique(
-            [str(getattr(item, "summary", "") or "").strip() for item in relation_views]
+            list(activation_summary.get("top_relations") or [])
+            + list(graph_focus.get("top_relations") or [])
+            + [str(getattr(item, "summary", "") or "").strip() for item in relation_views]
             + [
                 sentence
                 for sentence in _sentences(*chunk_summaries)
@@ -480,6 +656,16 @@ class MemorySleepInferenceService:
                     "state": "active" if any(cue in lowered for cue in _RULE_CUES) else "candidate",
                 },
             )
+        continuity_texts = _unique(
+            list(graph_focus.get("blocker_paths") or [])
+            + list(graph_focus.get("dependency_paths") or [])
+            + list(activation_summary.get("top_relations") or [])
+            + [
+                constraint
+                for constraint in constraints
+                if any(cue in constraint.lower() for cue in _RULE_CUES)
+            ]
+        )[:4]
         return {
             "digest": {
                 "headline": headline,
@@ -496,4 +682,208 @@ class MemorySleepInferenceService:
             "merge_results": merge_results,
             "soft_rules": soft_rules,
             "conflict_proposals": _detect_conflicts(_sentences(*chunk_summaries), source_refs),
+            "industry_profile": {
+                "headline": headline,
+                "summary": summary,
+                "strategic_direction": focuses[0] if focuses else headline,
+                "active_constraints": constraints,
+                "active_focuses": focuses,
+                "key_entities": entity_candidates,
+                "key_relations": relation_candidates,
+                "dynamic_slots": [],
+            },
+            "work_context_overlay": {
+                "headline": headline,
+                "summary": summary,
+                "focus_summary": focuses[0] if focuses else summary,
+                "active_constraints": constraints,
+                "active_focuses": focuses,
+                "active_entities": entity_candidates,
+                "active_relations": relation_candidates,
+                "dynamic_slots": [],
+            },
+            "structure_proposals": [],
+            "continuity_details": [
+                {
+                    "detail_key": f"anchor-{index + 1}",
+                    "detail_text": text,
+                    "importance_score": 0.8,
+                }
+                for index, text in enumerate(continuity_texts)
+            ],
         }
+
+    def _stabilize_payload(
+        self,
+        *,
+        payload: dict[str, Any],
+        scope_type: str,
+        scope_id: str,
+        knowledge_chunks: list[object],
+        strategies: list[object],
+        fact_entries: list[object],
+        graph_focus: dict[str, Any] | None,
+        activation_summary: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        result = dict(payload or {})
+        graph_focus = dict(graph_focus or {})
+        activation_summary = dict(activation_summary or {})
+
+        strategy_titles = _unique([str(getattr(item, "title", "") or "").strip() for item in strategies])
+        strategy_summaries = _unique([str(getattr(item, "summary", "") or "").strip() for item in strategies])
+        strategy_constraints = _unique(
+            [
+                value
+                for strategy in strategies
+                for value in list(getattr(strategy, "execution_constraints", []) or [])
+            ],
+        )
+        strategy_focuses = _unique(
+            [
+                value
+                for strategy in strategies
+                for value in list(getattr(strategy, "current_focuses", []) or [])
+            ],
+        )
+
+        strong_titles: list[str] = []
+        regular_titles: list[str] = []
+        strong_summaries: list[str] = []
+        regular_summaries: list[str] = []
+        for item in list(fact_entries or []) + list(knowledge_chunks or []):
+            title = _first_text(getattr(item, "title", None))
+            summary = _first_text(
+                getattr(item, "summary", None),
+                getattr(item, "content_excerpt", None),
+                getattr(item, "content_text", None),
+                getattr(item, "content", None),
+            )
+            item_tags = _item_noise_tags(item)
+            is_noise_item = (
+                "noise" in item_tags
+                or _looks_like_noise_text(title)
+                or _looks_like_noise_text(summary)
+            )
+            if title and not is_noise_item and not _looks_like_weak_title(title):
+                regular_titles.append(title)
+                if _is_rule_like(summary) or _is_rule_like(title):
+                    strong_titles.append(title)
+            if summary and not is_noise_item:
+                regular_summaries.append(summary)
+                if _is_rule_like(summary):
+                    strong_summaries.append(summary)
+
+        anchor_constraints = _clean_signal_values(
+            strategy_constraints
+            + list(activation_summary.get("top_constraints") or [])
+            + list(graph_focus.get("blocker_paths") or [])
+            + list(graph_focus.get("dependency_paths") or [])
+            + strong_summaries,
+        )
+        anchor_focuses = _clean_signal_values(
+            strategy_focuses
+            + list(activation_summary.get("top_next_actions") or [])
+            + list(activation_summary.get("top_constraints") or [])
+            + strong_summaries
+            + regular_summaries
+            + strong_titles
+            + regular_titles,
+            drop_weak_titles=True,
+        )
+        preferred_headline = _first_text(
+            strategy_titles[0] if strategy_titles else None,
+            anchor_focuses[0] if anchor_focuses else None,
+            strong_titles[0] if strong_titles else None,
+            regular_titles[0] if regular_titles else None,
+            f"Memory digest for {scope_type}:{scope_id}",
+        )
+        preferred_summary = _first_text(
+            strategy_summaries[0] if strategy_summaries else None,
+            anchor_constraints[0] if anchor_constraints else None,
+            strong_summaries[0] if strong_summaries else None,
+            regular_summaries[0] if regular_summaries else None,
+            preferred_headline,
+        )
+
+        digest_payload = dict(result.get("digest") or {})
+        digest_headline = _first_text(digest_payload.get("headline"))
+        digest_summary = _first_text(digest_payload.get("summary"))
+        if not digest_headline or _looks_like_noise_text(digest_headline) or _looks_like_weak_title(digest_headline):
+            digest_payload["headline"] = preferred_headline
+        if not digest_summary or _looks_like_noise_text(digest_summary):
+            digest_payload["summary"] = preferred_summary
+        digest_payload["current_constraints"] = _clean_signal_values(
+            anchor_constraints + list(digest_payload.get("current_constraints") or []),
+        )[:4]
+        digest_payload["current_focus"] = _clean_signal_values(
+            anchor_focuses + list(digest_payload.get("current_focus") or []),
+            drop_weak_titles=True,
+        )[:4]
+        result["digest"] = digest_payload
+
+        industry_payload = dict(result.get("industry_profile") or {})
+        if industry_payload:
+            headline = _first_text(industry_payload.get("headline"))
+            summary = _first_text(industry_payload.get("summary"))
+            direction = _first_text(industry_payload.get("strategic_direction"))
+            if not headline or _looks_like_noise_text(headline) or _looks_like_weak_title(headline):
+                industry_payload["headline"] = _first_text(
+                    strategy_titles[0] if strategy_titles else None,
+                    anchor_constraints[0] if anchor_constraints else None,
+                    preferred_headline,
+                )
+            if not summary or _looks_like_noise_text(summary):
+                industry_payload["summary"] = _first_text(
+                    strategy_summaries[0] if strategy_summaries else None,
+                    preferred_summary,
+                )
+            if not direction or _looks_like_noise_text(direction):
+                industry_payload["strategic_direction"] = _first_text(
+                    strategy_focuses[0] if strategy_focuses else None,
+                    anchor_focuses[0] if anchor_focuses else None,
+                    industry_payload.get("headline"),
+                )
+            industry_payload["active_constraints"] = _clean_signal_values(
+                anchor_constraints + list(industry_payload.get("active_constraints") or []),
+            )[:4]
+            industry_payload["active_focuses"] = _clean_signal_values(
+                strategy_focuses + anchor_focuses + list(industry_payload.get("active_focuses") or []),
+                drop_weak_titles=True,
+            )[:4]
+            result["industry_profile"] = industry_payload
+
+        overlay_payload = dict(result.get("work_context_overlay") or {})
+        if overlay_payload:
+            headline = _first_text(overlay_payload.get("headline"))
+            summary = _first_text(overlay_payload.get("summary"))
+            focus_summary = _first_text(overlay_payload.get("focus_summary"))
+            if not headline or _looks_like_noise_text(headline) or _looks_like_weak_title(headline):
+                overlay_payload["headline"] = _first_text(
+                    anchor_constraints[0] if anchor_constraints else None,
+                    strong_summaries[0] if strong_summaries else None,
+                    anchor_focuses[0] if anchor_focuses else None,
+                    preferred_headline,
+                )
+            if not summary or _looks_like_noise_text(summary):
+                overlay_payload["summary"] = _first_text(
+                    anchor_constraints[0] if anchor_constraints else None,
+                    strong_summaries[0] if strong_summaries else None,
+                    preferred_summary,
+                )
+            overlay_payload["active_constraints"] = _clean_signal_values(
+                anchor_constraints + list(overlay_payload.get("active_constraints") or []),
+            )[:4]
+            overlay_payload["active_focuses"] = _clean_signal_values(
+                anchor_focuses + list(overlay_payload.get("active_focuses") or []),
+                drop_weak_titles=True,
+            )[:4]
+            if not focus_summary or _looks_like_noise_text(focus_summary) or _looks_like_weak_title(focus_summary):
+                overlay_payload["focus_summary"] = _first_text(
+                    (overlay_payload.get("active_focuses") or [None])[0],
+                    (overlay_payload.get("active_constraints") or [None])[0],
+                    overlay_payload.get("summary"),
+                    overlay_payload.get("headline"),
+                )
+            result["work_context_overlay"] = overlay_payload
+
+        return result

@@ -1686,6 +1686,67 @@ CREATE INDEX IF NOT EXISTS idx_memory_conflict_proposals_scope
 CREATE INDEX IF NOT EXISTS idx_memory_conflict_proposals_status
     ON memory_conflict_proposals(status, updated_at DESC);
 
+CREATE TABLE IF NOT EXISTS memory_industry_slot_preferences (
+    preference_id TEXT PRIMARY KEY,
+    industry_instance_id TEXT NOT NULL,
+    slot_key TEXT NOT NULL,
+    slot_label TEXT NOT NULL DEFAULT '',
+    slot_summary TEXT NOT NULL DEFAULT '',
+    scope_level TEXT NOT NULL DEFAULT 'industry',
+    scope_id TEXT NOT NULL,
+    source_kind TEXT NOT NULL DEFAULT 'sleep',
+    source_ref TEXT,
+    slot_order INTEGER NOT NULL DEFAULT 0,
+    prominence REAL NOT NULL DEFAULT 0.5,
+    promotion_count INTEGER NOT NULL DEFAULT 0,
+    demotion_count INTEGER NOT NULL DEFAULT 0,
+    observation_count INTEGER NOT NULL DEFAULT 0,
+    last_promoted_at TEXT,
+    last_demoted_at TEXT,
+    last_observed_at TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_memory_industry_slot_preferences_slot
+    ON memory_industry_slot_preferences(industry_instance_id, slot_key, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_industry_slot_preferences_scope
+    ON memory_industry_slot_preferences(scope_level, scope_id, status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_industry_slot_preferences_status
+    ON memory_industry_slot_preferences(industry_instance_id, status, promotion_count DESC, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS memory_continuity_details (
+    detail_id TEXT PRIMARY KEY,
+    scope_type TEXT NOT NULL DEFAULT 'work_context',
+    scope_id TEXT NOT NULL,
+    industry_instance_id TEXT,
+    work_context_id TEXT,
+    detail_key TEXT NOT NULL,
+    detail_label TEXT NOT NULL DEFAULT '',
+    detail_text TEXT NOT NULL,
+    source_kind TEXT NOT NULL DEFAULT 'model',
+    source_ref TEXT,
+    importance_score REAL NOT NULL DEFAULT 0.5,
+    pinned INTEGER NOT NULL DEFAULT 0,
+    pinned_until_phase TEXT,
+    evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL DEFAULT 'active',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_memory_continuity_details_scope
+    ON memory_continuity_details(scope_type, scope_id, status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_continuity_details_work_context
+    ON memory_continuity_details(work_context_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_continuity_details_industry
+    ON memory_continuity_details(industry_instance_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_continuity_details_pinned
+    ON memory_continuity_details(pinned, updated_at DESC);
+
 CREATE TABLE IF NOT EXISTS memory_industry_profiles (
     profile_id TEXT PRIMARY KEY,
     industry_instance_id TEXT NOT NULL,
@@ -2441,10 +2502,15 @@ def _ensure_state_schema_ready(conn: sqlite3.Connection) -> None:
         conn.execute("PRAGMA user_version").fetchone()[0],
     )
     existing_tables = _list_table_names(conn)
+    required_tables = {
+        "agent_runtimes",
+        "automation_loop_runtimes",
+        "memory_industry_slot_preferences",
+        "memory_continuity_details",
+    }
     if (
         current_version == STATE_SCHEMA_VERSION
-        and "agent_runtimes" in existing_tables
-        and "automation_loop_runtimes" in existing_tables
+        and required_tables.issubset(existing_tables)
     ):
         return
     if existing_tables and current_version not in {0, STATE_SCHEMA_VERSION}:

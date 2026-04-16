@@ -46,8 +46,10 @@ from ..models_external_runtime import ExternalCapabilityRuntimeInstanceRecord
 from ..models_knowledge import KnowledgeChunkRecord
 from ..models_memory import (
     IndustryMemoryProfileRecord,
+    IndustryMemorySlotPreferenceRecord,
     MemoryAliasMapRecord,
     MemoryConflictProposalRecord,
+    MemoryContinuityDetailRecord,
     MemoryEntityViewRecord,
     MemoryFactIndexRecord,
     MemoryMergeResultRecord,
@@ -1515,6 +1517,62 @@ class BaseMemorySleepRepository(ABC):
         self,
         record: MemoryConflictProposalRecord,
     ) -> MemoryConflictProposalRecord:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_slot_preference(
+        self,
+        preference_id: str,
+    ) -> Optional[IndustryMemorySlotPreferenceRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_slot_preferences(
+        self,
+        *,
+        industry_instance_id: str | None = None,
+        slot_key: str | None = None,
+        scope_level: str | None = None,
+        scope_id: str | None = None,
+        status: str | None = None,
+        limit: int | None = None,
+    ) -> list[IndustryMemorySlotPreferenceRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upsert_slot_preference(
+        self,
+        record: IndustryMemorySlotPreferenceRecord,
+    ) -> IndustryMemorySlotPreferenceRecord:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_continuity_detail(
+        self,
+        detail_id: str,
+    ) -> Optional[MemoryContinuityDetailRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_continuity_details(
+        self,
+        *,
+        scope_type: str | None = None,
+        scope_id: str | None = None,
+        industry_instance_id: str | None = None,
+        work_context_id: str | None = None,
+        detail_key: str | None = None,
+        status: str | None = None,
+        pinned_only: bool = False,
+        limit: int | None = None,
+    ) -> list[MemoryContinuityDetailRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upsert_continuity_detail(
+        self,
+        record: MemoryContinuityDetailRecord,
+    ) -> MemoryContinuityDetailRecord:
         raise NotImplementedError
 
     @abstractmethod

@@ -9,8 +9,10 @@ from pydantic import BaseModel
 
 from ..models_memory import (
     IndustryMemoryProfileRecord,
+    IndustryMemorySlotPreferenceRecord,
     MemoryAliasMapRecord,
     MemoryConflictProposalRecord,
+    MemoryContinuityDetailRecord,
     MemoryMergeResultRecord,
     MemoryStructureProposalRecord,
     MemoryScopeDigestRecord,
@@ -138,6 +140,49 @@ _CONFLICT_COLUMNS = (
     "risk_level",
     "status",
     "source_job_id",
+    "metadata_json",
+    "created_at",
+    "updated_at",
+)
+_SLOT_PREFERENCE_COLUMNS = (
+    "preference_id",
+    "industry_instance_id",
+    "slot_key",
+    "slot_label",
+    "slot_summary",
+    "scope_level",
+    "scope_id",
+    "source_kind",
+    "source_ref",
+    "slot_order",
+    "prominence",
+    "promotion_count",
+    "demotion_count",
+    "observation_count",
+    "last_promoted_at",
+    "last_demoted_at",
+    "last_observed_at",
+    "status",
+    "metadata_json",
+    "created_at",
+    "updated_at",
+)
+_CONTINUITY_DETAIL_COLUMNS = (
+    "detail_id",
+    "scope_type",
+    "scope_id",
+    "industry_instance_id",
+    "work_context_id",
+    "detail_key",
+    "detail_label",
+    "detail_text",
+    "source_kind",
+    "source_ref",
+    "importance_score",
+    "pinned",
+    "pinned_until_phase",
+    "evidence_refs_json",
+    "status",
     "metadata_json",
     "created_at",
     "updated_at",
@@ -303,6 +348,24 @@ def _conflict_from_row(row: sqlite3.Row | None) -> MemoryConflictProposalRecord 
         ),
     )
     return record if isinstance(record, MemoryConflictProposalRecord) else None
+
+
+def _slot_preference_from_row(row: sqlite3.Row | None) -> IndustryMemorySlotPreferenceRecord | None:
+    record = _decode_record(
+        IndustryMemorySlotPreferenceRecord,
+        row,
+    )
+    return record if isinstance(record, IndustryMemorySlotPreferenceRecord) else None
+
+
+def _continuity_detail_from_row(row: sqlite3.Row | None) -> MemoryContinuityDetailRecord | None:
+    record = _decode_record(
+        MemoryContinuityDetailRecord,
+        row,
+        list_fields=(("evidence_refs", "evidence_refs_json"),),
+        bool_fields=("pinned",),
+    )
+    return record if isinstance(record, MemoryContinuityDetailRecord) else None
 
 
 def _industry_profile_from_row(row: sqlite3.Row | None) -> IndustryMemoryProfileRecord | None:
@@ -769,6 +832,192 @@ class SqliteMemorySleepRepository(BaseMemorySleepRepository):
         )
         return saved if isinstance(saved, MemoryConflictProposalRecord) else record
 
+    def get_slot_preference(
+        self,
+        preference_id: str,
+    ) -> IndustryMemorySlotPreferenceRecord | None:
+        with self._store.connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM memory_industry_slot_preferences WHERE preference_id = ?",
+                (preference_id,),
+            ).fetchone()
+        return _slot_preference_from_row(row)
+
+    def list_slot_preferences(
+        self,
+        *,
+        industry_instance_id: str | None = None,
+        slot_key: str | None = None,
+        scope_level: str | None = None,
+        scope_id: str | None = None,
+        status: str | None = None,
+        limit: int | None = None,
+    ) -> list[IndustryMemorySlotPreferenceRecord]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if industry_instance_id is not None:
+            clauses.append("industry_instance_id = ?")
+            params.append(industry_instance_id)
+        if slot_key is not None:
+            clauses.append("slot_key = ?")
+            params.append(slot_key)
+        if scope_level is not None:
+            clauses.append("scope_level = ?")
+            params.append(scope_level)
+        if scope_id is not None:
+            clauses.append("scope_id = ?")
+            params.append(scope_id)
+        if status is not None:
+            clauses.append("status = ?")
+            params.append(status)
+        return self._list(
+            table="memory_industry_slot_preferences",
+            clauses=clauses,
+            params=params,
+            order_by="CASE status WHEN 'active' THEN 0 WHEN 'inactive' THEN 1 ELSE 2 END, promotion_count DESC, updated_at DESC, created_at DESC",
+            limit=limit,
+            parser=_slot_preference_from_row,
+        )
+
+    def upsert_slot_preference(
+        self,
+        record: IndustryMemorySlotPreferenceRecord,
+    ) -> IndustryMemorySlotPreferenceRecord:
+        record = IndustryMemorySlotPreferenceRecord.model_validate(record.model_dump(mode="python"))
+
+        def _supersede(conn: sqlite3.Connection, payload: dict[str, Any], current: BaseModel) -> None:
+            if not isinstance(current, IndustryMemorySlotPreferenceRecord) or current.status != "active":
+                return
+            conn.execute(
+                """
+                UPDATE memory_industry_slot_preferences
+                SET status = 'superseded',
+                    updated_at = ?
+                WHERE industry_instance_id = ?
+                  AND slot_key = ?
+                  AND scope_level = ?
+                  AND scope_id = ?
+                  AND preference_id != ?
+                  AND status = 'active'
+                """,
+                (
+                    payload["updated_at"],
+                    current.industry_instance_id,
+                    current.slot_key,
+                    current.scope_level,
+                    current.scope_id,
+                    current.preference_id,
+                ),
+            )
+
+        saved = self._upsert(
+            table="memory_industry_slot_preferences",
+            pk="preference_id",
+            columns=_SLOT_PREFERENCE_COLUMNS,
+            record=record,
+            extra_payload={
+                "metadata_json": _encode_json(record.metadata),
+            },
+            before_write=_supersede,
+        )
+        return saved if isinstance(saved, IndustryMemorySlotPreferenceRecord) else record
+
+    def get_continuity_detail(
+        self,
+        detail_id: str,
+    ) -> MemoryContinuityDetailRecord | None:
+        with self._store.connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM memory_continuity_details WHERE detail_id = ?",
+                (detail_id,),
+            ).fetchone()
+        return _continuity_detail_from_row(row)
+
+    def list_continuity_details(
+        self,
+        *,
+        scope_type: str | None = None,
+        scope_id: str | None = None,
+        industry_instance_id: str | None = None,
+        work_context_id: str | None = None,
+        detail_key: str | None = None,
+        status: str | None = None,
+        pinned_only: bool = False,
+        limit: int | None = None,
+    ) -> list[MemoryContinuityDetailRecord]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if scope_type is not None:
+            clauses.append("scope_type = ?")
+            params.append(scope_type)
+        if scope_id is not None:
+            clauses.append("scope_id = ?")
+            params.append(scope_id)
+        if industry_instance_id is not None:
+            clauses.append("industry_instance_id = ?")
+            params.append(industry_instance_id)
+        if work_context_id is not None:
+            clauses.append("work_context_id = ?")
+            params.append(work_context_id)
+        if detail_key is not None:
+            clauses.append("detail_key = ?")
+            params.append(detail_key)
+        if status is not None:
+            clauses.append("status = ?")
+            params.append(status)
+        if pinned_only:
+            clauses.append("pinned = 1")
+        return self._list(
+            table="memory_continuity_details",
+            clauses=clauses,
+            params=params,
+            order_by="CASE pinned WHEN 1 THEN 0 ELSE 1 END, CASE status WHEN 'active' THEN 0 WHEN 'inactive' THEN 1 ELSE 2 END, importance_score DESC, updated_at DESC, created_at DESC",
+            limit=limit,
+            parser=_continuity_detail_from_row,
+        )
+
+    def upsert_continuity_detail(
+        self,
+        record: MemoryContinuityDetailRecord,
+    ) -> MemoryContinuityDetailRecord:
+        record = MemoryContinuityDetailRecord.model_validate(record.model_dump(mode="python"))
+
+        def _supersede(conn: sqlite3.Connection, payload: dict[str, Any], current: BaseModel) -> None:
+            if not isinstance(current, MemoryContinuityDetailRecord) or current.status != "active":
+                return
+            conn.execute(
+                """
+                UPDATE memory_continuity_details
+                SET status = 'superseded',
+                    updated_at = ?
+                WHERE scope_type = ?
+                  AND scope_id = ?
+                  AND detail_key = ?
+                  AND detail_id != ?
+                  AND status = 'active'
+                """,
+                (
+                    payload["updated_at"],
+                    current.scope_type,
+                    current.scope_id,
+                    current.detail_key,
+                    current.detail_id,
+                ),
+            )
+
+        saved = self._upsert(
+            table="memory_continuity_details",
+            pk="detail_id",
+            columns=_CONTINUITY_DETAIL_COLUMNS,
+            record=record,
+            extra_payload={
+                "evidence_refs_json": _json_list(record.evidence_refs),
+                "metadata_json": _encode_json(record.metadata),
+            },
+            before_write=_supersede,
+        )
+        return saved if isinstance(saved, MemoryContinuityDetailRecord) else record
+
     def get_active_industry_profile(
         self,
         industry_instance_id: str,
@@ -962,6 +1211,33 @@ class SqliteMemorySleepRepository(BaseMemorySleepRepository):
         record: MemoryStructureProposalRecord,
     ) -> MemoryStructureProposalRecord:
         record = MemoryStructureProposalRecord.model_validate(record.model_dump(mode="python"))
+
+        def _align_pending_candidate(conn: sqlite3.Connection, payload: dict[str, Any], current: BaseModel) -> None:
+            if str(payload.get("scope_type") or "").strip() != "work_context":
+                return
+            if str(payload.get("status") or "").strip() != "pending":
+                return
+            work_context_id = str(payload.get("work_context_id") or payload.get("scope_id") or "").strip()
+            if not work_context_id:
+                return
+            row = conn.execute(
+                """
+                SELECT overlay_id, industry_instance_id, base_profile_id
+                FROM memory_work_context_overlays
+                WHERE work_context_id = ? AND status = 'active'
+                ORDER BY version DESC, updated_at DESC, created_at DESC
+                LIMIT 1
+                """,
+                (work_context_id,),
+            ).fetchone()
+            if row is None:
+                return
+            payload["candidate_overlay_id"] = row["overlay_id"]
+            if row["industry_instance_id"]:
+                payload["industry_instance_id"] = row["industry_instance_id"]
+            if row["base_profile_id"]:
+                payload["candidate_profile_id"] = row["base_profile_id"]
+
         saved = self._upsert(
             table="memory_structure_proposals",
             pk="proposal_id",
@@ -971,5 +1247,6 @@ class SqliteMemorySleepRepository(BaseMemorySleepRepository):
                 "evidence_refs_json": _json_list(record.evidence_refs),
                 "metadata_json": _encode_json(record.metadata),
             },
+            before_write=_align_pending_candidate,
         )
         return saved if isinstance(saved, MemoryStructureProposalRecord) else record

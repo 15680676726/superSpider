@@ -51,6 +51,25 @@ def _normalize_runtime_compaction_visibility(payload: dict[str, Any] | None) -> 
     return normalized
 
 
+def _memory_profile_payload(profile: object | None) -> dict[str, object]:
+    if profile is None:
+        return {}
+    return {
+        "scope_type": str(getattr(profile, "scope_type", "") or "").strip() or "global",
+        "scope_id": str(getattr(profile, "scope_id", "") or "").strip() or "runtime",
+        "static_profile": list(getattr(profile, "static_profile", []) or []),
+        "dynamic_profile": list(getattr(profile, "dynamic_profile", []) or []),
+        "active_preferences": list(getattr(profile, "active_preferences", []) or []),
+        "active_constraints": list(getattr(profile, "active_constraints", []) or []),
+        "current_focus_summary": str(getattr(profile, "current_focus_summary", "") or "").strip(),
+        "current_operating_context": list(getattr(profile, "current_operating_context", []) or []),
+        "source_refs": list(getattr(profile, "source_refs", []) or []),
+        "read_layer": str(getattr(profile, "read_layer", "truth-first") or "truth-first"),
+        "overlay_id": getattr(profile, "overlay_id", None),
+        "industry_profile_id": getattr(profile, "industry_profile_id", None),
+    }
+
+
 class MemorySurfaceService:
     """Read-only facade over shared truth-first recall and private compaction memory."""
 
@@ -93,6 +112,26 @@ class MemorySurfaceService:
         limit: int = 8,
     ) -> dict[str, list[object]]:
         service = self._memory_recall_service
+        profile_service = getattr(service, "_profile_service", None)
+        build_views = getattr(profile_service, "build_views", None)
+        if callable(build_views):
+            try:
+                views = build_views(
+                    scope_type=scope_type,
+                    scope_id=scope_id,
+                )
+                latest_entries = _sort_truth_first_entries(list(getattr(views, "latest", []) or []))
+                history_entries = _sort_truth_first_entries(list(getattr(views, "history", []) or []))
+                bounded_limit = surface_snapshot_limit(limit)
+                return {
+                    "entries": [*latest_entries, *history_entries][:bounded_limit],
+                    "latest_entries": latest_entries[:2],
+                    "history_entries": history_entries[:2],
+                    "profile": _memory_profile_payload(getattr(views, "profile", None)),
+                    "sleep": self.resolve_sleep_overlay(scope_type=scope_type, scope_id=scope_id),
+                }
+            except Exception:
+                logger.debug("Memory surface profile snapshot resolve failed", exc_info=True)
         derived_service = getattr(service, "_derived_index_service", None)
         list_fact_entries = getattr(derived_service, "list_fact_entries", None)
         if not callable(list_fact_entries):
@@ -100,6 +139,7 @@ class MemorySurfaceService:
                 "entries": [],
                 "latest_entries": [],
                 "history_entries": [],
+                "profile": {},
                 "sleep": self.resolve_sleep_overlay(scope_type=scope_type, scope_id=scope_id),
             }
         bounded_limit = surface_snapshot_limit(limit)
@@ -123,6 +163,7 @@ class MemorySurfaceService:
             "entries": entries,
             "latest_entries": entries[:2],
             "history_entries": entries[2:4],
+            "profile": {},
             "sleep": self.resolve_sleep_overlay(scope_type=scope_type, scope_id=scope_id),
         }
 

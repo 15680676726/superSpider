@@ -855,6 +855,17 @@ async def list_memory_episodes(
     return payloads
 
 
+def _sleep_model_dump(value: object | None) -> object:
+    if value is None:
+        return None
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        return model_dump(mode="json")
+    if isinstance(value, dict):
+        return dict(value)
+    return value
+
+
 @router.get("/memory/history", response_model=list[dict[str, object]])
 async def list_memory_history(
     request: Request,
@@ -1216,6 +1227,185 @@ async def list_memory_sleep_structure_proposals(
             limit=limit,
         )
     ]
+
+
+@router.post("/memory/continuity-details/pin", response_model=dict[str, object])
+async def pin_memory_continuity_detail(
+    payload: MemoryContinuityDetailPinRequest,
+    request: Request,
+    response: Response,
+) -> dict[str, object]:
+    apply_runtime_center_surface_headers(response, surface="runtime-center")
+    service = _get_memory_sleep_service(request)
+    try:
+        record = service.upsert_manual_pin(
+            scope_type=payload.scope_type,
+            scope_id=payload.scope_id,
+            detail_key=payload.detail_key,
+            detail_text=payload.detail_text,
+            industry_instance_id=payload.industry_instance_id,
+            work_context_id=payload.work_context_id,
+            pinned_until_phase=payload.pinned_until_phase,
+            detail_label=payload.detail_label,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    model_dump = getattr(record, "model_dump", None)
+    if callable(model_dump):
+        return model_dump(mode="json")
+    return dict(record or {})
+
+
+@router.post("/memory/sleep/structure-proposals/{proposal_id}/apply", response_model=dict[str, object])
+async def apply_memory_sleep_structure_proposal(
+    proposal_id: str,
+    payload: MemoryStructureProposalDecisionRequest,
+    request: Request,
+    response: Response,
+) -> dict[str, object]:
+    apply_runtime_center_surface_headers(response, surface="runtime-center")
+    service = _get_memory_sleep_service(request)
+    try:
+        record = service.decide_structure_proposal(
+            proposal_id=proposal_id,
+            decision="accepted",
+            decided_by=payload.actor,
+            note=payload.note,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Memory structure proposal not found") from exc
+    return record.model_dump(mode="json")
+
+
+@router.post("/memory/sleep/structure-proposals/{proposal_id}/reject", response_model=dict[str, object])
+async def reject_memory_sleep_structure_proposal(
+    proposal_id: str,
+    payload: MemoryStructureProposalDecisionRequest,
+    request: Request,
+    response: Response,
+) -> dict[str, object]:
+    apply_runtime_center_surface_headers(response, surface="runtime-center")
+    service = _get_memory_sleep_service(request)
+    try:
+        record = service.decide_structure_proposal(
+            proposal_id=proposal_id,
+            decision="rejected",
+            decided_by=payload.actor,
+            note=payload.note,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Memory structure proposal not found") from exc
+    return record.model_dump(mode="json")
+
+
+@router.post("/memory/sleep/rebuild", response_model=dict[str, object])
+async def rebuild_memory_sleep_scope(
+    payload: MemorySleepRebuildRequest,
+    request: Request,
+    response: Response,
+) -> dict[str, object]:
+    apply_runtime_center_surface_headers(response, surface="runtime-center")
+    service = _get_memory_sleep_service(request)
+    result = service.rebuild_scope_memory(
+        scope_type=payload.scope_type,
+        scope_id=payload.scope_id,
+        trigger_kind=payload.trigger_kind,
+    )
+    return {
+        "scope_type": payload.scope_type,
+        "scope_id": payload.scope_id,
+        "projection": {
+            key: _sleep_model_dump(value)
+            for key, value in dict(result.get("projection") or {}).items()
+        },
+        "sleep_job": _sleep_model_dump(result.get("sleep_job")),
+        "industry_profile": _sleep_model_dump(result.get("industry_profile")),
+        "work_context_overlay": _sleep_model_dump(result.get("work_context_overlay")),
+        "structure_proposals": [
+            _sleep_model_dump(item)
+            for item in list(result.get("structure_proposals") or [])
+        ],
+    }
+
+
+@router.get("/memory/sleep/industry-profiles/{industry_instance_id}/diff", response_model=dict[str, object])
+async def diff_memory_sleep_industry_profiles(
+    industry_instance_id: str,
+    request: Request,
+    response: Response,
+    from_version: int,
+    to_version: int,
+) -> dict[str, object]:
+    apply_runtime_center_surface_headers(response, surface="runtime-center")
+    service = _get_memory_sleep_service(request)
+    try:
+        return service.diff_industry_profile_versions(
+            industry_instance_id=industry_instance_id,
+            from_version=from_version,
+            to_version=to_version,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Industry memory profile version not found") from exc
+
+
+@router.post("/memory/sleep/industry-profiles/{industry_instance_id}/rollback", response_model=dict[str, object])
+async def rollback_memory_sleep_industry_profile(
+    industry_instance_id: str,
+    payload: MemorySleepRollbackRequest,
+    request: Request,
+    response: Response,
+) -> dict[str, object]:
+    apply_runtime_center_surface_headers(response, surface="runtime-center")
+    service = _get_memory_sleep_service(request)
+    try:
+        record = service.rollback_industry_profile(
+            industry_instance_id=industry_instance_id,
+            version=payload.version,
+            decided_by=payload.actor,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Industry memory profile version not found") from exc
+    return record.model_dump(mode="json")
+
+
+@router.get("/memory/sleep/work-context-overlays/{work_context_id}/diff", response_model=dict[str, object])
+async def diff_memory_sleep_work_context_overlays(
+    work_context_id: str,
+    request: Request,
+    response: Response,
+    from_version: int,
+    to_version: int,
+) -> dict[str, object]:
+    apply_runtime_center_surface_headers(response, surface="runtime-center")
+    service = _get_memory_sleep_service(request)
+    try:
+        return service.diff_work_context_overlay_versions(
+            work_context_id=work_context_id,
+            from_version=from_version,
+            to_version=to_version,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Work-context memory overlay version not found") from exc
+
+
+@router.post("/memory/sleep/work-context-overlays/{work_context_id}/rollback", response_model=dict[str, object])
+async def rollback_memory_sleep_work_context_overlay(
+    work_context_id: str,
+    payload: MemorySleepRollbackRequest,
+    request: Request,
+    response: Response,
+) -> dict[str, object]:
+    apply_runtime_center_surface_headers(response, surface="runtime-center")
+    service = _get_memory_sleep_service(request)
+    try:
+        record = service.rollback_work_context_overlay(
+            work_context_id=work_context_id,
+            version=payload.version,
+            decided_by=payload.actor,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Work-context memory overlay version not found") from exc
+    return record.model_dump(mode="json")
 
 
 @router.post("/memory/sleep/run", response_model=dict[str, object])

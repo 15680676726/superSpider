@@ -32,6 +32,7 @@ from .models import (
     RuntimeHumanCockpitReportBlock,
     RuntimeHumanCockpitStageSummary,
     RuntimeHumanCockpitSummaryField,
+    RuntimeHumanCockpitTraceEntry,
     RuntimeHumanCockpitTrendPoint,
     RuntimeMainBrainGovernancePayload,
     RuntimeMainBrainPlanningPayload,
@@ -1183,10 +1184,15 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
         approvals = self._build_human_cockpit_approvals(payload)
         main_brain = RuntimeHumanCockpitMainBrain(
             card=self._build_main_brain_human_card(payload, approvals),
-            summary_fields=self._build_main_brain_human_summary_fields(payload, approvals),
+            summary_fields=self._build_main_brain_human_summary_fields(
+                app_state,
+                payload,
+                approvals,
+            ),
             morning_report=self._build_main_brain_human_morning_report(payload),
             evening_report=self._build_main_brain_human_evening_report(payload),
             trend=self._build_main_brain_human_trend(payload, approvals),
+            trace=self._build_main_brain_human_trace(payload, approvals),
             approvals=approvals,
             stage_summary=self._build_main_brain_human_stage_summary(payload),
         )
@@ -1243,6 +1249,11 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
                         related_reports=related_reports,
                     ),
                     trend=self._build_agent_human_trend(
+                        agent,
+                        related_assignments=related_assignments,
+                        related_reports=related_reports,
+                    ),
+                    trace=self._build_agent_human_trace(
                         agent,
                         related_assignments=related_assignments,
                         related_reports=related_reports,
@@ -1335,13 +1346,14 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
 
     def _build_main_brain_human_summary_fields(
         self,
+        app_state: RuntimeCenterAppStateView,
         payload: RuntimeMainBrainResponse,
         approvals: list[RuntimeHumanCockpitApproval],
     ) -> list[RuntimeHumanCockpitSummaryField]:
         current_cycle = self._mapping(payload.current_cycle) or {}
         report_cognition = self._mapping(payload.report_cognition) or {}
         next_action = self._mapping(report_cognition.get("next_action")) or {}
-        return [
+        fields = [
             RuntimeHumanCockpitSummaryField(
                 label="职责",
                 value=(
@@ -1377,6 +1389,99 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
                 ),
             ),
         ]
+        return fields + self._build_main_brain_memory_summary_fields(app_state, payload)
+
+    def _build_main_brain_memory_summary_fields(
+        self,
+        app_state: RuntimeCenterAppStateView,
+        payload: RuntimeMainBrainResponse,
+    ) -> list[RuntimeHumanCockpitSummaryField]:
+        sleep_service = getattr(app_state, "memory_sleep_service", None)
+        resolve_scope_overlay = getattr(sleep_service, "resolve_scope_overlay", None)
+        if not callable(resolve_scope_overlay):
+            return []
+        scope_type, scope_id = self._resolve_main_brain_memory_scope(payload)
+        if scope_type is None or scope_id is None:
+            return []
+        try:
+            sleep_payload = resolve_scope_overlay(scope_type=scope_type, scope_id=scope_id)
+        except Exception:
+            logger.debug("runtime_center cockpit memory summary failed", exc_info=True)
+            return []
+        sleep_mapping = self._mapping(sleep_payload) or {}
+        if not sleep_mapping:
+            return []
+        digest = self._mapping(sleep_mapping.get("digest")) or {}
+        industry_profile = self._mapping(sleep_mapping.get("industry_profile")) or {}
+        work_context_overlay = self._mapping(sleep_mapping.get("work_context_overlay")) or {}
+        overlay_metadata = self._mapping(work_context_overlay.get("metadata")) or {}
+        continuity_anchors = self._human_cockpit_text_list(
+            *list(overlay_metadata.get("continuity_anchors") or []),
+            self._first_human_cockpit_text(work_context_overlay.get("focus_summary")),
+            *list(digest.get("current_focus") or []),
+            *list(industry_profile.get("active_focuses") or []),
+        )
+        active_constraints = self._human_cockpit_text_list(
+            *list(work_context_overlay.get("active_constraints") or []),
+            *list(industry_profile.get("active_constraints") or []),
+            *list(digest.get("current_constraints") or []),
+        )
+        proposal_count = len(list(sleep_mapping.get("structure_proposals") or []))
+        conflict_count = len(list(sleep_mapping.get("conflicts") or []))
+        digest_summary = self._first_human_cockpit_text(
+            digest.get("summary"),
+            digest.get("headline"),
+            work_context_overlay.get("summary"),
+            industry_profile.get("summary"),
+            industry_profile.get("headline"),
+        )
+        if not any([continuity_anchors, active_constraints, proposal_count, conflict_count, digest_summary]):
+            return []
+        pending_parts = self._human_cockpit_text_list(
+            f"{proposal_count} 个结构提案待处理" if proposal_count > 0 else None,
+            f"{conflict_count} 个冲突待处理" if conflict_count > 0 else None,
+        )
+        return [
+            RuntimeHumanCockpitSummaryField(
+                label="最该记住",
+                value=continuity_anchors[0] if continuity_anchors else "当前还没有新的连续性锚点。",
+                hint=" / ".join(continuity_anchors[1:3]) or None,
+            ),
+            RuntimeHumanCockpitSummaryField(
+                label="关键约束",
+                value=active_constraints[0] if active_constraints else "当前还没有新的关键约束。",
+                hint=" / ".join(active_constraints[1:3]) or None,
+            ),
+            RuntimeHumanCockpitSummaryField(
+                label="待处理整理",
+                value=" / ".join(pending_parts) if pending_parts else "当前没有待处理的记忆整理项。",
+            ),
+            RuntimeHumanCockpitSummaryField(
+                label="最近记忆整理",
+                value=digest_summary or "当前还没有新的记忆整理结果。",
+                hint=self._first_human_cockpit_text(digest.get("headline")),
+            ),
+        ]
+
+    def _resolve_main_brain_memory_scope(
+        self,
+        payload: RuntimeMainBrainResponse,
+    ) -> tuple[str | None, str | None]:
+        latest_assignment = self._latest_human_cockpit_record(payload.assignments)
+        latest_report = self._latest_human_cockpit_record(payload.reports)
+        work_context_id = self._first_human_cockpit_text(
+            latest_assignment.get("work_context_id"),
+            latest_assignment.get("context_id"),
+            latest_assignment.get("work_context_ref"),
+            latest_report.get("work_context_id"),
+            payload.meta.get("work_context_id"),
+        )
+        if work_context_id:
+            return "work_context", work_context_id
+        industry_instance_id = self._string(payload.meta.get("industry_instance_id"))
+        if industry_instance_id:
+            return "industry", industry_instance_id
+        return None, None
 
     def _build_main_brain_human_morning_report(
         self,
@@ -1443,6 +1548,172 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
                 approval_pressure,
             ),
         ]
+
+    def _build_main_brain_human_trace(
+        self,
+        payload: RuntimeMainBrainResponse,
+        approvals: list[RuntimeHumanCockpitApproval],
+    ) -> list[RuntimeHumanCockpitTraceEntry]:
+        records: list[RuntimeHumanCockpitTraceEntry] = []
+        latest_report = self._latest_human_cockpit_record(payload.reports)
+        latest_assignment = self._latest_human_cockpit_record(payload.assignments)
+        latest_approval = approvals[0] if approvals else None
+        current_cycle = self._mapping(payload.current_cycle) or {}
+
+        report_message = self._first_human_cockpit_text(
+            latest_report.get("headline"),
+            latest_report.get("summary"),
+        )
+        if report_message:
+            records.append(
+                self._build_human_cockpit_trace_entry(
+                    timestamp=self._first_human_cockpit_text(
+                        latest_report.get("updated_at"),
+                        latest_report.get("created_at"),
+                        latest_report.get("generated_at"),
+                        payload.generated_at,
+                    ),
+                    message=f"收到汇报：{report_message}",
+                    kind="report",
+                )
+            )
+
+        assignment_message = self._first_human_cockpit_text(
+            latest_assignment.get("summary"),
+            latest_assignment.get("title"),
+        )
+        if assignment_message:
+            records.append(
+                self._build_human_cockpit_trace_entry(
+                    timestamp=self._first_human_cockpit_text(
+                        latest_assignment.get("updated_at"),
+                        latest_assignment.get("created_at"),
+                        payload.generated_at,
+                    ),
+                    message=f"派出任务：{assignment_message}",
+                    kind="assignment",
+                )
+            )
+
+        if latest_approval is not None:
+            records.append(
+                self._build_human_cockpit_trace_entry(
+                    timestamp=self._first_human_cockpit_text(
+                        latest_approval.created_at,
+                        payload.generated_at,
+                    ),
+                    message=f"等待决定：{latest_approval.title}",
+                    kind="approval",
+                )
+            )
+
+        cycle_message = self._first_human_cockpit_text(
+            current_cycle.get("summary"),
+            current_cycle.get("title"),
+        )
+        if cycle_message:
+            records.append(
+                self._build_human_cockpit_trace_entry(
+                    timestamp=self._first_human_cockpit_text(
+                        current_cycle.get("updated_at"),
+                        current_cycle.get("created_at"),
+                        payload.generated_at,
+                    ),
+                    message=f"阶段判断：{cycle_message}",
+                    kind="cycle",
+                )
+            )
+
+        return self._sort_human_cockpit_trace(records)
+
+    def _build_agent_human_trace(
+        self,
+        agent: dict[str, Any],
+        *,
+        related_assignments: list[dict[str, Any]],
+        related_reports: list[dict[str, Any]],
+    ) -> list[RuntimeHumanCockpitTraceEntry]:
+        records: list[RuntimeHumanCockpitTraceEntry] = []
+        latest_assignment = self._latest_human_cockpit_record(related_assignments)
+        latest_report = self._latest_human_cockpit_record(related_reports)
+
+        assignment_message = self._first_human_cockpit_text(
+            latest_assignment.get("summary"),
+            latest_assignment.get("title"),
+        )
+        if assignment_message:
+            records.append(
+                self._build_human_cockpit_trace_entry(
+                    timestamp=self._first_human_cockpit_text(
+                        latest_assignment.get("updated_at"),
+                        latest_assignment.get("created_at"),
+                        agent.get("updated_at"),
+                        "now",
+                    ),
+                    message=f"接到任务：{assignment_message}",
+                    kind="assignment",
+                )
+            )
+
+        report_message = self._first_human_cockpit_text(
+            latest_report.get("headline"),
+            latest_report.get("summary"),
+        )
+        if report_message:
+            records.append(
+                self._build_human_cockpit_trace_entry(
+                    timestamp=self._first_human_cockpit_text(
+                        latest_report.get("updated_at"),
+                        latest_report.get("created_at"),
+                        agent.get("updated_at"),
+                        "now",
+                    ),
+                    message=f"回传结果：{report_message}",
+                    kind="report",
+                )
+            )
+
+        if not records:
+            focus_message = self._first_human_cockpit_text(
+                agent.get("current_focus"),
+                agent.get("role_summary"),
+            )
+            if focus_message:
+                records.append(
+                    self._build_human_cockpit_trace_entry(
+                        timestamp=self._first_human_cockpit_text(
+                            agent.get("updated_at"),
+                            agent.get("created_at"),
+                            "now",
+                        ),
+                        message=f"当前负责：{focus_message}",
+                        kind="focus",
+                    )
+                )
+        return self._sort_human_cockpit_trace(records)
+
+    def _build_human_cockpit_trace_entry(
+        self,
+        *,
+        timestamp: str | None,
+        message: str | None,
+        kind: str | None,
+    ) -> RuntimeHumanCockpitTraceEntry:
+        return RuntimeHumanCockpitTraceEntry(
+            timestamp=timestamp or "now",
+            message=message or "暂无进展记录",
+            kind=kind,
+        )
+
+    def _sort_human_cockpit_trace(
+        self,
+        records: Sequence[RuntimeHumanCockpitTraceEntry],
+    ) -> list[RuntimeHumanCockpitTraceEntry]:
+        return sorted(
+            list(records),
+            key=lambda item: (self._string(item.timestamp) or "", self._string(item.kind) or ""),
+            reverse=True,
+        )[:4]
 
     def _build_main_brain_human_stage_summary(
         self,

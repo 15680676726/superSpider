@@ -27,6 +27,8 @@ MemoryRelationKind = str
 MemorySleepTriggerKind = Literal["scheduled", "idle", "manual"]
 MemorySleepJobStatus = Literal["queued", "running", "completed", "failed", "skipped"]
 MemorySleepArtifactStatus = Literal["active", "superseded"]
+MemorySlotPreferenceStatus = Literal["active", "inactive", "superseded"]
+MemoryContinuityDetailStatus = Literal["active", "inactive", "superseded"]
 MemorySoftRuleState = Literal["candidate", "active", "promoted", "rejected", "expired"]
 MemoryConflictProposalStatus = Literal["pending", "accepted", "rejected", "expired"]
 MemoryStructureProposalStatus = MemoryConflictProposalStatus
@@ -539,6 +541,56 @@ class MemoryConflictProposalRecord(UpdatedRecord):
     @field_validator("conflicting_refs", "supporting_refs", mode="before")
     @classmethod
     def _normalize_proposal_lists(cls, value: object) -> list[str]:
+        return _normalize_text_list(value)
+
+
+class IndustryMemorySlotPreferenceRecord(UpdatedRecord):
+    """Industry-level slot preference learned from repeated multi-round recall."""
+
+    preference_id: str = Field(default_factory=_new_record_id, min_length=1)
+    industry_instance_id: str = Field(..., min_length=1)
+    slot_key: str = Field(..., min_length=1)
+    slot_label: str = ""
+    slot_summary: str = ""
+    scope_level: MemoryScopeType = "industry"
+    scope_id: str = Field(..., min_length=1)
+    source_kind: str = Field(default="sleep", min_length=1)
+    source_ref: str | None = None
+    slot_order: int = 0
+    prominence: float = Field(default=0.5, ge=0.0, le=1.0)
+    promotion_count: int = Field(default=0, ge=0)
+    demotion_count: int = Field(default=0, ge=0)
+    observation_count: int = Field(default=0, ge=0)
+    last_promoted_at: datetime | None = None
+    last_demoted_at: datetime | None = None
+    last_observed_at: datetime | None = None
+    status: MemorySlotPreferenceStatus = "active"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class MemoryContinuityDetailRecord(UpdatedRecord):
+    """Stable continuity anchor that should survive across future rounds."""
+
+    detail_id: str = Field(default_factory=_new_record_id, min_length=1)
+    scope_type: MemoryScopeType = "work_context"
+    scope_id: str = Field(..., min_length=1)
+    industry_instance_id: str | None = None
+    work_context_id: str | None = None
+    detail_key: str = Field(..., min_length=1)
+    detail_label: str = ""
+    detail_text: str = Field(..., min_length=1)
+    source_kind: str = Field(default="model", min_length=1)
+    source_ref: str | None = None
+    importance_score: float = Field(default=0.5, ge=0.0, le=1.0)
+    pinned: bool = False
+    pinned_until_phase: str | None = None
+    evidence_refs: list[str] = Field(default_factory=list)
+    status: MemoryContinuityDetailStatus = "active"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("evidence_refs", mode="before")
+    @classmethod
+    def _normalize_detail_lists(cls, value: object) -> list[str]:
         return _normalize_text_list(value)
 
 

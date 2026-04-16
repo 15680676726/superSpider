@@ -1,7 +1,13 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-from copaw.memory import DerivedMemoryIndexService, MemoryActivationService, MemoryReflectionService
+from copaw.memory import (
+    DerivedMemoryIndexService,
+    MemoryActivationService,
+    MemoryReflectionService,
+    MemorySleepInferenceService,
+    MemorySleepService,
+)
 from copaw.memory.knowledge_writeback_service import KnowledgeWritebackService
 from copaw.memory.knowledge_graph_models import (
     KnowledgeGraphNode,
@@ -25,6 +31,7 @@ from copaw.state.repositories import (
     SqliteMemoryOpinionViewRepository,
     SqliteMemoryReflectionRunRepository,
     SqliteMemoryRelationViewRepository,
+    SqliteMemorySleepRepository,
 )
 
 
@@ -65,6 +72,7 @@ def _build_persistence_services(tmp_path):
     opinion_repo = SqliteMemoryOpinionViewRepository(store)
     relation_repo = SqliteMemoryRelationViewRepository(store)
     reflection_repo = SqliteMemoryReflectionRunRepository(store)
+    sleep_repo = SqliteMemorySleepRepository(store)
     derived = DerivedMemoryIndexService(
         fact_index_repository=fact_repo,
         entity_view_repository=entity_repo,
@@ -83,6 +91,15 @@ def _build_persistence_services(tmp_path):
         derived_index_service=derived,
         reflection_service=reflection,
     )
+    sleep = MemorySleepService(
+        repository=sleep_repo,
+        knowledge_service=knowledge,
+        strategy_memory_service=None,
+        derived_index_service=derived,
+        reflection_service=reflection,
+        inference_service=MemorySleepInferenceService(),
+    )
+    knowledge.set_memory_sleep_service(sleep)
     activation = MemoryActivationService(
         derived_index_service=derived,
     )
@@ -92,7 +109,7 @@ def _build_persistence_services(tmp_path):
         relation_view_repository=relation_repo,
         reflection_service=reflection,
     )
-    return service, knowledge, derived, activation
+    return service, knowledge, derived, activation, sleep
 
 
 def test_knowledge_writeback_service_builds_report_writeback_with_fact_opinion_evidence_and_relations() -> None:
@@ -179,7 +196,7 @@ def test_knowledge_writeback_service_keeps_human_boundary_writeback_out_of_fact_
 def test_knowledge_writeback_service_persists_execution_outcome_into_truth_first_memory(
     tmp_path,
 ) -> None:
-    service, knowledge, derived, activation = _build_persistence_services(tmp_path)
+    service, knowledge, derived, activation, _sleep = _build_persistence_services(tmp_path)
 
     change = service.build_execution_outcome_writeback(
         scope_type="task",
@@ -240,7 +257,7 @@ def test_knowledge_writeback_service_persists_execution_outcome_into_truth_first
 def test_knowledge_writeback_service_applies_invalidation_to_future_activation(
     tmp_path,
 ) -> None:
-    service, _knowledge, derived, activation = _build_persistence_services(tmp_path)
+    service, _knowledge, derived, activation, _sleep = _build_persistence_services(tmp_path)
     scope = KnowledgeGraphScope(scope_type="task", scope_id="task-2")
 
     initial = KnowledgeGraphWritebackChange(
@@ -498,3 +515,30 @@ def test_knowledge_writeback_service_invalidates_stale_execution_relations_when_
         "work-context:ctx-2",
     ) in relation_pairs
     assert len(change.invalidate_relation_ids) == 2
+
+
+def test_knowledge_writeback_service_daytime_refreshes_work_context_overlay(tmp_path) -> None:
+    service, _knowledge, _derived, _activation, sleep = _build_persistence_services(tmp_path)
+    report = _report(
+        headline="白天写回收口",
+        findings=["当前需要先完成财务复核，再继续外呼审批。"],
+        recommendation="先补齐财务证据，再继续外呼审批。",
+        evidence_ids=["evidence-1"],
+        metadata={"verified_findings": True},
+    )
+
+    change = service.build_report_writeback(report=report)
+    service.apply_change(change)
+
+    overlay = sleep.get_active_work_context_overlay("ctx-1")
+    assert overlay is not None
+    assert overlay.work_context_id == "ctx-1"
+    assert "财务复核" in " ".join(
+        [
+            overlay.headline,
+            overlay.summary,
+            overlay.focus_summary,
+            *overlay.active_focuses,
+            *overlay.active_constraints,
+        ],
+    )

@@ -45,6 +45,58 @@ def _path_guidance_lines(value: Any) -> list[str]:
     return lines
 
 
+def _truth_first_profile_lines(
+    *,
+    scope_type: str,
+    scope_id: str,
+    profile: dict[str, Any] | None,
+    fallback_entry: object | None,
+) -> list[str]:
+    profile_payload = dict(profile or {})
+    if profile_payload:
+        current_focus = _first_non_empty(
+            profile_payload.get("current_focus_summary"),
+            *(profile_payload.get("active_constraints") or []),
+            *(profile_payload.get("dynamic_profile") or []),
+            *(profile_payload.get("static_profile") or []),
+            scope_id,
+        ) or scope_id
+        current_context = _first_non_empty(
+            *(profile_payload.get("current_operating_context") or []),
+            *(profile_payload.get("dynamic_profile") or []),
+            *(profile_payload.get("static_profile") or []),
+        ) or "No current operating context."
+        read_layer = _first_non_empty(profile_payload.get("read_layer"), "truth-first") or "truth-first"
+        lines = [
+            f"- Scope: {scope_type}/{scope_id}",
+            f"- Read layer: {read_layer}",
+            f"- Current focus: {current_focus}",
+            f"- Current operating context: {current_context}",
+        ]
+        overlay_id = _first_non_empty(profile_payload.get("overlay_id"))
+        if overlay_id is not None:
+            lines.append(f"- Overlay: {overlay_id}")
+        industry_profile_id = _first_non_empty(profile_payload.get("industry_profile_id"))
+        if industry_profile_id is not None:
+            lines.append(f"- Industry profile: {industry_profile_id}")
+        return lines
+    if fallback_entry is None:
+        return ["- Shared truth-first profile unavailable."]
+    return [
+        f"- Scope: {scope_type}/{scope_id}",
+        f"- Current focus: {_first_non_empty(getattr(fallback_entry, 'title', None), scope_id) or scope_id}",
+        "- Current operating context: "
+        + (
+            _first_non_empty(
+                getattr(fallback_entry, "summary", None),
+                getattr(fallback_entry, "content_excerpt", None),
+                getattr(fallback_entry, "content_text", None),
+            )
+            or "No current operating context."
+        ),
+    ]
+
+
 class _QueryExecutionPromptMixin:
     def _assert_bound_chat_context(
         self,
@@ -1602,73 +1654,52 @@ class _QueryExecutionPromptMixin:
         if knowledge_chunks:
             lines.append("# Retrieved Knowledge")
             lines.extend(_knowledge_line(chunk) for chunk in knowledge_chunks[:4])
-        derived_service = getattr(recall_service, "_derived_index_service", None)
-        truth_first_entries = []
-        if derived_service is not None and callable(getattr(derived_service, "list_fact_entries", None)):
-            truth_first_entries = list(
-                derived_service.list_fact_entries(
-                    scope_type=resolved_scope_type,
-                    scope_id=resolved_scope_id,
-                    owner_agent_id=owner_agent_id,
-                    industry_instance_id=industry_instance_id,
-                    limit=6,
+        truth_first_snapshot = {}
+        surface_service = getattr(self, "_memory_surface_service", None)
+        resolve_scope_snapshot = getattr(surface_service, "resolve_truth_first_scope_snapshot", None)
+        if callable(resolve_scope_snapshot):
+            try:
+                truth_first_snapshot = dict(
+                    resolve_scope_snapshot(
+                        scope_type=resolved_scope_type,
+                        scope_id=resolved_scope_id,
+                        owner_agent_id=owner_agent_id,
+                        industry_instance_id=industry_instance_id,
+                        limit=6,
+                    )
+                    or {},
                 )
-                or [],
-            )
-            truth_first_entries.sort(
-                key=lambda item: (
-                    getattr(item, "source_updated_at", None)
-                    or getattr(item, "updated_at", None)
-                    or getattr(item, "created_at", None)
-                    or "",
-                ),
-                reverse=True,
-            )
-        if truth_first_entries:
+            except Exception:
+                truth_first_snapshot = {}
+        truth_first_entries = list(truth_first_snapshot.get("entries") or [])
+        latest_entries = list(truth_first_snapshot.get("latest_entries") or [])
+        history_entries = list(truth_first_snapshot.get("history_entries") or [])
+        truth_first_profile = dict(truth_first_snapshot.get("profile") or {})
+        if truth_first_entries or truth_first_profile:
+            display_latest_entries = list(latest_entries or [])
+            display_history_entries = list(history_entries or [])
+            if not display_history_entries and len(display_latest_entries) > 1:
+                display_history_entries = display_latest_entries[1:3]
+                display_latest_entries = display_latest_entries[:1]
             if lines:
                 lines.append("")
-            latest_entries = truth_first_entries[:1]
-            history_entries = truth_first_entries[1:3]
-            profile_entry = latest_entries[0] if latest_entries else None
+            profile_entry = display_latest_entries[0] if display_latest_entries else None
             lines.append("# Truth-First Memory Profile")
-            if profile_entry is not None:
-                lines.append(
-                    _knowledge_line(
-                        MemoryRecallHit(
-                            entry_id=f"profile:{getattr(profile_entry, 'scope_type', 'global')}:{getattr(profile_entry, 'scope_id', 'runtime')}",
-                            kind="memory_profile",
-                            title="Shared Memory Profile",
-                            summary=_first_non_empty(
-                                getattr(profile_entry, "summary", None),
-                                getattr(profile_entry, "content_excerpt", None),
-                                getattr(profile_entry, "title", None),
-                            )
-                            or "Shared truth-first profile.",
-                            content_excerpt=_first_non_empty(
-                                getattr(profile_entry, "content_excerpt", None),
-                                getattr(profile_entry, "summary", None),
-                            )
-                            or "",
-                            source_type="memory_profile",
-                            source_ref=f"profile:{getattr(profile_entry, 'scope_type', 'global')}:{getattr(profile_entry, 'scope_id', 'runtime')}",
-                            scope_type=str(getattr(profile_entry, "scope_type", "global") or "global"),
-                            scope_id=str(getattr(profile_entry, "scope_id", "runtime") or "runtime"),
-                            confidence=1.0,
-                            quality_score=1.0,
-                            score=1.0,
-                            backend="truth-first",
-                        ),
-                    ),
-                )
-            else:
-                lines.append("- Shared truth-first profile unavailable.")
+            lines.extend(
+                _truth_first_profile_lines(
+                    scope_type=resolved_scope_type,
+                    scope_id=resolved_scope_id,
+                    profile=truth_first_profile,
+                    fallback_entry=profile_entry,
+                ),
+            )
             lines.append("")
             lines.append("# Truth-First Memory Latest Facts")
-            lines.extend(_knowledge_line(chunk) for chunk in latest_entries[:2])
-            if history_entries:
+            lines.extend(_knowledge_line(chunk) for chunk in display_latest_entries[:2])
+            if display_history_entries:
                 lines.append("")
                 lines.append("# Truth-First Memory History")
-                lines.extend(_knowledge_line(chunk) for chunk in history_entries[:2])
+                lines.extend(_knowledge_line(chunk) for chunk in display_history_entries[:2])
         activated_neurons = list(getattr(activation_result, "activated_neurons", []) or [])
         dependency_paths = _path_guidance_lines(
             getattr(activation_result, "dependency_paths", None),
