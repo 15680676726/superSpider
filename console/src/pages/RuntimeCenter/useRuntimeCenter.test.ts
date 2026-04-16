@@ -327,6 +327,41 @@ describe("useRuntimeCenter", () => {
     expect(requestRuntimeBusinessAgentsMock).not.toHaveBeenCalled();
   });
 
+  it("treats retired hybrid surface status as unavailable instead of a live degraded state", async () => {
+    requestRuntimeSurfaceMock.mockResolvedValue(
+      mockSurface({
+        surface: {
+          ...surface,
+          status: "hybrid" as RuntimeCenterSurfaceInfo["status"],
+        },
+        cards: [
+          {
+            key: "tasks",
+            title: "Tasks",
+            source: "task-service",
+            status: "hybrid" as unknown as RuntimeCenterSurfaceCard["status"],
+            count: 1,
+            summary: "legacy hybrid status",
+            entries: [],
+            meta: {},
+          },
+        ],
+      }),
+    );
+
+    const { result } = renderHook(() => useRuntimeCenter());
+
+    await waitFor(
+      () =>
+        !result.current.loading &&
+        !result.current.mainBrainLoading &&
+        !result.current.businessAgentsLoading,
+    );
+
+    expect(result.current.data?.surface?.status).toBe("unavailable");
+    expect(result.current.data?.cards[0]?.status).toBe("unavailable");
+  });
+
   it("requests runtime surface without a browser-side buddy binding override", async () => {
     readBuddyProfileIdMock.mockReturnValue(null);
 
