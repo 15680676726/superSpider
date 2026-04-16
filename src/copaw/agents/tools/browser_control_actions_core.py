@@ -147,10 +147,10 @@ async def _create_browser_context(storage_state_path: str = ""):
 async def _ensure_browser_session(
     session_id: str,
     *,
-    profile_id: str = "",
-    entry_url: str = "",
-    persist_login_state: bool = False,
-    storage_state_path: str = "",
+    profile_id: str | None = None,
+    entry_url: str | None = None,
+    persist_login_state: bool | None = None,
+    storage_state_path: str | None = None,
     navigation_guard: dict[str, Any] | None = None,
     action_timeout_seconds: float | None = None,
 ) -> dict[str, Any] | None:
@@ -168,10 +168,14 @@ async def _ensure_browser_session(
     session["browser_mode"] = "managed-isolated"
     if entry_url:
         session["entry_url"] = entry_url
-    session["navigation_guard"] = _normalize_navigation_guard(navigation_guard)
-    session["action_timeout_seconds"] = _normalize_positive_timeout(action_timeout_seconds)
-    session["persist_login_state"] = bool(persist_login_state)
-    session["storage_state_path"] = storage_state_path or ""
+    if navigation_guard is not None:
+        session["navigation_guard"] = _normalize_navigation_guard(navigation_guard)
+    if action_timeout_seconds is not None:
+        session["action_timeout_seconds"] = _normalize_positive_timeout(action_timeout_seconds)
+    if persist_login_state is not None:
+        session["persist_login_state"] = bool(persist_login_state)
+    if storage_state_path is not None:
+        session["storage_state_path"] = storage_state_path or ""
     _state["current_session_id"] = session_id
     _touch_activity(session_id)
     return session

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 from weakref import WeakSet
 
 from agentscope.message import TextBlock
@@ -229,6 +230,78 @@ def test_browser_navigate_blocks_host_inside_navigation_guard_blocklist() -> Non
     assert payload["guardrail"]["kind"] == "navigation-guard"
     assert "blocked by browser navigation guard" in payload["error"].lower()
     assert page.goto_calls == []
+
+
+def test_browser_open_does_not_clobber_persisted_session_storage_contract(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    class _FakePage:
+        def __init__(self) -> None:
+            self.url = ""
+
+        def on(self, *_args, **_kwargs) -> None:
+            return None
+
+        async def goto(self, url: str) -> None:
+            self.url = url
+
+    class _FakeContext:
+        def __init__(self) -> None:
+            self.page = _FakePage()
+            self.storage_state_calls: list[str] = []
+            self.closed = False
+
+        def on(self, *_args, **_kwargs) -> None:
+            return None
+
+        async def new_page(self):
+            return self.page
+
+        async def storage_state(self, *, path: str):
+            self.storage_state_calls.append(path)
+            Path(path).write_text("{}", encoding="utf-8")
+
+        async def close(self) -> None:
+            self.closed = True
+
+    storage_state_path = tmp_path / "browser-storage.json"
+    fake_context = _FakeContext()
+
+    async def fake_ensure_browser() -> bool:
+        return True
+
+    async def fake_create_browser_context(storage_state_path: str = ""):
+        _ = storage_state_path
+        return fake_context
+
+    browser_control_shared._state["sessions"] = {}
+    browser_control_shared._state["current_session_id"] = None
+    monkeypatch.setattr(browser_control_actions_core, "_ensure_browser", fake_ensure_browser)
+    monkeypatch.setattr(
+        browser_control_actions_core,
+        "_create_browser_context",
+        fake_create_browser_context,
+    )
+
+    async def run() -> None:
+        await browser_control_actions_core._ensure_browser_session(
+            "persisted-session",
+            persist_login_state=True,
+            storage_state_path=str(storage_state_path),
+        )
+        await browser_control_actions_core._action_open(
+            "https://example.com/runtime",
+            "page-1",
+            "persisted-session",
+        )
+        await browser_control_actions_core._close_session_context("persisted-session")
+
+    asyncio.run(run())
+
+    assert fake_context.storage_state_calls == [str(storage_state_path)]
+    assert storage_state_path.exists() is True
+    assert fake_context.closed is True
 
 
 def test_browser_use_emits_navigation_guardrail_metadata_when_navigation_is_blocked(
