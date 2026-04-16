@@ -96,3 +96,5 @@ codex_desktop_smoke_*.txt
 tmp/
 tmp_real_self_evolution_smoke.py
 tmp_real_self_evolution_smoke_*/
+.githooks/pre-commit
+.githooks/pre-push

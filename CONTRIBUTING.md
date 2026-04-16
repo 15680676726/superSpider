@@ -12,6 +12,14 @@ Thank you for your interest in contributing to CoPaw! CoPaw is an open-source **
 
 To keep collaboration smooth and maintain quality, please follow these guidelines.
 
+### 0. Mainline-First Workflow
+
+This repository defaults to `main` for day-to-day development.
+
+- Run `python scripts/setup_git_hooks.py` once after cloning the repo. It configures the versioned git hooks under `.githooks/`.
+- Do not create feature branches, worktrees, or backup branches unless maintainers explicitly approve that exception for the task.
+- Before you consider a task done, the change must be committed on `main`, pushed to `origin/main`, and the working tree must be clean.
+
 ### 1. Check Existing Plans and Issues
 
 Before starting:
