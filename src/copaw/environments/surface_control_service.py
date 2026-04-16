@@ -1257,6 +1257,14 @@ class SurfaceControlService:
             executor = self._browser_companion_executors.get(normalized)
             if executor is not None:
                 return executor
+        resolver = getattr(self._service, "resolve_default_browser_companion_executor", None)
+        if callable(resolver):
+            executor = resolver(
+                transport_ref=transport_ref,
+                provider_session_ref=provider_session_ref,
+            )
+            if executor is not None:
+                return executor
         return None
 
     def _resolve_document_family(

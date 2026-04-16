@@ -139,7 +139,7 @@ def resolve_browser_channel_policy(
             },
         }
 
-    if browser_mcp_healthy:
+    if effective_attach_required and browser_mcp_healthy:
         return {
             "selected_channel": "browser-mcp",
             "selected_capability_id": "system:browser_companion_runtime",
@@ -175,7 +175,7 @@ def resolve_browser_channel_policy(
         "selected_channel_health": "healthy",
         "selected_browser_mode": "managed-isolated",
         "reason": (
-            "Built-in browser remains the default channel because browser MCP is unavailable or unhealthy."
+            "Built-in browser remains the default channel for general browser work; browser MCP is reserved for attached-session continuity."
         ),
         "attach_required": effective_attach_required,
         "fail_closed": False,
@@ -186,7 +186,7 @@ def resolve_browser_channel_policy(
         },
         "browser_mcp": {
             "capability_id": "system:browser_companion_runtime",
-            "healthy": False,
+            "healthy": browser_mcp_healthy,
             "status": browser_mcp_status,
             "transport_ref": companion_transport_ref,
             "provider_session_ref": companion_provider_session_ref,

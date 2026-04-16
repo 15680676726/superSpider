@@ -3275,6 +3275,311 @@ def test_capability_market_browser_local_session_start_resolves_to_attached_brow
     mocked_browser_use.assert_not_called()
 
 
+def test_capability_market_browser_local_session_start_stays_on_built_in_when_attach_is_optional(
+    tmp_path,
+) -> None:
+    app = build_runtime_app(tmp_path)
+    client = TestClient(app)
+    environment_service = app.state.environment_service
+
+    lease = environment_service.acquire_session_lease(
+        channel="browser",
+        session_id="browser-seat-operability-first",
+        user_id="alice",
+        owner="worker-1",
+        ttl_seconds=60,
+        metadata={
+            "host_mode": "attach-existing-session",
+            "lease_class": "exclusive-writer",
+            "access_mode": "writer",
+            "session_scope": "browser-user-session",
+        },
+    )
+    environment_service.register_browser_companion(
+        session_mount_id=lease.id,
+        transport_ref="transport:browser-companion:localhost",
+        status="attached",
+        available=True,
+        provider_session_ref="browser-session:web:main",
+    )
+    environment_service.register_browser_attach_transport(
+        session_mount_id=lease.id,
+        transport_ref="transport:browser-companion:localhost",
+        status="attached",
+        browser_session_ref="browser-session:web:main",
+        browser_scope_ref="chrome-profile:alice",
+        reconnect_token="reconnect-token-1",
+    )
+
+    with (
+        patch(
+            "copaw.capabilities.browser_runtime.browser_use",
+            return_value=_fake_tool_response('{"ok": true, "message": "started"}'),
+        ) as mocked_browser_use,
+        patch(
+            "copaw.capabilities.browser_runtime.get_browser_runtime_snapshot",
+            side_effect=[
+                {
+                    "running": False,
+                    "current_session_id": None,
+                    "session_count": 0,
+                    "sessions": [],
+                    "current_page_id": None,
+                    "page_count": 0,
+                    "page_ids": [],
+                },
+                {
+                    "running": True,
+                    "current_session_id": "operability-first-browser-session",
+                    "session_count": 1,
+                    "sessions": [
+                        {
+                            "session_id": "operability-first-browser-session",
+                            "page_count": 1,
+                            "page_ids": ["page-1"],
+                        }
+                    ],
+                    "current_page_id": "page-1",
+                    "page_count": 1,
+                    "page_ids": ["page-1"],
+                },
+            ],
+        ),
+    ):
+        response = client.post(
+            "/capability-market/install-templates/browser-local/sessions/start",
+            json={
+                "session_id": "operability-first-browser-session",
+                "session_mount_id": lease.id,
+                "attach_required": False,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "started"
+    assert payload["channel_resolution"]["selected_channel"] == "built-in-browser"
+    assert payload["channel_resolution"]["selection_status"] == "ready"
+    assert payload["channel_resolution"]["browser_mcp"]["healthy"] is True
+    mocked_browser_use.assert_called_once()
+
+
+def test_capability_market_browser_companion_example_run_auto_activates_managed_browser_when_unmounted(
+    tmp_path,
+) -> None:
+    app = build_runtime_app(tmp_path)
+    client = TestClient(app)
+    environment_service = app.state.environment_service
+
+    with (
+        patch(
+            "copaw.capabilities.install_templates._mount_enabled",
+            side_effect=lambda _service, capability_id, **_kwargs: (
+                capability_id == "system:browser_companion_runtime"
+            ),
+        ),
+        patch(
+            "copaw.capabilities.install_templates.get_browser_support_snapshot",
+            return_value={
+                "running": False,
+                "playwright_ready": True,
+                "playwright_error": "",
+                "container_mode": False,
+                "default_browser_kind": "chromium",
+                "default_browser_path": "",
+            },
+        ),
+        patch(
+            "copaw.capabilities.browser_runtime.get_browser_runtime_snapshot",
+            side_effect=[
+                {
+                    "running": False,
+                    "current_session_id": None,
+                    "session_count": 0,
+                    "sessions": [],
+                    "current_page_id": None,
+                    "page_count": 0,
+                    "page_ids": [],
+                },
+                {
+                    "running": True,
+                    "current_session_id": "managed-browser-companion-example",
+                    "session_count": 1,
+                    "sessions": [
+                        {
+                            "session_id": "managed-browser-companion-example",
+                            "current_page_id": "page-1",
+                            "page_count": 1,
+                            "page_ids": ["page-1"],
+                        }
+                    ],
+                    "current_page_id": "page-1",
+                    "page_count": 1,
+                    "page_ids": ["page-1"],
+                },
+                {
+                    "running": True,
+                    "current_session_id": "managed-browser-companion-example",
+                    "session_count": 1,
+                    "sessions": [
+                        {
+                            "session_id": "managed-browser-companion-example",
+                            "current_page_id": "page-1",
+                            "page_count": 1,
+                            "page_ids": ["page-1"],
+                        }
+                    ],
+                    "current_page_id": "page-1",
+                    "page_count": 1,
+                    "page_ids": ["page-1"],
+                },
+            ],
+        ),
+        patch(
+            "copaw.capabilities.browser_runtime.browser_use",
+            return_value=_fake_tool_response('{"ok": true, "message": "started"}'),
+        ) as mocked_browser_use,
+    ):
+        response = client.post(
+            "/capability-market/install-templates/browser-companion/example-run",
+            json={
+                "config": {
+                    "session_id": "managed-browser-companion-example",
+                }
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "success"
+    assert "auto-activate-managed-browser-seat" in payload["operations"]
+    assert payload["payload"]["auto_activated"] is True
+    session_mount_id = payload["payload"]["session_mount_id"]
+    companion_snapshot = environment_service.browser_companion_snapshot(
+        session_mount_id=session_mount_id,
+    )
+    attach_snapshot = environment_service.browser_attach_snapshot(
+        session_mount_id=session_mount_id,
+    )
+    assert companion_snapshot["browser_companion"]["available"] is True
+    assert companion_snapshot["browser_companion"]["provider_session_ref"] == (
+        "managed-browser-companion-example"
+    )
+    assert attach_snapshot["browser_attach"]["status"] == "attached"
+    mocked_browser_use.assert_called_once()
+
+
+def test_capability_market_browser_companion_example_run_repairs_existing_mounted_session(
+    tmp_path,
+) -> None:
+    app = build_runtime_app(tmp_path)
+    client = TestClient(app)
+    environment_service = app.state.environment_service
+    lease = environment_service.acquire_session_lease(
+        channel="browser",
+        session_id="browser-companion-repair-seat",
+        user_id="alice",
+        owner="worker-1",
+        ttl_seconds=60,
+        metadata={
+            "host_mode": "attach-existing-session",
+            "lease_class": "exclusive-writer",
+            "access_mode": "writer",
+            "session_scope": "browser-user-session",
+        },
+    )
+
+    with (
+        patch(
+            "copaw.capabilities.install_templates._mount_enabled",
+            side_effect=lambda _service, capability_id, **_kwargs: (
+                capability_id == "system:browser_companion_runtime"
+            ),
+        ),
+        patch(
+            "copaw.capabilities.install_templates.get_browser_support_snapshot",
+            return_value={
+                "running": False,
+                "playwright_ready": True,
+                "playwright_error": "",
+                "container_mode": False,
+                "default_browser_kind": "chromium",
+                "default_browser_path": "",
+            },
+        ),
+        patch(
+            "copaw.capabilities.browser_runtime.get_browser_runtime_snapshot",
+            side_effect=[
+                {
+                    "running": False,
+                    "current_session_id": None,
+                    "session_count": 0,
+                    "sessions": [],
+                    "current_page_id": None,
+                    "page_count": 0,
+                    "page_ids": [],
+                },
+                {
+                    "running": True,
+                    "current_session_id": "browser-companion-repair-seat",
+                    "session_count": 1,
+                    "sessions": [
+                        {
+                            "session_id": "browser-companion-repair-seat",
+                            "current_page_id": "page-1",
+                            "page_count": 1,
+                            "page_ids": ["page-1"],
+                        }
+                    ],
+                    "current_page_id": "page-1",
+                    "page_count": 1,
+                    "page_ids": ["page-1"],
+                },
+                {
+                    "running": True,
+                    "current_session_id": "browser-companion-repair-seat",
+                    "session_count": 1,
+                    "sessions": [
+                        {
+                            "session_id": "browser-companion-repair-seat",
+                            "current_page_id": "page-1",
+                            "page_count": 1,
+                            "page_ids": ["page-1"],
+                        }
+                    ],
+                    "current_page_id": "page-1",
+                    "page_count": 1,
+                    "page_ids": ["page-1"],
+                },
+            ],
+        ),
+        patch(
+            "copaw.capabilities.browser_runtime.browser_use",
+            return_value=_fake_tool_response('{"ok": true, "message": "started"}'),
+        ) as mocked_browser_use,
+    ):
+        response = client.post(
+            "/capability-market/install-templates/browser-companion/example-run",
+            json={
+                "config": {
+                    "session_mount_id": lease.id,
+                }
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "success"
+    assert payload["payload"]["auto_activated"] is True
+    assert payload["payload"]["session_mount_id"] == lease.id
+    assert len(environment_service.list_sessions(channel="browser", limit=10)) == 1
+    companion_snapshot = environment_service.browser_companion_snapshot(
+        session_mount_id=lease.id,
+    )
+    assert companion_snapshot["browser_companion"]["available"] is True
+    mocked_browser_use.assert_called_once()
+
+
 def test_capability_market_browser_local_install_defaults_to_visible_profile(
     tmp_path,
 ) -> None:

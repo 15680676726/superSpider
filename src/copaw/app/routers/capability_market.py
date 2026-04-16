@@ -561,7 +561,6 @@ def _get_browser_runtime_service(
     environment_service = _get_environment_service(request, required=False)
     service = getattr(request.app.state, "browser_runtime_service", None)
     if isinstance(service, BrowserRuntimeService):
-        setattr(service, "_environment_service", environment_service)
         _bind_browser_companion_runtime(
             service,
             environment_service=environment_service,
@@ -570,6 +569,7 @@ def _get_browser_runtime_service(
             service,
             environment_service=environment_service,
         )
+        service.set_environment_service(environment_service)
         return service
     state_store = getattr(request.app.state, "state_store", None)
     if isinstance(state_store, SQLiteStateStore):
@@ -582,7 +582,7 @@ def _get_browser_runtime_service(
                 environment_service=environment_service,
             ),
         )
-        setattr(service, "_environment_service", environment_service)
+        service.set_environment_service(environment_service)
         request.app.state.browser_runtime_service = service
         return service
     if required:
