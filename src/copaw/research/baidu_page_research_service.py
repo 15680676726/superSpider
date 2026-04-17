@@ -5,6 +5,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from hashlib import sha1
 from pathlib import Path
+import re
 from typing import Any, Mapping
 
 from ..constant import WORKING_DIR
@@ -84,12 +85,14 @@ def _split_sentences(text: str) -> list[str]:
     normalized = _text(text)
     if not normalized:
         return []
-    parts = []
-    for chunk in normalized.replace("?", "。").replace("!", "。").replace("；", "。").split("。"):
-        sentence = chunk.strip()
-        if sentence:
-            parts.append(sentence)
-    return parts
+    normalized = normalized.replace("\u200b", " ").replace("\u200c", " ")
+    for marker in (".", "?", "!", ";", "。", "？", "！", "；"):
+        normalized = normalized.replace(marker, "\n")
+    return [
+        sentence
+        for sentence in (chunk.strip() for chunk in normalized.splitlines())
+        if sentence
+    ]
 
 
 def _dedupe_texts(values: list[str]) -> list[str]:
@@ -141,12 +144,29 @@ def _safe_path_token(value: object | None) -> str:
     return normalized or "default"
 
 
+def _contains_cjk(text: str) -> bool:
+    return any("\u4e00" <= character <= "\u9fff" for character in text)
+
+
+def _tail_lines(previous_text: object | None, current_text: object | None) -> str:
+    previous_lines = [line for line in (_text(item) for item in str(previous_text or "").splitlines()) if line]
+    current_lines = [line for line in (_text(item) for item in str(current_text or "").splitlines()) if line]
+    index = 0
+    max_index = min(len(previous_lines), len(current_lines))
+    while index < max_index and previous_lines[index] == current_lines[index]:
+        index += 1
+    if index >= len(current_lines):
+        return str(current_text or "")
+    return "\n".join(current_lines[index:])
+
+
 class BaiduPageResearchService:
     BAIDU_CHAT_URL = "https://chat.baidu.com/search"
     MAX_ROUNDS = 5
     MAX_LINK_DEPTH = 3
     MAX_DOWNLOADS = 2
     MAX_CONSECUTIVE_NO_NEW_FINDINGS = 2
+    DEFAULT_RESPONSE_WAIT_SECONDS = 8
 
     def __init__(
         self,
@@ -229,24 +249,80 @@ class BaiduPageResearchService:
         consecutive_no_new_findings = 0
         stop_reason: str | None = None
         current_url = self.BAIDU_CHAT_URL
+        chat_page_id = f"{session.id}:chat"
+        chat_page_opened = False
+        last_chat_snapshot: dict[str, Any] | None = None
 
         while len(rounds) <= self.MAX_ROUNDS:
             current_round = rounds[-1]
-            self._browser_call(
-                action="open",
-                session_id=browser_session_id,
-                page_id=current_round.id,
-                url=current_url,
-            )
-            raw_html = _text(
+            is_chat_round = _text(current_url) in {"", self.BAIDU_CHAT_URL}
+            if is_chat_round:
+                if not chat_page_opened:
+                    self._browser_call(
+                        action="open",
+                        session_id=browser_session_id,
+                        page_id=chat_page_id,
+                        url=self.BAIDU_CHAT_URL,
+                    )
+                    chat_page_opened = True
+                self._submit_chat_question(
+                    session_id=browser_session_id,
+                    page_id=chat_page_id,
+                    question=current_round.question,
+                )
                 self._browser_call(
+                    action="wait_for",
+                    session_id=browser_session_id,
+                    page_id=chat_page_id,
+                    wait_time=self.DEFAULT_RESPONSE_WAIT_SECONDS,
+                )
+                snapshot = self._browser_call(
+                    action="evaluate",
+                    session_id=browser_session_id,
+                    page_id=chat_page_id,
+                    code=(
+                        "({"
+                        " html: document.documentElement.outerHTML || '',"
+                        " bodyText: (document.body && document.body.innerText) ? "
+                        "document.body.innerText : '',"
+                        " href: location.href || '',"
+                        " title: document.title || ''"
+                        "})"
+                    ),
+                ).get("result")
+                contract = self._extract_chat_contract(
+                    previous_snapshot=last_chat_snapshot,
+                    current_snapshot=snapshot,
+                )
+                last_chat_snapshot = _mapping(snapshot)
+            else:
+                self._browser_call(
+                    action="open",
+                    session_id=browser_session_id,
+                    page_id=current_round.id,
+                    url=current_url,
+                )
+                self._browser_call(
+                    action="wait_for",
+                    session_id=browser_session_id,
+                    page_id=current_round.id,
+                    wait_time=self.DEFAULT_RESPONSE_WAIT_SECONDS,
+                )
+                snapshot = self._browser_call(
                     action="evaluate",
                     session_id=browser_session_id,
                     page_id=current_round.id,
-                    code="document.documentElement.outerHTML",
-                ).get("result"),
-            )
-            contract = extract_answer_contract(raw_html)
+                    code=(
+                        "({"
+                        " html: document.documentElement.outerHTML || '',"
+                        " bodyText: (document.body && document.body.innerText) ? "
+                        "document.body.innerText : '',"
+                        " href: location.href || '',"
+                        " title: document.title || ''"
+                        "})"
+                    ),
+                ).get("result")
+                contract = extract_answer_contract(snapshot)
             if contract.login_state == "login-required":
                 updated_round = current_round.model_copy(
                     update={
@@ -329,8 +405,10 @@ class BaiduPageResearchService:
                 ),
                 None,
             )
+            has_structured_answer = bool(findings or _text(contract.answer_text))
             should_deepen = (
                 next_link is not None
+                and not has_structured_answer
                 and (
                     len(raw_links) > 1
                     or any(_text(item.get("kind")) == "pdf" for item in raw_links)
@@ -358,13 +436,25 @@ class BaiduPageResearchService:
                 continue
 
             if (
-                raw_links
+                has_structured_answer
                 and not should_deepen
-                and not deepened_links
                 and updated_round.round_index == 1
-                and findings
             ):
-                stop_reason = "initial-brief-complete"
+                next_round = self._build_next_round(
+                    session=session,
+                    round_index=updated_round.round_index + 1,
+                    question=self._build_followup_question(session=session, round_record=updated_round),
+                )
+                rounds.append(self._upsert_round(next_round))
+                current_url = self.BAIDU_CHAT_URL
+                continue
+
+            if (
+                has_structured_answer
+                and not should_deepen
+                and updated_round.round_index >= 2
+            ):
+                stop_reason = "followup-complete"
                 break
 
             if (
@@ -624,6 +714,167 @@ class BaiduPageResearchService:
             created_at=now,
             updated_at=now,
         )
+
+    def _build_followup_question(
+        self,
+        *,
+        session: ResearchSessionRecord,
+        round_record: ResearchSessionRoundRecord,
+    ) -> str:
+        summary = _text(round_record.response_summary or round_record.response_excerpt) or session.goal
+        if _contains_cjk(f"{session.goal} {summary}"):
+            return (
+                f"继续追问这个研究目标：{session.goal}。"
+                f"当前已知结论：{summary}。"
+                "请补充最关键的遗漏细节、最值得继续核对的来源线索，以及一个最容易误解的点。"
+            )
+        return (
+            f"Follow up on this research goal: {session.goal}. "
+            f"Current answer: {summary}. "
+            "Fill the most important missing details, the best sources to verify next, "
+            "and one common misunderstanding."
+        )
+
+    def _submit_chat_question(
+        self,
+        *,
+        session_id: str,
+        page_id: str,
+        question: str,
+    ) -> None:
+        target = self._resolve_chat_input_target(session_id=session_id, page_id=page_id)
+        payload: dict[str, Any] = {
+            "action": "type",
+            "session_id": session_id,
+            "page_id": page_id,
+            "text": question,
+            "submit": True,
+        }
+        ref = _text(target.get("ref"))
+        selector = _text(target.get("selector"))
+        if ref:
+            payload["ref"] = ref
+            payload["selector"] = ""
+        elif selector:
+            payload["selector"] = selector
+        else:
+            raise RuntimeError("Could not resolve a usable chat input target on the current page.")
+        self._browser_call(**payload)
+
+    def _resolve_chat_input_target(
+        self,
+        *,
+        session_id: str,
+        page_id: str,
+    ) -> dict[str, str]:
+        snapshot_payload = self._browser_call(
+            action="snapshot",
+            session_id=session_id,
+            page_id=page_id,
+        )
+        snapshot_text = _text(snapshot_payload.get("snapshot"))
+        ref = self._select_chat_input_ref(snapshot_text)
+        if ref:
+            return {"ref": ref}
+        fallback = self._browser_call(
+            action="evaluate",
+            session_id=session_id,
+            page_id=page_id,
+            code=(
+                "(() => {"
+                " const candidates = Array.from(document.querySelectorAll("
+                " 'textarea, input:not([type=\"hidden\"]), [contenteditable=\"true\"], "
+                " [role=\"textbox\"], [role=\"searchbox\"], [role=\"combobox\"]'"
+                " ));"
+                " const visible = candidates.filter((element) => {"
+                "   const rect = element.getBoundingClientRect();"
+                "   const style = window.getComputedStyle(element);"
+                "   const editable = !element.disabled && !element.readOnly && ("
+                "     element.isContentEditable ||"
+                "     element.tagName === 'TEXTAREA' ||"
+                "     element.tagName === 'INPUT' ||"
+                "     ['textbox','searchbox','combobox'].includes((element.getAttribute('role') || '').toLowerCase())"
+                "   );"
+                "   return editable && rect.width > 0 && rect.height > 0 &&"
+                "     style.display !== 'none' && style.visibility !== 'hidden';"
+                " });"
+                " const scored = visible.map((element, index) => {"
+                "   const text = ["
+                "     element.getAttribute('aria-label') || '',"
+                "     element.getAttribute('placeholder') || '',"
+                "     element.id || '',"
+                "     element.className || ''"
+                "   ].join(' ').toLowerCase();"
+                "   let score = 0;"
+                "   if (element.tagName === 'TEXTAREA') score += 6;"
+                "   if (element.isContentEditable) score += 6;"
+                "   if ((element.getAttribute('role') || '').toLowerCase() === 'textbox') score += 5;"
+                "   if (text.includes('chat') || text.includes('message') || text.includes('ask') || text.includes('输入') || text.includes('对话') || text.includes('消息')) score += 4;"
+                "   score -= index;"
+                "   return { element, score };"
+                " }).sort((left, right) => right.score - left.score);"
+                " const winner = scored[0] && scored[0].element;"
+                " if (!winner) return {};"
+                " winner.setAttribute('data-copaw-chat-input', '1');"
+                " return { selector: '[data-copaw-chat-input=\"1\"]' };"
+                "})()"
+            ),
+        ).get("result")
+        selector = _text(_mapping(fallback).get("selector"))
+        return {"selector": selector} if selector else {}
+
+    def _select_chat_input_ref(self, snapshot_text: str) -> str:
+        best_ref = ""
+        best_score = -1
+        for raw_line in snapshot_text.splitlines():
+            line = _text(raw_line)
+            if "[ref=" not in line:
+                continue
+            match = re.search(r"\[ref=(?P<ref>[^\]]+)\]", line)
+            if match is None:
+                continue
+            lowered = line.casefold()
+            score = 0
+            if "textbox" in lowered:
+                score += 10
+            if "searchbox" in lowered or "combobox" in lowered:
+                score += 8
+            if any(token in lowered for token in ("chat", "message", "ask", "input", "search")):
+                score += 4
+            if any(token in line for token in ("输入", "对话", "消息", "提问")):
+                score += 4
+            if "button" in lowered:
+                score -= 10
+            if score > best_score:
+                best_score = score
+                best_ref = match.group("ref")
+        return best_ref if best_score > 0 else ""
+
+    def _extract_chat_contract(
+        self,
+        *,
+        previous_snapshot: Mapping[str, Any] | None,
+        current_snapshot: Mapping[str, Any] | object,
+    ):
+        payload = _mapping(current_snapshot)
+        if not payload:
+            raw_current = str(current_snapshot or "")
+            if "<" in raw_current and ">" in raw_current:
+                payload = {"html": raw_current, "bodyText": ""}
+            else:
+                payload = {"html": "", "bodyText": raw_current}
+        previous_payload = _mapping(previous_snapshot)
+        if previous_snapshot is not None and not previous_payload:
+            raw_previous = str(previous_snapshot or "")
+            if "<" in raw_previous and ">" in raw_previous:
+                previous_payload = {"html": raw_previous, "bodyText": ""}
+            else:
+                previous_payload = {"html": "", "bodyText": raw_previous}
+        current_body = payload.get("bodyText")
+        previous_body = previous_payload.get("bodyText")
+        incremental_payload = dict(payload)
+        incremental_payload["bodyText"] = _tail_lines(previous_body, current_body) or current_body or ""
+        return extract_answer_contract(incremental_payload)
 
     def _collect_citations(
         self,

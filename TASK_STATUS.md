@@ -828,19 +828,20 @@
     - `Runtime Center` 主脑 cockpit research summary surface
     - opt-in `live smoke` 合同测试
     - research session 默认浏览器登录态持久化：`WORKING_DIR/state/research_browser_storage/<owner_agent_id>.json`
+    - `search?word=` 正式发问链、页面答案文本提取、登录误判修正、内部导航链接过滤
   - 当前未完成：
-    - 当前机器上的百度页面仍未登录；真实研究会话已能启动浏览器并进入 `waiting-login`，但还没有拿到一次“已登录状态下返回真实答案”的联网 `PASS`
-    - 这条链已具备正式对象、触发、执行、汇报、读面与登录态持久化，但还不能把它外推成“任意机器都已真实联网稳定跑通”
+    - 当前主线已拿到“已登录状态下返回真实答案”的联网 `PASS`；剩余尾巴主要是答案/链接抽取策略还能继续做得更精细，但不再是主链断点
+    - 这条链已具备正式对象、触发、执行、汇报、读面、登录态持久化与真实联网问答；仍不能外推成“所有百度页面变体都零维护”
   - 当前验收口径：
     - `L1/L2`：
       - `python -m pytest tests/state/test_research_repositories.py tests/state/test_state_store_migration.py tests/state/test_models_module_exports.py tests/research/test_baidu_page_contract.py tests/research/test_baidu_page_research_service.py tests/research/test_baidu_deepening_flow.py tests/research/test_research_report_writeback.py tests/research/test_research_knowledge_ingestion.py tests/agents/test_browser_tool_evidence.py tests/app/test_research_schedule_trigger.py tests/app/test_research_session_api.py tests/app/test_runtime_center_router_split.py tests/app/test_cron_executor.py tests/app/test_runtime_manager_stack.py tests/kernel/test_main_brain_research_followup.py tests/app/test_research_session_live_contract.py -q` -> `81 passed, 1 skipped`
       - `python -m pytest tests/app/test_industry_service_wiring.py::test_runtime_domain_builder_injects_research_session_service_into_main_brain_chat tests/app/industry_api_parts/runtime_updates.py -k "bootstrap_researcher_schedule_report_keeps_main_brain_continuity or researcher_followup_assignment_persists_execution_core_continuity_without_backlog_anchor" -q` -> `2 passed, 47 deselected`
       - `npm --prefix console test -- src/pages/RuntimeCenter/useRuntimeCenter.test.ts src/pages/RuntimeCenter/MainBrainCockpitPanel.test.tsx` -> `19 passed`
-      - `PYTHONPATH=src python -m pytest tests/research/test_baidu_page_research_service.py tests/app/test_research_session_live_contract.py tests/kernel/test_main_brain_research_followup.py -q` -> `8 passed, 1 skipped`
+      - `PYTHONPATH=src python -m pytest tests/research/test_baidu_page_contract.py tests/research/test_baidu_page_research_service.py tests/app/test_research_session_live_contract.py tests/kernel/test_main_brain_research_followup.py -q` -> `15 passed, 1 skipped`
     - `L3`：已跑 opt-in live smoke 合同；`COPAW_RUN_BAIDU_RESEARCH_LIVE_SMOKE=1 PYTHONPATH=src python -m pytest tests/app/test_research_session_live_contract.py -q -rs` -> `2 passed`
-      - 当前真实结果：浏览器 runtime 已能正常启动并打开百度页；这台机器上继续卡住的真原因是页面未登录，因此真实研究会话停在 `waiting-login`
+      - 当前真实结果：浏览器 runtime 已能正常启动并打开百度页；在当前机器登录百度后，真实 research session 已能拿到问答结果
     - `L4`：未跑
-  - 下一步验证顺序应固定为：先用当前已落盘的 research browser storage 完成一次真实百度登录，再拿一条“已登录状态下返回真实答案”的 `live smoke PASS`，再补更长的多轮/跨重启 soak
+  - 下一步验证顺序应固定为：在现有登录态回放基础上，再补更长的多轮/跨重启 soak，并继续收答案/链接抽取质量
 
 ### 3.3.1 `Symbiotic Host Runtime V1` 当前落地边界
 

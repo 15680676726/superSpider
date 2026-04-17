@@ -173,6 +173,7 @@ def test_baidu_research_session_live_contract(tmp_path: Path) -> None:
     assert result.session.status == "completed"
     assert stored_session.completed_at is not None
     assert result.stop_reason in {
+        "followup-complete",
         "initial-brief-complete",
         "enough-findings",
         "no-new-findings",
@@ -180,6 +181,7 @@ def test_baidu_research_session_live_contract(tmp_path: Path) -> None:
         "completed",
         "max-rounds",
     }
+    assert len(stored_rounds) >= 2, "Completed live Baidu research session did not run a real follow-up round."
     assert any(str(round_record.response_summary or "").strip() for round_record in stored_rounds), (
         "Completed live Baidu research session returned no round summary."
     )

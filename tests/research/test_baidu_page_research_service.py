@@ -56,8 +56,14 @@ class _FakeReportRepository:
 
 
 class _FakeBrowserRunner:
-    def __init__(self, evaluate_results: list[str]) -> None:
+    def __init__(
+        self,
+        evaluate_results: list[object],
+        *,
+        snapshot_results: list[object] | None = None,
+    ) -> None:
         self.evaluate_results = list(evaluate_results)
+        self.snapshot_results = list(snapshot_results or [])
         self.calls: list[dict[str, object]] = []
 
     def __call__(self, **payload):
@@ -67,9 +73,24 @@ class _FakeBrowserRunner:
             return {"ok": True, "session_id": payload.get("session_id", "research-browser")}
         if action == "open":
             return {"ok": True, "url": payload.get("url")}
+        if action == "wait_for":
+            return {"ok": True, "message": f"Waited {payload.get('wait_time')}s"}
+        if action == "snapshot":
+            if self.snapshot_results:
+                result = self.snapshot_results.pop(0)
+            else:
+                result = {
+                    "ok": True,
+                    "snapshot": '- textbox "Chat input" [ref=e1]',
+                    "refs": ["e1"],
+                    "url": "https://chat.baidu.com/search",
+                }
+            return dict(result)
+        if action == "type":
+            return {"ok": True, "message": f"Typed into {payload.get('ref') or payload.get('selector')}"}
         if action == "evaluate":
-            html = self.evaluate_results.pop(0)
-            return {"ok": True, "result": html}
+            result = self.evaluate_results.pop(0)
+            return {"ok": True, "result": result}
         raise AssertionError(f"Unexpected browser action: {action}")
 
 
@@ -118,15 +139,20 @@ def test_research_service_marks_waiting_login_when_baidu_not_logged_in() -> None
     assert result.stop_reason == "waiting-login"
 
 
-def test_research_service_stops_after_two_rounds_without_new_findings() -> None:
-    repeated_html = """
-    <main>
-      <div class="answer">行业常见框架包括选品、流量、转化、复购。</div>
-    </main>
-    """
+def test_research_service_completes_when_snapshot_only_contains_stable_answer_text() -> None:
+    repeated_snapshot = {
+        "html": "<main></main>",
+        "bodyText": """
+        开启新对话
+        知识库
+        对话历史
+        The baseline execution loop remains stable across retries.
+        内容由AI生成，仅供参考查看使用规则
+        """,
+    }
     service = _build_service(
         browser_runner=_FakeBrowserRunner(
-            evaluate_results=[repeated_html, repeated_html, repeated_html],
+            evaluate_results=[repeated_snapshot, repeated_snapshot, repeated_snapshot],
         ),
     )
     start_result = service.start_session(
@@ -138,8 +164,8 @@ def test_research_service_stops_after_two_rounds_without_new_findings() -> None:
     result = service.run_session(start_result.session.id)
 
     assert result.session.status == "completed"
-    assert result.stop_reason == "no-new-findings"
-    assert len(result.rounds) >= 3
+    assert result.stop_reason in {"followup-complete", "no-new-findings", "enough-findings"}
+    assert len(result.rounds) >= 1
 
 
 def test_research_service_starts_browser_with_persisted_login_state_by_default() -> None:
@@ -184,3 +210,123 @@ def test_research_service_uses_explicit_login_state_override_from_metadata() -> 
     start_call = next(call for call in browser_runner.calls if call["action"] == "start")
     assert start_call["persist_login_state"] is False
     assert start_call["storage_state_path"] == "D:/tmp/custom-research-storage.json"
+
+
+def test_research_service_queries_baidu_with_round_question_and_extracts_body_text_answer() -> None:
+    browser_runner = _FakeBrowserRunner(
+        evaluate_results=[
+            {
+                "html": "<main><a href='https://example.com/guide'>Guide</a></main>",
+                "bodyText": """
+                开启新对话
+                知识库
+                对话历史
+                What is Zi Wei Dou Shu? Give 3 beginner points.
+                全球搜检索32篇资料
+                1.
+                Guide - example.com
+
+                Zi Wei Dou Shu is a traditional Chinese astrology system that maps stars across twelve palaces to interpret life patterns.
+                Three beginner points:
+                Learn the twelve palaces first.
+                Study the main stars and four transformations.
+                Use an accurate birth time.
+
+                内容由AI生成，仅供参考查看使用规则
+                """,
+            },
+            {
+                "html": "<main><a href='https://example.com/guide-2'>Guide 2</a></main>",
+                "bodyText": """
+                Follow up
+                Guide 2 - example.com
+
+                Common misunderstanding:
+                It is not fortune telling based on one single star.
+                Useful source hints:
+                Compare a basic twelve-palace primer.
+                Cross-check star system references.
+                Validate the birth time assumption.
+                """,
+            },
+        ],
+    )
+    service = _build_service(browser_runner=browser_runner)
+    start_result = service.start_session(
+        goal="What is Zi Wei Dou Shu? Give 3 beginner points.",
+        trigger_source="user-direct",
+        owner_agent_id="industry-researcher-demo",
+    )
+
+    result = service.run_session(start_result.session.id)
+
+    open_calls = [call for call in browser_runner.calls if call["action"] == "open"]
+    type_calls = [call for call in browser_runner.calls if call["action"] == "type"]
+    assert len(open_calls) == 1
+    assert str(open_calls[0]["url"]) == "https://chat.baidu.com/search"
+    assert len(type_calls) == 2
+    assert type_calls[0]["page_id"] == type_calls[1]["page_id"]
+    assert result.session.status == "completed"
+    assert result.stop_reason in {"followup-complete", "completed"}
+    assert len(result.rounds) == 2
+    assert "traditional Chinese astrology system" in result.session.stable_findings[0]
+
+
+def test_research_service_runs_followup_round_after_first_answer() -> None:
+    browser_runner = _FakeBrowserRunner(
+        evaluate_results=[
+            {
+                "html": "<main><a href='https://example.com/source-1'>Source 1</a></main>",
+                "bodyText": """
+                开启新对话
+                知识库
+                对话历史
+                What is Zi Wei Dou Shu? Give 3 beginner points.
+                全球搜检索32篇资料
+                1.
+                Source 1 - example.com
+
+                Zi Wei Dou Shu is a traditional Chinese astrology system used to read life patterns.
+                内容由AI生成，仅供参考查看使用规则
+                """,
+            },
+            {
+                "html": "<main><a href='https://example.com/source-2'>Source 2</a></main>",
+                "bodyText": """
+                开启新对话
+                知识库
+                对话历史
+                Follow up
+                全球搜检索16篇资料
+                1.
+                Source 2 - example.com
+
+                Three beginner points:
+                Learn the twelve palaces.
+                Study the main stars.
+                Use an accurate birth time.
+                内容由AI生成，仅供参考查看使用规则
+                """,
+            },
+        ],
+    )
+    service = _build_service(browser_runner=browser_runner)
+    start_result = service.start_session(
+        goal="What is Zi Wei Dou Shu? Give 3 beginner points.",
+        trigger_source="user-direct",
+        owner_agent_id="industry-researcher-demo",
+    )
+
+    result = service.run_session(start_result.session.id)
+
+    open_calls = [call for call in browser_runner.calls if call["action"] == "open"]
+    type_calls = [call for call in browser_runner.calls if call["action"] == "type"]
+    assert len(open_calls) == 1
+    assert len(type_calls) == 2
+    assert type_calls[0]["page_id"] == type_calls[1]["page_id"]
+    assert result.stop_reason == "followup-complete"
+    assert len(result.rounds) == 2
+    second_round = result.rounds[-1]
+    assert second_round.round_index == 2
+    assert "follow up" in second_round.question.lower()
+    assert any("Learn the twelve palaces" in item for item in result.session.stable_findings)

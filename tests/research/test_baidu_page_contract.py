@@ -13,6 +13,20 @@ def test_baidu_page_contract_detects_logged_out_state() -> None:
     assert "登录" in result.reason
 
 
+def test_baidu_page_contract_does_not_mark_authenticated_home_as_login_required() -> None:
+    body_text = """
+    开启新对话
+    知识库
+    对话历史
+    Your current account is not eligible for Antigravity. Try signing in with an
+    内容由AI生成，仅供参考查看使用规则
+    """
+
+    result = detect_login_state(body_text)
+
+    assert result.state == "ready"
+
+
 def test_baidu_page_contract_extracts_answer_and_links() -> None:
     html = """
     <main>
@@ -33,3 +47,48 @@ def test_baidu_page_contract_extracts_answer_and_links() -> None:
         "https://example.com/report.pdf",
     ]
     assert result.links[1].kind == "pdf"
+
+
+def test_baidu_page_contract_filters_internal_navigation_links() -> None:
+    html = """
+    <main>
+      <div class="answer">A stable answer.</div>
+      <a href="//www.baidu.com/my/index">个人中心</a>
+      <a href="//passport.baidu.com">账号设置</a>
+      <a href="https://example.com/source">Source</a>
+    </main>
+    """
+
+    result = extract_answer_contract(html)
+
+    assert [item.url for item in result.links] == ["https://example.com/source"]
+
+
+def test_baidu_page_contract_extracts_answer_from_body_text_snapshot() -> None:
+    snapshot = {
+        "html": "<main><a href='https://example.com/guide'>Guide</a></main>",
+        "bodyText": """
+        开启新对话
+        知识库
+        对话历史
+        What is Zi Wei Dou Shu? Give 3 beginner points.
+        全球搜检索32篇资料
+        1.
+        Guide - example.com
+
+        Zi Wei Dou Shu is a traditional Chinese astrology system that maps stars across twelve palaces to interpret life patterns.
+        Three beginner points:
+        Learn the twelve palaces first.
+        Study the main stars and four transformations.
+        Use an accurate birth time.
+
+        内容由AI生成，仅供参考查看使用规则
+        """,
+    }
+
+    result = extract_answer_contract(snapshot)
+
+    assert result.login_state == "ready"
+    assert "traditional Chinese astrology system" in result.answer_text
+    assert "Learn the twelve palaces first." in result.answer_text
+    assert result.links[0].url == "https://example.com/guide"
