@@ -605,6 +605,28 @@ class BaiduPageResearchService:
             industry_document_id=industry_document_id,
         )
 
+    def collect_provider_round_result(
+        self,
+        *,
+        snapshot: Mapping[str, Any] | object,
+        current_url: str,
+        previous_snapshot: Mapping[str, Any] | None = None,
+    ):
+        payload = _mapping(snapshot)
+        if not payload:
+            raw_snapshot = str(snapshot or "")
+            payload = {
+                "html": raw_snapshot if "<" in raw_snapshot and ">" in raw_snapshot else "",
+                "bodyText": "" if "<" in raw_snapshot and ">" in raw_snapshot else raw_snapshot,
+            }
+        payload.setdefault("href", current_url)
+        if _text(payload.get("href")) in {"", self.BAIDU_CHAT_URL}:
+            return self._extract_chat_contract(
+                previous_snapshot=previous_snapshot,
+                current_snapshot=payload,
+            )
+        return extract_answer_contract(payload)
+
     def _ensure_browser_session(self, session: ResearchSessionRecord) -> str:
         browser_session_id = _text(session.browser_session_id) or session.id
         payload = self._browser_call(

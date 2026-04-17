@@ -330,3 +330,31 @@ def test_research_service_runs_followup_round_after_first_answer() -> None:
     assert second_round.round_index == 2
     assert "follow up" in second_round.question.lower()
     assert any("Learn the twelve palaces" in item for item in result.session.stable_findings)
+
+
+def test_research_service_exposes_provider_facing_round_collection_entry() -> None:
+    service = _build_service(
+        browser_runner=_FakeBrowserRunner(
+            evaluate_results=[],
+        ),
+    )
+    snapshot = {
+        "html": "<main><a href='https://example.com/guide'>Guide</a></main>",
+        "bodyText": """
+        What is Zi Wei Dou Shu?
+        Zi Wei Dou Shu is a traditional Chinese astrology system that maps stars across twelve palaces.
+        """,
+        "href": "https://chat.baidu.com/search",
+        "title": "Baidu Chat",
+    }
+
+    result = service.collect_provider_round_result(
+        snapshot=snapshot,
+        current_url=BaiduPageResearchService.BAIDU_CHAT_URL,
+    )
+
+    assert result.login_state == "ready"
+    assert result.adapter_result is not None
+    assert result.adapter_result.collection_action == "interact"
+    assert result.adapter_result.status == "succeeded"
+    assert result.adapter_result.findings[0].summary.startswith("Zi Wei Dou Shu is")

@@ -1,11 +1,19 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+from hashlib import sha1
 from html import unescape
 import re
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping
 
-from .models import BaiduPageContractResult, LoginStateResult, ResearchLink
+from .models import (
+    BaiduAdapterResult,
+    BaiduCollectedSource,
+    BaiduFinding,
+    BaiduPageContractResult,
+    LoginStateResult,
+    ResearchLink,
+)
 
 _TAG_RE = re.compile(r"<[^>]+>")
 _WHITESPACE_RE = re.compile(r"\s+")
@@ -106,6 +114,16 @@ def _mapping(value: object | None) -> dict[str, Any]:
         if isinstance(payload, dict):
             return dict(payload)
     return {}
+
+
+def _text(value: object | None) -> str:
+    return str(value or "").strip()
+
+
+def _stable_id(prefix: str, *parts: object) -> str:
+    normalized = "|".join(_text(part) for part in parts if _text(part))
+    digest = sha1(normalized.encode("utf-8")).hexdigest()[:16]
+    return f"{prefix}:{digest}"
 
 
 def detect_login_state(page_text: str) -> LoginStateResult:
@@ -215,6 +233,71 @@ def _extract_answer_from_text(raw_text: object) -> str:
     return "\n\n".join(answer_lines).strip()
 
 
+def _collection_action(page_href: str) -> Literal["read", "interact"]:
+    if "chat.baidu.com/search" in _text(page_href).lower():
+        return "interact"
+    return "read"
+
+
+def _build_adapter_result(
+    *,
+    payload: Mapping[str, Any],
+    login_state: str,
+    answer_text: str,
+    links: list[ResearchLink],
+) -> BaiduAdapterResult:
+    page_href = _text(payload.get("href"))
+    collected_sources: list[BaiduCollectedSource] = []
+    source_ids: list[str] = []
+    for link in links:
+        source_id = _stable_id("baidu-source", link.url, link.kind)
+        source_ids.append(source_id)
+        collected_sources.append(
+            BaiduCollectedSource(
+                source_id=source_id,
+                source_kind=link.kind or "link",
+                collection_action="read",
+                source_ref=link.url,
+                normalized_ref=link.url,
+                title=link.label,
+                snippet=answer_text[:240],
+                metadata={"provider": "baidu-page"},
+            )
+        )
+    summary = answer_text.splitlines()[0].strip() if answer_text.strip() else ""
+    findings: list[BaiduFinding] = []
+    if summary:
+        findings.append(
+            BaiduFinding(
+                finding_id=_stable_id("baidu-finding", summary, page_href),
+                summary=summary,
+                supporting_source_ids=source_ids,
+                metadata={"provider": "baidu-page"},
+            )
+        )
+    if login_state == "login-required":
+        status: Literal["succeeded", "partial", "blocked"] = "blocked"
+    elif summary or collected_sources:
+        status = "succeeded"
+    else:
+        status = "partial"
+    return BaiduAdapterResult(
+        adapter_kind="baidu_page",
+        collection_action=_collection_action(page_href),
+        status=status,
+        summary=summary,
+        collected_sources=collected_sources,
+        findings=findings,
+        gaps=[] if summary or collected_sources else ["No normalized answer or source was extracted."],
+        metadata={
+            "provider": "baidu-page",
+            "login_state": login_state,
+            "page_href": page_href,
+            "page_title": _text(payload.get("title")),
+        },
+    )
+
+
 def extract_answer_contract(snapshot_text: str | Mapping[str, object]) -> BaiduPageContractResult:
     payload = _mapping(snapshot_text)
     raw_html = str(payload.get("html") or snapshot_text or "")
@@ -240,6 +323,12 @@ def extract_answer_contract(snapshot_text: str | Mapping[str, object]) -> BaiduP
         login_state=login_state,
         answer_text=answer_text,
         links=links,
+        adapter_result=_build_adapter_result(
+            payload=payload,
+            login_state=login_state,
+            answer_text=answer_text,
+            links=links,
+        ),
     )
 
 

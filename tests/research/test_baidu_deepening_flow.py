@@ -30,14 +30,15 @@ class _FakeBrowserRunner:
         self._html_queue = [
             """
             <main>
-              <div class="answer">行业通用框架包括选品、投放与复盘。</div>
-              <a href="https://example.com/guide">深挖指南</a>
-              <a href="https://example.com/report.pdf">白皮书 PDF</a>
+              <a href="https://example.com/guide">Deep guide</a>
+              <a href="https://example.com/report.pdf">Whitepaper PDF</a>
             </main>
             """,
             """
             <main>
-              <div class="answer">行业通用框架补充了履约与客服协同。</div>
+              <div class="answer">
+                The framework adds retention and customer-service collaboration details.
+              </div>
             </main>
             """,
         ]
@@ -49,6 +50,17 @@ class _FakeBrowserRunner:
             return {"ok": True, "session_id": payload.get("session_id", "research-browser")}
         if action == "open":
             return {"ok": True, "url": payload.get("url")}
+        if action == "wait_for":
+            return {"ok": True, "message": f"Waited {payload.get('wait_time')}s"}
+        if action == "snapshot":
+            return {
+                "ok": True,
+                "snapshot": '- textbox "Chat input" [ref=e1]',
+                "refs": ["e1"],
+                "url": str(payload.get("page_id") or ""),
+            }
+        if action == "type":
+            return {"ok": True, "message": f"Typed into {payload.get('ref') or payload.get('selector')}"}
         if action == "evaluate":
             return {"ok": True, "result": self._html_queue.pop(0)}
         raise AssertionError(f"Unexpected browser action: {action}")
@@ -62,7 +74,7 @@ def test_research_service_uses_browser_session_to_open_followup_link() -> None:
         browser_download_resolver=lambda **_: [],
     )
     start_result = service.start_session(
-        goal="梳理电商平台入门知识结构",
+        goal="Organize an ecommerce research scaffold",
         trigger_source="user-direct",
         owner_agent_id="industry-researcher-demo",
     )
@@ -89,7 +101,7 @@ def test_research_service_records_downloaded_pdf_as_artifact() -> None:
         ],
     )
     start_result = service.start_session(
-        goal="梳理电商平台入门知识结构",
+        goal="Organize an ecommerce research scaffold",
         trigger_source="user-direct",
         owner_agent_id="industry-researcher-demo",
     )

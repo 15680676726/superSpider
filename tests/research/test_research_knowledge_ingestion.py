@@ -4,6 +4,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from copaw.research import BaiduPageResearchService
+from copaw.state import ResearchSessionRecord, ResearchSessionRoundRecord, SQLiteStateStore
+from copaw.state.repositories import SqliteResearchSessionRepository
 
 
 @dataclass
@@ -63,9 +65,16 @@ class _FakeBrowserRunner:
             """
             <main>
               <div class="answer">
-                当前项目应先补齐商品库标签体系。
-                行业通用做法是按选品、投放、转化、复购分层复盘。
-                该回答暂无来源佐证。
+                Start with a product taxonomy before launch work.
+                A reusable framework groups work into selection, acquisition, conversion, and repeat purchase.
+                The first answer still needs stronger source support.
+              </div>
+            </main>
+            """,
+            """
+            <main>
+              <div class="answer">
+                Normalize the taxonomy and campaign goal semantics before optimizing conversion and retention.
               </div>
             </main>
             """,
@@ -76,6 +85,17 @@ class _FakeBrowserRunner:
             return {"ok": True, "session_id": payload.get("session_id", "research-browser")}
         if payload["action"] == "open":
             return {"ok": True, "url": payload.get("url")}
+        if payload["action"] == "wait_for":
+            return {"ok": True, "message": f"Waited {payload.get('wait_time')}s"}
+        if payload["action"] == "snapshot":
+            return {
+                "ok": True,
+                "snapshot": '- textbox "Chat input" [ref=e1]',
+                "refs": ["e1"],
+                "url": str(payload.get("page_id") or ""),
+            }
+        if payload["action"] == "type":
+            return {"ok": True, "message": f"Typed into {payload.get('ref') or payload.get('selector')}"}
         if payload["action"] == "evaluate":
             return {"ok": True, "result": self._html_queue.pop(0)}
         raise AssertionError(payload["action"])
@@ -90,7 +110,7 @@ def test_research_result_routes_project_specific_findings_to_work_context_memory
         work_context_service=_FakeWorkContextService(),
     )
     start_result = service.start_session(
-        goal="梳理电商平台入门知识结构",
+        goal="Organize an ecommerce research scaffold",
         trigger_source="user-direct",
         owner_agent_id="industry-researcher-demo",
     )
@@ -111,7 +131,7 @@ def test_research_result_routes_stable_reusable_findings_to_industry_knowledge()
         work_context_service=_FakeWorkContextService(),
     )
     start_result = service.start_session(
-        goal="梳理电商平台入门知识结构",
+        goal="Organize an ecommerce research scaffold",
         trigger_source="user-direct",
         owner_agent_id="industry-researcher-demo",
         industry_instance_id="industry-1",
@@ -123,3 +143,64 @@ def test_research_result_routes_stable_reusable_findings_to_industry_knowledge()
     assert result.industry_document_id is not None
     assert "industry-1" in result.industry_document_id
     assert any(call["scope_type"] == "industry" for call in knowledge_service.calls)
+
+
+def test_research_repository_round_trips_session_brief_and_round_sources(tmp_path) -> None:
+    store = SQLiteStateStore(tmp_path / "state.db")
+    repository = SqliteResearchSessionRepository(store)
+
+    session = ResearchSessionRecord(
+        id="research-session-1",
+        provider="baidu-page",
+        industry_instance_id="industry-1",
+        work_context_id="ctx-1",
+        owner_agent_id="industry-researcher-demo",
+        supervisor_agent_id="main-brain",
+        trigger_source="user-direct",
+        goal="Map the ecommerce onboarding operating model",
+        stable_findings=["Stable finding"],
+        brief={
+            "question": "What should the first operator playbook include?",
+            "why_needed": "Need a reusable onboarding baseline.",
+            "done_when": "We have the first reusable research summary.",
+            "writeback_target": {
+                "scope_type": "work_context",
+                "scope_id": "ctx-1",
+            },
+        },
+        metadata={"operator_note": "keep-this"},
+    )
+    round_record = ResearchSessionRoundRecord(
+        id="research-session-1:round:1",
+        session_id=session.id,
+        round_index=1,
+        question="What are the key onboarding steps?",
+        new_findings=["Round-specific finding"],
+        sources=[
+            {
+                "source_id": "source-1",
+                "source_kind": "link",
+                "collection_action": "read",
+                "source_ref": "https://example.com/guide",
+                "normalized_ref": "https://example.com/guide",
+                "title": "Example onboarding guide",
+                "snippet": "A reusable operating checklist.",
+                "metadata": {"evidence_id": "evidence-1"},
+            },
+        ],
+        metadata={"adapter_kind": "baidu-page"},
+    )
+
+    repository.upsert_research_session(session)
+    repository.upsert_research_round(round_record)
+
+    restored_session = repository.get_research_session(session.id)
+    restored_rounds = repository.list_research_rounds(session_id=session.id)
+
+    assert restored_session is not None
+    assert restored_session.brief["question"] == session.brief["question"]
+    assert restored_session.metadata["operator_note"] == "keep-this"
+    assert len(restored_rounds) == 1
+    assert restored_rounds[0].sources[0]["source_ref"] == "https://example.com/guide"
+    assert restored_rounds[0].sources[0]["metadata"]["evidence_id"] == "evidence-1"
+    assert restored_rounds[0].metadata["adapter_kind"] == "baidu-page"

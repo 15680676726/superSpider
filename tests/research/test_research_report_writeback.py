@@ -50,8 +50,15 @@ class _FakeBrowserRunner:
         self._html_queue = [
             """
             <main>
-              <div class="answer">行业通用框架包括选品、投放与复盘。</div>
-              <a href="https://example.com/guide">深挖指南</a>
+              <div class="answer">The framework includes selection, delivery, and review loops.</div>
+              <a href="https://example.com/guide">Deep guide</a>
+            </main>
+            """,
+            """
+            <main>
+              <div class="answer">
+                Add audience segmentation, key metrics, and one common misunderstanding.
+              </div>
             </main>
             """,
         ]
@@ -61,6 +68,17 @@ class _FakeBrowserRunner:
             return {"ok": True, "session_id": payload.get("session_id", "research-browser")}
         if payload["action"] == "open":
             return {"ok": True, "url": payload.get("url")}
+        if payload["action"] == "wait_for":
+            return {"ok": True, "message": f"Waited {payload.get('wait_time')}s"}
+        if payload["action"] == "snapshot":
+            return {
+                "ok": True,
+                "snapshot": '- textbox "Chat input" [ref=e1]',
+                "refs": ["e1"],
+                "url": str(payload.get("page_id") or ""),
+            }
+        if payload["action"] == "type":
+            return {"ok": True, "message": f"Typed into {payload.get('ref') or payload.get('selector')}"}
         if payload["action"] == "evaluate":
             return {"ok": True, "result": self._html_queue.pop(0)}
         raise AssertionError(payload["action"])
@@ -74,7 +92,7 @@ def test_completed_research_session_generates_researcher_report() -> None:
         report_repository=report_repo,
     )
     start_result = service.start_session(
-        goal="梳理电商平台入门知识结构",
+        goal="Organize an ecommerce research scaffold",
         trigger_source="user-direct",
         owner_agent_id="industry-researcher-demo",
     )
@@ -94,7 +112,7 @@ def test_research_report_includes_question_excerpt_links_and_provider() -> None:
         report_repository=report_repo,
     )
     start_result = service.start_session(
-        goal="梳理电商平台入门知识结构",
+        goal="Organize an ecommerce research scaffold",
         trigger_source="user-direct",
         owner_agent_id="industry-researcher-demo",
     )
@@ -106,4 +124,4 @@ def test_research_report_includes_question_excerpt_links_and_provider() -> None:
     assert report is not None
     assert report.metadata["provider"] == "baidu-page"
     assert report.metadata["citations"]
-    assert report.metadata["question_excerpt"].startswith("梳理电商平台")
+    assert report.metadata["question_excerpt"].startswith("Organize an ecommerce")

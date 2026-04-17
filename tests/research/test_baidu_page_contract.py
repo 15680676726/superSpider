@@ -92,3 +92,41 @@ def test_baidu_page_contract_extracts_answer_from_body_text_snapshot() -> None:
     assert "traditional Chinese astrology system" in result.answer_text
     assert "Learn the twelve palaces first." in result.answer_text
     assert result.links[0].url == "https://example.com/guide"
+
+
+def test_baidu_page_contract_normalizes_provider_result_for_chat_snapshot() -> None:
+    snapshot = {
+        "html": "<main><a href='https://example.com/guide'>Guide</a></main>",
+        "bodyText": """
+        What is Zi Wei Dou Shu?
+        Zi Wei Dou Shu is a traditional Chinese astrology system that maps stars across twelve palaces.
+        """,
+        "href": "https://chat.baidu.com/search",
+        "title": "Baidu Chat",
+    }
+
+    result = extract_answer_contract(snapshot)
+
+    assert result.adapter_result is not None
+    assert result.adapter_result.adapter_kind == "baidu_page"
+    assert result.adapter_result.collection_action == "interact"
+    assert result.adapter_result.status == "succeeded"
+    assert result.adapter_result.summary.startswith("Zi Wei Dou Shu is")
+    assert result.adapter_result.findings[0].summary.startswith("Zi Wei Dou Shu is")
+    assert result.adapter_result.collected_sources[0].source_ref == "https://example.com/guide"
+    assert result.adapter_result.collected_sources[0].source_kind == "link"
+
+
+def test_baidu_page_contract_marks_login_required_as_blocked_adapter_result() -> None:
+    snapshot = {
+        "html": "<main><button>login</button></main>",
+        "bodyText": "login required",
+        "href": "https://chat.baidu.com/search",
+    }
+
+    result = extract_answer_contract(snapshot)
+
+    assert result.adapter_result is not None
+    assert result.adapter_result.status == "blocked"
+    assert result.adapter_result.collection_action == "interact"
+    assert result.adapter_result.metadata["login_state"] == "login-required"

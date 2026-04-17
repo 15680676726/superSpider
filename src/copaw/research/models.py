@@ -15,6 +15,39 @@ class ResearchLink:
 
 
 @dataclass(slots=True)
+class BaiduCollectedSource:
+    source_id: str
+    source_kind: str
+    collection_action: Literal["read", "interact"] = "read"
+    source_ref: str = ""
+    normalized_ref: str = ""
+    title: str = ""
+    snippet: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class BaiduFinding:
+    finding_id: str
+    finding_type: str = "answer"
+    summary: str = ""
+    supporting_source_ids: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class BaiduAdapterResult:
+    adapter_kind: str = "baidu_page"
+    collection_action: Literal["read", "interact"] = "read"
+    status: Literal["succeeded", "partial", "blocked"] = "partial"
+    summary: str = ""
+    collected_sources: list[BaiduCollectedSource] = field(default_factory=list)
+    findings: list[BaiduFinding] = field(default_factory=list)
+    gaps: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class LoginStateResult:
     state: Literal["ready", "login-required", "unknown"]
     reason: str = ""
@@ -25,6 +58,7 @@ class BaiduPageContractResult:
     login_state: Literal["ready", "login-required", "unknown"] = "unknown"
     answer_text: str = ""
     links: list[ResearchLink] = field(default_factory=list)
+    adapter_result: BaiduAdapterResult | None = None
 
 
 @dataclass(slots=True)
@@ -40,7 +74,10 @@ class ResearchSessionRunResult:
 
 
 __all__ = [
+    "BaiduAdapterResult",
+    "BaiduCollectedSource",
     "BaiduPageContractResult",
+    "BaiduFinding",
     "LoginStateResult",
     "ResearchLink",
     "ResearchSessionRunResult",
