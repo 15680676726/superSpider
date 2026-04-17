@@ -270,6 +270,7 @@ def _build_adapter_result(
         findings.append(
             BaiduFinding(
                 finding_id=_stable_id("baidu-finding", summary, page_href),
+                finding_type="answer",
                 summary=summary,
                 supporting_source_ids=source_ids,
                 metadata={"provider": "baidu-page"},

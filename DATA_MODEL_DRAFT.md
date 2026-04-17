@@ -1420,16 +1420,16 @@ Windows-first 约束：
 
 - `src/copaw/state/models_research.py` 已正式定义 `ResearchSessionRecord / ResearchSessionRoundRecord`
 - `SqliteResearchSessionRepository` 已成为当前 research session 的正式仓储实现；session 与 round 都走同一份 SQLite state truth，而不是散落在临时浏览器状态里
-- `BaiduPageResearchService` 已落地 `start_session / run_session / summarize_session` 主链；heavy path 当前会在 `summarize_session()` 内把完成后的研究结果写成 `AgentReportRecord`，并把摘要继续写入 `work_context / industry` 知识面
+- `BaiduPageResearchService` 已落地 `start_session / run_session / summarize_session / collect_via_baidu_page` 主链；heavy path 当前会在 `summarize_session()` 内把完成后的研究结果写成 `AgentReportRecord`，并把摘要继续写入 `work_context / industry` 知识面，同时通过共享 `ResearchAdapterResult` provider seam 对接 universal `source_collection` frontdoor
 - `GET /runtime-center/research` 已作为 Runtime Center 的正式研究读面落地；前端主脑 cockpit 当前消费的是这条 read surface，而不是 chat fallback 文本
 - 主脑 `user-direct` 触发前门与 schedule `monitoring brief` 自动触发前门现已落地；`ResearchSession*` 不再只是研究过程真相，也已成为正式研究触发链的运行对象
 - `ResearchSessionRecord.brief` 现已成为 session-level 正式 projection；它承载主脑或执行位写出的 `ResearchBrief` 摘要，而不是再把 research brief 只塞在 prompt 或临时 request 上下文里
 - `ResearchSessionRoundRecord.sources` 现已成为 round-level 正式 projection；它承载本轮 `CollectedSource` 列表，供 Runtime Center、knowledge writeback 与后续 recall 复用
 - 当前已存在一层正式 `source_collection` 编排层：typed contracts 包括 `ResearchBrief / CollectedSource / ResearchFinding / ResearchAdapterResult`；它们复用既有 `ResearchSessionRecord / ResearchSessionRoundRecord / EvidenceRecord`，不单独再造第二套 research runtime truth
 - runtime bootstrap 当前注入的是 `SourceCollectionFrontdoorService`；它把 `user-direct / main-brain-followup / monitoring / agent-entry` 收口到同一前门，再按 `light / heavy` 分流到 inline collection 或 `researcher` heavy path
-- 当前 writeback 边界要写死：light inline collection 已正式持久化 `ResearchSessionRecord.brief + ResearchSessionRoundRecord.sources` 并进入 Runtime Center 研究读面；`findings / gaps / conflicts` 当前仍主要通过 `stable_findings / open_questions / metadata` 聚合投影，而不是已经升成独立 persisted fields。与此同时，light path 还没有在 live frontdoor 上自动把 report / knowledge / graph writeback 全量应用，也还没有统一新写 dedicated `EvidenceRecord`。`StateKnowledgeService.ingest_research_session(...)` 与 `KnowledgeWritebackService.build_research_session_writeback(...)` 当前是正式可复用 builder，而不是 light path 默认自动 owner
-- phase-1 adapters 当前正式落地为 `search / web_page / github / artifact`；但当前 light adapters 仍主要是 metadata-backed 的 typed adapters，真实外部多轮采集 owner 仍是 heavy `BaiduPageResearchService`。稳定本体分类不是 source family，而是 collection actions：`discover / read / interact / capture`
-- 当前剩余边界：live smoke 合同已落地，但真实联网稳定性仍受浏览器运行时与外部站点状态影响；不得把现有 `L3` 外推成所有环境都已稳定通过，更不能把 `L3` 写成 `L4`
+- 当前 writeback 边界要写死：light inline collection 现已正式持久化 `ResearchSessionRecord.brief / conflicts / writeback_truth + ResearchSessionRoundRecord.sources / findings / conflicts / gaps / writeback_truth` 并进入 Runtime Center 研究读面；light path 现在也会在 live frontdoor 上自动应用 report / knowledge / graph writeback，并统一新写 dedicated `EvidenceRecord`。`StateKnowledgeService.ingest_research_session(...)` 与 `KnowledgeWritebackService.build_research_session_writeback(...)` 当前已成为 heavy/light 共用 builder
+- phase-1 adapters 当前正式落地为 `search / web_page / github / artifact`，并已支持 live single-source collection；真实外部多轮采集默认仍由 heavy `BaiduPageResearchService` 承接，但它已经通过共享 provider seam 被收进 universal `source_collection` frontdoor。稳定本体分类不是 source family，而是 collection actions：`discover / read / interact / capture`
+- 当前验证边界：light-path real smoke 已在正式 `SourceCollectionFrontdoorService + SQLiteStateStore + EvidenceLedger + StateKnowledgeService + KnowledgeWritebackService` 组合上跑通，light-path selected-scope `L4` 也已在连续 `3` 个 cycle、跨 repositories/services 重建的 live soak 中通过；但这仍不等于“所有外部站点 / 所有网络环境”都已经永久稳定
 
 ---
 

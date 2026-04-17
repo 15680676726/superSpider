@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from copaw.app.runtime_bootstrap_domains import SourceCollectionFrontdoorService
+from copaw.evidence import EvidenceLedger
 from copaw.state import ResearchSessionRecord, SQLiteStateStore
 from copaw.state.repositories import SqliteResearchSessionRepository
 
@@ -11,6 +12,71 @@ from copaw.state.repositories import SqliteResearchSessionRepository
 class _UnusedHeavyResearchService:
     def start_session(self, **kwargs):
         raise AssertionError(f"heavy path should not be used: {kwargs}")
+
+
+class _StoredReport:
+    def __init__(self, report_id: str, metadata: dict[str, object], evidence_ids: list[str]):
+        self.id = report_id
+        self.metadata = metadata
+        self.evidence_ids = evidence_ids
+
+
+class _FakeReportRepository:
+    def __init__(self) -> None:
+        self.reports: dict[str, _StoredReport] = {}
+
+    def upsert_report(self, report):
+        stored = _StoredReport(
+            report_id=report.id,
+            metadata=dict(report.metadata),
+            evidence_ids=list(report.evidence_ids),
+        )
+        self.reports[stored.id] = stored
+        return report
+
+
+class _FakeKnowledgeService:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def ingest_research_session(self, *, session, rounds):
+        self.calls.append(
+            {
+                "session_id": session.id,
+                "round_ids": [round_record.id for round_record in rounds],
+            }
+        )
+        return {
+            "work_context_chunk_ids": ["chunk-ctx-1"],
+            "industry_document_id": "memory:industry:industry-1",
+            "source_refs": ["https://example.com/pricing"],
+        }
+
+
+class _FakeKnowledgeWritebackService:
+    def __init__(self) -> None:
+        self.build_calls: list[dict[str, object]] = []
+        self.applied_changes: list[object] = []
+
+    def build_research_session_writeback(self, *, session, rounds):
+        change = {
+            "session_id": session.id,
+            "round_ids": [round_record.id for round_record in rounds],
+        }
+        self.build_calls.append(change)
+        return change
+
+    def summarize_change(self, change):
+        return {
+            "scope_type": "work_context",
+            "scope_id": "ctx-1",
+            "node_ids": ["node-1"],
+            "relation_ids": ["relation-1"],
+        }
+
+    def apply_change(self, change):
+        self.applied_changes.append(change)
+        return self.summarize_change(change)
 
 
 def test_light_frontdoor_persists_formal_brief_and_round_sources(tmp_path) -> None:
@@ -49,6 +115,83 @@ def test_light_frontdoor_persists_formal_brief_and_round_sources(tmp_path) -> No
     assert stored_session.brief["question"] == "官网定价是多少"
     assert stored_session.brief["writeback_target"]["scope_id"] == "ctx-1"
     assert stored_round.sources[0]["source_ref"] == "https://example.com/pricing"
+
+
+def test_light_frontdoor_writes_dedicated_evidence_and_formal_writeback_truth(
+    tmp_path,
+) -> None:
+    repository = SqliteResearchSessionRepository(SQLiteStateStore(tmp_path / "state.db"))
+    evidence_ledger = EvidenceLedger(tmp_path / "evidence.sqlite3")
+    report_repository = _FakeReportRepository()
+    knowledge_service = _FakeKnowledgeService()
+    knowledge_writeback_service = _FakeKnowledgeWritebackService()
+    service = SourceCollectionFrontdoorService(
+        heavy_research_service=_UnusedHeavyResearchService(),
+        research_session_repository=repository,
+        report_repository=report_repository,
+        evidence_ledger=evidence_ledger,
+        knowledge_service=knowledge_service,
+        knowledge_writeback_service=knowledge_writeback_service,
+    )
+
+    result = service.run_source_collection_frontdoor(
+        goal="查官网定价",
+        question="官网定价是多少",
+        why_needed="主脑要做价格对比",
+        done_when="拿到官网价格和来源",
+        trigger_source="agent-entry",
+        owner_agent_id="writer-agent",
+        supervisor_agent_id="main-brain",
+        industry_instance_id="industry-1",
+        work_context_id="ctx-1",
+        collection_mode_hint="light",
+        requested_sources=["web_page"],
+        writeback_target={"scope_type": "work_context", "scope_id": "ctx-1"},
+        metadata={
+            "entry_surface": "test",
+            "web_page": {
+                "url": "https://example.com/pricing",
+                "title": "Pricing",
+                "summary": "基础套餐 299 元 / 月",
+            },
+        },
+    )
+
+    stored_session = repository.get_research_session(result.session_id)
+    stored_round = repository.list_research_rounds(session_id=result.session_id)[0]
+    evidence_records = evidence_ledger.list_by_task(result.session_id)
+
+    assert stored_session is not None
+    assert stored_round.evidence_ids
+    assert len(evidence_records) == 1
+    assert evidence_records[0].metadata["research_session_id"] == result.session_id
+    assert stored_round.sources[0]["evidence_id"] == evidence_records[0].id
+    assert stored_round.findings[0]["summary"] == "基础套餐 299 元 / 月"
+    assert stored_session.writeback_truth == {
+        "status": "written",
+        "scope_type": "work_context",
+        "scope_id": "ctx-1",
+        "report_id": stored_session.final_report_id,
+        "work_context_chunk_ids": ["chunk-ctx-1"],
+        "industry_document_id": "memory:industry:industry-1",
+        "node_ids": ["node-1"],
+        "relation_ids": ["relation-1"],
+    }
+    assert stored_session.conflicts == []
+    assert knowledge_service.calls == [
+        {
+            "session_id": result.session_id,
+            "round_ids": [stored_round.id],
+        }
+    ]
+    assert knowledge_writeback_service.build_calls == [
+        {
+            "session_id": result.session_id,
+            "round_ids": [stored_round.id],
+        }
+    ]
+    assert knowledge_writeback_service.applied_changes == knowledge_writeback_service.build_calls
+    assert result.final_report_id == stored_session.final_report_id
 
 
 class _ReusableHeavyResearchService:

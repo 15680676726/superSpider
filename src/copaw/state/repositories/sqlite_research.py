@@ -50,6 +50,11 @@ def _research_session_from_row(row: sqlite3.Row | None) -> ResearchSessionRecord
     payload = dict(row)
     payload["stable_findings"] = _decode_json_list(payload.pop("stable_findings_json", None)) or []
     payload["open_questions"] = _decode_json_list(payload.pop("open_questions_json", None)) or []
+    payload["brief"] = _decode_json_mapping(payload.pop("brief_json", None))
+    payload["conflicts"] = _decode_json_list(payload.pop("conflicts_json", None)) or []
+    payload["writeback_truth"] = _decode_json_mapping(
+        payload.pop("writeback_truth_json", None),
+    )
     payload["metadata"] = _decode_json_mapping(payload.pop("metadata_json", None))
     return ResearchSessionRecord.model_validate(payload)
 
@@ -66,6 +71,13 @@ def _research_round_from_row(row: sqlite3.Row | None) -> ResearchSessionRoundRec
         payload.pop("downloaded_artifacts_json", None),
     )
     payload["new_findings"] = _decode_json_list(payload.pop("new_findings_json", None)) or []
+    payload["sources"] = _decode_json_mapping_list(payload.pop("sources_json", None))
+    payload["findings"] = _decode_json_mapping_list(payload.pop("findings_json", None))
+    payload["conflicts"] = _decode_json_list(payload.pop("conflicts_json", None)) or []
+    payload["gaps"] = _decode_json_list(payload.pop("gaps_json", None)) or []
+    payload["writeback_truth"] = _decode_json_mapping(
+        payload.pop("writeback_truth_json", None),
+    )
     payload["remaining_gaps"] = _decode_json_list(payload.pop("remaining_gaps_json", None)) or []
     payload["evidence_ids"] = _decode_json_list(payload.pop("evidence_ids_json", None)) or []
     payload["metadata"] = _decode_json_mapping(payload.pop("metadata_json", None))
@@ -136,9 +148,11 @@ class SqliteResearchSessionRepository(BaseResearchSessionRepository):
         payload = _payload(session)
         payload["stable_findings_json"] = _encode_json(session.stable_findings)
         payload["open_questions_json"] = _encode_json(session.open_questions)
+        payload["brief_json"] = _encode_json(session.brief)
+        payload["conflicts_json"] = _encode_json(session.conflicts)
+        payload["writeback_truth_json"] = _encode_json(session.writeback_truth)
         payload["metadata_json"] = _encode_research_metadata(
             session.metadata,
-            brief=session.brief,
         )
         with self._store.connection() as conn:
             conn.execute(
@@ -159,6 +173,9 @@ class SqliteResearchSessionRepository(BaseResearchSessionRepository):
                     download_count,
                     stable_findings_json,
                     open_questions_json,
+                    brief_json,
+                    conflicts_json,
+                    writeback_truth_json,
                     final_report_id,
                     failure_class,
                     failure_summary,
@@ -182,6 +199,9 @@ class SqliteResearchSessionRepository(BaseResearchSessionRepository):
                     :download_count,
                     :stable_findings_json,
                     :open_questions_json,
+                    :brief_json,
+                    :conflicts_json,
+                    :writeback_truth_json,
                     :final_report_id,
                     :failure_class,
                     :failure_summary,
@@ -205,6 +225,9 @@ class SqliteResearchSessionRepository(BaseResearchSessionRepository):
                     download_count = excluded.download_count,
                     stable_findings_json = excluded.stable_findings_json,
                     open_questions_json = excluded.open_questions_json,
+                    brief_json = excluded.brief_json,
+                    conflicts_json = excluded.conflicts_json,
+                    writeback_truth_json = excluded.writeback_truth_json,
                     final_report_id = excluded.final_report_id,
                     failure_class = excluded.failure_class,
                     failure_summary = excluded.failure_summary,
@@ -270,11 +293,15 @@ class SqliteResearchSessionRepository(BaseResearchSessionRepository):
         payload["selected_links_json"] = _encode_json(round_record.selected_links)
         payload["downloaded_artifacts_json"] = _encode_json(round_record.downloaded_artifacts)
         payload["new_findings_json"] = _encode_json(round_record.new_findings)
+        payload["sources_json"] = _encode_json(round_record.sources)
+        payload["findings_json"] = _encode_json(round_record.findings)
+        payload["conflicts_json"] = _encode_json(round_record.conflicts)
+        payload["gaps_json"] = _encode_json(round_record.gaps)
+        payload["writeback_truth_json"] = _encode_json(round_record.writeback_truth)
         payload["remaining_gaps_json"] = _encode_json(round_record.remaining_gaps)
         payload["evidence_ids_json"] = _encode_json(round_record.evidence_ids)
         payload["metadata_json"] = _encode_research_metadata(
             round_record.metadata,
-            sources=round_record.sources,
         )
         with self._store.connection() as conn:
             conn.execute(
@@ -291,6 +318,11 @@ class SqliteResearchSessionRepository(BaseResearchSessionRepository):
                     selected_links_json,
                     downloaded_artifacts_json,
                     new_findings_json,
+                    sources_json,
+                    findings_json,
+                    conflicts_json,
+                    gaps_json,
+                    writeback_truth_json,
                     remaining_gaps_json,
                     decision,
                     evidence_ids_json,
@@ -309,6 +341,11 @@ class SqliteResearchSessionRepository(BaseResearchSessionRepository):
                     :selected_links_json,
                     :downloaded_artifacts_json,
                     :new_findings_json,
+                    :sources_json,
+                    :findings_json,
+                    :conflicts_json,
+                    :gaps_json,
+                    :writeback_truth_json,
                     :remaining_gaps_json,
                     :decision,
                     :evidence_ids_json,
@@ -327,6 +364,11 @@ class SqliteResearchSessionRepository(BaseResearchSessionRepository):
                     selected_links_json = excluded.selected_links_json,
                     downloaded_artifacts_json = excluded.downloaded_artifacts_json,
                     new_findings_json = excluded.new_findings_json,
+                    sources_json = excluded.sources_json,
+                    findings_json = excluded.findings_json,
+                    conflicts_json = excluded.conflicts_json,
+                    gaps_json = excluded.gaps_json,
+                    writeback_truth_json = excluded.writeback_truth_json,
                     remaining_gaps_json = excluded.remaining_gaps_json,
                     decision = excluded.decision,
                     evidence_ids_json = excluded.evidence_ids_json,

@@ -166,6 +166,37 @@ def test_research_service_promotes_brief_metadata_into_formal_session_projection
     assert result.rounds[0].question == "继续核对官网定价和核心能力页"
 
 
+def test_research_service_exposes_shared_adapter_result_for_latest_round() -> None:
+    snapshot = {
+        "html": "<main><a href='https://example.com/guide'>Guide</a></main>",
+        "bodyText": (
+            "Explain Zi Wei Dou Shu in one sentence.\n"
+            "Zi Wei Dou Shu is a traditional Chinese astrology system.\n"
+        ),
+        "href": "https://chat.baidu.com/search",
+        "title": "Baidu Chat",
+    }
+    service = _build_service(
+        browser_runner=_FakeBrowserRunner(
+            evaluate_results=[dict(snapshot) for _ in range(12)],
+        ),
+    )
+    start_result = service.start_session(
+        goal="Explain Zi Wei Dou Shu in one sentence.",
+        trigger_source="user-direct",
+        owner_agent_id="industry-researcher-demo",
+    )
+    service.run_session(start_result.session.id)
+
+    adapter_result = service.collect_via_baidu_page(start_result.session.id)
+
+    assert adapter_result.adapter_kind == "baidu_page"
+    assert adapter_result.collection_action == "interact"
+    assert adapter_result.status == "succeeded"
+    assert adapter_result.findings[0].summary.startswith("Zi Wei Dou Shu is")
+    assert adapter_result.collected_sources[0].source_ref == "https://example.com/guide"
+
+
 def test_research_service_marks_waiting_login_when_baidu_not_logged_in() -> None:
     service = _build_service(
         browser_runner=_FakeBrowserRunner(

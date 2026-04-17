@@ -2,9 +2,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
 
 from ..state import ResearchSessionRecord, ResearchSessionRoundRecord
+from .source_collection.contracts import (
+    CollectedSource as BaiduCollectedSource,
+    ResearchAdapterResult as BaiduAdapterResult,
+    ResearchFinding as BaiduFinding,
+)
 
 
 @dataclass(slots=True)
@@ -12,39 +16,6 @@ class ResearchLink:
     url: str
     label: str = ""
     kind: str = "link"
-
-
-@dataclass(slots=True)
-class BaiduCollectedSource:
-    source_id: str
-    source_kind: str
-    collection_action: Literal["read", "interact"] = "read"
-    source_ref: str = ""
-    normalized_ref: str = ""
-    title: str = ""
-    snippet: str = ""
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(slots=True)
-class BaiduFinding:
-    finding_id: str
-    finding_type: str = "answer"
-    summary: str = ""
-    supporting_source_ids: list[str] = field(default_factory=list)
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(slots=True)
-class BaiduAdapterResult:
-    adapter_kind: str = "baidu_page"
-    collection_action: Literal["read", "interact"] = "read"
-    status: Literal["succeeded", "partial", "blocked"] = "partial"
-    summary: str = ""
-    collected_sources: list[BaiduCollectedSource] = field(default_factory=list)
-    findings: list[BaiduFinding] = field(default_factory=list)
-    gaps: list[str] = field(default_factory=list)
-    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)

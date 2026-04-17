@@ -528,11 +528,11 @@ At minimum, phase 1 must formally persist into:
 Current mainline boundary:
 
 - heavy research already writes report + knowledge summary through `summarize_session()`
-- universal light inline collection already persists formal `ResearchSessionRecord.brief` + `ResearchSessionRoundRecord.sources`
-- `findings / gaps / conflicts` currently still surface via `stable_findings / open_questions / metadata` projections, not dedicated top-level persisted fields
-- phase-1 light adapters are currently metadata-backed typed adapters; real external multi-round collection is still owned by the heavy `BaiduPageResearchService`
-- light inline collection does **not** yet create a dedicated `EvidenceRecord` on the live frontdoor
-- but light inline collection does **not** yet auto-apply report / knowledge / graph writeback on the live frontdoor
+- universal light inline collection now persists formal `ResearchSessionRecord.brief / conflicts / writeback_truth` + `ResearchSessionRoundRecord.sources / findings / conflicts / gaps / writeback_truth`
+- light inline collection now creates a dedicated `EvidenceRecord` on the live frontdoor
+- light inline collection now auto-applies report / knowledge / graph writeback on the live frontdoor
+- phase-1 light adapters now support live single-source collection for `search / web_page / github / artifact`; heavy multi-round collection still defaults to `BaiduPageResearchService`
+- `BaiduPageResearchService` now exposes a shared `ResearchAdapterResult`-shaped provider seam via `collect_via_baidu_page(...)`, so one provider-specific service is no longer the universal collection model
 
 The foundation is incomplete if it can collect but cannot formally feed the system's truth chain.
 

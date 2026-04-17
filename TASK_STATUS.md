@@ -857,17 +857,17 @@
     - typed contracts：`ResearchBrief / CollectedSource / ResearchFinding / ResearchAdapterResult`
     - routing / synthesis / orchestration：`route_collection_mode(...) / synthesize_collection_results(...) / SourceCollectionService`
     - phase-1 adapters：`search / web_page / github / artifact`
-    - 当前 adapter 边界：phase-1 light adapters 仍主要是 metadata-backed typed adapters；真实外部多轮采集 owner 仍是 heavy `BaiduPageResearchService`
+    - 当前 adapter 边界：phase-1 light adapters 已支持 live single-source collection，并补上默认 source inference；真实外部多轮采集默认仍由 heavy `BaiduPageResearchService` 承接，但它已通过 `collect_via_baidu_page(...)` 收进共享 provider adapter seam
     - formal frontdoor：`SourceCollectionFrontdoorService.run_source_collection_frontdoor(...)`
     - 统一入口：主脑 `user-direct`、`main-brain-followup`、cron `monitoring`、职业 agent `collect_sources`
-    - persistence/read-model：session-level `brief`、round-level `sources` 已正式持久化；`findings / gaps / conflicts` 当前仍主要通过 `stable_findings / open_questions / metadata` 聚合投影；`/runtime-center/research` 现已优先读取 formal projection，而不是继续优先吃 metadata fallback
-    - writeback boundary：heavy `summarize_session()` 继续复用 report + knowledge summary writeback；`StateKnowledgeService.ingest_research_session(...)` 与 `KnowledgeWritebackService.build_research_session_writeback(...)` 已具备正式 builder 能力，但 light inline collection 还没有在 live frontdoor 上自动把 knowledge / graph writeback 真写回，也还没有统一新写 dedicated `EvidenceRecord`
+    - persistence/read-model：session-level `brief / conflicts / writeback_truth`、round-level `sources / findings / conflicts / gaps / writeback_truth` 已正式持久化；`/runtime-center/research` 现已优先读取这些 formal projection，而不是继续优先吃 metadata fallback
+    - writeback boundary：heavy `summarize_session()` 继续复用 report + knowledge summary writeback；`StateKnowledgeService.ingest_research_session(...)` 与 `KnowledgeWritebackService.build_research_session_writeback(...)` 已作为 heavy/light 共用 builder；light inline collection 现在也会在 live frontdoor 上自动写 dedicated `EvidenceRecord`，并自动把 report / knowledge / graph writeback 真写回
     - Runtime Center：`/runtime-center/research` 与 cockpit research card 已正式暴露 `brief / findings / sources / gaps / conflicts / writeback_truth`
   - 当前边界补充：
-    - `2026-04-17` 文档纠偏：此前这里把 source collection 的 writeback 口径写得过满；现已收正为“formal session/round truth 已闭环，heavy summary writeback 已闭环，light inline collection 的 knowledge/graph auto-writeback 还未正式接 live frontdoor”
-    - 这轮 fresh regression 已证明 typed contracts / routing / synthesis / frontdoor / Runtime Center 读面在 `L1/L2` 层收口；但 `Task 4`“把 `BaiduPageResearchService` 真降成 provider adapter”与 light-path evidence truth 还没有完全做完
-    - `L3` 仍只有 opt-in live smoke，不得把它外推成所有联网环境都已稳定通过
-    - `L4` long soak 仍未跑
+    - `2026-04-18` 文档纠偏：此前这里把 source collection 的 writeback / adapter 落地口径写得过窄；现已收正为“formal session/round truth 已闭环，heavy + light writeback 已闭环，provider adapter seam 已落到 `collect_via_baidu_page(...)`，phase-1 light adapters 已补成 live collector”
+    - 这轮 fresh regression 已证明 typed contracts / routing / synthesis / frontdoor / Runtime Center 读面 / provider fallback 在 `L1/L2` 层收口
+    - `2026-04-18` 真实 light-path `L3`：已在正式 `SourceCollectionFrontdoorService + SQLiteStateStore + EvidenceLedger + StateKnowledgeService + KnowledgeWritebackService` 组合上跑通 `search / web_page / github / artifact` 四条 live smoke；四条都真实产出 source / finding / evidence / report / writeback truth
+    - `2026-04-18` 真实 light-path `L4`：已跑选定范围 live soak；连续 `3` 个 cycle、每轮重建 repositories/services，并让 `search / web_page / github / artifact` 都通过默认 source inference 走 light frontdoor。每条链都稳定写入 `1` round、`1` evidence、`written` writeback truth，且 source 数量稳定大于等于 `1`
 
 ### 3.3.1 `Symbiotic Host Runtime V1` 当前落地边界
 

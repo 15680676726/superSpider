@@ -2,17 +2,11 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from urllib.parse import urldefrag, urlparse
+from urllib.parse import urlparse
 
+from ....discovery.provider_search import search_github_repository_donors
 from ..contracts import CollectedSource, ResearchAdapterResult, ResearchBrief, ResearchFinding
-
-
-def _text(value: object) -> str:
-    return str(value or "").strip()
-
-
-def _normalized_ref(value: str) -> str:
-    return urldefrag(value).url if value else ""
+from ._shared import extract_first_url, normalize_ref, summarize_html_page, text
 
 
 def _github_metadata(source_ref: str) -> dict[str, str]:
@@ -42,10 +36,49 @@ def _github_metadata(source_ref: str) -> dict[str, str]:
     }
 
 
+def _search_github_live(query: str, limit: int = 1) -> list[dict[str, object]]:
+    hits = search_github_repository_donors(query, limit=limit)
+    results: list[dict[str, object]] = []
+    for hit in hits:
+        source_ref = text(getattr(hit, "candidate_source_ref", None))
+        if not source_ref:
+            continue
+        metadata = dict(getattr(hit, "metadata", {}) or {})
+        metadata.setdefault("repository", text(getattr(hit, "display_name", None)))
+        metadata.setdefault("github_target_kind", "repository")
+        results.append(
+            {
+                "url": source_ref,
+                "title": text(getattr(hit, "display_name", None)),
+                "summary": text(getattr(hit, "summary", None)),
+                "metadata": metadata,
+            }
+        )
+    return results
+
+
+def _resolve_live_github_target(brief: ResearchBrief) -> dict[str, object]:
+    direct_url = extract_first_url(brief.question, brief.goal)
+    try:
+        if direct_url and "github.com/" in direct_url.casefold():
+            page = summarize_html_page(direct_url)
+            return {
+                "url": direct_url,
+                "title": text(page.get("title")),
+                "summary": text(page.get("summary") or page.get("snippet")),
+                "metadata": _github_metadata(direct_url),
+            }
+        live_hits = _search_github_live(brief.question, limit=1)
+        return live_hits[0] if live_hits else {}
+    except Exception:
+        return {}
+
+
 def collect_github(brief: ResearchBrief) -> ResearchAdapterResult:
     payload = brief.metadata.get("github")
-    github_target = payload if isinstance(payload, Mapping) else {}
-    source_ref = _text(github_target.get("url") or github_target.get("source_ref"))
+    live_target = _resolve_live_github_target(brief) if payload is None else {}
+    github_target = payload if isinstance(payload, Mapping) else live_target
+    source_ref = text(github_target.get("url") or github_target.get("source_ref"))
     if not source_ref:
         return ResearchAdapterResult(
             adapter_kind="github",
@@ -55,7 +88,7 @@ def collect_github(brief: ResearchBrief) -> ResearchAdapterResult:
             gaps=["github target missing from research brief metadata"],
         )
 
-    summary = _text(
+    summary = text(
         github_target.get("summary")
         or github_target.get("snippet")
         or github_target.get("title")
@@ -65,11 +98,18 @@ def collect_github(brief: ResearchBrief) -> ResearchAdapterResult:
         source_kind="github_target",
         collection_action="interact",
         source_ref=source_ref,
-        normalized_ref=_normalized_ref(source_ref),
-        title=_text(github_target.get("title")),
-        snippet=_text(github_target.get("snippet")),
+        normalized_ref=normalize_ref(source_ref),
+        title=text(github_target.get("title")),
+        snippet=text(github_target.get("snippet")),
         access_status="interacted",
-        metadata=_github_metadata(source_ref),
+        metadata={
+            **_github_metadata(source_ref),
+            **(
+                dict(github_target.get("metadata") or {})
+                if isinstance(github_target.get("metadata"), Mapping)
+                else {}
+            ),
+        },
     )
     findings = [
         ResearchFinding(

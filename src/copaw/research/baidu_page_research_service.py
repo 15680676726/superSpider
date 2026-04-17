@@ -13,6 +13,7 @@ from ..constant import WORKING_DIR
 from ..state import AgentReportRecord, ResearchSessionRecord, ResearchSessionRoundRecord
 from .baidu_page_contract import extract_answer_contract
 from .models import ResearchLink, ResearchSessionRunResult
+from .source_collection.contracts import ResearchAdapterResult
 
 logger = logging.getLogger(__name__)
 _LATIN_TOKEN_RE = re.compile(r"[a-z0-9]{3,}", re.IGNORECASE)
@@ -325,6 +326,7 @@ class BaiduPageResearchService:
         report_repository: object | None = None,
         knowledge_service: object | None = None,
         work_context_service: object | None = None,
+        knowledge_writeback_service: object | None = None,
     ) -> None:
         self._research_session_repository = research_session_repository
         self._browser_action_runner = browser_action_runner
@@ -332,6 +334,7 @@ class BaiduPageResearchService:
         self._report_repository = report_repository
         self._knowledge_service = knowledge_service
         self._work_context_service = work_context_service
+        self._knowledge_writeback_service = knowledge_writeback_service
 
     def start_session(
         self,
@@ -586,6 +589,9 @@ class BaiduPageResearchService:
                     "downloaded_artifacts": round_downloads,
                     "new_findings": new_findings,
                     "sources": source_payloads,
+                    "findings": finding_payloads,
+                    "conflicts": adapter_conflicts,
+                    "gaps": adapter_gaps,
                     "remaining_gaps": (
                         []
                         if new_findings and not adapter_gaps
@@ -606,6 +612,7 @@ class BaiduPageResearchService:
             session = session.model_copy(
                 update={
                     "stable_findings": stable_findings,
+                    "conflicts": _dedupe_texts([*session.conflicts, *adapter_conflicts]),
                     "round_count": max(session.round_count, updated_round.round_index),
                     "download_count": len(downloaded_artifacts),
                     "updated_at": _utc_now(),
@@ -847,10 +854,58 @@ class BaiduPageResearchService:
                 )
                 industry_document_id = _text(getattr(chunk, "document_id", None))
 
+        node_ids: list[str] = []
+        relation_ids: list[str] = []
+        builder = getattr(
+            self._knowledge_writeback_service,
+            "build_research_session_writeback",
+            None,
+        )
+        applier = getattr(self._knowledge_writeback_service, "apply_change", None)
+        summarizer = getattr(
+            self._knowledge_writeback_service,
+            "summarize_change",
+            None,
+        )
+        if callable(builder):
+            change = builder(session=session, rounds=rounds)
+            graph_result = _mapping(applier(change)) if callable(applier) else {}
+            if not graph_result and callable(summarizer):
+                graph_result = _mapping(summarizer(change))
+            node_ids = _dedupe_texts(graph_result.get("node_ids") or [])
+            relation_ids = _dedupe_texts(graph_result.get("relation_ids") or [])
+
+        writeback_target = _mapping(_mapping(session.brief).get("writeback_target"))
+        writeback_scope_type = (
+            _text(writeback_target.get("scope_type"))
+            or ("work_context" if _text(session.work_context_id) else "")
+            or ("industry" if _text(session.industry_instance_id) else "")
+        )
+        writeback_scope_id = (
+            _text(writeback_target.get("scope_id"))
+            or _text(session.work_context_id)
+            or _text(session.industry_instance_id)
+        )
+        writeback_truth = {
+            "status": (
+                "written"
+                if any((report_id, work_context_chunk_ids, industry_document_id, node_ids, relation_ids))
+                else "pending"
+            ),
+            "scope_type": writeback_scope_type or None,
+            "scope_id": writeback_scope_id or None,
+            "report_id": report_id,
+            "work_context_chunk_ids": work_context_chunk_ids,
+            "industry_document_id": industry_document_id,
+            "node_ids": node_ids,
+            "relation_ids": relation_ids,
+        }
+
         session = session.model_copy(
             update={
                 "status": "completed" if session.status != "waiting-login" else session.status,
                 "final_report_id": report_id or session.final_report_id,
+                "writeback_truth": writeback_truth,
                 "updated_at": _utc_now(),
                 "completed_at": session.completed_at or _utc_now(),
             },
@@ -863,6 +918,91 @@ class BaiduPageResearchService:
             final_report_id=report_id,
             work_context_chunk_ids=work_context_chunk_ids,
             industry_document_id=industry_document_id,
+        )
+
+    def collect_via_baidu_page(self, session_id: str) -> ResearchAdapterResult:
+        session = self._get_session(session_id)
+        if session is None:
+            raise KeyError(f"Unknown research session: {session_id}")
+        rounds = _unique_rounds(
+            _repo_list_rounds(self._research_session_repository, session_id=session_id),
+        )
+        latest_round = rounds[-1] if rounds else None
+        round_metadata = _mapping(getattr(latest_round, "metadata", None))
+        findings = _mapping_list(
+            getattr(latest_round, "findings", None),
+        ) or _mapping_list(round_metadata.get("findings"))
+        sources = _mapping_list(
+            getattr(latest_round, "sources", None),
+        ) or _mapping_list(round_metadata.get("collected_sources"))
+        latest_question = _text(getattr(latest_round, "question", None))
+        fallback_source_ids = [
+            _text(item.get("source_id"))
+            for item in sources
+            if _text(item.get("source_id")) is not None
+        ]
+        stable_findings = [
+            {
+                "finding_id": _stable_id("baidu-finding", session.id, summary),
+                "finding_type": "answer",
+                "summary": summary,
+                "supporting_source_ids": fallback_source_ids,
+                "supporting_evidence_ids": [],
+                "conflicts": [],
+                "gaps": [],
+            }
+            for summary in _dedupe_texts(session.stable_findings)
+            if not _is_semantic_duplicate(summary, [latest_question, session.goal])
+        ]
+        filtered_findings = [
+            item
+            for item in findings
+            if _text(item.get("summary"))
+            and not _is_semantic_duplicate(item.get("summary"), [latest_question, session.goal])
+        ]
+        if stable_findings:
+            findings = stable_findings
+        elif filtered_findings:
+            findings = filtered_findings
+        elif not findings:
+            findings = stable_findings
+        conflicts = _dedupe_texts(
+            getattr(latest_round, "conflicts", None)
+            or round_metadata.get("conflicts")
+            or getattr(session, "conflicts", None)
+            or [],
+        )
+        gaps = _dedupe_texts(
+            getattr(latest_round, "gaps", None)
+            or getattr(latest_round, "remaining_gaps", None)
+            or getattr(session, "open_questions", None)
+            or [],
+        )
+        summary = (
+            (findings[0].get("summary") if findings else "")
+            or _text(getattr(latest_round, "response_summary", None))
+            or _text(session.goal)
+        )
+        status = "blocked" if _text(session.status) == "waiting-login" else "partial"
+        if summary or sources or findings:
+            status = "succeeded"
+        return ResearchAdapterResult.model_validate(
+            {
+                "adapter_kind": "baidu_page",
+                "collection_action": "interact",
+                "status": status,
+                "session_id": session.id,
+                "round_id": getattr(latest_round, "id", None),
+                "collected_sources": sources,
+                "findings": findings,
+                "conflicts": conflicts,
+                "gaps": gaps,
+                "summary": summary,
+                "metadata": {
+                    "provider": session.provider,
+                    "session_status": session.status,
+                },
+            },
         )
 
     def collect_provider_round_result(

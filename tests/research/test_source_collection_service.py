@@ -154,3 +154,26 @@ def test_service_normalizes_requested_sources_before_invoking_adapters() -> None
 
     assert result.route.requested_sources == ["web_page"]
     assert calls == ["web_page"]
+
+
+def test_service_infers_default_search_adapter_when_requested_sources_missing() -> None:
+    calls: list[str] = []
+
+    def collect_search(_brief: ResearchBrief) -> ResearchAdapterResult:
+        calls.append("search")
+        return ResearchAdapterResult(
+            adapter_kind="search",
+            collection_action="discover",
+            status="succeeded",
+        )
+
+    service = SourceCollectionService(adapters={"search": collect_search})
+
+    result = service.collect(
+        brief=_brief(),
+        owner_agent_id="writer-agent",
+        requested_sources=[],
+    )
+
+    assert result.route.requested_sources == ["search"]
+    assert calls == ["search"]

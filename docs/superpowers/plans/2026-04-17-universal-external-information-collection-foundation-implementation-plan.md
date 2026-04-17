@@ -11,14 +11,13 @@
 ## Reality Sync (2026-04-17 audit)
 
 - `source_collection` contracts / routing / synthesis / orchestration / phase-1 adapters / frontdoor / Runtime Center read surface are already on mainline
-- `ResearchSessionRecord.brief` and `ResearchSessionRoundRecord.sources` are now the formal persisted projections used by the Runtime Center
-- `findings / gaps / conflicts` currently still surface from `stable_findings / open_questions / metadata`, not dedicated top-level persisted projections
+- `ResearchSessionRecord.brief / conflicts / writeback_truth` and `ResearchSessionRoundRecord.sources / findings / conflicts / gaps / writeback_truth` are now the formal persisted projections used by the Runtime Center
 - heavy `BaiduPageResearchService.summarize_session()` is the current live owner for report + knowledge-summary writeback
 - `StateKnowledgeService.ingest_research_session(...)` and `KnowledgeWritebackService.build_research_session_writeback(...)` already exist as reusable builders
-- heavy-path demotion is only partial today: `BaiduPageResearchService` is behind the unified frontdoor, but it is not yet a true `ResearchAdapterResult`-shaped provider adapter
-- phase-1 `search / web_page / github / artifact` adapters are live, but current light adapters are still metadata-backed shapers rather than full browser/network collectors
-- light inline collection does **not** yet emit a dedicated `EvidenceRecord` on the live frontdoor
-- light inline collection does **not** yet auto-apply report / knowledge / graph writeback on the live frontdoor
+- heavy-path demotion is now formalized at the provider seam: `BaiduPageResearchService.collect_via_baidu_page(...)` returns shared `ResearchAdapterResult`-shaped output behind the unified frontdoor
+- phase-1 `search / web_page / github / artifact` adapters now support live single-source collection instead of metadata-only shaping
+- light inline collection now emits a dedicated `EvidenceRecord` on the live frontdoor
+- light inline collection now auto-applies report / knowledge / graph writeback on the live frontdoor
 - this plan originally mentioned a dedicated `src/copaw/research/source_collection/writeback.py`, but current mainline did not materialize that file
 
 ---

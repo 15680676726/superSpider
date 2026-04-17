@@ -73,6 +73,8 @@ class ResearchSessionRecord(UpdatedRecord):
     stable_findings: list[str] = Field(default_factory=list)
     open_questions: list[str] = Field(default_factory=list)
     brief: dict[str, Any] = Field(default_factory=dict)
+    conflicts: list[str] = Field(default_factory=list)
+    writeback_truth: dict[str, Any] = Field(default_factory=dict)
     final_report_id: str | None = None
     failure_class: str | None = None
     failure_summary: str | None = None
@@ -94,9 +96,13 @@ class ResearchSessionRecord(UpdatedRecord):
                 or metadata.get("brief")
                 or {}
             )
+        if payload.get("conflicts") is None:
+            payload["conflicts"] = metadata.get("conflicts") or []
+        if payload.get("writeback_truth") is None:
+            payload["writeback_truth"] = metadata.get("writeback_truth") or {}
         return payload
 
-    @field_validator("stable_findings", "open_questions", mode="before")
+    @field_validator("stable_findings", "open_questions", "conflicts", mode="before")
     @classmethod
     def _normalize_text_fields(cls, value: object) -> list[str]:
         return _normalize_text_list(value)
@@ -104,6 +110,11 @@ class ResearchSessionRecord(UpdatedRecord):
     @field_validator("brief", mode="before")
     @classmethod
     def _normalize_brief(cls, value: object) -> dict[str, Any]:
+        return _normalize_mapping(value)
+
+    @field_validator("writeback_truth", mode="before")
+    @classmethod
+    def _normalize_writeback_truth(cls, value: object) -> dict[str, Any]:
         return _normalize_mapping(value)
 
     @field_validator("metadata", mode="before")
@@ -125,6 +136,10 @@ class ResearchSessionRoundRecord(UpdatedRecord):
     downloaded_artifacts: list[dict[str, Any]] = Field(default_factory=list)
     new_findings: list[str] = Field(default_factory=list)
     sources: list[dict[str, Any]] = Field(default_factory=list)
+    findings: list[dict[str, Any]] = Field(default_factory=list)
+    conflicts: list[str] = Field(default_factory=list)
+    gaps: list[str] = Field(default_factory=list)
+    writeback_truth: dict[str, Any] = Field(default_factory=dict)
     remaining_gaps: list[str] = Field(default_factory=list)
     decision: ResearchRoundDecision = "continue"
     evidence_ids: list[str] = Field(default_factory=list)
@@ -146,9 +161,24 @@ class ResearchSessionRoundRecord(UpdatedRecord):
                 or metadata.get("sources")
                 or []
             )
+        if payload.get("findings") is None:
+            payload["findings"] = metadata.get("findings") or []
+        if payload.get("conflicts") is None:
+            payload["conflicts"] = metadata.get("conflicts") or []
+        if payload.get("gaps") is None:
+            payload["gaps"] = metadata.get("gaps") or payload.get("remaining_gaps") or []
+        if payload.get("writeback_truth") is None:
+            payload["writeback_truth"] = metadata.get("writeback_truth") or {}
         return payload
 
-    @field_validator("new_findings", "remaining_gaps", "evidence_ids", mode="before")
+    @field_validator(
+        "new_findings",
+        "remaining_gaps",
+        "evidence_ids",
+        "conflicts",
+        "gaps",
+        mode="before",
+    )
     @classmethod
     def _normalize_text_list_fields(cls, value: object) -> list[str]:
         return _normalize_text_list(value)
@@ -158,11 +188,17 @@ class ResearchSessionRoundRecord(UpdatedRecord):
         "selected_links",
         "downloaded_artifacts",
         "sources",
+        "findings",
         mode="before",
     )
     @classmethod
     def _normalize_mapping_list_fields(cls, value: object) -> list[dict[str, Any]]:
         return _normalize_mapping_list(value)
+
+    @field_validator("writeback_truth", mode="before")
+    @classmethod
+    def _normalize_round_writeback_truth(cls, value: object) -> dict[str, Any]:
+        return _normalize_mapping(value)
 
     @field_validator("metadata", mode="before")
     @classmethod

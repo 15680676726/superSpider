@@ -14,7 +14,7 @@ from ..compiler import (
     ReportReplanEngine,
     StrategyPlanningCompiler,
 )
-from ..evidence import EvidenceLedger
+from ..evidence import EvidenceLedger, EvidenceRecord
 from ..environments import EnvironmentService
 from ..goals import GoalService
 from ..industry import IndustryDraftGenerator, IndustryService
@@ -44,6 +44,7 @@ from ..memory import (
     MemoryRetainService,
     MemorySleepService,
 )
+from ..memory.knowledge_writeback_service import KnowledgeWritebackService
 from ..predictions import PredictionService
 from ..research import BaiduPageResearchService
 from ..research.source_collection import SourceCollectionService
@@ -53,7 +54,12 @@ from ..research.source_collection.routing import route_collection_mode
 from ..providers.runtime_provider_facade import ProviderRuntimeSurface
 from ..routines import RoutineService
 from ..sop_kernel import FixedSopService
-from ..state import ResearchSessionRecord, ResearchSessionRoundRecord, SQLiteStateStore
+from ..state import (
+    AgentReportRecord,
+    ResearchSessionRecord,
+    ResearchSessionRoundRecord,
+    SQLiteStateStore,
+)
 from ..state.agent_experience_service import AgentExperienceMemoryService
 from ..state.knowledge_service import StateKnowledgeService
 from ..state.main_brain_service import (
@@ -203,6 +209,9 @@ class SourceCollectionFrontdoorService:
         heavy_research_service: object,
         research_session_repository: object,
         report_repository: object | None = None,
+        evidence_ledger: EvidenceLedger | None = None,
+        knowledge_service: object | None = None,
+        knowledge_writeback_service: object | None = None,
     ) -> None:
         self._heavy_research_service = heavy_research_service
         self._source_collection_service = SourceCollectionService(
@@ -210,6 +219,9 @@ class SourceCollectionFrontdoorService:
         )
         self.research_session_repository = research_session_repository
         self.report_repository = report_repository
+        self._evidence_ledger = evidence_ledger
+        self._knowledge_service = knowledge_service
+        self._knowledge_writeback_service = knowledge_writeback_service
 
     def run_source_collection_frontdoor(
         self,
@@ -349,6 +361,25 @@ class SourceCollectionFrontdoorService:
             summary_payload = _mapping(summary_result)
         else:
             summary_payload = {}
+        findings_payload: list[dict[str, Any]] = []
+        sources_payload: list[dict[str, Any]] = []
+        conflicts: list[str] = []
+        gaps: list[str] = []
+        adapter_collector = getattr(service, "collect_via_baidu_page", None)
+        if callable(adapter_collector) and session_id is not None:
+            adapter_result = adapter_collector(session_id)
+            findings_payload = [
+                _mapping(item)
+                for item in list(_mapping(adapter_result).get("findings") or [])
+                if _mapping(item)
+            ]
+            sources_payload = [
+                _mapping(item)
+                for item in list(_mapping(adapter_result).get("collected_sources") or [])
+                if _mapping(item)
+            ]
+            conflicts = _string_list(_mapping(adapter_result).get("conflicts"))
+            gaps = _string_list(_mapping(adapter_result).get("gaps"))
         stop_reason = _string(
             _mapping(summary_payload).get("stop_reason")
             or getattr(session_result, "stop_reason", None)
@@ -367,6 +398,10 @@ class SourceCollectionFrontdoorService:
             trigger_source=trigger_source,
             goal=brief.goal,
             stop_reason=stop_reason,
+            findings=findings_payload,
+            collected_sources=sources_payload,
+            conflicts=conflicts,
+            gaps=gaps,
             final_report_id=final_report_id,
         )
 
@@ -450,6 +485,23 @@ class SourceCollectionFrontdoorService:
         ]
         now = _utc_now()
         session_id = f"research-session:{uuid4().hex}"
+        round_evidence_ids: list[str] = []
+        evidence_id = self._append_light_evidence(
+            session_id=session_id,
+            brief=brief,
+            trigger_source=trigger_source,
+            route_payload=route_payload,
+            findings_payload=findings_payload,
+            sources_payload=sources_payload,
+            conflicts=list(collection.conflicts or []),
+            gaps=list(collection.gaps or []),
+        )
+        if evidence_id is not None:
+            round_evidence_ids = [evidence_id]
+            sources_payload = self._attach_evidence_to_sources(
+                sources_payload=sources_payload,
+                evidence_id=evidence_id,
+            )
         session = ResearchSessionRecord(
             id=session_id,
             provider="source-collection",
@@ -468,11 +520,8 @@ class SourceCollectionFrontdoorService:
             ],
             open_questions=list(collection.gaps or []),
             brief=brief_payload,
-            metadata={
-                **metadata,
-                "conflicts": list(collection.conflicts or []),
-                "gaps": list(collection.gaps or []),
-            },
+            conflicts=list(collection.conflicts or []),
+            metadata=metadata,
             created_at=now,
             updated_at=now,
             completed_at=now,
@@ -504,16 +553,44 @@ class SourceCollectionFrontdoorService:
                 if str(item.get("summary") or "").strip()
             ],
             sources=sources_payload,
+            findings=findings_payload,
+            conflicts=list(collection.conflicts or []),
+            gaps=list(collection.gaps or []),
             remaining_gaps=list(collection.gaps or []),
             decision="stop",
-            metadata={
-                "findings": findings_payload,
-                "collected_sources": sources_payload,
-                "conflicts": list(collection.conflicts or []),
-                "gaps": list(collection.gaps or []),
-            },
+            evidence_ids=round_evidence_ids,
+            metadata={},
             created_at=now,
             updated_at=now,
+        )
+        report_id = self._write_light_report(
+            session=session,
+            round_record=round_record,
+            findings_payload=findings_payload,
+            sources_payload=sources_payload,
+            evidence_ids=round_evidence_ids,
+            conflicts=list(collection.conflicts or []),
+            gaps=list(collection.gaps or []),
+        )
+        session = session.model_copy(
+            update={
+                "final_report_id": report_id,
+            },
+        )
+        writeback_truth = self._apply_light_writeback(
+            session=session,
+            round_record=round_record,
+            report_id=report_id,
+        )
+        session = session.model_copy(
+            update={
+                "writeback_truth": writeback_truth,
+            },
+        )
+        round_record = round_record.model_copy(
+            update={
+                "writeback_truth": writeback_truth,
+            },
         )
         upsert_session = getattr(
             self.research_session_repository,
@@ -541,7 +618,173 @@ class SourceCollectionFrontdoorService:
             collected_sources=sources_payload,
             conflicts=list(collection.conflicts or []),
             gaps=list(collection.gaps or []),
+            final_report_id=report_id,
         )
+
+    def _append_light_evidence(
+        self,
+        *,
+        session_id: str,
+        brief: ResearchBrief,
+        trigger_source: str,
+        route_payload: dict[str, Any],
+        findings_payload: list[dict[str, Any]],
+        sources_payload: list[dict[str, Any]],
+        conflicts: list[str],
+        gaps: list[str],
+    ) -> str | None:
+        if self._evidence_ledger is None:
+            return None
+        top_finding = next(
+            (
+                str(item.get("summary") or "").strip()
+                for item in findings_payload
+                if str(item.get("summary") or "").strip()
+            ),
+            "",
+        )
+        record = self._evidence_ledger.append(
+            EvidenceRecord(
+                task_id=session_id,
+                actor_ref=str(route_payload.get("execution_agent_id") or brief.owner_agent_id),
+                risk_level="auto",
+                action_summary=f"Light source collection: {brief.goal}",
+                result_summary=top_finding or f"Collected {len(sources_payload)} source(s).",
+                capability_ref="source-collection:light",
+                environment_ref="source-collection",
+                metadata={
+                    "research_session_id": session_id,
+                    "trigger_source": trigger_source,
+                    "brief": {
+                        "goal": brief.goal,
+                        "question": brief.question,
+                        "why_needed": brief.why_needed,
+                        "done_when": brief.done_when,
+                    },
+                    "sources": list(sources_payload),
+                    "findings": list(findings_payload),
+                    "conflicts": list(conflicts),
+                    "gaps": list(gaps),
+                },
+            ),
+        )
+        return _string(record.id)
+
+    def _attach_evidence_to_sources(
+        self,
+        *,
+        sources_payload: list[dict[str, Any]],
+        evidence_id: str,
+    ) -> list[dict[str, Any]]:
+        attached: list[dict[str, Any]] = []
+        for item in sources_payload:
+            payload = dict(item)
+            payload["evidence_id"] = _string(payload.get("evidence_id")) or evidence_id
+            attached.append(payload)
+        return attached
+
+    def _write_light_report(
+        self,
+        *,
+        session: ResearchSessionRecord,
+        round_record: ResearchSessionRoundRecord,
+        findings_payload: list[dict[str, Any]],
+        sources_payload: list[dict[str, Any]],
+        evidence_ids: list[str],
+        conflicts: list[str],
+        gaps: list[str],
+    ) -> str | None:
+        upsert_report = getattr(self.report_repository, "upsert_report", None)
+        if not callable(upsert_report) or _string(session.industry_instance_id) is None:
+            return None
+        findings = [
+            str(item.get("summary") or "").strip()
+            for item in findings_payload
+            if str(item.get("summary") or "").strip()
+        ]
+        summary = findings[0] if findings else (_string(round_record.response_summary) or session.goal)
+        report = AgentReportRecord(
+            industry_instance_id=str(session.industry_instance_id),
+            work_context_id=session.work_context_id,
+            owner_agent_id=session.owner_agent_id,
+            owner_role_id="source-collection",
+            report_kind="source-collection",
+            headline=f"Source collection: {session.goal[:64]}",
+            summary=summary,
+            findings=findings,
+            uncertainties=list(gaps),
+            recommendation="Review collected sources and decide whether to adopt them.",
+            evidence_ids=list(evidence_ids),
+            metadata={
+                "provider": session.provider,
+                "research_session_id": session.id,
+                "conflicts": list(conflicts),
+                "source_refs": [
+                    _string(item.get("source_ref"))
+                    for item in sources_payload
+                    if _string(item.get("source_ref")) is not None
+                ],
+            },
+        )
+        stored_report = upsert_report(report)
+        return _string(getattr(stored_report, "id", None) or report.id)
+
+    def _apply_light_writeback(
+        self,
+        *,
+        session: ResearchSessionRecord,
+        round_record: ResearchSessionRoundRecord,
+        report_id: str | None,
+    ) -> dict[str, Any]:
+        work_context_chunk_ids: list[str] = []
+        industry_document_id: str | None = None
+        knowledge_ingest = getattr(self._knowledge_service, "ingest_research_session", None)
+        if callable(knowledge_ingest):
+            ingestion = _mapping(
+                knowledge_ingest(session=session, rounds=[round_record]),
+            )
+            work_context_chunk_ids = _string_list(ingestion.get("work_context_chunk_ids"))
+            industry_document_id = _string(ingestion.get("industry_document_id"))
+        node_ids: list[str] = []
+        relation_ids: list[str] = []
+        summarizer = getattr(self._knowledge_writeback_service, "summarize_change", None)
+        applier = getattr(self._knowledge_writeback_service, "apply_change", None)
+        builder = getattr(
+            self._knowledge_writeback_service,
+            "build_research_session_writeback",
+            None,
+        )
+        if callable(builder):
+            change = builder(session=session, rounds=[round_record])
+            graph_result = _mapping(applier(change)) if callable(applier) else {}
+            if not graph_result and callable(summarizer):
+                graph_result = _mapping(summarizer(change))
+            node_ids = _string_list(graph_result.get("node_ids"))
+            relation_ids = _string_list(graph_result.get("relation_ids"))
+        writeback_target = _mapping(session.brief.get("writeback_target"))
+        scope_type = (
+            _string(writeback_target.get("scope_type"))
+            or ("work_context" if _string(session.work_context_id) is not None else None)
+            or ("industry" if _string(session.industry_instance_id) is not None else None)
+        )
+        scope_id = (
+            _string(writeback_target.get("scope_id"))
+            or _string(session.work_context_id)
+            or _string(session.industry_instance_id)
+        )
+        status = "written" if any(
+            (report_id, work_context_chunk_ids, industry_document_id, node_ids, relation_ids),
+        ) else "pending"
+        return {
+            "status": status,
+            "scope_type": scope_type,
+            "scope_id": scope_id,
+            "report_id": report_id,
+            "work_context_chunk_ids": work_context_chunk_ids,
+            "industry_document_id": industry_document_id,
+            "node_ids": node_ids,
+            "relation_ids": relation_ids,
+        }
 
 
 @dataclass(slots=True)
@@ -946,11 +1189,25 @@ def build_runtime_domain_services(
         report_repository=repositories.agent_report_repository,
         knowledge_service=knowledge_service,
         work_context_service=work_context_service,
+        knowledge_writeback_service=KnowledgeWritebackService(
+            knowledge_service=knowledge_service,
+            derived_index_service=derived_memory_index_service,
+            reflection_service=memory_reflection_service,
+            memory_sleep_service=memory_sleep_service,
+        ),
     )
     research_session_service = SourceCollectionFrontdoorService(
         heavy_research_service=heavy_research_session_service,
         research_session_repository=repositories.research_session_repository,
         report_repository=repositories.agent_report_repository,
+        evidence_ledger=evidence_ledger,
+        knowledge_service=knowledge_service,
+        knowledge_writeback_service=KnowledgeWritebackService(
+            knowledge_service=knowledge_service,
+            derived_index_service=derived_memory_index_service,
+            reflection_service=memory_reflection_service,
+            memory_sleep_service=memory_sleep_service,
+        ),
     )
     set_research_session_service = getattr(
         main_brain_chat_service,

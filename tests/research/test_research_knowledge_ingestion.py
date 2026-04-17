@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 
 from copaw.research import BaiduPageResearchService
 from copaw.state import ResearchSessionRecord, ResearchSessionRoundRecord, SQLiteStateStore
@@ -260,3 +261,110 @@ def test_research_repository_hydrates_legacy_metadata_brief_and_collected_source
     assert restored_session is not None
     assert restored_session.brief["question"] == "What should the first operator playbook include?"
     assert restored_round.sources[0]["source_ref"] == "https://example.com/guide"
+
+
+def test_research_repository_persists_formal_projection_columns_for_source_collection_truth(
+    tmp_path,
+) -> None:
+    store = SQLiteStateStore(tmp_path / "state.db")
+    repository = SqliteResearchSessionRepository(store)
+
+    session = ResearchSessionRecord(
+        id="research-session-formal-columns",
+        provider="source-collection",
+        industry_instance_id="industry-1",
+        work_context_id="ctx-1",
+        owner_agent_id="writer-agent",
+        supervisor_agent_id="main-brain",
+        trigger_source="agent-entry",
+        goal="查官网定价",
+        status="completed",
+        stable_findings=["官网定价页显示基础套餐 299 元 / 月。"],
+        open_questions=["还缺官网截图归档。"],
+        brief={
+            "goal": "查官网定价",
+            "question": "官网定价是多少",
+            "why_needed": "主脑要做价格对比",
+            "done_when": "拿到官网价格和来源",
+            "collection_mode_hint": "light",
+            "requested_sources": ["web_page"],
+        },
+        conflicts=["第三方博客把旧价格写成了 199 元。"],
+        writeback_truth={
+            "status": "written",
+            "scope_type": "work_context",
+            "scope_id": "ctx-1",
+            "report_id": "report-1",
+        },
+    )
+    round_record = ResearchSessionRoundRecord(
+        id="research-session-formal-columns:round:1",
+        session_id=session.id,
+        round_index=1,
+        question="官网定价是多少",
+        response_summary="官网定价页显示基础套餐 299 元 / 月。",
+        new_findings=["官网定价页显示基础套餐 299 元 / 月。"],
+        sources=[
+            {
+                "source_id": "source-1",
+                "source_kind": "web_page",
+                "collection_action": "read",
+                "source_ref": "https://example.com/pricing",
+                "normalized_ref": "https://example.com/pricing",
+                "title": "官网定价页",
+                "snippet": "基础套餐 299 元 / 月",
+                "evidence_id": "evidence-1",
+            },
+        ],
+        findings=[
+            {
+                "finding_id": "finding-1",
+                "finding_type": "pricing",
+                "summary": "官网定价页显示基础套餐 299 元 / 月。",
+                "supporting_source_ids": ["source-1"],
+                "supporting_evidence_ids": ["evidence-1"],
+            }
+        ],
+        conflicts=["第三方博客把旧价格写成了 199 元。"],
+        gaps=["还缺官网截图归档。"],
+        writeback_truth={
+            "status": "written",
+            "scope_type": "work_context",
+            "scope_id": "ctx-1",
+            "report_id": "report-1",
+        },
+    )
+
+    repository.upsert_research_session(session)
+    repository.upsert_research_round(round_record)
+
+    with store.connection() as conn:
+        session_row = conn.execute(
+            """
+            SELECT brief_json, conflicts_json, writeback_truth_json
+            FROM research_sessions
+            WHERE id = ?
+            """,
+            (session.id,),
+        ).fetchone()
+        round_row = conn.execute(
+            """
+            SELECT sources_json, findings_json, conflicts_json, gaps_json, writeback_truth_json
+            FROM research_session_rounds
+            WHERE id = ?
+            """,
+            (round_record.id,),
+        ).fetchone()
+
+    assert session_row is not None
+    assert session_row["brief_json"] is not None
+    assert json.loads(session_row["brief_json"])["question"] == "官网定价是多少"
+    assert json.loads(session_row["conflicts_json"]) == ["第三方博客把旧价格写成了 199 元。"]
+    assert json.loads(session_row["writeback_truth_json"])["status"] == "written"
+
+    assert round_row is not None
+    assert json.loads(round_row["sources_json"])[0]["source_ref"] == "https://example.com/pricing"
+    assert json.loads(round_row["findings_json"])[0]["summary"] == "官网定价页显示基础套餐 299 元 / 月。"
+    assert json.loads(round_row["conflicts_json"]) == ["第三方博客把旧价格写成了 199 元。"]
+    assert json.loads(round_row["gaps_json"]) == ["还缺官网截图归档。"]
+    assert json.loads(round_row["writeback_truth_json"])["report_id"] == "report-1"

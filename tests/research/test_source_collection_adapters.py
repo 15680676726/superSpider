@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+from pathlib import Path
+
 from copaw.research.source_collection.adapters import (
     build_source_collection_adapters,
     collect_artifact,
@@ -148,3 +150,150 @@ def test_collect_artifact_returns_partial_when_reference_missing() -> None:
     assert result.status == "partial"
     assert result.collected_sources == []
     assert result.gaps == ["artifact reference missing from research brief metadata"]
+
+
+def test_collect_search_uses_live_search_when_metadata_missing(monkeypatch) -> None:
+    from copaw.research.source_collection.adapters import search as search_module
+
+    monkeypatch.setattr(
+        search_module,
+        "_search_live",
+        lambda query, limit=5: [
+            {
+                "title": "Live result",
+                "url": "https://example.com/live-result",
+                "snippet": f"query={query}; limit={limit}",
+            }
+        ],
+    )
+
+    result = collect_search(_brief())
+
+    assert result.status == "succeeded"
+    assert result.collected_sources[0].source_ref == "https://example.com/live-result"
+    assert "Discovered 1 search hit" in result.summary
+
+
+def test_collect_search_falls_back_to_secondary_provider(monkeypatch) -> None:
+    from copaw.research.source_collection.adapters import search as search_module
+
+    monkeypatch.setattr(
+        search_module,
+        "_search_duckduckgo",
+        lambda query, limit: (_ for _ in ()).throw(TimeoutError("ddg timed out")),
+    )
+    monkeypatch.setattr(
+        search_module,
+        "_search_bing",
+        lambda query, limit: [
+            {
+                "title": "Fallback result",
+                "url": "https://example.com/fallback",
+                "snippet": f"{query}:{limit}",
+            }
+        ],
+    )
+
+    result = search_module.collect_search(_brief())
+
+    assert result.status == "succeeded"
+    assert result.collected_sources[0].source_ref == "https://example.com/fallback"
+
+
+def test_collect_web_page_reads_live_page_from_direct_url(monkeypatch) -> None:
+    from copaw.research.source_collection.adapters import web_page as web_page_module
+
+    monkeypatch.setattr(
+        web_page_module,
+        "_read_live_page",
+        lambda source_ref: {
+            "url": source_ref,
+            "title": "Live Runtime Center",
+            "snippet": "Live snippet",
+            "summary": "Live page summary",
+        },
+    )
+
+    result = collect_web_page(
+        _brief(
+            metadata={},
+        ).model_copy(
+            update={
+                "question": "https://docs.example.com/runtime-center",
+            }
+        )
+    )
+
+    assert result.status == "succeeded"
+    assert result.collected_sources[0].normalized_ref == "https://docs.example.com/runtime-center"
+    assert result.findings[0].summary == "Live page summary"
+
+
+def test_collect_web_page_returns_blocked_when_live_read_fails(monkeypatch) -> None:
+    from copaw.research.source_collection.adapters import web_page as web_page_module
+
+    monkeypatch.setattr(
+        web_page_module,
+        "_read_live_page",
+        lambda source_ref: (_ for _ in ()).throw(TimeoutError(source_ref)),
+    )
+
+    result = collect_web_page(
+        _brief().model_copy(
+            update={
+                "question": "https://docs.example.com/runtime-center",
+            }
+        )
+    )
+
+    assert result.status == "blocked"
+    assert result.gaps == ["web page provider could not read the requested page"]
+
+
+def test_collect_github_resolves_live_repository_query(monkeypatch) -> None:
+    from copaw.research.source_collection.adapters import github as github_module
+
+    monkeypatch.setattr(
+        github_module,
+        "_search_github_live",
+        lambda query, limit=1: [
+            {
+                "url": "https://github.com/example/project",
+                "title": "example/project",
+                "summary": f"Live repo for {query}",
+                "metadata": {
+                    "repository": "example/project",
+                    "github_target_kind": "repository",
+                },
+            }
+        ],
+    )
+
+    result = collect_github(
+        _brief().model_copy(
+            update={
+                "question": "example project runtime center adapter",
+            }
+        )
+    )
+
+    assert result.status == "succeeded"
+    assert result.collected_sources[0].metadata["repository"] == "example/project"
+    assert result.findings[0].summary == "Live repo for example project runtime center adapter"
+
+
+def test_collect_artifact_captures_live_local_file(tmp_path: Path) -> None:
+    artifact_path = tmp_path / "research-note.md"
+    artifact_path.write_text("# research\ncontent\n", encoding="utf-8")
+
+    result = collect_artifact(
+        _brief().model_copy(
+            update={
+                "question": str(artifact_path),
+            }
+        )
+    )
+
+    assert result.status == "succeeded"
+    assert result.collected_sources[0].source_ref == str(artifact_path)
+    assert result.collected_sources[0].metadata["storage_kind"] == "local-file"

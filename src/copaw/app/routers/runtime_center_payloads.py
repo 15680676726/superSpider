@@ -144,7 +144,9 @@ def serialize_runtime_research_findings(
 ) -> list[dict[str, object]]:
     session_id = _runtime_non_empty_str(session_payload.get("id")) or "runtime-center-research"
     round_metadata = _runtime_mapping(round_payload.get("metadata"))
-    structured_findings = _runtime_mapping_list(round_metadata.get("findings"))
+    structured_findings = _runtime_mapping_list(round_payload.get("findings")) or _runtime_mapping_list(
+        round_metadata.get("findings"),
+    )
     if structured_findings:
         return [
             {
@@ -243,6 +245,9 @@ def serialize_runtime_research_gaps(
     round_payload: dict[str, object],
 ) -> list[str]:
     round_metadata = _runtime_mapping(round_payload.get("metadata"))
+    formal_round_gaps = _runtime_text_list(round_payload.get("gaps"))
+    if formal_round_gaps:
+        return formal_round_gaps
     round_gaps = _runtime_text_list(
         round_metadata.get("gaps"),
         round_payload.get("remaining_gaps"),
@@ -264,6 +269,12 @@ def serialize_runtime_research_conflicts(
 ) -> list[str]:
     session_metadata = _runtime_mapping(session_payload.get("metadata"))
     round_metadata = _runtime_mapping(round_payload.get("metadata"))
+    formal_round_conflicts = _runtime_text_list(round_payload.get("conflicts"))
+    if formal_round_conflicts:
+        return formal_round_conflicts
+    formal_session_conflicts = _runtime_text_list(session_payload.get("conflicts"))
+    if formal_session_conflicts:
+        return formal_session_conflicts
     direct_conflicts = _runtime_text_list(
         round_metadata.get("conflicts"),
         session_metadata.get("conflicts"),
@@ -283,8 +294,11 @@ def serialize_runtime_research_writeback_truth(
 ) -> dict[str, object] | None:
     session_metadata = _runtime_mapping(session_payload.get("metadata"))
     round_metadata = _runtime_mapping(round_payload.get("metadata"))
-    payload = _runtime_mapping(round_metadata.get("writeback_truth")) or _runtime_mapping(
-        session_metadata.get("writeback_truth"),
+    payload = (
+        _runtime_mapping(round_payload.get("writeback_truth"))
+        or _runtime_mapping(session_payload.get("writeback_truth"))
+        or _runtime_mapping(round_metadata.get("writeback_truth"))
+        or _runtime_mapping(session_metadata.get("writeback_truth"))
     )
     writeback_target = _runtime_writeback_target(session_payload, brief_payload)
     scope_type = _runtime_non_empty_str(payload.get("scope_type")) or _runtime_non_empty_str(

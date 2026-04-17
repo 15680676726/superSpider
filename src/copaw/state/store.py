@@ -1294,6 +1294,9 @@ CREATE TABLE IF NOT EXISTS research_sessions (
     download_count INTEGER NOT NULL DEFAULT 0,
     stable_findings_json TEXT NOT NULL DEFAULT '[]',
     open_questions_json TEXT NOT NULL DEFAULT '[]',
+    brief_json TEXT NOT NULL DEFAULT '{}',
+    conflicts_json TEXT NOT NULL DEFAULT '[]',
+    writeback_truth_json TEXT NOT NULL DEFAULT '{}',
     final_report_id TEXT,
     failure_class TEXT,
     failure_summary TEXT,
@@ -1324,6 +1327,11 @@ CREATE TABLE IF NOT EXISTS research_session_rounds (
     selected_links_json TEXT NOT NULL DEFAULT '[]',
     downloaded_artifacts_json TEXT NOT NULL DEFAULT '[]',
     new_findings_json TEXT NOT NULL DEFAULT '[]',
+    sources_json TEXT NOT NULL DEFAULT '[]',
+    findings_json TEXT NOT NULL DEFAULT '[]',
+    conflicts_json TEXT NOT NULL DEFAULT '[]',
+    gaps_json TEXT NOT NULL DEFAULT '[]',
+    writeback_truth_json TEXT NOT NULL DEFAULT '{}',
     remaining_gaps_json TEXT NOT NULL DEFAULT '[]',
     decision TEXT NOT NULL DEFAULT 'continue',
     evidence_ids_json TEXT NOT NULL DEFAULT '[]',
@@ -2117,6 +2125,24 @@ CREATE INDEX IF NOT EXISTS idx_skill_lifecycle_decisions_attribution
 """
 
 _ADDITIVE_SCHEMA_COLUMNS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
+    (
+        "research_sessions",
+        (
+            ("brief_json", "TEXT NOT NULL DEFAULT '{}'"),
+            ("conflicts_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("writeback_truth_json", "TEXT NOT NULL DEFAULT '{}'"),
+        ),
+    ),
+    (
+        "research_session_rounds",
+        (
+            ("sources_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("findings_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("conflicts_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("gaps_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("writeback_truth_json", "TEXT NOT NULL DEFAULT '{}'"),
+        ),
+    ),
     (
         "buddy_onboarding_sessions",
         (

@@ -144,10 +144,7 @@ def test_runtime_center_research_surface_exposes_structured_research_truth(tmp_p
         }
     ]
     assert payload["gaps"] == ["还缺官网截图归档。"]
-    assert payload["conflicts"] == [
-        "第三方博客把旧价格写成了 199 元。",
-        "第三方博客和官网的价格口径不一致。",
-    ]
+    assert payload["conflicts"] == ["第三方博客把旧价格写成了 199 元。"]
     assert payload["writeback_truth"] == {
         "status": "written",
         "scope_type": "work_context",
@@ -328,3 +325,133 @@ def test_runtime_center_research_surface_prefers_formal_brief_and_round_source_f
             "captured_at": None,
         }
     ]
+
+
+def test_runtime_center_research_surface_prefers_formal_findings_conflicts_gaps_and_writeback_fields(
+    tmp_path,
+) -> None:
+    client, repository = _build_client(tmp_path)
+    session = repository.upsert_research_session(
+        ResearchSessionRecord(
+            id="research-session-formal-projections",
+            provider="source-collection",
+            owner_agent_id="writer-agent",
+            supervisor_agent_id="main-brain",
+            work_context_id="ctx-formal-2",
+            trigger_source="agent-entry",
+            goal="查官网定价",
+            status="completed",
+            round_count=1,
+            stable_findings=["旧 fallback finding"],
+            open_questions=["旧 fallback gap"],
+            brief={
+                "goal": "查官网定价",
+                "question": "官网定价是多少",
+                "why_needed": "主脑要做价格对比",
+                "done_when": "拿到官网价格和来源",
+                "collection_mode_hint": "light",
+                "requested_sources": ["web_page"],
+                "writeback_target": {
+                    "scope_type": "work_context",
+                    "scope_id": "ctx-formal-2",
+                },
+            },
+            conflicts=["formal session conflict"],
+            writeback_truth={
+                "status": "written",
+                "scope_type": "work_context",
+                "scope_id": "ctx-formal-2",
+                "report_id": "report-formal-2",
+            },
+            metadata={
+                "conflicts": ["legacy metadata conflict"],
+                "writeback_truth": {
+                    "status": "pending",
+                    "scope_type": "industry",
+                    "scope_id": "industry-legacy",
+                    "report_id": "report-legacy",
+                },
+            },
+        ),
+    )
+    repository.upsert_research_round(
+        ResearchSessionRoundRecord(
+            id="research-session-formal-projections:round:1",
+            session_id=session.id,
+            round_index=1,
+            question="官网定价是多少",
+            response_summary="官网定价页显示基础套餐 299 元 / 月。",
+            new_findings=["旧 fallback round finding"],
+            remaining_gaps=["旧 fallback round gap"],
+            findings=[
+                {
+                    "finding_id": "finding-formal-1",
+                    "finding_type": "pricing",
+                    "summary": "官网定价页显示基础套餐 299 元 / 月。",
+                    "supporting_source_ids": ["source-formal-2"],
+                    "supporting_evidence_ids": ["evidence-formal-2"],
+                }
+            ],
+            conflicts=["formal round conflict"],
+            gaps=["formal round gap"],
+            writeback_truth={
+                "status": "written",
+                "scope_type": "work_context",
+                "scope_id": "ctx-formal-2",
+                "report_id": "report-formal-2",
+            },
+            sources=[
+                {
+                    "source_id": "source-formal-2",
+                    "source_kind": "web_page",
+                    "collection_action": "read",
+                    "source_ref": "https://example.com/pricing",
+                    "normalized_ref": "https://example.com/pricing",
+                    "title": "官网定价页",
+                    "snippet": "基础套餐 299 元 / 月",
+                    "evidence_id": "evidence-formal-2",
+                }
+            ],
+            metadata={
+                "findings": [
+                    {
+                        "finding_id": "finding-legacy-1",
+                        "finding_type": "legacy",
+                        "summary": "legacy metadata finding",
+                    }
+                ],
+                "conflicts": ["legacy round metadata conflict"],
+                "gaps": ["legacy round metadata gap"],
+                "writeback_truth": {
+                    "status": "pending",
+                    "scope_type": "industry",
+                    "scope_id": "industry-legacy",
+                    "report_id": "report-legacy",
+                },
+            },
+        ),
+    )
+
+    response = client.get("/runtime-center/research")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["findings"] == [
+        {
+            "finding_id": "finding-formal-1",
+            "finding_type": "pricing",
+            "summary": "官网定价页显示基础套餐 299 元 / 月。",
+            "supporting_source_ids": ["source-formal-2"],
+            "supporting_evidence_ids": ["evidence-formal-2"],
+            "conflicts": [],
+            "gaps": [],
+        }
+    ]
+    assert payload["gaps"] == ["formal round gap"]
+    assert payload["conflicts"] == ["formal round conflict"]
+    assert payload["writeback_truth"] == {
+        "status": "written",
+        "scope_type": "work_context",
+        "scope_id": "ctx-formal-2",
+        "report_id": "report-formal-2",
+    }
