@@ -92,9 +92,13 @@ export interface RuntimeCenterAgentSummary {
   industry_role_id?: string | null;
 }
 
-const MAIN_BRAIN_AGENT_IDS = new Set(["copaw-agent-runner"]);
-const MAIN_BRAIN_AGENT_CLASSES = new Set(["system"]);
-const MAIN_BRAIN_ROLE_IDS = new Set(["execution-core"]);
+const HIDDEN_COLLABORATION_AGENT_IDS = new Set([
+  "copaw-agent-runner",
+  "copaw-scheduler",
+  "copaw-governance",
+]);
+const HIDDEN_COLLABORATION_AGENT_CLASSES = new Set(["system"]);
+const HIDDEN_COLLABORATION_ROLE_IDS = new Set(["execution-core"]);
 
 interface RuntimeActionResult {
   success?: boolean;
@@ -183,7 +187,7 @@ function deriveBusinessAgents(
       reports_to: metaString(entry.meta, "reports_to"),
       industry_role_id: metaString(entry.meta, "industry_role_id"),
     } satisfies RuntimeCenterAgentSummary))
-    .filter((agent) => !isMainBrainAgent(agent));
+    .filter((agent) => !isHiddenCollaborationAgent(agent));
 }
 
 function buildActionBody(
@@ -219,14 +223,16 @@ function actionMethod(actionKey: string): "POST" | "DELETE" {
   return actionKey === "delete" ? "DELETE" : "POST";
 }
 
-function isMainBrainAgent(agent: RuntimeCenterAgentSummary | null | undefined): boolean {
+function isHiddenCollaborationAgent(
+  agent: RuntimeCenterAgentSummary | null | undefined,
+): boolean {
   if (!agent) {
     return false;
   }
   return (
-    MAIN_BRAIN_AGENT_IDS.has(agent.agent_id) ||
-    MAIN_BRAIN_AGENT_CLASSES.has(agent.agent_class ?? "") ||
-    MAIN_BRAIN_ROLE_IDS.has(agent.industry_role_id ?? "")
+    HIDDEN_COLLABORATION_AGENT_IDS.has(agent.agent_id) ||
+    HIDDEN_COLLABORATION_AGENT_CLASSES.has(agent.agent_class ?? "") ||
+    HIDDEN_COLLABORATION_ROLE_IDS.has(agent.industry_role_id ?? "")
   );
 }
 

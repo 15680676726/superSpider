@@ -377,6 +377,64 @@ describe("useRuntimeCenter", () => {
     );
   });
 
+  it("filters scheduler and governance agents from the fallback collaboration strip", async () => {
+    requestRuntimeSurfaceMock.mockResolvedValue(
+      mockSurface({
+        main_brain: null,
+        cards: [
+          createAgentsCard(
+            {
+              id: "copaw-agent-runner",
+              title: "Spider Mesh",
+              kind: "agent",
+              status: "active",
+              owner: "Execution Core",
+              summary: "System seat",
+              actions: {},
+              meta: {},
+            },
+            {
+              id: "copaw-scheduler",
+              title: "Spider Mesh Scheduler",
+              kind: "agent",
+              status: "running",
+              owner: "Scheduler",
+              summary: "System scheduler",
+              actions: {},
+              meta: {},
+            },
+            {
+              id: "copaw-governance",
+              title: "Spider Mesh Governance",
+              kind: "agent",
+              status: "idle",
+              owner: "Governance",
+              summary: "System governance",
+              actions: {},
+              meta: {},
+            },
+            {
+              id: "agent-ops-1",
+              title: "Closer Nine",
+              kind: "agent",
+              status: "active",
+              owner: "Closer",
+              summary: "Closing backlog",
+              actions: {},
+              meta: {},
+            },
+          ),
+        ],
+      }),
+    );
+
+    const { result } = renderHook(() => useRuntimeCenter());
+
+    await waitFor(() => !result.current.loading && !result.current.mainBrainLoading);
+
+    expect(result.current.businessAgents.map((item) => item.agent_id)).toEqual(["agent-ops-1"]);
+  });
+
   it("loads channel runtime projections alongside the runtime center surface", async () => {
     listRuntimeChannelRuntimesMock.mockResolvedValue([
       {

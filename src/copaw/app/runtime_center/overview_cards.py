@@ -49,6 +49,13 @@ from .models import (
 logger = logging.getLogger(__name__)
 
 _MISSING = object()
+_HUMAN_COCKPIT_HIDDEN_AGENT_IDS = frozenset(
+    {
+        "copaw-agent-runner",
+        "copaw-scheduler",
+        "copaw-governance",
+    }
+)
 
 _HUMAN_COCKPIT_ROLE_LABELS: dict[str, str] = {
     "operations": "运营",
@@ -2672,7 +2679,7 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             self._string(payload.get("industry_role_id") or payload.get("role_id")) or ""
         ).strip().lower()
         return (
-            agent_id == "copaw-agent-runner"
+            agent_id in _HUMAN_COCKPIT_HIDDEN_AGENT_IDS
             or agent_class == "system"
             or industry_role_id == "execution-core"
         )
