@@ -35,11 +35,25 @@
   - `/industry` 最小前端入口
 - 当前系统已经有固定团队根岗：
   - canonical `execution-core`（唯一物理 agent：`copaw-agent-runner`，产品可见名：`Spider Mesh 执行中枢`）
-- 当前代码主链里，`researcher` 仍是默认补齐的常驻研究支援岗；它负责持续收集行业/客户/竞争/平台信号并把研究汇报回流给主脑，不是一个单独对外展示的“知识库 builder”
+- 当前代码主链里，`researcher` 仍会被补齐为研究支援位；但正确产品边界应是：它不是按行业默认空跑的巡检器，而是主脑的研究执行位。只有主脑围绕当前目标写出正式研究 brief / monitoring brief 时，它才应启动并把结果汇报回主脑，不是一个单独对外展示的“知识库 builder”
 - `2026-03-13` 语义补充：内部 canonical `execution-core` 与物理 runtime `copaw-agent-runner` 当前继续保留；但 `V4` 起产品语义应把它收敛为“团队总控核”，默认负责规划、分派、监督、治理与汇报，而不是长期承担叶子执行
-- `2026-03-14` 组团语义补充：产品规划目标仍是按 `solo / lead-plus-support / pod / full-team` 收敛最小合理拓扑；但当前运行真相里，draft/compiler 在缺失 `researcher` 时仍会自动补齐，所以正式主链应把它视为默认存在的研究位
+- `2026-03-14` 组团语义补充：产品规划目标仍是按 `solo / lead-plus-support / pod / full-team` 收敛最小合理拓扑；但 `researcher` 即使作为默认可用支援位存在，也不代表它拥有默认启动权。角色可保留，启动必须由主脑派工或显式监控任务触发
 - `2026-03-13` 补充：`IndustryInstance` 现持有显式 `IndustryExecutionCoreIdentity` 绑定对象；系统仍只有一个物理 `Spider Mesh 执行中枢`，但会按行业实例挂载不同的行业身份壳，`industry detail / goal detail / query execution` 都从同一对象读取行业使命、思考维度、约束与证据要求，不再靠默认 profile 猜测行业执行框架
-- `2026-03-16` 补充：行业创建入口现已显式区分 `system-led / operator-guided` 两种规划模式；`IndustryProfile` 已持久化 `experience_mode / experience_notes / operator_requirements`，可把操作方已有经验、硬要求与缺失环路正式写入草案生成与战略记忆；控制台创建团队默认提交 `auto_dispatch + execute`，信号型 brief 若遗漏 `researcher` 或默认研究/巡检 schedule，compiler canonicalize 会自动补齐。
+- `2026-03-16` 补充：行业创建入口现已显式区分 `system-led / operator-guided` 两种规划模式；`IndustryProfile` 已持久化 `experience_mode / experience_notes / operator_requirements`，可把操作方已有经验、硬要求与缺失环路正式写入草案生成与战略记忆；控制台创建团队默认提交 `auto_dispatch + execute`。当前 live code 仍可在草案缺失时补齐 `researcher` 这个研究支援位，但已不再默认补 researcher 巡检 schedule。
+- `2026-04-17` 补充：`researcher` 的正确边界正式改为“主脑派工优先”。主脑必须先形成清楚的研究任务，再让 researcher 执行；最少应明确：
+  - 这次为什么要查
+  - 服务哪个目标 / assignment / work context
+  - 要查什么范围
+  - 期望产出是什么
+  - 什么时候停止
+- `2026-04-17` 补充：researcher 的正式触发原因只保留四类：
+  - `goal-gap`：主脑发现当前目标存在信息缺口
+  - `task-required`：当前执行任务明确需要外部资料
+  - `monitoring`：主脑或用户显式建立了带目标的持续监控任务
+  - `user-direct`：用户直接要求发起研究
+- `2026-04-17` 补充：不存在“因为属于某个行业，所以 researcher 每天自动跑一次通用巡检”这条产品逻辑。即使是股票、电商、舆情这类高频场景，也应先由主脑写成正式监控任务，再由 schedule 驱动执行，而不是 researcher 自己决定跑什么。
+- `2026-04-17` research session 基线补充：formal `ResearchSessionRecord / ResearchSessionRoundRecord`、`SqliteResearchSessionRepository`、`BaiduPageResearchService`、runtime bootstrap 注入、`GET /runtime-center/research` 与 Runtime Center 主脑 cockpit research surface 已落地；这表示研究过程对象、仓储、服务与读面已经形成正式基线
+- `2026-04-17` research session 进度补充：主脑 `user-direct` 触发、schedule monitoring brief 触发、runtime bootstrap 注入、`/runtime-center/research` 读面与 cockpit summary 已打通；当前剩余真边界主要是 live smoke 受浏览器运行时前置条件限制，尚无真实联网 `PASS`
 - `2026-03-16` 补充：执行中枢在行业聊天中收到“新增任务 / 改规划 / 加长期节奏”后，已不再只是 prompt 里理解；当前会经正式 chat writeback 路径把 operator 指令写回 `IndustryProfile.operator_requirements`、`StrategyMemoryRecord`、新增 goal override 与 recurring schedule，并在同一轮 query prompt 中直接读到回写后的正式状态。新建 goal 也会立刻进入正式 `dispatch_goal` 主链；长期节奏支持工作日 / 季度 / 年度 / 每 N 天(周/月) 等通用 cadence，而不是写死某个行业模板。若指令与团队中现有专业执行位匹配，goal / schedule owner 会直接落到该角色；只有没有合适执行位时才保留在 `execution-core`。
 - `2026-03-17` 补充：执行中枢发现岗位空缺时，补位建议现已统一走 `decision-first` 主链。`team_role_gap` recommendation 会先生成正式 `DecisionRequest`，预测页点击“执行”不再直接改团队；operator 可在执行中枢聊天里直接回复“批准补位 / 拒绝补位”复用同一条 kernel 治理链完成批准或驳回。
 - `2026-03-16` 补充：`/chat` 已开始从“单长会话壳”升级为“单控制线程 + 多任务线程”的正式形态。行业前台仍只暴露 `Spider Mesh 执行中枢` 作为唯一主入口；当控制线程里出现明确执行型请求时，前门会预先创建正式 `system:dispatch_query` task，并把会话拆到 `task-chat:{task_id}` / `task-session:*`。控制线程本身继续承载指挥、纠偏、追加任务与状态追问，不再把执行噪声长期混在同一聊天线程里。
@@ -305,9 +319,10 @@
 
 目标：
 
-- 保留 `Manager` 作为固定系统核心岗，并保留 `Researcher` 作为当前默认补齐的研究支援岗
+- 保留 `Manager` 作为固定系统核心岗，并保留 `Researcher` 作为可挂载的研究支援岗
 - 基于行业画像与团队复杂度自动生成最小合理的业务专员 Agent
 - 让编译链稳定产出业务角色蓝图、goal seed、初始 capability/risk/env 约束
+- 让主脑能够给 `Researcher` 下达清楚的研究 brief / monitoring brief，而不是让它空转
 
 主要产出：
 
@@ -317,11 +332,14 @@
   - 业务专员的 role/risk/capability/evidence contract
 - 业务角色的 goal seed 编译
 - 业务角色的默认 schedule seed 策略
+- `Researcher` 的研究 brief / monitoring brief seed 策略
 
 明确要求：
 
 - 不删 `Manager`
-- 不删 `Researcher` 这类证据支援角色；当前运行真相仍保留默认补齐，后续若要收敛成按需加入，必须先同步修改 compiler/activation 真主链
+- 不删 `Researcher` 这类证据支援角色；当前运行真相仍保留默认补齐，但没有主脑正式 brief 时不应启动
+- `Researcher` 不能自发决定长期研究方向；研究目标、监控对象、停止条件必须由主脑或用户明确给出
+- 如果存在研究 schedule，它必须绑定到明确的监控 brief，而不是“通用 researcher loop”
 - 不把业务专员生成写死成固定行业模板
 - 不生成没有 capability/risk/env 边界的空壳 Agent
 
@@ -332,7 +350,7 @@
 
 验收标准：
 
-- 任一行业初始化后，系统至少能生成 `Manager + Researcher + >=1 business role`；其中 `Researcher` 负责持续研究回流、正式记忆保留与图谱投影的上游输入
+- 任一行业初始化后，系统至少能生成 `Manager + Researcher + >=1 business role`；其中 `Researcher` 负责执行主脑派发的研究回流、正式记忆保留与图谱投影的上游输入，而不是默认空跑
 - 业务专员在 Runtime Center / Agent Workbench / `/industry` 可见
 - Manager 能将任务稳定委派给业务专员
 

@@ -43,11 +43,10 @@ def test_industry_preview_returns_editable_draft(tmp_path) -> None:
     assert payload["draft"]["team"]["topology"] == "lead-plus-support"
     assert payload["draft"]["generation_summary"]
     assert len(payload["draft"]["goals"]) == 3
-    assert len(payload["draft"]["schedules"]) == 5
     schedule_titles = {item["title"] for item in payload["draft"]["schedules"]}
     assert any("Morning Review" in title for title in schedule_titles)
     assert any("Evening Review" in title for title in schedule_titles)
-    assert any("Research" in title for title in schedule_titles)
+    assert not any("Research" in title for title in schedule_titles)
     assert {agent["role_id"] for agent in payload["draft"]["team"]["agents"]}.issuperset(
         {"execution-core", "researcher"},
     )
@@ -1559,7 +1558,7 @@ def test_canonicalize_industry_draft_defaults_execution_core_to_delegation_first
     assert "strategy aligned with execution" in execution_core.mission
 
 
-def test_canonicalize_industry_draft_injects_researcher_and_default_loops_for_signal_heavy_brief() -> None:
+def test_canonicalize_industry_draft_keeps_researcher_without_default_loop_for_signal_heavy_brief() -> None:
     profile = normalize_industry_profile(
         IndustryPreviewRequest(
             industry="E-commerce Operations",
@@ -1633,11 +1632,19 @@ def test_canonicalize_industry_draft_injects_researcher_and_default_loops_for_si
         owner_scope="industry-v1-northwind-commerce",
     )
 
-    assert any(agent.role_id == "researcher" for agent in canonicalized.team.agents)
+    researcher = next(
+        agent for agent in canonicalized.team.agents if agent.role_id == "researcher"
+    )
+    assert "research briefs" in researcher.role_summary.lower()
+    assert "monitoring briefs" in researcher.mission.lower()
+    assert any(
+        "monitoring brief reports" in item.lower()
+        for item in researcher.evidence_expectations
+    )
     schedule_titles = {schedule.title for schedule in canonicalized.schedules}
     assert any("Morning Review" in title for title in schedule_titles)
     assert any("Evening Review" in title for title in schedule_titles)
-    assert any("Research Signal Loop" in title for title in schedule_titles)
+    assert not any("Research" in title for title in schedule_titles)
 
 
 def test_industry_bootstrap_reinjects_default_researcher_when_missing_from_draft(tmp_path) -> None:

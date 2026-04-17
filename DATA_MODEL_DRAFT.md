@@ -361,6 +361,10 @@
 
 - `career` 表示可长期复用、可持续承担同类任务的职业位
 - `temporary` 表示围绕当前 live work 存在的短期 seat，工作清空后应退出团队编制
+- `activation_mode=on-demand` 只表示该 seat 需要由正式 `brief / assignment / schedule` 唤醒，不等于 seat 一旦存在就自动启动
+- 对 `researcher` 而言，seat 是否存在可由 `draft/compiler` 决定；但 seat 存在不构成自动执行权，正式启动原因应收口为 `user-direct / main-brain-followup / monitoring`
+- 其中 `main-brain-followup` 指主脑围绕当前 `assignment / backlog / report / work context` 写出的 follow-up research brief，而不是 researcher 自发追加的新长期目标
+- `monitoring` 只允许在主脑或用户已经写出明确 `monitoring brief` 后，由 `schedule/cron` 作为执行载体唤醒 researcher；不得因为某个行业存在就默认生成通用巡检
 - `temporary` 在没有显式 `goal` 时，不应自动创建默认长期目标
 - 对同一 temporary role 的重复补位，系统应优先复用现有 seat
 - 当已有 `temporary` seat 被确认需要长期存在时，应走“晋升为 `career`”而不是新建第二个同类 seat
@@ -1328,6 +1332,9 @@ Windows-first 约束：
 - `2026-04-07` bootstrap hard-cut 2A：bootstrap 内部现在先以 canonical `goal_specs + schedule_specs` 起 `backlog/cycle/assignment`，再下游持久化 compatibility `GoalRecord / ScheduleRecord`；`ScheduleRecord` 不再是 bootstrap seed 的前置真相
 - `V4` 规划补充：内部 canonical `execution-core` 与物理 runtime 继续保留，但其产品语义应逐步收敛为“团队总控核”；后续对象字段应能显式表达其 `operating_mode=control-core` 与 `direct_execution_policy=fallback-only`
 - `2026-03-14` 对象补充：`IndustryTeamBlueprint` 现应显式承载 `topology=solo|lead-plus-support|pod|full-team`；`researcher` 从固定常驻岗降为可选支援角色，由 draft/compiler 按 brief 的独立证据环路决定是否生成
+- `2026-04-17` 对象补充：`researcher` 的正式职责是研究支援位，不是默认空跑巡检器；`draft/compiler` 可以决定该 seat 是否存在，但“存在”不等于“自动启动”
+- `2026-04-17` 对象补充：主脑必须先形成 `research brief` 或 `monitoring brief`，再分别物化为 follow-up `assignment` 或 `monitoring schedule` 交给 researcher 执行并回报；`monitoring schedule` 不是泛行业默认巡检
+- `2026-04-17` 删旧口径补充：compiler 默认 `research-signal-loop` 仅视为待删旧行为；对象模型不再把它写成目标团队拓扑、默认节奏或正式 runtime contract 的一部分
 
 ---
 
@@ -1397,6 +1404,26 @@ Windows-first 约束：
 - `src/copaw/state/knowledge_service.py` 已提供正式 knowledge import / split / retrieve / CRUD 入口，并由 `/api/runtime-center/knowledge*` 暴露
 - `src/copaw/state/reporting_service.py` 已基于 `EvidenceLedger + Task/Goal/Runtime + DecisionRequest + Learning` 计算正式 reports/performance 读面，并由 `/api/runtime-center/reports` 与 `/api/runtime-center/performance` 暴露
 - 这些对象当前是统一 `state/evidence` 主链上的正式读模型，不是新的平行 reporting store
+
+---
+
+## 6.8a `ResearchSessionRecord / ResearchSessionRoundRecord`
+
+表示当前已落地的正式 research runtime 对象。它们记录一次研究任务及其逐轮推进过程，是 `researcher` 执行研究 brief 的过程真相；但它们不替代 `Assignment / AgentReport / KnowledgeChunkRecord`，后者仍分别承担派工、回报与知识沉淀。
+
+建议字段：
+
+- `ResearchSessionRecord.id / provider / industry_instance_id / work_context_id / owner_agent_id / supervisor_agent_id / trigger_source / goal / status / browser_session_id / round_count / link_depth_count / download_count / stable_findings / open_questions / final_report_id / failure_class / failure_summary / completed_at / metadata / created_at / updated_at`
+- `ResearchSessionRoundRecord.id / session_id / round_index / question / generated_prompt / response_excerpt / response_summary / raw_links / selected_links / downloaded_artifacts / new_findings / remaining_gaps / decision / evidence_ids / metadata / created_at / updated_at`
+
+### 当前稳定实现补充
+
+- `src/copaw/state/models_research.py` 已正式定义 `ResearchSessionRecord / ResearchSessionRoundRecord`
+- `SqliteResearchSessionRepository` 已成为当前 research session 的正式仓储实现；session 与 round 都走同一份 SQLite state truth，而不是散落在临时浏览器状态里
+- `BaiduPageResearchService` 已落地 `start_session / run_session / summarize_session` 主链，可把完成后的研究结果写成 `AgentReportRecord`，并把摘要继续写入 `work_context / industry` 知识面
+- `GET /runtime-center/research` 已作为 Runtime Center 的正式研究读面落地；前端主脑 cockpit 当前消费的是这条 read surface，而不是 chat fallback 文本
+- 主脑 `user-direct` 触发前门与 schedule `monitoring brief` 自动触发前门现已落地；`ResearchSession*` 不再只是研究过程真相，也已成为正式研究触发链的运行对象
+- 当前剩余边界：live smoke 合同已落地，但真实联网 `PASS` 仍受浏览器运行时前置条件限制，当前只有显式 `skip` 记录
 
 ---
 
@@ -1707,9 +1734,12 @@ Windows-first 约束：
 - `IndustryProfile / IndustryRoleBlueprint / IndustryTeamBlueprint / IndustryGoalSeed` 已有正式模型与编译器；它们现在是稳定的 compiler/product-layer objects，不再承担长期运行真相源
 - `employment_mode / activation_mode` 已成为稳定岗位契约字段：前者定义 `career / temporary` seat 生命周期，后者定义 `persistent / on-demand` 唤醒方式；`/industry`、`Runtime Center` 与 `AgentWorkbench` 必须消费同一套字段
 - `2026-03-14` 语义补充：`IndustryTeamBlueprint.topology` 已进入正式模型，用于约束“最小合理团队”；`execution-core` 继续固定为团队总控核，而 `researcher` 只作为可选支援角色存在
+- `2026-04-17` 语义补充：`researcher` seat 即使被 `draft/compiler` 物化，也必须继续服从“主脑先写 brief、researcher 再执行”的主链；正式启动原因收口为 `user-direct / main-brain-followup / monitoring`，默认 `research-signal-loop` 不再属于目标口径
 - `IndustryScheduleSeed / IndustryInstanceSummary / IndustryInstanceDetail / IndustryReportSnapshot` 已成为稳定的产品层节奏/读模型
 - `KnowledgeChunkRecord` 已成为正式知识库对象，knowledge import/retrieve 不再只存在于聊天上下文或零散 evidence 中
 - `KnowledgeChunkRecord` 当前也承载长期记忆文档语义，`memory:{scope_type}:{scope_id}` 已成为稳定 scope 约定
+- `ResearchSessionRecord / ResearchSessionRoundRecord` 已成为正式 research runtime 对象；当前稳定链路为 `SqliteResearchSessionRepository + BaiduPageResearchService + /runtime-center/research + cockpit research summary`
+- 上述 `ResearchSession*` 现已覆盖主脑 `user-direct`、schedule `monitoring brief`、runtime bootstrap 注入、研究汇报回流与 `/runtime-center/research` 读面；未完成项主要只剩真实联网 live smoke `PASS`
 - `MetricRecord / ReportRecord` 已成为正式 evidence-driven V2 报告/绩效读对象，用于承载 Reports / Performance 产品面
 - `Task.parent_task_id` 已成为正式 delegation hierarchy anchor，不再只是临时读面拼接字段
 - `EnvironmentMount / SessionMount` 的 detail 读面当前已把 recovery 与 replay_support 视为正式运行元数据的一部分

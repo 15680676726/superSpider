@@ -91,6 +91,7 @@ if TYPE_CHECKING:
         SqlitePredictionReviewRepository,
         SqlitePredictionScenarioRepository,
         SqlitePredictionSignalRepository,
+        SqliteResearchSessionRepository,
         SqliteExecutionRoutineRepository,
         SqliteRuntimeFrameRepository,
         SqliteRoutineRunRepository,
@@ -164,6 +165,7 @@ class RuntimeRepositories:
     prediction_signal_repository: SqlitePredictionSignalRepository
     prediction_recommendation_repository: SqlitePredictionRecommendationRepository
     prediction_review_repository: SqlitePredictionReviewRepository
+    research_session_repository: SqliteResearchSessionRepository
     automation_loop_runtime_repository: SqliteAutomationLoopRuntimeRepository
     session_mount_repository: SessionMountRepository
     external_runtime_repository: Any | None = None
@@ -234,6 +236,7 @@ class RuntimeBootstrap:
     actor_worker: ActorWorker
     actor_supervisor: ActorSupervisor
     external_runtime_service: Any | None = None
+    research_session_service: Any | None = None
     buddy_onboarding_service: BuddyOnboardingService | None = None
     buddy_projection_service: BuddyProjectionService | None = None
     main_brain_orchestrator: MainBrainOrchestrator | None = None

@@ -37,6 +37,12 @@ def test_runtime_center_reports_routes_live_in_reports_module() -> None:
     assert hasattr(module, "list_strategy_memory")
 
 
+def test_runtime_center_research_routes_live_in_research_module() -> None:
+    module = importlib.import_module("copaw.app.routers.runtime_center_routes_research")
+
+    assert hasattr(module, "get_runtime_research")
+
+
 def test_runtime_center_industry_routes_live_in_industry_module() -> None:
     module = importlib.import_module("copaw.app.routers.runtime_center_routes_industry")
 
@@ -51,4 +57,20 @@ def test_runtime_center_facade_imports_domain_route_modules() -> None:
     assert hasattr(module, "_runtime_center_routes_memory")
     assert hasattr(module, "_runtime_center_routes_knowledge")
     assert hasattr(module, "_runtime_center_routes_reports")
+    assert hasattr(module, "_runtime_center_routes_research")
     assert hasattr(module, "_runtime_center_routes_industry")
+
+
+def test_runtime_center_facade_registers_research_route_on_shared_router() -> None:
+    module = importlib.import_module("copaw.app.routers.runtime_center")
+
+    matching_routes = [
+        route
+        for route in module.router.routes
+        if getattr(route, "path", None) == "/runtime-center/research"
+    ]
+
+    assert len(matching_routes) == 1
+    assert matching_routes[0].endpoint.__module__ == (
+        "copaw.app.routers.runtime_center_routes_research"
+    )

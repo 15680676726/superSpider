@@ -210,6 +210,20 @@ def _get_reporting_service(request: Request):
     return service
 
 
+def _get_research_session_repository(request: Request):
+    repository = getattr(request.app.state, "research_session_repository", None)
+    if repository is None:
+        raise HTTPException(503, detail="Research session repository is not available")
+    return repository
+
+
+def _get_research_session_service(request: Request):
+    service = getattr(request.app.state, "research_session_service", None)
+    if service is None:
+        raise HTTPException(503, detail="Research session service is not available")
+    return service
+
+
 def _get_industry_service(request: Request) -> IndustryService:
     service = getattr(request.app.state, "industry_service", None)
     if isinstance(service, IndustryService):

@@ -106,6 +106,12 @@ _RESEARCH_NEGATION_KEYWORDS = (
     "without research",
     "no signal loop",
 )
+_MONITORING_BRIEF_KEYWORDS = (
+    "monitoring brief",
+    "monitoring-brief",
+    "监测简报",
+    "监控简报",
+)
 
 _EXECUTION_CORE_ENVIRONMENT = [
     "Own the main control thread, delegation queue, and governed operating loop.",
@@ -437,6 +443,40 @@ def compile_industry_schedule_seeds(
             cadence_summary=schedule.summary,
             task_mode=task_mode,
         )
+        research_schedule_metadata = _build_research_schedule_metadata(
+            schedule=schedule,
+            role=role,
+            goal=goal,
+        )
+        request_payload = {
+            "channel": "console",
+            "session_id": session_id,
+            "user_id": owner_scope,
+            "agent_id": role.agent_id,
+            "owner_scope": owner_scope,
+            "industry_instance_id": draft.team.team_id,
+            "industry_role_id": role.role_id,
+            "industry_role_name": role.role_name,
+            "industry_label": draft.team.label,
+            "task_mode": task_mode,
+            "kickoff_stage": kickoff_stage,
+            "session_kind": (
+                "industry-control-thread"
+                if is_execution_core_role_id(role.role_id)
+                else "industry-agent-chat"
+            ),
+            "control_thread_id": (
+                session_id if is_execution_core_role_id(role.role_id) else None
+            ),
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "text", "text": prompt}],
+                },
+            ],
+        }
+        request_payload.update(research_schedule_metadata)
         seeds.append(
             IndustryScheduleSeed(
                 schedule_id=schedule.schedule_id,
@@ -449,34 +489,7 @@ def compile_industry_schedule_seeds(
                 dispatch_user_id=owner_scope,
                 dispatch_session_id=session_id,
                 dispatch_mode=schedule.dispatch_mode,
-                request_payload={
-                    "channel": "console",
-                    "session_id": session_id,
-                    "user_id": owner_scope,
-                    "agent_id": role.agent_id,
-                    "owner_scope": owner_scope,
-                    "industry_instance_id": draft.team.team_id,
-                    "industry_role_id": role.role_id,
-                    "industry_role_name": role.role_name,
-                    "industry_label": draft.team.label,
-                    "task_mode": task_mode,
-                    "kickoff_stage": kickoff_stage,
-                    "session_kind": (
-                        "industry-control-thread"
-                        if is_execution_core_role_id(role.role_id)
-                        else "industry-agent-chat"
-                    ),
-                    "control_thread_id": (
-                        session_id if is_execution_core_role_id(role.role_id) else None
-                    ),
-                    "input": [
-                        {
-                            "type": "message",
-                            "role": "user",
-                            "content": [{"type": "text", "text": prompt}],
-                        },
-                    ],
-                },
+                request_payload=request_payload,
                 metadata={
                     "bootstrap_kind": "industry-v1",
                     "industry_instance_id": draft.team.team_id,
@@ -485,10 +498,50 @@ def compile_industry_schedule_seeds(
                     "goal_kind": goal.kind if goal is not None else role.goal_kind,
                     "task_mode": task_mode,
                     "kickoff_stage": kickoff_stage,
+                    **research_schedule_metadata,
                 },
             ),
         )
     return seeds
+
+
+def _build_research_schedule_metadata(
+    *,
+    schedule: IndustryDraftSchedule,
+    role: IndustryRoleBlueprint,
+    goal: IndustryDraftGoal | None,
+) -> dict[str, str]:
+    if normalize_industry_role_id(role.role_id) != "researcher":
+        return {}
+    schedule_text = _normalize_search_text(
+        [
+            schedule.schedule_id,
+            schedule.title,
+            schedule.summary,
+            goal.title if goal is not None else None,
+            goal.summary if goal is not None else None,
+        ],
+    )
+    if not _contains_any_keyword(schedule_text, _MONITORING_BRIEF_KEYWORDS):
+        return {}
+    research_goal = _first_non_empty_text(
+        schedule.summary,
+        goal.summary if goal is not None else None,
+        goal.title if goal is not None else None,
+        schedule.title,
+    )
+    if research_goal is None:
+        return {}
+    metadata = {
+        "research_provider": "baidu-page",
+        "research_mode": "monitoring-brief",
+        "research_goal": research_goal,
+        "owner_agent_id": role.agent_id,
+    }
+    supervisor_agent_id = _first_non_empty_text(role.reports_to)
+    if supervisor_agent_id is not None:
+        metadata["supervisor_agent_id"] = supervisor_agent_id
+    return metadata
 
 
 def _pick_system_role(
@@ -597,11 +650,11 @@ def _canonicalize_researcher_role(
         role_name=role_name,
         role_summary=(
             role.role_summary.strip()
-            or "Persistent researcher role that collects signals and evidence for the main-brain review loop."
+            or "Research support role that executes explicit research briefs for the main brain."
         ),
         mission=(
             role.mission.strip()
-            or f"Feed {_EXECUTION_CORE_NAME} with durable industry, competitor, customer, and platform signals."
+            or f"Feed {_EXECUTION_CORE_NAME} with evidence-backed findings from explicit monitoring briefs and follow-up research."
         ),
         goal_kind="researcher",
         agent_class="system",
@@ -624,9 +677,9 @@ def _canonicalize_researcher_role(
         evidence_expectations=list(
             role.evidence_expectations
             or [
-                "Signal digests and research summaries.",
-                "Evidence links for platform, customer, and market changes.",
-                "Daily or periodic research reports routed back to the main brain.",
+                "Evidence-backed research summaries tied to the active brief.",
+                "Evidence links for the monitored platform, customer, market, or source changes.",
+                "Research or monitoring brief reports routed back to the main brain.",
             ]
         ),
     )
@@ -863,9 +916,7 @@ def _ensure_default_schedules(
             ),
         )
     for role in roles:
-        if not (
-            is_execution_core_role_id(role.role_id) or role.role_id == "researcher"
-        ):
+        if not is_execution_core_role_id(role.role_id):
             continue
         for blueprint in _default_schedule_blueprints(profile, role):
             signature = blueprint["signature"]
@@ -949,6 +1000,14 @@ def _normalize_search_text(values: list[object | None]) -> str:
     return " ".join(parts)
 
 
+def _first_non_empty_text(*values: object | None) -> str | None:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return None
+
+
 def _contains_any_keyword(text: str, keywords: tuple[str, ...]) -> bool:
     return any(keyword in text for keyword in keywords)
 
@@ -995,10 +1054,10 @@ def _build_default_researcher_source(
         name=f"{profile.primary_label()} Researcher",
         role_name="Researcher",
         role_summary=(
-            "Persistent researcher role that gathers signals and evidence for the main-brain review loop."
+            "Research support role that executes explicit research briefs for the main brain."
         ),
         mission=(
-            f"Feed {_EXECUTION_CORE_NAME} with durable industry, market, customer, and competitor signals."
+            f"Feed {_EXECUTION_CORE_NAME} with evidence-backed findings from explicit monitoring briefs and follow-up research."
         ),
         goal_kind="researcher",
         agent_class="system",
@@ -1169,17 +1228,6 @@ def _default_schedule_blueprints(
                 "summary": "Evening main-brain review over execution results, unresolved risks, and tomorrow routing.",
                 "cron": "0 19 * * *",
                 "dispatch_mode": "final",
-            },
-        ]
-    if role.role_id == "researcher":
-        return [
-            {
-                "signature": "research-signal-loop",
-                "slug": "research-signal-loop",
-                "title": f"{label} Research Signal Loop",
-                "summary": "Persistent researcher loop for industry, customer, platform, and competitor signals.",
-                "cron": "0 11 * * *",
-                "dispatch_mode": "stream",
             },
         ]
     return []

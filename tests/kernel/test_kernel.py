@@ -418,7 +418,32 @@ class TestKernelDispatcher:
         assert decision.status == "rejected"
         assert decision.resolution == "Rejected by operator."
 
-    def test_dispatch_query_parent_does_not_auto_complete_on_child_terminal(self, tmp_path):
+    def test_dispatch_query_parent_without_deferred_complete_stays_open_after_child_terminal(
+        self,
+        tmp_path,
+    ):
+        dispatcher, _task_store = _build_dispatcher_with_decisions(tmp_path)
+        parent = KernelTask(
+            id="parent-task",
+            title="Parent task",
+            capability_ref="system:dispatch_query",
+        )
+        child = KernelTask(
+            id="child-task",
+            parent_task_id=parent.id,
+            title="Child task",
+            capability_ref="system:dispatch_query",
+        )
+        dispatcher.submit(parent)
+        dispatcher.submit(child)
+
+        dispatcher.complete_task(child.id, summary="child done")
+        assert dispatcher.lifecycle.get_task(parent.id).phase == "executing"
+
+    def test_dispatch_query_parent_replays_deferred_complete_after_last_child_terminal(
+        self,
+        tmp_path,
+    ):
         dispatcher, _task_store = _build_dispatcher_with_decisions(tmp_path)
         parent = KernelTask(
             id="parent-task",
@@ -439,9 +464,31 @@ class TestKernelDispatcher:
         assert dispatcher.lifecycle.get_task(parent.id).phase == "executing"
 
         dispatcher.complete_task(child.id, summary="child done")
+        assert dispatcher.lifecycle.get_task(parent.id).phase == "completed"
+
+    def test_failed_child_task_does_not_auto_fail_explicit_close_query_parent(self, tmp_path):
+        dispatcher, _task_store = _build_dispatcher_with_decisions(tmp_path)
+        parent = KernelTask(
+            id="parent-task",
+            title="Parent task",
+            capability_ref="system:dispatch_query",
+        )
+        child = KernelTask(
+            id="child-task",
+            parent_task_id=parent.id,
+            title="Child task",
+            capability_ref="system:dispatch_query",
+        )
+        dispatcher.submit(parent)
+        dispatcher.submit(child)
+
+        dispatcher.fail_task(child.id, error="child failed")
         assert dispatcher.lifecycle.get_task(parent.id).phase == "executing"
 
-        completed = dispatcher.complete_task(parent.id, summary="parent done after turn closeout")
+        completed = dispatcher.complete_task(
+            parent.id,
+            summary="child failure was reported back honestly",
+        )
         assert completed.phase == "completed"
 
     def test_non_query_parent_auto_completes_after_last_child_terminal(self, tmp_path):
@@ -467,18 +514,18 @@ class TestKernelDispatcher:
         dispatcher.complete_task(child.id, summary="child done")
         assert dispatcher.lifecycle.get_task(parent.id).phase == "completed"
 
-    def test_failed_child_task_fails_parent_task(self, tmp_path):
+    def test_failed_child_task_still_fails_non_query_parent(self, tmp_path):
         dispatcher, _task_store = _build_dispatcher_with_decisions(tmp_path)
         parent = KernelTask(
             id="parent-task",
             title="Parent task",
-            capability_ref="system:dispatch_query",
+            capability_ref="system:delegate_task",
         )
         child = KernelTask(
             id="child-task",
             parent_task_id=parent.id,
             title="Child task",
-            capability_ref="system:dispatch_query",
+            capability_ref="tool:execute_shell_command",
         )
         dispatcher.submit(parent)
         dispatcher.submit(child)

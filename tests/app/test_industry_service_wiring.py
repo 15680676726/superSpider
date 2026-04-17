@@ -1276,3 +1276,126 @@ def test_sync_actor_runtime_surface_recomputes_effective_capabilities_after_tria
         "mcp:campaign-dashboard",
         "mcp:browser-temp",
     ]
+
+
+def test_runtime_domain_builder_injects_research_session_service_into_main_brain_chat(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+    research_session_repository = object()
+    agent_report_repository = object()
+
+    class _RepoBag(SimpleNamespace):
+        def __getattr__(self, name: str):
+            value = object()
+            setattr(self, name, value)
+            return value
+
+    class _CapabilityService:
+        def __init__(self) -> None:
+            self.discovery = SimpleNamespace(set_fixed_sop_service=lambda service: None)
+
+        def set_goal_service(self, value) -> None:
+            captured["goal_service"] = value
+
+        def set_agent_profile_service(self, value) -> None:
+            captured["agent_profile_service"] = value
+
+        def set_industry_service(self, value) -> None:
+            captured["industry_service"] = value
+
+        def set_routine_service(self, value) -> None:
+            captured["routine_service"] = value
+
+        def set_fixed_sop_service(self, value) -> None:
+            captured["fixed_sop_service"] = value
+
+        def set_delegation_service(self, value) -> None:
+            captured["delegation_service"] = value
+
+        def set_actor_mailbox_service(self, value) -> None:
+            captured["actor_mailbox_service"] = value
+
+        def set_actor_supervisor(self, value) -> None:
+            captured["actor_supervisor"] = value
+
+        def get_discovery_service(self):
+            return self.discovery
+
+    class _StateQueryService:
+        def set_goal_service(self, value) -> None:
+            captured["state_query_goal_service"] = value
+
+        def set_learning_service(self, value) -> None:
+            captured["state_query_learning_service"] = value
+
+        def set_agent_profile_service(self, value) -> None:
+            captured["state_query_agent_profile_service"] = value
+
+    class _MainBrainChatService(SimpleNamespace):
+        def __init__(self, **kwargs) -> None:
+            super().__init__()
+            captured["main_brain_chat_init_kwargs"] = kwargs
+
+        def set_research_session_service(self, value) -> None:
+            captured["main_brain_research_session_service"] = value
+
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "GoalService", lambda **kwargs: SimpleNamespace(set_agent_profile_service=lambda value: None))
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "AgentProfileService", lambda **kwargs: SimpleNamespace(backfill_industry_baseline_capabilities=lambda: None))
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "StateReportingService", lambda **kwargs: SimpleNamespace())
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "OperatingLaneService", lambda **kwargs: SimpleNamespace())
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "BacklogService", lambda **kwargs: SimpleNamespace())
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "OperatingCycleService", lambda **kwargs: SimpleNamespace())
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "AssignmentService", lambda **kwargs: SimpleNamespace())
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "AgentReportService", lambda **kwargs: SimpleNamespace())
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "MediaService", lambda **kwargs: SimpleNamespace())
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "IndustryService", lambda **kwargs: SimpleNamespace(set_prediction_service=lambda value: None))
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "WorkflowTemplateService", lambda **kwargs: SimpleNamespace())
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "FixedSopService", lambda **kwargs: SimpleNamespace(set_routine_service=lambda value: None))
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "RoutineService", lambda **kwargs: SimpleNamespace())
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "PredictionService", lambda **kwargs: SimpleNamespace())
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "TaskDelegationService", lambda **kwargs: SimpleNamespace())
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "KernelQueryExecutionService", lambda **kwargs: SimpleNamespace())
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "MainBrainChatService", _MainBrainChatService)
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "MainBrainOrchestrator", lambda **kwargs: SimpleNamespace())
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "BaiduPageResearchService", lambda **kwargs: SimpleNamespace(**kwargs))
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "LearningRuntimeBindings", lambda **kwargs: SimpleNamespace())
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "build_industry_service_runtime_bindings", lambda **kwargs: SimpleNamespace())
+
+    domain_services = runtime_bootstrap_domains_module.build_runtime_domain_services(
+        session_backend=object(),
+        conversation_compaction_service=object(),
+        mcp_manager=object(),
+        state_store=SQLiteStateStore(":memory:"),
+        repositories=_RepoBag(
+            research_session_repository=research_session_repository,
+            agent_report_repository=agent_report_repository,
+        ),
+        evidence_ledger=object(),
+        environment_service=SimpleNamespace(set_kernel_dispatcher=lambda value: None),
+        runtime_event_bus=object(),
+        runtime_provider=SimpleNamespace(get_active_chat_model=lambda: object()),
+        state_query_service=_StateQueryService(),
+        strategy_memory_service=object(),
+        knowledge_service=object(),
+        derived_memory_index_service=SimpleNamespace(set_reporting_service=lambda value: None, set_learning_service=lambda value: None),
+        memory_reflection_service=SimpleNamespace(set_learning_service=lambda value: None),
+        memory_recall_service=object(),
+        memory_retain_service=object(),
+        memory_activation_service=None,
+        agent_experience_service=None,
+        work_context_service=object(),
+        learning_service=SimpleNamespace(configure_bindings=lambda value: None),
+        capability_service=_CapabilityService(),
+        kernel_dispatcher=object(),
+        kernel_tool_bridge=object(),
+        actor_mailbox_service=object(),
+        actor_supervisor=object(),
+    )
+
+    injected_service = captured.get("main_brain_research_session_service")
+
+    assert injected_service is not None
+    assert domain_services.research_session_service is injected_service
+    assert injected_service.research_session_repository is research_session_repository
+    assert injected_service.report_repository is agent_report_repository

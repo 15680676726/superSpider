@@ -1,6 +1,10 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any
+
 from . import browser_control_actions_core as browser_control_actions_core_module
 from .browser_control_shared import *  # noqa: F401,F403
 from .browser_control_actions_core import *  # noqa: F401,F403
@@ -23,6 +27,38 @@ def _attach_page_listeners_with_downloads(page, page_id: str, session_id: str) -
 
 if browser_control_actions_core_module._attach_page_listeners is not _attach_page_listeners_with_downloads:
     browser_control_actions_core_module._attach_page_listeners = _attach_page_listeners_with_downloads
+
+
+def run_browser_use_json(**payload: Any) -> dict[str, Any]:
+    async def _invoke() -> ToolResponse:
+        return await browser_use(**payload)
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        response = asyncio.run(_invoke())
+        return _parse_tool_response_json(response)
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(lambda: asyncio.run(_invoke()))
+        response = future.result()
+    return _parse_tool_response_json(response)
+
+
+def list_browser_downloads(
+    *,
+    session_id: str | None = None,
+    page_id: str | None = None,
+) -> list[dict[str, Any]]:
+    downloads = _session_download_records(session_id)
+    if page_id is None:
+        return list(downloads)
+    normalized_page_id = str(page_id).strip()
+    return [
+        item
+        for item in downloads
+        if str(item.get("page_id") or "").strip() == normalized_page_id
+    ]
 
 
 async def browser_use(  # pylint: disable=R0911,R0912

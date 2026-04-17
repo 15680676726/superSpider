@@ -386,6 +386,10 @@
   - `PUT /industry/v1/instances/{instance_id}/team` 当前已成为现有团队拓扑的 canonical 更新入口；它继续复用同一条 bootstrap 激活主链，但锁定现有 `instance_id` 做 team patch，使“新增/删除职业位”不再依赖隐式 re-bootstrap 语义
   - `system:update_industry_team` 当前已作为 kernel-governed team write capability 落地；prediction / recommendation 若发现执行中枢长期兜底某个叶子环路，会通过这条能力把“补岗位”正式回写到现有行业实例，而不是停留在手工说明层
   - `2026-03-20` 起 canonical team seat contract 已正式固定为 `employment_mode + activation_mode`：`employment_mode=career|temporary` 负责 seat 生命周期，`activation_mode=persistent|on-demand` 只负责唤醒方式；行业编译、团队运行态、Agent Workbench 与预测补位都必须复用这同一组字段，不再允许另造“临时/常驻/兼职”平行心智
+  - `2026-04-17` 研究驱动口径补充：`researcher` 在行业 bootstrap/update-team 主链中是研究支援位，不是默认空跑巡检器；`draft/compiler` 可决定该 seat 是否存在，但 seat 被物化不等于自动启动
+  - `2026-04-17` 研究驱动口径补充：researcher 的正式启动原因收口为 `user-direct / main-brain-followup / monitoring`；其中 `main-brain-followup` 指主脑围绕现有 `assignment / backlog / report / work context` 写出的 follow-up research brief
+  - `2026-04-17` 研究驱动口径补充：`monitoring` 不是泛行业默认巡检；只有用户或主脑先写出明确 `monitoring brief`，`schedule / cron` 才能作为该 brief 的执行载体唤醒 researcher
+  - `2026-04-17` 删旧口径补充：compiler 默认 `research-signal-loop` 只应视为待删 legacy behavior；迁移目标是“主脑生成 research brief / monitoring brief -> 正式 assignment 或 monitoring schedule -> researcher 执行 -> report 回流”，不再把通用 researcher loop 视为正式 runtime contract
   - `2026-03-20` 起 `system:update_industry_team` / `IndustryService.add_role_to_instance_team()` 已支持同一主链上的 seat lifecycle 动作：duplicate temporary add 复用现有 seat、temporary -> career 视为晋升而不是新建第二个岗位、completed temporary 在无 live work 时自动退场；temporary seat 若没有显式 `goal`，不再自动生成默认长期 goal
   - `2026-03-19` 起行业推荐侧的 install-template / curated / hub discovery 已从 `IndustryService` 私有实现切到共享 `CapabilityDiscoveryService`，`/industry` 读面返回的 recommendation 也会直接带出 `discovery_queries / match_signals / governance_path`，前后端不再各自猜测“为什么推荐、下一步如何治理”
   - `GET /industry/v1/instances` 与 `GET /industry/v1/instances/{instance_id}` 已提供正式行业 summary/detail 读面
@@ -667,6 +671,10 @@
   - 当前 `GET /runtime-center/decisions/{id}` 已保持纯读；正式 review 写 front-door 现只剩 `POST /runtime-center/governed/decisions/{id}/review`，用于把 `open` 显式推进到 `reviewing`
   - 当前 `GET /runtime-center/kernel/tasks` 已改走 persisted `KernelTaskStore` read projection，不再依赖 live `dispatcher.lifecycle.list_tasks()`；因此 `phase=waiting-confirm` 等 kernel 相位会继续按 kernel truth 原样返回，而不是退化成 generic task status
   - `2026-04-02` 补充：`RuntimeCenterStateQueryService` 已把 task list / kernel task 读面下沉到 `app/runtime_center/task_list_projection.py`，后续继续拆 projector 时应优先沿这种独立 read-collaborator 方向推进，而不是回到巨型 service 内聚合
+  - `2026-04-17` 补充：`GET /runtime-center/research` 已作为正式 research read surface 落地；它当前读取 `ResearchSessionRecord + ResearchSessionRoundRecord` 的最近会话摘要，并供主脑 cockpit research card 使用
+  - `2026-04-17` 补充：runtime bootstrap 已真实注入 `SqliteResearchSessionRepository + BaiduPageResearchService`，因此 `/runtime-center/research` 读取的是正式 state/research service truth，而不是前端本地派生或 chat fallback
+  - `2026-04-17` 进度补充：主脑 `user-direct` 与 schedule `monitoring brief` 现已正式路由进 `BaiduPageResearchService`；`/runtime-center/research` 不再只是读面，而是正式 research session 真相的聚合读口
+  - `2026-04-17` 边界补充：当前仍缺真实联网 live smoke `PASS`，因此不能把这条链外推成“所有浏览器环境都已稳定跑通”
   - 当前 `/runtime-center/events` 已提供 SSE runtime event stream；前端只把它当作 reload trigger，而不是第二真相源
   - 当前 `/runtime-center/recovery/latest` 与 `/runtime-center/sessions/{id}/lease/force-release` 仍是一等 operator 动作；`/runtime-center/replays/{id}/execute` 已于 `2026-03-25` 从 router 物理删除，不再允许人类前台直接重放执行
   - `V6` 的 routine diagnosis / lock conflict / replay fallback 也应继续落在 Runtime Center detail/drawer 体系里，不允许再造 page-local routine operator 面

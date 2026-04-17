@@ -63,6 +63,7 @@ from ..models_memory import (
     MemorySoftRuleRecord,
     WorkContextMemoryOverlayRecord,
 )
+from ..models_research import ResearchSessionRecord, ResearchSessionRoundRecord
 from ..models_work_context import WorkContextRecord
 
 
@@ -409,6 +410,65 @@ class BaseHumanAssistTaskRepository(ABC):
 
     @abstractmethod
     def delete_task(self, task_id: str) -> bool:
+        raise NotImplementedError
+
+
+class BaseResearchSessionRepository(ABC):
+    """Abstract repository for formal research sessions and rounds."""
+
+    @abstractmethod
+    def get_research_session(self, session_id: str) -> Optional[ResearchSessionRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_research_sessions(
+        self,
+        *,
+        provider: str | None = None,
+        owner_agent_id: str | None = None,
+        supervisor_agent_id: str | None = None,
+        trigger_source: str | None = None,
+        industry_instance_id: str | None = None,
+        work_context_id: str | None = None,
+        status: str | None = None,
+        limit: int | None = None,
+    ) -> list[ResearchSessionRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upsert_research_session(
+        self,
+        session: ResearchSessionRecord,
+    ) -> ResearchSessionRecord:
+        raise NotImplementedError
+
+    @abstractmethod
+    def delete_research_session(self, session_id: str) -> bool:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_research_round(self, round_id: str) -> Optional[ResearchSessionRoundRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_research_rounds(
+        self,
+        *,
+        session_id: str,
+        decision: str | None = None,
+        limit: int | None = None,
+    ) -> list[ResearchSessionRoundRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upsert_research_round(
+        self,
+        round_record: ResearchSessionRoundRecord,
+    ) -> ResearchSessionRoundRecord:
+        raise NotImplementedError
+
+    @abstractmethod
+    def delete_research_round(self, round_id: str) -> bool:
         raise NotImplementedError
 
 

@@ -13,7 +13,11 @@ from copaw.agents.tools import browser_control as browser_control_module
 from copaw.agents.tools import browser_control_actions_core
 from copaw.agents.tools import browser_control_actions_extended
 from copaw.agents.tools import browser_control_shared
-from copaw.agents.tools.browser_control import browser_use
+from copaw.agents.tools.browser_control import (
+    browser_use,
+    list_browser_downloads,
+    run_browser_use_json,
+)
 from copaw.agents.tools.evidence_runtime import bind_browser_evidence_sink
 from copaw.app.runtime_events import RuntimeEventBus
 from copaw.capabilities import browser_runtime as browser_runtime_module
@@ -855,6 +859,51 @@ def test_attach_download_listener_accepts_property_filename(tmp_path, monkeypatc
     assert downloads[0]["suggested_filename"] == "listener-report.csv"
     assert downloads[0]["status"] == "completed"
     assert downloads[0]["exists"] is True
+
+
+def test_list_browser_downloads_reads_verified_records_from_shared_bucket() -> None:
+    browser_control_shared._state["sessions"] = {}
+    browser_control_shared._state["current_session_id"] = None
+    session = browser_control_shared._get_session_state("research-session", create=True)
+    assert session is not None
+    session["downloads"] = {
+        "page-1": [
+            {
+                "page_id": "page-1",
+                "path": "D:/tmp/report.pdf",
+                "suggested_filename": "report.pdf",
+                "status": "completed",
+                "verified": True,
+                "exists": True,
+            },
+        ],
+        "page-2": [
+            {
+                "page_id": "page-2",
+                "path": "D:/tmp/ignore.txt",
+                "suggested_filename": "ignore.txt",
+                "status": "completed",
+                "verified": True,
+                "exists": True,
+            },
+        ],
+    }
+
+    downloads = list_browser_downloads(session_id="research-session", page_id="page-1")
+
+    assert [item["page_id"] for item in downloads] == ["page-1"]
+    assert downloads[0]["suggested_filename"] == "report.pdf"
+
+
+def test_run_browser_use_json_returns_parsed_payload(monkeypatch) -> None:
+    async def fake_browser_use(**_payload):
+        return _json_response({"ok": True, "page_id": "page-1"})
+
+    monkeypatch.setattr(browser_control_module, "browser_use", fake_browser_use)
+
+    payload = run_browser_use_json(action="snapshot", page_id="page-1")
+
+    assert payload == {"ok": True, "page_id": "page-1"}
 
 
 def test_fill_form_fails_when_requested_ref_is_missing(monkeypatch) -> None:

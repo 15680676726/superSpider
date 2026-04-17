@@ -265,15 +265,6 @@ class FakeIndustryDraftGenerator:
                     dispatch_mode="stream",
                 ),
                 IndustryDraftSchedule(
-                    schedule_id="research-review",
-                    owner_agent_id=f"industry-researcher-{slug}",
-                    title=f"{profile.primary_label()} Research Review",
-                    summary="Recurring research review.",
-                    cron="0 10 * * 2",
-                    timezone="UTC",
-                    dispatch_mode="stream",
-                ),
-                IndustryDraftSchedule(
                     schedule_id="solution-review",
                     owner_agent_id=f"industry-solution-lead-{slug}",
                     title=f"{profile.primary_label()} Solution Review",

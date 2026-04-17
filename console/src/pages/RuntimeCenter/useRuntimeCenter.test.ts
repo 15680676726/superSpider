@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
   RuntimeCenterSurfaceCard,
+  RuntimeCenterResearchResponse,
   RuntimeCenterSurfaceResponse,
   RuntimeCenterSurfaceInfo,
   RuntimeMainBrainBuddySummary,
@@ -100,6 +101,7 @@ const requestRuntimeSurfaceMock = vi.fn();
 const requestRuntimeBusinessAgentsMock = vi.fn();
 const requestRuntimeRecordMock = vi.fn();
 const readBuddyProfileIdMock = vi.fn();
+const getRuntimeResearchMock = vi.fn();
 let runtimeEventHandler:
   | ((event: { event_name: string; payload: Record<string, unknown> }) => void)
   | null = null;
@@ -126,6 +128,17 @@ vi.mock("../../runtime/buddyProfileBinding", () => ({
   readBuddyProfileId: () => readBuddyProfileIdMock(),
 }));
 
+vi.mock("../../api/modules/runtimeCenter", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../api/modules/runtimeCenter")>();
+  return {
+    ...actual,
+    runtimeCenterApi: {
+      ...actual.runtimeCenterApi,
+      getRuntimeResearch: (...args: unknown[]) => getRuntimeResearchMock(...args),
+    },
+  };
+});
+
 vi.mock("../../runtime/eventBus", () => ({
   subscribe: vi.fn((_topic: string, handler: typeof runtimeEventHandler) => {
     runtimeEventHandler = handler;
@@ -144,6 +157,10 @@ describe("useRuntimeCenter", () => {
     requestRuntimeSurfaceMock.mockResolvedValue(mockSurface());
     requestRuntimeBusinessAgentsMock.mockResolvedValue([]);
     requestRuntimeRecordMock.mockReset();
+    getRuntimeResearchMock.mockResolvedValue({
+      session: null,
+      latest_round: null,
+    } satisfies RuntimeCenterResearchResponse);
   });
 
   it("loads cards first and hydrates main-brain in a follow-up request", async () => {
@@ -224,6 +241,57 @@ describe("useRuntimeCenter", () => {
       }),
     ]);
     expect(result.current.businessAgentsError).toBeNull();
+  });
+
+  it("loads research session summary from the dedicated runtime research surface", async () => {
+    getRuntimeResearchMock.mockResolvedValue({
+      session: {
+        id: "research-session-1",
+        status: "running",
+        goal: "研究百度搜索结果里的 SaaS 竞品线索",
+        round_count: 2,
+      },
+      latest_round: {
+        id: "research-round-2",
+        round_index: 2,
+        response_summary: "正在比对第二轮抓到的竞品页面。",
+      },
+      latest_status: "正在比对第二轮抓到的竞品页面。",
+    } satisfies RuntimeCenterResearchResponse);
+
+    const { result } = renderHook(() => useRuntimeCenter());
+
+    await waitFor(
+      () =>
+        !result.current.loading &&
+        !result.current.mainBrainLoading &&
+        !result.current.businessAgentsLoading,
+    );
+
+    const researchSummary = (
+      result.current as unknown as {
+        researchSummary?: {
+          id: string;
+          status: string;
+          goal: string;
+          roundCount: number;
+          waitingLogin: boolean;
+          latestStatus: string;
+        } | null;
+      }
+    ).researchSummary;
+
+    expect(getRuntimeResearchMock).toHaveBeenCalledTimes(1);
+    expect(researchSummary).toEqual(
+      expect.objectContaining({
+        id: "research-session-1",
+        status: "running",
+        goal: "研究百度搜索结果里的 SaaS 竞品线索",
+        roundCount: 2,
+        waitingLogin: false,
+        latestStatus: "正在比对第二轮抓到的竞品页面。",
+      }),
+    );
   });
 
   it("marks main-brain surface unavailable when canonical surface omits it", async () => {

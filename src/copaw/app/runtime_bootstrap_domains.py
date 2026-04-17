@@ -42,6 +42,7 @@ from ..memory import (
     MemorySleepService,
 )
 from ..predictions import PredictionService
+from ..research import BaiduPageResearchService
 from ..providers.runtime_provider_facade import ProviderRuntimeSurface
 from ..routines import RoutineService
 from ..sop_kernel import FixedSopService
@@ -59,6 +60,7 @@ from ..state.reporting_service import StateReportingService
 from ..state.strategy_memory_service import StateStrategyMemoryService
 from ..state.work_context_service import WorkContextService
 from ..workflows import WorkflowTemplateService
+from ..agents.tools.browser_control import list_browser_downloads, run_browser_use_json
 from .mcp import MCPClientManager
 from .runtime_bootstrap_models import RuntimeRepositories
 from .runtime_center import RuntimeCenterStateQueryService
@@ -86,6 +88,7 @@ class RuntimeDomainServices:
     main_brain_chat_service: MainBrainChatService
     main_brain_orchestrator: MainBrainOrchestrator
     report_replan_engine: ReportReplanEngine
+    research_session_service: BaiduPageResearchService | None = None
 
 
 def _build_goal_service(
@@ -459,6 +462,21 @@ def build_runtime_domain_services(
             knowledge_graph_service=knowledge_graph_service,
         ),
     )
+    research_session_service = BaiduPageResearchService(
+        research_session_repository=repositories.research_session_repository,
+        browser_action_runner=run_browser_use_json,
+        browser_download_resolver=list_browser_downloads,
+        report_repository=repositories.agent_report_repository,
+        knowledge_service=knowledge_service,
+        work_context_service=work_context_service,
+    )
+    set_research_session_service = getattr(
+        main_brain_chat_service,
+        "set_research_session_service",
+        None,
+    )
+    if callable(set_research_session_service):
+        set_research_session_service(research_session_service)
 
     return RuntimeDomainServices(
         goal_service=goal_service,
@@ -480,4 +498,5 @@ def build_runtime_domain_services(
         main_brain_chat_service=main_brain_chat_service,
         main_brain_orchestrator=main_brain_orchestrator,
         report_replan_engine=report_replan_engine,
+        research_session_service=research_session_service,
     )

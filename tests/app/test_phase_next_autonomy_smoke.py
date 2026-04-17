@@ -12,7 +12,11 @@ from copaw.app.crons.models import CronJobState
 from copaw.app.startup_recovery import StartupRecoverySummary
 from copaw.config.config import HeartbeatConfig
 from copaw.kernel import GovernanceService, KernelTask
-from copaw.industry import IndustryPreviewRequest, normalize_industry_profile
+from copaw.industry import (
+    IndustryDraftSchedule,
+    IndustryPreviewRequest,
+    normalize_industry_profile,
+)
 from copaw.industry.chat_writeback import build_chat_writeback_plan
 from copaw.state import (
     AgentReportRecord,
@@ -1517,6 +1521,20 @@ def test_phase_next_researcher_schedule_followup_keeps_execution_core_continuity
         profile,
         "industry-v1-northwind-robotics",
     )
+    researcher_agent_id = next(
+        agent.agent_id for agent in draft.team.agents if agent.role_id == "researcher"
+    )
+    draft.schedules.append(
+        IndustryDraftSchedule(
+            schedule_id="phase-next-researcher-monitoring-explicit",
+            owner_agent_id=researcher_agent_id,
+            title=f"{profile.primary_label()} Monitoring Brief Review",
+            summary="Run the explicit researcher monitoring brief and return governed follow-up pressure.",
+            cron="0 10 * * 2",
+            timezone="UTC",
+            dispatch_mode="stream",
+        )
+    )
     response = client.post(
         "/industry/v1/bootstrap",
         json={
@@ -1546,8 +1564,8 @@ def test_phase_next_researcher_schedule_followup_keeps_execution_core_continuity
         assignment_id=None,
         owner_agent_id=schedule.spec_payload["meta"]["owner_agent_id"],
         owner_role_id="researcher",
-        headline="Researcher schedule found escalation signal",
-        summary="Research cadence surfaced a governed follow-up for the main brain chain.",
+        headline="Monitoring brief found escalation signal",
+        summary="The explicit monitoring brief surfaced a governed follow-up for the main brain chain.",
         status="recorded",
         result="failed",
         findings=["Competitor monitoring surfaced a signal that needs execution-core routing."],

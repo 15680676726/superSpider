@@ -27,6 +27,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_DEFERRED_EXPLICIT_CLOSEOUT_KEY = "_copaw_deferred_explicit_closeout"
+
 
 class KernelDispatcher:
     """Dispatch tasks through risk admission, persistence, and execution."""
@@ -313,6 +315,11 @@ class KernelDispatcher:
             )
         child_block_summary = self._active_child_block_summary(task_id)
         if child_block_summary is not None:
+            if _parent_requires_explicit_terminal_close(task):
+                task = self._remember_deferred_explicit_closeout(
+                    task,
+                    summary=summary,
+                )
             if self._task_store is not None:
                 self._task_store.append_evidence(
                     task,
@@ -331,6 +338,7 @@ class KernelDispatcher:
                 phase=task.phase,
                 summary=child_block_summary,
             )
+        task = self._clear_deferred_explicit_closeout(task)
         evidence_id: str | None = None
         if self._task_store is not None:
             evidence = self._task_store.append_evidence(
@@ -361,6 +369,7 @@ class KernelDispatcher:
             raise KeyError(f"Task '{task_id}' not found in kernel")
         if task.phase in {"completed", "failed", "cancelled"}:
             return self._lifecycle.fail(task_id, error=error)
+        task = self._clear_deferred_explicit_closeout(task)
         if self._task_store is not None:
             self._task_store.resolve_open_decisions(
                 task_id=task_id,
@@ -399,6 +408,7 @@ class KernelDispatcher:
                 task_id,
                 summary=resolution or "Task cancelled",
             )
+        task = self._clear_deferred_explicit_closeout(task)
         resolution_text = resolution or "任务已取消。"
         resolved_decision_id = decision_request_id
         if self._task_store is not None:
@@ -748,9 +758,19 @@ class KernelDispatcher:
             return
         summary = self._terminal_child_summary(child_tasks)
         if any(child.phase in {"failed", "cancelled"} for child in child_tasks):
+            if _parent_requires_explicit_terminal_close(parent):
+                return
             self.fail_task(parent_task_id, error=summary)
             return
         if _parent_requires_explicit_terminal_close(parent):
+            deferred_summary = self._deferred_explicit_closeout_summary(parent)
+            if deferred_summary is None:
+                return
+            self.complete_task(
+                parent_task_id,
+                summary=deferred_summary,
+                metadata={"source": "delegation-child-closeout"},
+            )
             return
         self.complete_task(
             parent_task_id,
@@ -765,6 +785,49 @@ class KernelDispatcher:
         if self._task_store is None:
             return []
         return self._task_store.list_child_tasks(parent_task_id=parent_task_id)
+
+    def _remember_deferred_explicit_closeout(
+        self,
+        task: KernelTask,
+        *,
+        summary: str,
+    ) -> KernelTask:
+        payload = dict(task.payload) if isinstance(task.payload, dict) else {}
+        pending = payload.get(_DEFERRED_EXPLICIT_CLOSEOUT_KEY)
+        if isinstance(pending, dict) and str(pending.get("summary") or "").strip() == summary.strip():
+            return task
+        payload[_DEFERRED_EXPLICIT_CLOSEOUT_KEY] = {"summary": summary}
+        return self._replace_task_payload(task, payload)
+
+    def _clear_deferred_explicit_closeout(self, task: KernelTask) -> KernelTask:
+        payload = dict(task.payload) if isinstance(task.payload, dict) else {}
+        if _DEFERRED_EXPLICIT_CLOSEOUT_KEY not in payload:
+            return task
+        payload.pop(_DEFERRED_EXPLICIT_CLOSEOUT_KEY, None)
+        return self._replace_task_payload(task, payload)
+
+    def _deferred_explicit_closeout_summary(self, task: KernelTask) -> str | None:
+        payload = dict(task.payload) if isinstance(task.payload, dict) else {}
+        pending = payload.get(_DEFERRED_EXPLICIT_CLOSEOUT_KEY)
+        if not isinstance(pending, dict):
+            return None
+        summary = str(pending.get("summary") or "").strip()
+        return summary or None
+
+    def _replace_task_payload(
+        self,
+        task: KernelTask,
+        payload: dict[str, object],
+    ) -> KernelTask:
+        updated_task = task.model_copy(
+            update={"payload": payload, "updated_at": datetime.now(timezone.utc)},
+        )
+        lifecycle_tasks = getattr(self._lifecycle, "_tasks", None)
+        if isinstance(lifecycle_tasks, dict):
+            lifecycle_tasks[updated_task.id] = updated_task
+        if self._task_store is not None:
+            self._task_store.upsert(updated_task)
+        return updated_task
 
     @staticmethod
     def _terminal_child_summary(child_tasks: list[KernelTask]) -> str:

@@ -82,7 +82,7 @@ def build_industry_draft_system_prompt() -> str:
             "- If `experience_mode` is `operator-guided`, treat `experience_notes` and `operator_requirements` as first-class planning anchors instead of overwriting them with a generic template.",
             "- If `experience_mode` is `system-led`, design the operating loop end to end yourself and proactively add the durable lanes the brief will actually need.",
             "- Add a `researcher` role only when the brief truly needs a recurring evidence, sourcing, or signal-collection lane.",
-            "- When the brief implies recurring market, platform, customer, competitor, or operating signal collection, keep `researcher` as a persistent role and give it a recurring schedule.",
+            "- Keep `researcher` as a persistent support role when the brief needs research capacity, but only give it a recurring schedule when the brief explicitly defines a monitoring brief, monitoring lane, or another named recurring monitoring contract.",
             "- If the operator explicitly names a missing loop such as customer service, content, reporting, sourcing, or platform operations, make that loop visible in the draft instead of hiding it inside another role.",
             "- Do not create filler roles, mirrored roles, or roles whose missions overlap heavily.",
             "- Every non-core role must own a distinct loop, output, or evidence stream.",

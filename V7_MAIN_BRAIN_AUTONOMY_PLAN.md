@@ -314,6 +314,7 @@
 
 - execution-core 的默认 schedule 应优先触发 planner
 - 不应直接等于叶子执行 prompt
+- researcher 不应自带无目的的默认 `researcher-loop`；只有主脑已经形成明确的研究 brief / monitoring brief 时，才允许创建对应的 monitoring schedule
 
 ---
 
@@ -526,4 +527,4 @@ Runtime Center 首屏必须回答：
 - The main brain is now treated as a planner / dispatcher / supervisor by default. Frontend chat no longer encourages the user to open execution task threads; execution work is expected to flow into assignments, tasks, reports, and evidence surfaces instead.
 - `heartbeat` is now a supervision pulse, not a chat surrogate. The runtime cron submits `system:run_operating_cycle` for `copaw-main-brain`, which matches the V7 rule that daily supervision belongs to the main brain instead of a fake standalone heartbeat persona.
 - Prediction is now the formal morning/evening review mechanism. `PredictionCase` metadata carries `meeting_window`, `review_date_local`, `participant_inputs`, `assignment_summaries`, and `lane_summaries`, and `/predictions` is treated as the visible review center rather than a separate optimization sidecar.
-- `researcher` remains a durable support role in the default industry bootstrap. If a draft omits it, the compiler reinjects it together with the default morning review / evening review / researcher-loop schedules so the main brain keeps a stable research input.
+- `researcher` remains a durable support role in the default industry bootstrap, but it is not a second planner and it should not own a generic auto-running researcher loop. If the role is present, its work must still be driven by a main-brain-authored research brief or an explicit monitoring brief; schedule is allowed only as the execution carrier of that brief, not as a purpose-free daily巡检器.

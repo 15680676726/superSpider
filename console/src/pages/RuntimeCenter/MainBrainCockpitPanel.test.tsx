@@ -86,6 +86,51 @@ describe("MainBrainCockpitPanel", () => {
 
     expect(screen.getByText("自动化管理区")).toBeInTheDocument();
   });
+
+  it("shows waiting-login when baidu research needs user login", () => {
+    const props = {
+      ...createProps(),
+      researchSummary: {
+        id: "research-session-1",
+        status: "waiting-login",
+        statusLabel: "待登录百度",
+        goal: "研究百度搜索里的行业竞品动态",
+        roundCount: 1,
+        roundLabel: "第 1 轮",
+        waitingLogin: true,
+        latestStatus: "等待你先登录百度，研究才能继续。",
+      },
+    } as unknown as MainBrainCockpitPanelProps;
+
+    render(<MainBrainCockpitPanel {...props} />);
+
+    expect(screen.getByText("待登录百度")).toBeInTheDocument();
+    expect(screen.getByText("当前研究目标")).toBeInTheDocument();
+  });
+
+  it("shows current research goal and round progress for researcher", () => {
+    const props = {
+      ...createProps(),
+      researchSummary: {
+        id: "research-session-2",
+        status: "running",
+        statusLabel: "当前研究中",
+        goal: "研究飞书与多维表格相关竞品能力",
+        roundCount: 2,
+        roundLabel: "第 2 轮",
+        waitingLogin: false,
+        latestStatus: "正在整理第二轮抓到的页面线索。",
+      },
+    } as unknown as MainBrainCockpitPanelProps;
+
+    render(<MainBrainCockpitPanel {...props} />);
+
+    expect(screen.getByText("当前研究目标")).toBeInTheDocument();
+    expect(screen.getByText("研究飞书与多维表格相关竞品能力")).toBeInTheDocument();
+    expect(screen.getByText("第 2 轮")).toBeInTheDocument();
+    expect(screen.getByText("最近状态")).toBeInTheDocument();
+  });
+
   it("renders trace lines inside the trace tab", () => {
     render(<MainBrainCockpitPanel {...createProps()} />);
 

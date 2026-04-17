@@ -64,7 +64,7 @@
 - Modify: `console/src/api/modules/industry.ts`
   - Add typed `staffing` payloads.
 - Modify: `console/src/pages/Industry/index.tsx`
-  - Add a staffing section that surfaces active gap, pending proposal, temporary seats, and researcher loop status.
+  - Add a staffing section that surfaces active gap, pending proposal, temporary seats, and researcher / monitoring status.
 - Modify: `console/src/pages/Industry/pageHelpers.tsx`
   - Add localized labels for the new staffing section.
 - Modify: `console/src/pages/AgentWorkbench/V7ExecutionSeatPanel.tsx`

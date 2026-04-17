@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-STATE_SCHEMA_VERSION = 39
+STATE_SCHEMA_VERSION = 40
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS human_profiles (
@@ -1278,6 +1278,64 @@ CREATE INDEX IF NOT EXISTS idx_agent_reports_processed
 CREATE INDEX IF NOT EXISTS idx_agent_reports_work_context
     ON agent_reports(work_context_id, updated_at DESC);
 
+CREATE TABLE IF NOT EXISTS research_sessions (
+    id TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    industry_instance_id TEXT,
+    work_context_id TEXT,
+    owner_agent_id TEXT NOT NULL,
+    supervisor_agent_id TEXT,
+    trigger_source TEXT NOT NULL,
+    goal TEXT NOT NULL,
+    status TEXT NOT NULL,
+    browser_session_id TEXT,
+    round_count INTEGER NOT NULL DEFAULT 0,
+    link_depth_count INTEGER NOT NULL DEFAULT 0,
+    download_count INTEGER NOT NULL DEFAULT 0,
+    stable_findings_json TEXT NOT NULL DEFAULT '[]',
+    open_questions_json TEXT NOT NULL DEFAULT '[]',
+    final_report_id TEXT,
+    failure_class TEXT,
+    failure_summary TEXT,
+    completed_at TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_research_sessions_owner_status
+    ON research_sessions(owner_agent_id, status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_research_sessions_work_context
+    ON research_sessions(work_context_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_research_sessions_industry
+    ON research_sessions(industry_instance_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_research_sessions_trigger
+    ON research_sessions(trigger_source, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS research_session_rounds (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    round_index INTEGER NOT NULL,
+    question TEXT NOT NULL,
+    generated_prompt TEXT,
+    response_excerpt TEXT,
+    response_summary TEXT,
+    raw_links_json TEXT NOT NULL DEFAULT '[]',
+    selected_links_json TEXT NOT NULL DEFAULT '[]',
+    downloaded_artifacts_json TEXT NOT NULL DEFAULT '[]',
+    new_findings_json TEXT NOT NULL DEFAULT '[]',
+    remaining_gaps_json TEXT NOT NULL DEFAULT '[]',
+    decision TEXT NOT NULL DEFAULT 'continue',
+    evidence_ids_json TEXT NOT NULL DEFAULT '[]',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY(session_id) REFERENCES research_sessions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_research_rounds_session_round_index
+    ON research_session_rounds(session_id, round_index ASC, updated_at DESC);
+
 CREATE TABLE IF NOT EXISTS strategy_memories (
     strategy_id TEXT PRIMARY KEY,
     scope_type TEXT NOT NULL,
@@ -2507,6 +2565,8 @@ def _ensure_state_schema_ready(conn: sqlite3.Connection) -> None:
         "automation_loop_runtimes",
         "memory_industry_slot_preferences",
         "memory_continuity_details",
+        "research_sessions",
+        "research_session_rounds",
     }
     if (
         current_version == STATE_SCHEMA_VERSION

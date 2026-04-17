@@ -20,6 +20,7 @@ import {
   type CockpitTrendPoint,
   type DayMode,
 } from "./AgentWorkPanel";
+import type { ResearchSessionSummary } from "./researchHelpers";
 import styles from "./index.module.less";
 
 export interface PendingApprovalItem {
@@ -42,6 +43,7 @@ export interface MainBrainStageSummary {
 
 export interface MainBrainCockpitPanelProps {
   title: string;
+  researchSummary?: ResearchSessionSummary | null;
   summaryFields: CockpitSummaryField[];
   morningReport?: CockpitReportBlock | null;
   eveningReport?: CockpitReportBlock | null;
@@ -181,8 +183,49 @@ function StageSummarySection({
   );
 }
 
+function ResearchSummarySection({
+  researchSummary,
+}: {
+  researchSummary?: ResearchSessionSummary | null;
+}) {
+  if (!researchSummary) {
+    return null;
+  }
+
+  return (
+    <div className={styles.stageSummaryCard} style={{ marginBottom: 16 }}>
+      <div className={styles.stageSummaryTop}>
+        <div>
+          <div className={styles.stageSummaryTitle}>研究进展</div>
+          <div className={styles.stageSummaryPeriod}>
+            {normalizeDisplayChinese(researchSummary.statusLabel)}
+          </div>
+        </div>
+      </div>
+
+      <div className={styles.approvalReasonBlock}>
+        <div className={styles.approvalLabel}>当前研究目标</div>
+        <p className={styles.approvalText}>{normalizeDisplayChinese(researchSummary.goal)}</p>
+      </div>
+
+      <div className={styles.approvalReasonBlock}>
+        <div className={styles.approvalLabel}>轮次进展</div>
+        <p className={styles.approvalText}>{normalizeDisplayChinese(researchSummary.roundLabel)}</p>
+      </div>
+
+      <div className={styles.approvalReasonBlock}>
+        <div className={styles.approvalLabel}>最近状态</div>
+        <p className={styles.approvalText}>
+          {normalizeDisplayChinese(researchSummary.latestStatus)}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export default function MainBrainCockpitPanel({
   title,
+  researchSummary,
   summaryFields,
   morningReport,
   eveningReport,
@@ -271,6 +314,7 @@ export default function MainBrainCockpitPanel({
           <p className={styles.cardSummary}>这里展示主脑今天的统筹判断、待处理事项和系统级控制入口。</p>
         </div>
       </div>
+      <ResearchSummarySection researchSummary={researchSummary} />
       <Tabs defaultActiveKey="summary" items={tabItems} destroyOnHidden />
     </Card>
   );

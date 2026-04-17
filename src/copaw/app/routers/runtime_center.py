@@ -12,4 +12,5 @@ from . import runtime_center_routes_overview as _runtime_center_routes_overview 
 from . import runtime_center_routes_memory as _runtime_center_routes_memory  # noqa: F401
 from . import runtime_center_routes_knowledge as _runtime_center_routes_knowledge  # noqa: F401
 from . import runtime_center_routes_reports as _runtime_center_routes_reports  # noqa: F401
+from . import runtime_center_routes_research as _runtime_center_routes_research  # noqa: F401
 from . import runtime_center_routes_industry as _runtime_center_routes_industry  # noqa: F401

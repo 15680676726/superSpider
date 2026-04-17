@@ -23,6 +23,15 @@ def _table_names(conn: sqlite3.Connection) -> set[str]:
     }
 
 
+def _index_names(conn: sqlite3.Connection) -> set[str]:
+    return {
+        str(row[0])
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'index'",
+        ).fetchall()
+    }
+
+
 def test_sqlite_state_store_initialize_upgrades_legacy_tables_before_schema_indexes(
     tmp_path,
 ) -> None:
@@ -127,6 +136,8 @@ def test_sqlite_state_store_initialize_upgrades_legacy_tables_before_schema_inde
         assert "buddy_domain_capabilities" in _table_names(conn)
         assert "work_contexts" in _table_names(conn)
         assert "human_assist_tasks" in _table_names(conn)
+        assert "research_sessions" in _table_names(conn)
+        assert "research_session_rounds" in _table_names(conn)
         assert "memory_industry_slot_preferences" in _table_names(conn)
         assert "memory_continuity_details" in _table_names(conn)
         assert "sop_adapter_templates" not in _table_names(conn)
@@ -221,6 +232,50 @@ def test_sqlite_state_store_initialize_upgrades_legacy_tables_before_schema_inde
             "verification_payload_json",
         }.issubset(_column_names(conn, "human_assist_tasks"))
         assert {"work_context_id"}.issubset(_column_names(conn, "media_analyses"))
+        assert {
+            "id",
+            "provider",
+            "industry_instance_id",
+            "work_context_id",
+            "owner_agent_id",
+            "supervisor_agent_id",
+            "trigger_source",
+            "goal",
+            "status",
+            "browser_session_id",
+            "round_count",
+            "link_depth_count",
+            "download_count",
+            "stable_findings_json",
+            "open_questions_json",
+            "final_report_id",
+            "failure_class",
+            "failure_summary",
+            "completed_at",
+            "metadata_json",
+        }.issubset(_column_names(conn, "research_sessions"))
+        assert {
+            "id",
+            "session_id",
+            "round_index",
+            "question",
+            "generated_prompt",
+            "response_excerpt",
+            "response_summary",
+            "raw_links_json",
+            "selected_links_json",
+            "downloaded_artifacts_json",
+            "new_findings_json",
+            "remaining_gaps_json",
+            "decision",
+            "evidence_ids_json",
+            "metadata_json",
+        }.issubset(_column_names(conn, "research_session_rounds"))
+        assert {
+            "idx_research_sessions_owner_status",
+            "idx_research_sessions_work_context",
+            "idx_research_rounds_session_round_index",
+        }.issubset(_index_names(conn))
         assert conn.execute("PRAGMA user_version").fetchone()[0] == STATE_SCHEMA_VERSION
 
 

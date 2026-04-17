@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
+import inspect
 import json
 import logging
 import re
@@ -57,6 +58,25 @@ def _current_prompt_time_snapshot() -> str:
     return f"北京时间 {now:%Y-%m-%d} {weekday} {now:%H:%M}"
 
 logger = logging.getLogger(__name__)
+
+_RESEARCH_DIRECT_HINTS = (
+    "去查一下",
+    "查一下",
+    "帮我查",
+    "查资料",
+    "找资料",
+    "研究一下",
+    "去研究",
+    "调研一下",
+    "做个调研",
+    "搜一下",
+    "帮我搜",
+    "搜集资料",
+    "了解一下",
+    "look up",
+    "research this",
+    "find sources",
+)
 
 
 def _missing_main_brain_chat_model() -> object:
@@ -182,6 +202,18 @@ def _safe_mapping(value: object) -> dict[str, Any]:
     if isinstance(namespace, dict):
         return dict(namespace)
     return {}
+
+
+def _safe_text(value: object | None) -> str | None:
+    text = str(value or "").strip()
+    return text or None
+
+
+def _looks_like_explicit_research_request(query: str) -> bool:
+    normalized = _normalize_query_signature(query)
+    if not normalized:
+        return False
+    return any(hint in normalized for hint in _RESEARCH_DIRECT_HINTS)
 
 
 def _int(value: object | None, default: int = 0) -> int:
@@ -840,6 +872,7 @@ class MainBrainChatService:
         model_factory: Callable[[], object] | None = None,
         scope_snapshot_service: MainBrainScopeSnapshotService | None = None,
         commit_service: MainBrainCommitService | None = None,
+        research_session_service: object | None = None,
     ) -> None:
         self._session_backend = session_backend
         self._industry_service = industry_service
@@ -879,6 +912,7 @@ class MainBrainChatService:
             },
             dirty_marker=self.mark_scope_snapshot_dirty,
         )
+        self._research_session_service = research_session_service
         set_owner = getattr(self._scope_snapshot_service, "set_owner", None)
         if callable(set_owner):
             set_owner(self)
@@ -901,6 +935,118 @@ class MainBrainChatService:
 
     def set_actor_supervisor(self, actor_supervisor: object | None) -> None:
         self._actor_supervisor = actor_supervisor
+
+    def set_research_session_service(self, research_session_service: object | None) -> None:
+        self._research_session_service = research_session_service
+
+    def _resolve_research_owner_agent_id(self, *, request: Any) -> str | None:
+        explicit = _safe_text(
+            _first_non_empty(
+                getattr(request, "research_owner_agent_id", None),
+                getattr(request, "target_agent_id", None),
+            ),
+        )
+        if explicit is not None:
+            return explicit
+        industry_instance_id = _safe_text(getattr(request, "industry_instance_id", None))
+        getter = getattr(self._industry_service, "get_instance_detail", None)
+        if industry_instance_id is not None and callable(getter):
+            try:
+                detail = getter(industry_instance_id)
+            except Exception:
+                logger.exception("Failed to resolve industry detail for research trigger")
+                detail = None
+            staffing = _safe_mapping(_safe_mapping(detail).get("staffing"))
+            researcher = _safe_mapping(staffing.get("researcher"))
+            researcher_agent_id = _safe_text(researcher.get("agent_id"))
+            if researcher_agent_id is not None:
+                return researcher_agent_id
+            team = _safe_mapping(_safe_mapping(detail).get("team"))
+            agents = team.get("agents")
+            if isinstance(agents, list):
+                for item in agents:
+                    payload = _safe_mapping(item)
+                    role_id = _safe_text(
+                        _first_non_empty(
+                            payload.get("role_id"),
+                            payload.get("industry_role_id"),
+                        ),
+                    )
+                    if role_id == "researcher":
+                        return _safe_text(_first_non_empty(payload.get("agent_id"), payload.get("id")))
+        return None
+
+    async def _maybe_handle_research_trigger(
+        self,
+        *,
+        query: str,
+        request: Any,
+        assistant_message_id: str,
+    ) -> tuple[Msg, dict[str, Any]] | None:
+        service = self._research_session_service
+        if service is None:
+            return None
+        brief = _safe_mapping(getattr(request, "_copaw_research_brief", None))
+        trigger_source = _safe_text(brief.get("trigger_source"))
+        goal = _safe_text(brief.get("goal"))
+        if trigger_source is None:
+            if not _looks_like_explicit_research_request(query):
+                return None
+            trigger_source = "user-direct"
+        if goal is None:
+            goal = _safe_text(query)
+        if goal is None:
+            return None
+        owner_agent_id = self._resolve_research_owner_agent_id(request=request)
+        if owner_agent_id is None:
+            return None
+        starter = getattr(service, "start_session", None)
+        if not callable(starter):
+            return None
+        session_result = starter(
+            goal=goal,
+            trigger_source=trigger_source,
+            owner_agent_id=owner_agent_id,
+            industry_instance_id=_safe_text(getattr(request, "industry_instance_id", None)),
+            work_context_id=_safe_text(getattr(request, "work_context_id", None)),
+            supervisor_agent_id=_safe_text(getattr(request, "agent_id", None)),
+            metadata={"entry_surface": "main-brain-chat"},
+        )
+        session_id = _safe_text(
+            _first_non_empty(
+                getattr(getattr(session_result, "session", None), "id", None),
+                getattr(session_result, "session_id", None),
+            ),
+        )
+        status = _safe_text(getattr(getattr(session_result, "session", None), "status", None))
+        runner = getattr(service, "run_session", None)
+        if callable(runner) and session_id is not None:
+            run_result = runner(session_id)
+            if inspect.isawaitable(run_result):
+                run_result = await run_result
+            status = _safe_text(getattr(getattr(run_result, "session", None), "status", None)) or status
+        summarizer = getattr(service, "summarize_session", None)
+        if callable(summarizer) and session_id is not None:
+            summary_result = summarizer(session_id)
+            if inspect.isawaitable(summary_result):
+                await summary_result
+        reply_text = (
+            "研究任务已建立，但百度还没登录。你先登录百度，我再继续。"
+            if status == "waiting-login"
+            else "研究任务已经启动，我去查资料并整理成正式汇报。"
+        )
+        return (
+            _build_assistant_message(
+                text=reply_text,
+                message_id=assistant_message_id,
+            ),
+            {
+                "research_session_id": session_id,
+                "trigger_source": trigger_source,
+                "status": status,
+                "goal": goal,
+            },
+        )
 
     def mark_scope_snapshot_dirty(
         self,
@@ -1165,6 +1311,42 @@ class MainBrainChatService:
                     memory=memory,
                     now=now,
                 )
+            research_turn = await self._maybe_handle_research_trigger(
+                query=query,
+                request=request,
+                assistant_message_id=assistant_message_id,
+            )
+            if research_turn is not None:
+                assistant_message, research_state = research_turn
+                try:
+                    snapshot, now = await self._persist_assistant_snapshot(
+                        assistant_message=assistant_message,
+                        session_id=session_id,
+                        user_id=user_id,
+                        has_session_snapshot=has_session_snapshot,
+                        cache_entry=cache_entry,
+                        snapshot=snapshot,
+                        memory=memory,
+                        now=now,
+                    )
+                except Exception:
+                    logger.exception("Failed to persist main-brain research trigger snapshot")
+                turn_timing["turn_total_ms"] = round(
+                    (time.perf_counter() - turn_started_at) * 1000,
+                    3,
+                )
+                self._set_request_runtime_value(
+                    request,
+                    "_copaw_main_brain_research_session",
+                    research_state,
+                )
+                self._set_request_runtime_value(
+                    request,
+                    "_copaw_main_brain_timing",
+                    dict(turn_timing),
+                )
+                yield assistant_message, True
+                return
         except Exception:
             logger.exception("Failed to persist incoming main-brain chat messages")
         try:

@@ -85,6 +85,10 @@ from .models_memory import (
     MemorySoftRuleRecord,
     WorkContextMemoryOverlayRecord,
 )
+from .models_research import (
+    ResearchSessionRecord,
+    ResearchSessionRoundRecord,
+)
 from .models_work_context import WorkContextRecord
 from .work_context_service import WorkContextService
 from .human_assist_task_service import (
@@ -181,6 +185,8 @@ __all__ = [
     "PredictionReviewRecord",
     "PredictionScenarioRecord",
     "PredictionSignalRecord",
+    "ResearchSessionRecord",
+    "ResearchSessionRoundRecord",
     "ReportRecord",
     "RuntimeFrameRecord",
     "RoutineRunRecord",

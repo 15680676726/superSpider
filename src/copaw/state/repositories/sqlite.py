@@ -72,3 +72,4 @@ from .sqlite_memory import (
     SqliteMemoryReflectionRunRepository,
 )
 from .sqlite_memory_sleep import SqliteMemorySleepRepository
+from .sqlite_research import SqliteResearchSessionRepository

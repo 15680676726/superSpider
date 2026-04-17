@@ -2005,6 +2005,20 @@ def test_bootstrap_researcher_schedule_report_keeps_main_brain_continuity(
         profile,
         owner_scope,
     )
+    researcher_agent_id = next(
+        agent.agent_id for agent in draft.team.agents if agent.role_id == "researcher"
+    )
+    draft.schedules.append(
+        IndustryDraftSchedule(
+            schedule_id="researcher-monitoring-brief",
+            owner_agent_id=researcher_agent_id,
+            title=f"{profile.primary_label()} Monitoring Brief Review",
+            summary="Run the explicit researcher monitoring brief and report governed follow-up pressure.",
+            cron="0 10 * * 2",
+            timezone="UTC",
+            dispatch_mode="stream",
+        )
+    )
     response = client.post(
         "/industry/v1/bootstrap",
         json={
@@ -2034,14 +2048,14 @@ def test_bootstrap_researcher_schedule_report_keeps_main_brain_continuity(
         assignment_id=None,
         owner_agent_id=schedule.spec_payload["meta"]["owner_agent_id"],
         owner_role_id=schedule.spec_payload["request"]["industry_role_id"],
-        headline="Research signal loop found follow-up pressure",
-        summary="Research loop surfaced a governed follow-up that should return to the main brain chain.",
+        headline="Monitoring brief found follow-up pressure",
+        summary="The explicit monitoring brief surfaced a governed follow-up that should return to the main brain chain.",
         status="recorded",
         result="failed",
         findings=["Competitor monitoring surfaced a signal that needs main-brain follow-up."],
         recommendation="Route this follow-up back through the same control thread and governed runtime chain.",
         processed=False,
-        work_context_id="work-context:researcher-schedule-followup",
+        work_context_id="work-context:researcher-monitoring-followup",
         metadata=dict(schedule.spec_payload.get("meta") or {}),
     )
     app.state.agent_report_repository.upsert_report(report)
@@ -2951,6 +2965,20 @@ def test_researcher_followup_assignment_persists_execution_core_continuity_witho
         profile,
         "industry-v1-northwind-robotics",
     )
+    researcher_agent_id = next(
+        agent.agent_id for agent in draft.team.agents if agent.role_id == "researcher"
+    )
+    draft.schedules.append(
+        IndustryDraftSchedule(
+            schedule_id="researcher-monitoring-followup-explicit",
+            owner_agent_id=researcher_agent_id,
+            title=f"{profile.primary_label()} Monitoring Follow-Up",
+            summary="Run the explicit researcher monitoring brief and keep governed continuity stable.",
+            cron="0 10 * * 2",
+            timezone="UTC",
+            dispatch_mode="stream",
+        )
+    )
     response = client.post(
         "/industry/v1/bootstrap",
         json={
@@ -2981,8 +3009,8 @@ def test_researcher_followup_assignment_persists_execution_core_continuity_witho
         assignment_id=None,
         owner_agent_id=schedule.spec_payload["meta"]["owner_agent_id"],
         owner_role_id="researcher",
-        headline="Researcher schedule found another escalation signal",
-        summary="Research cadence surfaced a follow-up that should stay on the main-brain control thread.",
+        headline="Monitoring brief found another escalation signal",
+        summary="The explicit monitoring brief surfaced a follow-up that should stay on the main-brain control thread.",
         status="recorded",
         result="failed",
         findings=["A governed follow-up is still required on the execution-core thread."],

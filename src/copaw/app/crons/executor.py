@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from types import SimpleNamespace
 from typing import Any, Dict, TYPE_CHECKING
@@ -45,11 +46,16 @@ class CronExecutor:
         self,
         *,
         kernel_dispatcher: "KernelDispatcher | None" = None,
+        research_session_service: object | None = None,
     ):
         self._kernel_dispatcher = kernel_dispatcher
+        self._research_session_service = research_session_service
 
     def set_kernel_dispatcher(self, dispatcher: "KernelDispatcher | None") -> None:
         self._kernel_dispatcher = dispatcher
+
+    def set_research_session_service(self, research_session_service: object | None) -> None:
+        self._research_session_service = research_session_service
 
     async def execute(self, job: CronJobSpec) -> None:
         """Execute one job once.
@@ -63,6 +69,11 @@ class CronExecutor:
         target_user_id = job.dispatch.target.user_id
         target_session_id = job.dispatch.target.session_id
         dispatch_meta: Dict[str, Any] = dict(job.dispatch.meta or {})
+        if await self._maybe_execute_research_session(
+            job=job,
+            dispatch_meta=dispatch_meta,
+        ):
+            return
 
         override_capability_ref = _string_value(
             (job.meta or {}).get("capability_ref") if isinstance(job.meta, dict) else None,
@@ -129,6 +140,83 @@ class CronExecutor:
             target_session_id=target_session_id,
             dispatch_meta=dispatch_meta,
         )
+
+    async def _maybe_execute_research_session(
+        self,
+        *,
+        job: CronJobSpec,
+        dispatch_meta: Dict[str, Any],
+    ) -> bool:
+        service = self._research_session_service
+        if service is None:
+            return False
+        meta = dict(job.meta or {})
+        research_provider = _string_value(meta.get("research_provider"))
+        research_mode = _string_value(meta.get("research_mode"))
+        if research_provider != "baidu-page" or research_mode != "monitoring-brief":
+            return False
+        starter = getattr(service, "start_session", None)
+        if not callable(starter):
+            return False
+        request_payload = (
+            job.request.model_dump(mode="json")
+            if job.request is not None
+            else {}
+        )
+        if not isinstance(request_payload, dict):
+            request_payload = {}
+        goal = _first_non_empty_text(
+            meta.get("research_goal"),
+            dispatch_meta.get("summary"),
+            job.name,
+        )
+        owner_agent_id = _first_non_empty_text(
+            meta.get("owner_agent_id"),
+            dispatch_meta.get("owner_agent_id"),
+            request_payload.get("agent_id"),
+        )
+        if goal is None or owner_agent_id is None:
+            return False
+        session_result = starter(
+            goal=goal,
+            trigger_source="monitoring",
+            owner_agent_id=owner_agent_id,
+            industry_instance_id=_first_non_empty_text(
+                meta.get("industry_instance_id"),
+                request_payload.get("industry_instance_id"),
+            ),
+            work_context_id=_first_non_empty_text(
+                meta.get("work_context_id"),
+                request_payload.get("work_context_id"),
+            ),
+            supervisor_agent_id=_first_non_empty_text(
+                meta.get("supervisor_agent_id"),
+                meta.get("control_agent_id"),
+            ),
+            metadata={
+                "schedule_id": job.id,
+                "schedule_name": job.name,
+                "research_provider": research_provider,
+                "research_mode": research_mode,
+            },
+        )
+        session_id = _first_non_empty_text(
+            getattr(getattr(session_result, "session", None), "id", None),
+            getattr(session_result, "session_id", None),
+        )
+        if session_id is None:
+            return True
+        runner = getattr(service, "run_session", None)
+        if callable(runner):
+            run_result = runner(session_id)
+            if inspect.isawaitable(run_result):
+                await run_result
+        summarizer = getattr(service, "summarize_session", None)
+        if callable(summarizer):
+            summary_result = summarizer(session_id)
+            if inspect.isawaitable(summary_result):
+                await summary_result
+        return True
 
     async def _dispatch_capability_via_kernel(
         self,
@@ -434,6 +522,14 @@ def _string_value(value: object | None) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _first_non_empty_text(*values: object | None) -> str | None:
+    for value in values:
+        text = _string_value(value)
+        if text:
+            return text
+    return None
 
 
 def _mapping_value(value: object | None) -> dict[str, Any]:

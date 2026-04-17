@@ -810,6 +810,7 @@ class RuntimeRestartCoordinator:
                 schedule_repository=schedule_repository,
                 mcp_manager=new_mcp_manager,
                 memory_sleep_service=self._bootstrap.memory_sleep_service,
+                research_session_service=self._bootstrap.research_session_service,
                 logger=self._logger,
                 strict_mcp_watcher=True,
             )

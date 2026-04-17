@@ -20,6 +20,28 @@ class _FakeKernelDispatcher:
         return SimpleNamespace(success=True, error=None, summary="ok")
 
 
+class _FakeResearchSessionService:
+    def __init__(self) -> None:
+        self.started: list[dict[str, object]] = []
+        self.ran: list[str] = []
+        self.summarized: list[str] = []
+
+    def start_session(self, **kwargs):
+        self.started.append(dict(kwargs))
+        session = SimpleNamespace(id="research-session-1", status="queued")
+        return SimpleNamespace(session=session, stop_reason=None)
+
+    def run_session(self, session_id: str):
+        self.ran.append(session_id)
+        session = SimpleNamespace(id=session_id, status="completed")
+        return SimpleNamespace(session=session, stop_reason="completed")
+
+    def summarize_session(self, session_id: str):
+        self.summarized.append(session_id)
+        session = SimpleNamespace(id=session_id, status="completed")
+        return SimpleNamespace(session=session, stop_reason="completed")
+
+
 def _agent_job(*, meta: dict[str, object] | None = None) -> CronJobSpec:
     return CronJobSpec.model_validate(
         {
@@ -289,3 +311,61 @@ def test_cron_executor_dispatches_agent_with_shared_durable_request_context() ->
     assert submitted.payload["request_context"]["main_brain_runtime"]["recovery"]["mode"] == (
         "resume-environment"
     )
+
+
+def test_cron_executor_routes_monitoring_brief_into_research_session_service() -> None:
+    dispatcher = _FakeKernelDispatcher()
+    research_service = _FakeResearchSessionService()
+    executor = CronExecutor(
+        kernel_dispatcher=dispatcher,
+        research_session_service=research_service,
+    )
+    job = _agent_job(
+        meta={
+            "research_provider": "baidu-page",
+            "research_mode": "monitoring-brief",
+            "research_goal": "每天早上整理持仓股票相关新闻和监管变化",
+            "owner_agent_id": "industry-researcher-demo",
+            "industry_instance_id": "industry-v1-demo",
+            "supervisor_agent_id": "copaw-agent-runner",
+        }
+    )
+
+    asyncio.run(executor.execute(job))
+
+    assert dispatcher.tasks == []
+    assert research_service.started == [
+        {
+            "goal": "每天早上整理持仓股票相关新闻和监管变化",
+            "trigger_source": "monitoring",
+            "owner_agent_id": "industry-researcher-demo",
+            "industry_instance_id": "industry-v1-demo",
+            "work_context_id": None,
+            "supervisor_agent_id": "copaw-agent-runner",
+            "metadata": {
+                "schedule_id": "cron-job-1",
+                "schedule_name": "Workflow host-aware cron",
+                "research_provider": "baidu-page",
+                "research_mode": "monitoring-brief",
+            },
+        }
+    ]
+    assert research_service.ran == ["research-session-1"]
+    assert research_service.summarized == ["research-session-1"]
+
+
+def test_cron_executor_ignores_monitoring_stub_without_research_service() -> None:
+    dispatcher = _FakeKernelDispatcher()
+    executor = CronExecutor(kernel_dispatcher=dispatcher)
+    job = _agent_job(
+        meta={
+            "research_provider": "baidu-page",
+            "research_mode": "monitoring-brief",
+            "research_goal": "整理本周平台规则变化",
+            "owner_agent_id": "industry-researcher-demo",
+        }
+    )
+
+    asyncio.run(executor.execute(job))
+
+    assert len(dispatcher.tasks) == 1

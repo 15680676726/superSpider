@@ -141,14 +141,17 @@ class CronManager:
         timezone: str = "UTC",
         kernel_dispatcher: Any | None = None,
         memory_sleep_service: Any | None = None,
+        research_session_service: Any | None = None,
     ):
         self._repo = repo
         self._scheduler = AsyncIOScheduler(timezone=timezone)
         self._executor = CronExecutor(
             kernel_dispatcher=kernel_dispatcher,
+            research_session_service=research_session_service,
         )
         self._kernel_dispatcher = kernel_dispatcher
         self._memory_sleep_service = memory_sleep_service
+        self._research_session_service = research_session_service
 
         self._lock = asyncio.Lock()
         self._heartbeat_run_lock = asyncio.Lock()
@@ -165,6 +168,10 @@ class CronManager:
 
     def set_memory_sleep_service(self, memory_sleep_service: Any | None) -> None:
         self._memory_sleep_service = memory_sleep_service
+
+    def set_research_session_service(self, research_session_service: Any | None) -> None:
+        self._research_session_service = research_session_service
+        self._executor.set_research_session_service(research_session_service)
 
     async def start(self) -> None:
         async with self._lock:

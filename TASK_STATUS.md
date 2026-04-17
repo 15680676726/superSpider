@@ -816,6 +816,30 @@
 - `2026-03-25` 补充：`run_operating_cycle()` 已切掉 `goal` 物化中转；backlog 现在直接生成 `Assignment` 并编译成 assignment-backed `TaskRecord`，`AgentReport` 也优先按 `assignment_id` 回收，不再走旧 goal-phase 假链。
 - `2026-03-25` 补充：`main_chain.routine` 在没有 live task 时，会回锚到最新 `AgentReport` 对应的 assignment/task 元数据；已完成的固定 SOP / routine 执行不会再在主链上丢失执行面信息。
 
+- `2026-04-17` research session 当前真实边界补充：
+  - 已落地代码基线：
+    - `ResearchSessionRecord / ResearchSessionRoundRecord`
+    - `SqliteResearchSessionRepository`
+    - `BaiduPageResearchService`
+    - runtime bootstrap 注入 `research_session_service`
+    - 主脑 `user-direct` -> research session 正式触发前门
+    - schedule `monitoring brief` -> research session 正式唤醒链
+    - `GET /runtime-center/research`
+    - `Runtime Center` 主脑 cockpit research summary surface
+    - opt-in `live smoke` 合同测试
+  - 当前未完成：
+    - 真实 Baidu 浏览器运行时在当前机器上无法启动，因此 `live smoke` 目前只有显式 `skip` 结论，尚无 `PASS` 记录
+    - 这条链已具备正式对象、触发、执行、汇报与读面，但还不能把它外推成“真实联网环境已稳定跑通”
+  - 当前验收口径：
+    - `L1/L2`：
+      - `python -m pytest tests/state/test_research_repositories.py tests/state/test_state_store_migration.py tests/state/test_models_module_exports.py tests/research/test_baidu_page_contract.py tests/research/test_baidu_page_research_service.py tests/research/test_baidu_deepening_flow.py tests/research/test_research_report_writeback.py tests/research/test_research_knowledge_ingestion.py tests/agents/test_browser_tool_evidence.py tests/app/test_research_schedule_trigger.py tests/app/test_research_session_api.py tests/app/test_runtime_center_router_split.py tests/app/test_cron_executor.py tests/app/test_runtime_manager_stack.py tests/kernel/test_main_brain_research_followup.py tests/app/test_research_session_live_contract.py -q` -> `81 passed, 1 skipped`
+      - `python -m pytest tests/app/test_industry_service_wiring.py::test_runtime_domain_builder_injects_research_session_service_into_main_brain_chat tests/app/industry_api_parts/runtime_updates.py -k "bootstrap_researcher_schedule_report_keeps_main_brain_continuity or researcher_followup_assignment_persists_execution_core_continuity_without_backlog_anchor" -q` -> `2 passed, 47 deselected`
+      - `npm --prefix console test -- src/pages/RuntimeCenter/useRuntimeCenter.test.ts src/pages/RuntimeCenter/MainBrainCockpitPanel.test.tsx` -> `19 passed`
+    - `L3`：已跑 opt-in live smoke 合同；`COPAW_RUN_BAIDU_RESEARCH_LIVE_SMOKE=1 python -m pytest tests/app/test_research_session_live_contract.py -q -rs` -> `1 passed, 1 skipped`
+      - 当前真实结果：skip 原因是 `Browser start failed: Browser start failed`，属于环境前置条件不足，不是测试假通过
+    - `L4`：未跑
+  - 下一步验证顺序应固定为：先在可用浏览器运行时上拿到一次真实 `live smoke PASS`，再补更长的多轮/跨重启 soak
+
 ### 3.3.1 `Symbiotic Host Runtime V1` 当前落地边界
 
 - 这次回写的含义，是把 execution-side 的正式口径、对象映射与当前阶段施工边界写成统一状态事实；它不是在声明所有配套文档、后续 phase 能力或成熟态宿主投影已经全部交付。
@@ -1039,7 +1063,7 @@
 - 主脑收到 operator 指令后，优先把工作路由给现有执行位
 - 没有合适执行位时，低风险任务自动补临时位
 - 高风险或长期岗位需求进入治理提案
-- researcher 作为长期观察位持续回流
+- researcher 作为研究支援位持续回流；没有正式 brief / monitoring task 时不应空跑
 - 上述状态必须同时在 prompt、state、API、UI 四层一致可见
 
 当前状态：
@@ -1252,7 +1276,7 @@
 - media-backed memory hit 现已可直接追回原始 `MediaAnalysisRecord`
 - `Runtime Center` 已有正式 `Media Analyses` operator section
 - `2026-04-01` 补充：`/runtime-center/main-brain` 正式 payload 已补上顶层 `cycles` 与顶层 `report_cognition`；前台驾驶舱也已把 `周期序列` 收进正式规划面，不再只靠 `meta.report_cognition` 和单个 `current_cycle` 临时拼装。
-- `2026-04-01` 补充：`researcher` 的 schedule-originated continuity 已继续补厚到“follow-up backlog 物化 assignment 后仍保住 execution-core continuity 合同”。`service_lifecycle` 现会把 `control_thread_id / session_id / environment_ref / work_context_id / supervisor_* / requested_surfaces / recommended_scheduler_action` 从 follow-up backlog 正式持久化进 assignment metadata；`service_report_closure` 也会优先使用最新 report 的 `work_context_id`，不再让旧 assignment metadata 把新工作上下文盖掉。
+- `2026-04-01` 补充：researcher follow-up continuity 已继续补厚到“follow-up backlog 物化 assignment 后仍保住 execution-core continuity 合同”。`service_lifecycle` 现会把 `control_thread_id / session_id / environment_ref / work_context_id / supervisor_* / requested_surfaces / recommended_scheduler_action` 从 follow-up backlog 正式持久化进 assignment metadata；`service_report_closure` 也会优先使用最新 report 的 `work_context_id`，不再让旧 assignment metadata 把新工作上下文盖掉。这条 continuity 现在只服务已经被正式创建的研究任务或监控任务，不再依赖默认 researcher loop。
 - `2026-04-01` 补充：`AgentWorkbench` 前台已停止展示 `GoalSelector / GoalDetailPanel`，也不再主动请求 `/goals/{goal_id}/detail`；执行条文案已把 `目标` 收成 `焦点`，`Predictions` 里的 `目标状态面 / 目标 delta` 也已改成 `焦点` 口径，避免继续把 operator 拉回旧 `goal-era` 心智。
 - `2026-04-01` 补充：`P0-4` 已新增正式 gate 入口 `scripts/run_p0_runtime_terminal_gate.py`，把后端主链回归、长跑与删旧回归、控制台定向回归和控制台构建收口成一个仓库级可执行门槛；`scripts/README.md` 已同步写明用法。
 - `2026-04-01` 补充：`Knowledge Activation Layer Phase 4` 已补上最小 persisted relation-view 边界。`MemoryRelationViewRecord`、SQLite-backed `memory_relation_views`、`SqliteMemoryRelationViewRepository` 与 runtime bootstrap wiring 已落地；`DerivedMemoryIndexService` 已具备显式 `list_relation_views(...) / rebuild_relation_views(...)`；`Runtime Center` 也已新增 `GET /runtime-center/memory/relations` 读面，并支持按 `scope / relation_kind / source_node_id / target_node_id` 过滤。

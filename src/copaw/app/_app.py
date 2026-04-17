@@ -122,6 +122,7 @@ async def lifespan(
         schedule_repository=bootstrap.repositories.bootstrap_schedule_repository,
         mcp_manager=mcp_manager,
         memory_sleep_service=bootstrap.memory_sleep_service,
+        research_session_service=bootstrap.research_session_service,
         logger=logger,
         strict_mcp_watcher=False,
     )

@@ -63,6 +63,29 @@ async def test_request_main_brain_intake_contract_prefers_attached_contract():
     assert contract is attached
 
 
+@pytest.mark.asyncio
+async def test_request_main_brain_intake_contract_materializes_explicit_orchestrate_backlog_writeback():
+    contract = await resolve_request_main_brain_intake_contract(
+        request=SimpleNamespace(interaction_mode="orchestrate"),
+        msgs=[
+            Msg(
+                name="user",
+                role="user",
+                content=(
+                    "Delegate this to the right specialist and write it back "
+                    "into the formal backlog before execution."
+                ),
+            ),
+        ],
+    )
+
+    assert contract is not None
+    assert contract.writeback_requested is True
+    assert contract.has_active_writeback_plan is True
+    assert contract.should_kickoff is False
+    assert contract.should_route_to_orchestrate is True
+
+
 class _FakeStructuredDecisionModel:
     stream = False
 

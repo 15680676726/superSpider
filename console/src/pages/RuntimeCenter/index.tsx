@@ -668,6 +668,7 @@ export default function RuntimeCenterPage() {
     error,
     buddySummary,
     mainBrainData,
+    researchSummary,
     mainBrainError,
     mainBrainLoading,
     mainBrainUnavailable,
@@ -850,6 +851,7 @@ export default function RuntimeCenterPage() {
       return (
         <MainBrainCockpitPanel
           title={`${mainBrainCard.name}（主脑）`}
+          researchSummary={researchSummary}
           summaryFields={mainBrainSummaryFields}
           morningReport={mainBrainReports.morningReport}
           eveningReport={mainBrainReports.eveningReport}

@@ -40,6 +40,7 @@ from ..state.repositories import (
     SqlitePredictionReviewRepository,
     SqlitePredictionScenarioRepository,
     SqlitePredictionSignalRepository,
+    SqliteResearchSessionRepository,
     SqliteRoutineRunRepository,
     SqliteRuntimeFrameRepository,
     SqliteScheduleRepository,
@@ -107,6 +108,7 @@ def build_runtime_repositories(state_store: SQLiteStateStore) -> RuntimeReposito
             state_store,
         ),
         prediction_review_repository=SqlitePredictionReviewRepository(state_store),
+        research_session_repository=SqliteResearchSessionRepository(state_store),
         automation_loop_runtime_repository=SqliteAutomationLoopRuntimeRepository(
             state_store,
         ),

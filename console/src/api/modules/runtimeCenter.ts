@@ -479,6 +479,36 @@ export interface RuntimeHumanCockpitPayload {
   agents: RuntimeHumanCockpitAgent[];
 }
 
+export interface RuntimeResearchRoundSummary {
+  id?: string | null;
+  round_index?: number | null;
+  status?: string | null;
+  response_summary?: string | null;
+  updated_at?: string | null;
+}
+
+export interface RuntimeResearchSessionSurface {
+  id?: string | null;
+  status?: string | null;
+  goal?: string | null;
+  round_count?: number | null;
+  waiting_login?: boolean | null;
+  latest_status?: string | null;
+  updated_at?: string | null;
+}
+
+export interface RuntimeCenterResearchResponse {
+  id?: string | null;
+  status?: string | null;
+  goal?: string | null;
+  round_count?: number | null;
+  waiting_login?: boolean | null;
+  latest_status?: string | null;
+  updated_at?: string | null;
+  session?: RuntimeResearchSessionSurface | null;
+  latest_round?: RuntimeResearchRoundSummary | null;
+}
+
 export interface RuntimeMainBrainMeta {
   control_chain: RuntimeMainBrainSignal[];
   agent_reports?: RuntimeMainBrainRecord | null;
@@ -595,6 +625,9 @@ export const runtimeCenterApi = {
 
   getRuntimeHeartbeat: () =>
     request<RuntimeHeartbeatDetail>("/runtime-center/heartbeat"),
+
+  getRuntimeResearch: () =>
+    request<RuntimeCenterResearchResponse>("/runtime-center/research"),
 
   updateRuntimeHeartbeat: (body: RuntimeHeartbeatConfig) =>
     request<RuntimeHeartbeatMutationResult>("/runtime-center/heartbeat", {

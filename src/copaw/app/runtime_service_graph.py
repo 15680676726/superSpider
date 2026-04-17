@@ -683,6 +683,7 @@ def build_runtime_bootstrap(
     query_execution_service = domain_services.query_execution_service
     main_brain_chat_service = domain_services.main_brain_chat_service
     main_brain_orchestrator = domain_services.main_brain_orchestrator
+    research_session_service = getattr(domain_services, "research_session_service", None)
     buddy_current_focus_resolver = build_buddy_current_focus_resolver(
         agent_profile_service=agent_profile_service,
         growth_target_repository=buddy_growth_target_repository,
@@ -827,6 +828,7 @@ def build_runtime_bootstrap(
         goal_service=goal_service,
         learning_service=learning_service,
         governance_service=governance_service,
+        research_session_service=research_session_service,
         kernel_dispatcher=kernel_dispatcher,
         kernel_task_store=kernel_task_store,
         kernel_tool_bridge=kernel_tool_bridge,

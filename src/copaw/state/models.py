@@ -115,6 +115,10 @@ from .models_prediction import (
     PredictionScenarioRecord,
     PredictionSignalRecord,
 )
+from .models_research import (
+    ResearchSessionRecord,
+    ResearchSessionRoundRecord,
+)
 from .models_reporting import (
     LaneBudgetRecord,
     MetricRecord,
@@ -223,6 +227,8 @@ __all__ = [
     "PredictionSignalDirection",
     "PredictionSignalRecord",
     "PredictionSignalSourceKind",
+    "ResearchSessionRecord",
+    "ResearchSessionRoundRecord",
     "ReportEvidenceDigest",
     "ReportRecord",
     "ReportScopeType",

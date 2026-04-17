@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any
 
 from ..app.channels.schema import DEFAULT_CHANNEL
@@ -311,9 +312,28 @@ async def resolve_request_main_brain_intake_contract(
     request: Any,
     msgs: list[Any],
 ) -> MainBrainIntakeContract | None:
-    return materialize_requested_actions_main_brain_intake_contract(
+    requested_actions_contract = materialize_requested_actions_main_brain_intake_contract(
         request=request,
         msgs=msgs,
+    )
+    if requested_actions_contract is not None:
+        return requested_actions_contract
+    if not _request_uses_explicit_orchestrate_mode(request):
+        return None
+    message_text = extract_main_brain_intake_text(msgs)
+    if message_text is None:
+        message_text = _first_non_empty(
+            getattr(request, "text", None),
+            getattr(request, "query", None),
+            getattr(request, "message", None),
+        )
+    if message_text is None:
+        return None
+    if not _looks_like_explicit_orchestrate_writeback_request(message_text):
+        return None
+    return materialize_main_brain_intake_contract(
+        message_text=message_text,
+        decision=_build_explicit_orchestrate_writeback_decision(),
     )
 
 
@@ -450,6 +470,52 @@ def _normalize_requested_actions(value: Any) -> list[str]:
         seen.add(normalized)
         actions.append(normalized)
     return actions
+
+
+def _request_uses_explicit_orchestrate_mode(request: Any) -> bool:
+    return _first_non_empty(getattr(request, "interaction_mode", None)) == "orchestrate"
+
+
+def _looks_like_explicit_orchestrate_writeback_request(text: str) -> bool:
+    lowered = text.casefold()
+    has_delegation_cue = any(
+        phrase in lowered
+        for phrase in (
+            "delegate",
+            "assign",
+            "right specialist",
+            "specialist",
+        )
+    )
+    has_writeback_chain_cue = any(
+        phrase in lowered
+        for phrase in (
+            "next concrete step",
+            "formal chain",
+            "formal verification report",
+            "formal backlog",
+            "backlog before execution",
+            "write it back",
+            "write this back",
+            "write back into",
+            "keep it on the formal backlog",
+            "keep this on the formal backlog",
+        )
+    )
+    return has_delegation_cue and has_writeback_chain_cue
+
+
+def _build_explicit_orchestrate_writeback_decision() -> Any:
+    return SimpleNamespace(
+        intent_kind="chat",
+        should_writeback=True,
+        approved_targets=["backlog"],
+        kickoff_allowed=False,
+        explicit_execution_confirmation=False,
+        strategy=None,
+        goal=None,
+        schedule=None,
+    )
 
 
 def _normalize_knowledge_graph_payload(value: Any) -> dict[str, Any]:

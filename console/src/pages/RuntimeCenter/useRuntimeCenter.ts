@@ -9,16 +9,22 @@ import { message } from "antd";
 import { request } from "../../api";
 import { subscribe } from "../../runtime/eventBus";
 import type {
+  RuntimeCenterResearchResponse,
   RuntimeCenterSurfaceResponse,
   RuntimeMainBrainBuddySummary,
   RuntimeMainBrainResponse,
 } from "../../api/modules/runtimeCenter";
+import { runtimeCenterApi } from "../../api/modules/runtimeCenter";
 import {
   normalizeRuntimePath,
   requestRuntimeRecord,
   type RuntimeSurfaceSection,
   requestRuntimeSurface,
 } from "../../runtime/runtimeSurfaceClient";
+import {
+  normalizeResearchSessionSummary,
+  type ResearchSessionSummary,
+} from "./researchHelpers";
 import {
   formatRuntimeActionLabel,
   localizeRuntimeText,
@@ -28,6 +34,7 @@ import {
 let runtimeCenterSurfaceCache: RuntimeCenterSurfaceResponse | null = null;
 let runtimeCenterBuddySummaryCache: RuntimeMainBrainBuddySummary | null = null;
 let runtimeCenterMainBrainHydratedCache = false;
+let runtimeCenterResearchCache: ResearchSessionSummary | null = null;
 
 export type RuntimeCardStatus = "state-service" | "degraded" | "unavailable";
 
@@ -226,6 +233,8 @@ export function useRuntimeCenter() {
     useState<RuntimeCenterSurfaceResponse | null>(() => runtimeCenterSurfaceCache);
   const [buddySummary, setBuddySummary] =
     useState<RuntimeMainBrainBuddySummary | null>(() => runtimeCenterBuddySummaryCache);
+  const [researchSummary, setResearchSummary] =
+    useState<ResearchSessionSummary | null>(() => runtimeCenterResearchCache);
   const [loading, setLoading] = useState(() => runtimeCenterSurfaceCache == null);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -243,6 +252,7 @@ export function useRuntimeCenter() {
   const cardsRequestSeqRef = useRef(0);
   const mainBrainRequestSeqRef = useRef(0);
   const detailRequestSeqRef = useRef(0);
+  const researchRequestSeqRef = useRef(0);
 
   const data = useMemo<RuntimeCenterOverviewPayload | null>(() => {
     if (!surfaceData) {
@@ -269,6 +279,28 @@ export function useRuntimeCenter() {
     mainBrainError == null;
   const businessAgentsLoading = loading;
   const businessAgentsError = data ? null : error;
+
+  const loadResearch = useCallback(async () => {
+    const researchRequestSeq = researchRequestSeqRef.current + 1;
+    researchRequestSeqRef.current = researchRequestSeq;
+    try {
+      const payload =
+        await runtimeCenterApi.getRuntimeResearch() as RuntimeCenterResearchResponse;
+      if (researchRequestSeqRef.current !== researchRequestSeq) {
+        return;
+      }
+      const nextSummary = normalizeResearchSessionSummary(payload);
+      setResearchSummary(nextSummary);
+      runtimeCenterResearchCache = nextSummary;
+    } catch {
+      if (researchRequestSeqRef.current !== researchRequestSeq) {
+        return;
+      }
+      if (runtimeCenterResearchCache == null) {
+        setResearchSummary(null);
+      }
+    }
+  }, []);
 
   const loadSurface = useCallback(
     async (
@@ -417,7 +449,8 @@ export function useRuntimeCenter() {
 
   useEffect(() => {
     void loadSurface("initial", { sections: ["cards"] });
-  }, [loadSurface]);
+    void loadResearch();
+  }, [loadResearch, loadSurface]);
 
   // Subscribe to the global event bus instead of opening a dedicated SSE
   // connection. The global bus (started in main.tsx) already connects to
@@ -428,13 +461,16 @@ export function useRuntimeCenter() {
       if (surfaceReloadTimerRef.current !== null) {
         window.clearTimeout(surfaceReloadTimerRef.current);
       }
-      surfaceReloadTimerRef.current = window.setTimeout(() => {
-        surfaceReloadTimerRef.current = null;
-        const pendingSections = Array.from(pendingSectionsRef.current);
-        pendingSectionsRef.current.clear();
-        void loadSurface("refresh", { sections: pendingSections });
-      }, 250);
-    };
+        surfaceReloadTimerRef.current = window.setTimeout(() => {
+          surfaceReloadTimerRef.current = null;
+          const pendingSections = Array.from(pendingSectionsRef.current);
+          pendingSectionsRef.current.clear();
+          void loadSurface("refresh", { sections: pendingSections });
+          if (pendingSections.includes("main_brain")) {
+            void loadResearch();
+          }
+        }, 250);
+      };
 
     const unsub = subscribe("*", (event) => {
       if (event.event_name.endsWith(".heartbeat")) {
@@ -448,6 +484,7 @@ export function useRuntimeCenter() {
       if (
         topic === "assignment" ||
         topic === "report" ||
+        topic === "research" ||
         topic === "industry" ||
         topic === "cycle" ||
         topic === "backlog" ||
@@ -591,7 +628,8 @@ export function useRuntimeCenter() {
     detail,
     detailLoading,
     detailError,
-    reload: () => loadSurface(),
+    researchSummary,
+    reload: () => Promise.all([loadSurface(), loadResearch()]),
     invokeAction,
     openDetail,
     closeDetail,
@@ -602,4 +640,5 @@ export function resetRuntimeCenterSurfaceCache(): void {
   runtimeCenterSurfaceCache = null;
   runtimeCenterBuddySummaryCache = null;
   runtimeCenterMainBrainHydratedCache = false;
+  runtimeCenterResearchCache = null;
 }

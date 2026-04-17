@@ -1,0 +1,82 @@
+# -*- coding: utf-8 -*-
+from __future__ import annotations
+
+from .runtime_center_shared_core import *  # noqa: F401,F403
+from .runtime_center_dependencies import _get_research_session_repository
+
+
+def _serialize_research_round(round_record: object | None) -> dict[str, object] | None:
+    if round_record is None:
+        return None
+    model_dump = getattr(round_record, "model_dump", None)
+    payload = model_dump(mode="json") if callable(model_dump) else {}
+    if not isinstance(payload, dict):
+        return None
+    return {
+        "id": payload.get("id"),
+        "round_index": payload.get("round_index"),
+        "status": payload.get("decision"),
+        "response_summary": payload.get("response_summary"),
+        "updated_at": payload.get("updated_at"),
+    }
+
+
+def _serialize_research_session(session: object) -> dict[str, object]:
+    model_dump = getattr(session, "model_dump", None)
+    payload = model_dump(mode="json") if callable(model_dump) else {}
+    if not isinstance(payload, dict):
+        payload = {}
+    status = str(payload.get("status") or "").strip()
+    return {
+        "id": payload.get("id"),
+        "status": status,
+        "goal": payload.get("goal"),
+        "round_count": payload.get("round_count"),
+        "waiting_login": status == "waiting-login",
+        "latest_status": payload.get("failure_summary") or status,
+        "updated_at": payload.get("updated_at"),
+    }
+
+
+@router.get("/research", response_model=dict[str, object])
+async def get_runtime_research(
+    request: Request,
+    response: Response,
+) -> dict[str, object]:
+    apply_runtime_center_surface_headers(response, surface="runtime-center")
+    repository = _get_research_session_repository(request)
+    sessions = repository.list_research_sessions(limit=1)
+    if not sessions:
+        return {
+            "id": None,
+            "status": None,
+            "goal": None,
+            "round_count": 0,
+            "waiting_login": False,
+            "latest_status": None,
+            "updated_at": None,
+            "session": None,
+            "latest_round": None,
+        }
+    session = sessions[0]
+    serialized_session = _serialize_research_session(session)
+    rounds = repository.list_research_rounds(session_id=session.id, limit=50)
+    latest_round = rounds[-1] if rounds else None
+    serialized_round = _serialize_research_round(latest_round)
+    latest_status = (
+        (serialized_round or {}).get("response_summary")
+        or (serialized_round or {}).get("status")
+        or serialized_session.get("latest_status")
+    )
+    return {
+        **serialized_session,
+        "latest_status": latest_status,
+        "session": {
+            **serialized_session,
+            "latest_status": latest_status,
+        },
+        "latest_round": serialized_round,
+    }
+
+
+__all__ = ["get_runtime_research"]
