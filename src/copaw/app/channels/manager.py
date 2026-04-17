@@ -159,12 +159,14 @@ class ChannelManager:
         process: ProcessHandler,
         config: "Config",
         on_last_dispatch: OnLastDispatch = None,
+        channel_init_overrides: dict[str, dict[str, Any]] | None = None,
     ) -> "ChannelManager":
         """Create channels from config (config.json)."""
         available = get_available_channels()
         ch = config.channels
         show_tool_details = getattr(config, "show_tool_details", True)
         extra = getattr(ch, "__pydantic_extra__", None) or {}
+        init_overrides = dict(channel_init_overrides or {})
 
         channels: list[BaseChannel] = []
         for key, ch_cls in get_channel_registry().items():
@@ -198,6 +200,7 @@ class ChannelManager:
                     show_tool_details=show_tool_details,
                     filter_tool_messages=filter_tool_messages,
                     filter_thinking=filter_thinking,
+                    **dict(init_overrides.get(key) or {}),
                 ),
             )
         return cls(channels)

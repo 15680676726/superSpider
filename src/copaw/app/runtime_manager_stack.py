@@ -41,6 +41,7 @@ async def start_runtime_manager_stack(
     mcp_manager: MCPClientManager,
     memory_sleep_service: object | None,
     research_session_service: object | None,
+    weixin_ilink_runtime_state: object | None,
     logger: logging.Logger,
     strict_mcp_watcher: bool,
 ) -> RuntimeManagerStack:
@@ -49,6 +50,11 @@ async def start_runtime_manager_stack(
         process=make_process_from_kernel(kernel_dispatcher),
         config=config,
         on_last_dispatch=update_last_dispatch,
+        channel_init_overrides=(
+            {"weixin_ilink": {"runtime_state": weixin_ilink_runtime_state}}
+            if weixin_ilink_runtime_state is not None
+            else None
+        ),
     )
     capability_service.set_channel_manager(stack.channel_manager)
     try:

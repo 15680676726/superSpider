@@ -159,3 +159,9 @@ def test_send_text_wraps_context_token_in_message_payload() -> None:
     assert '"to_user_id":"user@im.wechat"' in str(captured["json"])
     assert '"context_token":"ctx-1"' in str(captured["json"])
     assert '"hello back"' in str(captured["json"])
+
+
+def test_default_timeout_covers_ilink_login_status_and_longpoll_budget() -> None:
+    client = WeixinILinkApiClient(bot_token="")
+
+    assert client._timeout == 60.0  # noqa: SLF001

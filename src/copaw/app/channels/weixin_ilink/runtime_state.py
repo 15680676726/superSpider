@@ -87,6 +87,58 @@ class WeixinILinkRuntimeState:
                 "login_status": "auth_expired",
                 "polling_status": "stopped",
                 "last_error": reason,
+                "qrcode": "",
+                "qrcode_img_content": "",
+                "bot_token": "",
             },
         )
+        return self.snapshot()
+
+    def mark_running(
+        self,
+        *,
+        token_source: str,
+        base_url: str,
+    ) -> dict[str, Any]:
+        self._state.update(
+            {
+                "login_status": "running",
+                "polling_status": "running",
+                "token_source": str(token_source or self._state.get("token_source") or ""),
+                "last_error": "",
+                "qrcode": "",
+                "qrcode_img_content": "",
+                "bot_token": "",
+                "base_url": base_url,
+            },
+        )
+        return self.snapshot()
+
+    def record_receive(
+        self,
+        *,
+        last_update_id: str,
+    ) -> dict[str, Any]:
+        self._state.update(
+            {
+                "login_status": "running",
+                "polling_status": "running",
+                "last_receive_at": _utc_now(),
+                "last_update_id": last_update_id,
+                "last_error": "",
+            },
+        )
+        return self.snapshot()
+
+    def record_send(self) -> dict[str, Any]:
+        self._state.update(
+            {
+                "last_send_at": _utc_now(),
+                "last_error": "",
+            },
+        )
+        return self.snapshot()
+
+    def mark_runtime_error(self, *, reason: str) -> dict[str, Any]:
+        self._state.update({"last_error": reason})
         return self.snapshot()

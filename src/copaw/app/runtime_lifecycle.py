@@ -811,6 +811,7 @@ class RuntimeRestartCoordinator:
                 mcp_manager=new_mcp_manager,
                 memory_sleep_service=self._bootstrap.memory_sleep_service,
                 research_session_service=self._bootstrap.research_session_service,
+                weixin_ilink_runtime_state=self._bootstrap.weixin_ilink_runtime_state,
                 logger=self._logger,
                 strict_mcp_watcher=True,
             )

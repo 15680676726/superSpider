@@ -72,7 +72,7 @@ class WeixinILinkApiClient:
         bot_token: str,
         base_url: str = "",
         transport: httpx.AsyncBaseTransport | None = None,
-        timeout: float = 30.0,
+        timeout: float = 60.0,
     ) -> None:
         self._bot_token = str(bot_token or "").strip()
         self._base_url = _normalize_base_url(base_url)

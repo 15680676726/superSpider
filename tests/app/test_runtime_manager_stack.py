@@ -34,7 +34,12 @@ def test_start_runtime_manager_stack_passes_research_session_service_to_cron_man
     monkeypatch.setattr(
         runtime_manager_stack_module.ChannelManager,
         "from_config",
-        staticmethod(lambda **kwargs: _FakeChannelManager()),
+        staticmethod(
+            lambda **kwargs: (
+                captured.__setitem__("channel_manager_kwargs", kwargs),
+                _FakeChannelManager(),
+            )[1],
+        ),
     )
     monkeypatch.setattr(
         runtime_manager_stack_module,
@@ -66,6 +71,8 @@ def test_start_runtime_manager_stack_passes_research_session_service_to_cron_man
         async def reconcile_runtime_state(self) -> None:
             captured["reconciled"] = True
 
+    runtime_state = object()
+
     async def run() -> None:
         await runtime_manager_stack_module.start_runtime_manager_stack(
             config=SimpleNamespace(),
@@ -76,6 +83,7 @@ def test_start_runtime_manager_stack_passes_research_session_service_to_cron_man
             mcp_manager=object(),
             memory_sleep_service=object(),
             research_session_service="research-service",
+            weixin_ilink_runtime_state=runtime_state,
             logger=logging.getLogger("test"),
             strict_mcp_watcher=True,
         )
@@ -83,3 +91,6 @@ def test_start_runtime_manager_stack_passes_research_session_service_to_cron_man
     asyncio.run(run())
 
     assert captured["cron_kwargs"]["research_session_service"] == "research-service"
+    assert captured["channel_manager_kwargs"]["channel_init_overrides"] == {
+        "weixin_ilink": {"runtime_state": runtime_state},
+    }

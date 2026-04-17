@@ -9,6 +9,8 @@ import os
 from pathlib import Path
 from typing import Any, Optional
 
+import httpx
+
 from agentscope_runtime.engine.schemas.agent_schemas import (
     AudioContent,
     ContentType,
@@ -19,6 +21,7 @@ from agentscope_runtime.engine.schemas.agent_schemas import (
 
 from ....config.config import WeixinILinkConfig as WeixinILinkChannelConfig
 from .client import WeixinILinkApiClient, read_bot_token_file
+from .runtime_state import WeixinILinkRuntimeState
 from ..base import BaseChannel, OnReplySent, ProcessHandler
 
 logger = logging.getLogger(__name__)
@@ -26,6 +29,13 @@ logger = logging.getLogger(__name__)
 
 def _text(value: object | None) -> str:
     return str(value or "").strip()
+
+
+def _auth_failure_reason(exc: Exception) -> str | None:
+    if isinstance(exc, httpx.HTTPStatusError) and exc.response is not None:
+        if exc.response.status_code in {401, 403}:
+            return f"auth_failed:{exc.response.status_code}"
+    return None
 
 
 class WeixinILinkChannel(BaseChannel):
@@ -54,6 +64,7 @@ class WeixinILinkChannel(BaseChannel):
         group_policy: str = "open",
         allow_from: list[str] | None = None,
         deny_message: str = "",
+        runtime_state: WeixinILinkRuntimeState | None = None,
     ) -> None:
         super().__init__(
             process,
@@ -75,6 +86,8 @@ class WeixinILinkChannel(BaseChannel):
         self.group_reply_mode = group_reply_mode or "mention_or_prefix"
         self.group_allowlist = list(group_allowlist or [])
         self.proactive_targets = list(proactive_targets or [])
+        self._runtime_state = runtime_state
+        self._token_source = "config" if self.bot_token else ""
         self._client: WeixinILinkApiClient | None = None
         self._poll_task: asyncio.Task | None = None
         self._cursor = ""
@@ -118,6 +131,7 @@ class WeixinILinkChannel(BaseChannel):
         show_tool_details: bool = True,
         filter_tool_messages: bool = False,
         filter_thinking: bool = False,
+        runtime_state: WeixinILinkRuntimeState | None = None,
     ) -> "WeixinILinkChannel":
         return cls(
             process=process,
@@ -138,11 +152,17 @@ class WeixinILinkChannel(BaseChannel):
             group_policy=config.group_policy,
             allow_from=list(config.allow_from),
             deny_message=config.deny_message,
+            runtime_state=runtime_state,
         )
 
     def _load_client_if_possible(self) -> None:
-        token = self.bot_token or read_bot_token_file(self.bot_token_file)
+        token = self.bot_token
+        token_source = "config" if token else ""
+        if not token:
+            token = read_bot_token_file(self.bot_token_file)
+            token_source = "bot_token_file" if token else ""
         self.bot_token = token
+        self._token_source = token_source
         self._client = (
             WeixinILinkApiClient(
                 bot_token=token,
@@ -151,6 +171,34 @@ class WeixinILinkChannel(BaseChannel):
             if token
             else None
         )
+
+    def _mark_runtime_running(self) -> None:
+        if self._runtime_state is None:
+            return
+        self._runtime_state.mark_running(
+            token_source=self._token_source,
+            base_url=self._client.base_url if self._client is not None else self.base_url,
+        )
+
+    def _record_runtime_receive(self, *, last_update_id: str) -> None:
+        if self._runtime_state is None:
+            return
+        self._runtime_state.record_receive(last_update_id=last_update_id)
+
+    def _record_runtime_send(self) -> None:
+        if self._runtime_state is None:
+            return
+        self._runtime_state.record_send()
+
+    def _record_runtime_error(self, *, reason: str) -> None:
+        if self._runtime_state is None:
+            return
+        self._runtime_state.mark_runtime_error(reason=reason)
+
+    def _mark_auth_expired(self, *, reason: str) -> None:
+        if self._runtime_state is None:
+            return
+        self._runtime_state.mark_auth_expired(reason=reason)
 
     def resolve_session_id(
         self,
@@ -303,6 +351,10 @@ class WeixinILinkChannel(BaseChannel):
                 response = await self._client.get_updates(cursor=self._cursor)
                 if response.next_cursor:
                     self._cursor = response.next_cursor
+                if response.messages or response.next_cursor:
+                    self._record_runtime_receive(
+                        last_update_id=response.next_cursor or self._cursor,
+                    )
                 for item in response.messages:
                     if not isinstance(item, dict):
                         continue
@@ -311,7 +363,12 @@ class WeixinILinkChannel(BaseChannel):
                         self._enqueue(payload)
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:
+                auth_failure = _auth_failure_reason(exc)
+                if auth_failure:
+                    self._mark_auth_expired(reason=auth_failure)
+                    return
+                self._record_runtime_error(reason=str(exc))
                 logger.exception("weixin_ilink polling failed")
                 await asyncio.sleep(5)
 
@@ -323,6 +380,7 @@ class WeixinILinkChannel(BaseChannel):
             self._load_client_if_possible()
         if self._client is None or self._enqueue is None or self._poll_task is not None:
             return
+        self._mark_runtime_running()
         self._poll_task = asyncio.create_task(
             self._poll_updates_loop(),
             name="weixin_ilink_polling",
@@ -364,8 +422,36 @@ class WeixinILinkChannel(BaseChannel):
                 raise ValueError(
                     f"weixin_ilink proactive group target '{group_id}' is not allowlisted",
                 )
-        await self._client.send_text(
-            to_user_id=_text(meta.get("to_user_id") or to_handle),
-            text=text,
-            context_token=_text(meta.get("context_token")) or None,
+        try:
+            await self._client.send_text(
+                to_user_id=_text(meta.get("to_user_id") or to_handle),
+                text=text,
+                context_token=_text(meta.get("context_token")) or None,
+            )
+        except Exception as exc:
+            auth_failure = _auth_failure_reason(exc)
+            if auth_failure:
+                self._mark_auth_expired(reason=auth_failure)
+            else:
+                self._record_runtime_error(reason=str(exc))
+            raise
+        self._record_runtime_send()
+
+    def clone(self, config) -> "BaseChannel":
+        return self.__class__.from_config(
+            process=self._process,
+            config=config,
+            on_reply_sent=self._on_reply_sent,
+            show_tool_details=getattr(self, "_show_tool_details", True),
+            filter_tool_messages=getattr(
+                config,
+                "filter_tool_messages",
+                False,
+            ),
+            filter_thinking=getattr(
+                config,
+                "filter_thinking",
+                False,
+            ),
+            runtime_state=self._runtime_state,
         )

@@ -123,6 +123,7 @@ async def lifespan(
         mcp_manager=mcp_manager,
         memory_sleep_service=bootstrap.memory_sleep_service,
         research_session_service=bootstrap.research_session_service,
+        weixin_ilink_runtime_state=bootstrap.weixin_ilink_runtime_state,
         logger=logger,
         strict_mcp_watcher=False,
     )
