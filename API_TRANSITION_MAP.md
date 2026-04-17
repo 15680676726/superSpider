@@ -674,6 +674,9 @@
   - `2026-04-17` 补充：`GET /runtime-center/research` 已作为正式 research read surface 落地；它当前读取 `ResearchSessionRecord + ResearchSessionRoundRecord` 的最近会话摘要，并供主脑 cockpit research card 使用
   - `2026-04-17` 补充：runtime bootstrap 已真实注入 `SqliteResearchSessionRepository + BaiduPageResearchService`，因此 `/runtime-center/research` 读取的是正式 state/research service truth，而不是前端本地派生或 chat fallback
   - `2026-04-17` 进度补充：主脑 `user-direct` 与 schedule `monitoring brief` 现已正式路由进 `BaiduPageResearchService`；`/runtime-center/research` 不再只是读面，而是正式 research session 真相的聚合读口
+  - `2026-04-17` source collection 补充：runtime bootstrap 现已在 `BaiduPageResearchService` 之上新增 `SourceCollectionFrontdoorService`，主脑 `user-direct`、`main-brain-followup`、cron `monitoring` 与职业 agent `collect_sources` 工具都统一走 `run_source_collection_frontdoor(...)`
+  - `2026-04-17` 读面补充：`/runtime-center/research` 当前正式聚合 `brief / findings / sources / gaps / conflicts / writeback_truth`，前端 cockpit 不再只消费 provider-only latest round summary
+  - `2026-04-17` taxonomy 补充：通用外部信息收集的稳定模型已收口为 `discover / read / interact / capture`；`search / web_page / github / artifact` 只是 phase-1 adapters，不应继续被误写成永久一级 source ontology
   - `2026-04-17` 边界补充：当前仍缺真实联网 live smoke `PASS`，因此不能把这条链外推成“所有浏览器环境都已稳定跑通”
   - 当前 `/runtime-center/events` 已提供 SSE runtime event stream；前端只把它当作 reload trigger，而不是第二真相源
   - 当前 `/runtime-center/recovery/latest` 与 `/runtime-center/sessions/{id}/lease/force-release` 仍是一等 operator 动作；`/runtime-center/replays/{id}/execute` 已于 `2026-03-25` 从 router 物理删除，不再允许人类前台直接重放执行

@@ -838,10 +838,24 @@
       - `python -m pytest tests/app/test_industry_service_wiring.py::test_runtime_domain_builder_injects_research_session_service_into_main_brain_chat tests/app/industry_api_parts/runtime_updates.py -k "bootstrap_researcher_schedule_report_keeps_main_brain_continuity or researcher_followup_assignment_persists_execution_core_continuity_without_backlog_anchor" -q` -> `2 passed, 47 deselected`
       - `npm --prefix console test -- src/pages/RuntimeCenter/useRuntimeCenter.test.ts src/pages/RuntimeCenter/MainBrainCockpitPanel.test.tsx` -> `19 passed`
       - `PYTHONPATH=src python -m pytest tests/research/test_baidu_page_contract.py tests/research/test_baidu_page_research_service.py tests/app/test_research_session_live_contract.py tests/kernel/test_main_brain_research_followup.py -q` -> `15 passed, 1 skipped`
+      - `PYTHONPATH=src python -m pytest tests/research/test_source_collection_contracts.py tests/research/test_source_collection_routing.py tests/research/test_source_collection_synthesis.py tests/research/test_source_collection_service.py tests/research/test_source_collection_adapters.py tests/research/test_baidu_page_contract.py tests/research/test_baidu_page_research_service.py tests/research/test_baidu_deepening_flow.py tests/research/test_research_report_writeback.py tests/research/test_research_knowledge_ingestion.py tests/research/test_research_writeback_flow.py tests/kernel/test_main_brain_research_followup.py tests/kernel/test_source_collection_agent_entry.py tests/app/test_research_session_live_contract.py tests/app/test_runtime_center_research_surface.py -q` -> `49 passed, 1 skipped`
+      - `npm --prefix console run test -- src/pages/RuntimeCenter/useRuntimeCenter.test.ts src/pages/RuntimeCenter/MainBrainCockpitPanel.test.tsx` -> `20 passed`
     - `L3`：已跑 opt-in live smoke 合同；`COPAW_RUN_BAIDU_RESEARCH_LIVE_SMOKE=1 PYTHONPATH=src python -m pytest tests/app/test_research_session_live_contract.py -q -rs` -> `2 passed`
       - 当前真实结果：浏览器 runtime 已能正常启动并打开百度页；在当前机器登录百度后，真实 research session 已能拿到问答结果
     - `L4`：未跑
   - 下一步验证顺序应固定为：在现有登录态回放基础上，再补更长的多轮/跨重启 soak，并继续收答案/链接抽取质量
+  - `2026-04-17` source collection foundation 已落地：
+    - typed contracts：`ResearchBrief / CollectedSource / ResearchFinding / ResearchAdapterResult`
+    - routing / synthesis / orchestration：`route_collection_mode(...) / synthesize_collection_results(...) / SourceCollectionService`
+    - phase-1 adapters：`search / web_page / github / artifact`
+    - formal frontdoor：`SourceCollectionFrontdoorService.run_source_collection_frontdoor(...)`
+    - 统一入口：主脑 `user-direct`、`main-brain-followup`、cron `monitoring`、职业 agent `collect_sources`
+    - persistence/writeback：session-level `brief`、round-level `sources`、knowledge ingestion / graph writeback reuse existing truth
+    - Runtime Center：`/runtime-center/research` 与 cockpit research card 已正式暴露 `brief / findings / sources / gaps / conflicts / writeback_truth`
+  - 当前边界补充：
+    - 这轮 fresh regression 已证明 `Task 4-8` 的 provider / adapters / writeback / frontdoor / runtime center 读面在 `L1/L2` 层收口
+    - `L3` 仍只有 opt-in live smoke，不得把它外推成所有联网环境都已稳定通过
+    - `L4` long soak 仍未跑
 
 ### 3.3.1 `Symbiotic Host Runtime V1` 当前落地边界
 

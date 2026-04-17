@@ -1423,6 +1423,11 @@ Windows-first 约束：
 - `BaiduPageResearchService` 已落地 `start_session / run_session / summarize_session` 主链，可把完成后的研究结果写成 `AgentReportRecord`，并把摘要继续写入 `work_context / industry` 知识面
 - `GET /runtime-center/research` 已作为 Runtime Center 的正式研究读面落地；前端主脑 cockpit 当前消费的是这条 read surface，而不是 chat fallback 文本
 - 主脑 `user-direct` 触发前门与 schedule `monitoring brief` 自动触发前门现已落地；`ResearchSession*` 不再只是研究过程真相，也已成为正式研究触发链的运行对象
+- `ResearchSessionRecord.brief` 现已成为 session-level 正式 projection；它承载主脑或执行位写出的 `ResearchBrief` 摘要，而不是再把 research brief 只塞在 prompt 或临时 request 上下文里
+- `ResearchSessionRoundRecord.sources` 现已成为 round-level 正式 projection；它承载本轮 `CollectedSource` 列表，供 Runtime Center、knowledge writeback 与后续 recall 复用
+- 当前已存在一层正式 `source_collection` 编排层：typed contracts 包括 `ResearchBrief / CollectedSource / ResearchFinding / ResearchAdapterResult`；它们复用既有 `ResearchSessionRecord / ResearchSessionRoundRecord / EvidenceRecord`，不单独再造第二套 research runtime truth
+- runtime bootstrap 当前注入的是 `SourceCollectionFrontdoorService`；它把 `user-direct / main-brain-followup / monitoring / agent-entry` 收口到同一前门，再按 `light / heavy` 分流到 inline collection 或 `researcher` heavy path
+- phase-1 adapters 当前正式落地为 `search / web_page / github / artifact`；但稳定本体分类不是 source family，而是 collection actions：`discover / read / interact / capture`
 - 当前剩余边界：live smoke 合同已落地，但真实联网 `PASS` 仍受浏览器运行时前置条件限制，当前只有显式 `skip` 记录
 
 ---
