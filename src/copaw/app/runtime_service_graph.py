@@ -139,6 +139,7 @@ from ..state.repositories import (
     SqliteWorkflowTemplateRepository,
 )
 from ..workflows import WorkflowTemplateService
+from .channels.weixin_ilink.runtime_state import WeixinILinkRuntimeState
 from .mcp import MCPClientManager
 from .runtime_bootstrap_execution import (
     build_runtime_execution_stack as build_runtime_execution_stack_components,
@@ -343,6 +344,7 @@ def _build_query_services(
     environment_service: EnvironmentService,
     runtime_provider: object | None,
     external_runtime_service: object | None = None,
+    weixin_ilink_runtime_state: object | None = None,
 ) -> tuple[
     RuntimeCenterStateQueryService,
     RuntimeCenterEvidenceQueryService,
@@ -371,6 +373,7 @@ def _build_query_services(
         human_assist_task_service=human_assist_task_service,
         environment_service=environment_service,
         external_runtime_service=external_runtime_service,
+        weixin_ilink_runtime_state=weixin_ilink_runtime_state,
         runtime_provider=runtime_provider,
     )
 
@@ -533,6 +536,7 @@ def build_runtime_bootstrap(
         repository=repositories.external_runtime_repository,
     )
     _reconcile_external_runtime_truth(external_runtime_service)
+    weixin_ilink_runtime_state = WeixinILinkRuntimeState()
 
     provider_manager = ProviderManager()
     runtime_provider = _resolve_runtime_provider_facade(provider_manager)
@@ -568,6 +572,7 @@ def build_runtime_bootstrap(
         environment_service=environment_service,
         runtime_provider=runtime_provider,
         external_runtime_service=external_runtime_service,
+        weixin_ilink_runtime_state=weixin_ilink_runtime_state,
     )
     knowledge_graph_service = KnowledgeGraphService(
         knowledge_service=knowledge_service,
@@ -840,4 +845,5 @@ def build_runtime_bootstrap(
         actor_worker=actor_worker,
         actor_supervisor=actor_supervisor,
         external_runtime_service=external_runtime_service,
+        weixin_ilink_runtime_state=weixin_ilink_runtime_state,
     )

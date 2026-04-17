@@ -150,6 +150,7 @@ def build_runtime_state_bindings(
         "actor_worker": bootstrap.actor_worker,
         "actor_supervisor": bootstrap.actor_supervisor,
         "external_runtime_service": bootstrap.external_runtime_service,
+        "weixin_ilink_runtime_state": bootstrap.weixin_ilink_runtime_state,
         "automation_tasks": _materialize_automation_tasks(automation_tasks),
     }
 

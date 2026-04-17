@@ -1224,6 +1224,36 @@ async def list_runtime_center_external_runtimes(
     )
 
 
+@router.get("/channel-runtimes", response_model=list[dict[str, object]])
+async def list_runtime_center_channel_runtimes(
+    request: Request,
+    response: Response,
+) -> list[dict[str, object]]:
+    return await _runtime_center_list_query(
+        request=request,
+        response=response,
+        query_methods=("list_channel_runtimes",),
+        not_available_detail="Channel runtime view is not available.",
+    )
+
+
+@router.get("/channel-runtimes/{channel}", response_model=dict[str, object])
+async def get_runtime_center_channel_runtime_detail(
+    channel: str,
+    request: Request,
+    response: Response,
+) -> dict[str, object]:
+    return await _runtime_center_detail_query(
+        request=request,
+        response=response,
+        query_methods=("get_channel_runtime_detail",),
+        not_available_detail="Channel runtime detail view is not available.",
+        not_found_detail=f"Channel runtime '{channel}' was not found.",
+        payload_key="runtime",
+        channel=channel,
+    )
+
+
 @router.get("/external-runtimes/{runtime_id}", response_model=dict[str, object])
 async def get_runtime_center_external_runtime_detail(
     runtime_id: str,

@@ -81,6 +81,7 @@ class RuntimeCenterStateQueryService:
         human_assist_task_service: object | None = None,
         environment_service: object | None = None,
         external_runtime_service: object | None = None,
+        weixin_ilink_runtime_state: object | None = None,
         memory_activation_service: object | None = None,
         knowledge_graph_service: object | None = None,
     ) -> None:
@@ -110,6 +111,7 @@ class RuntimeCenterStateQueryService:
         self._human_assist_task_service = human_assist_task_service
         self._environment_service = environment_service
         self._external_runtime_service = external_runtime_service
+        self._weixin_ilink_runtime_state = weixin_ilink_runtime_state
         self._memory_activation_service = memory_activation_service
         self._knowledge_graph_service = knowledge_graph_service
         self._skill_gap_detector = SkillGapDetector()
@@ -377,6 +379,41 @@ class RuntimeCenterStateQueryService:
                 serialized["route"] = f"/api/runtime-center/external-runtimes/{runtime_id}"
             payload.append(serialized)
         return payload
+
+    def list_channel_runtimes(self) -> list[dict[str, object]]:
+        runtime_state = getattr(self, "_weixin_ilink_runtime_state", None)
+        snapshot = getattr(runtime_state, "snapshot", None)
+        if not callable(snapshot):
+            return []
+        payload = snapshot()
+        if not isinstance(payload, dict):
+            return []
+        if str(payload.get("login_status") or "").strip() == "unconfigured":
+            return []
+        return [
+            {
+                "channel": "weixin_ilink",
+                **payload,
+                "route": "/api/runtime-center/channel-runtimes/weixin_ilink",
+            },
+        ]
+
+    def get_channel_runtime_detail(self, channel: str) -> dict[str, object] | None:
+        normalized = str(channel or "").strip().lower()
+        if normalized != "weixin_ilink":
+            return None
+        runtime_state = getattr(self, "_weixin_ilink_runtime_state", None)
+        snapshot = getattr(runtime_state, "snapshot", None)
+        if not callable(snapshot):
+            return None
+        payload = snapshot()
+        if not isinstance(payload, dict):
+            return None
+        return {
+            "channel": "weixin_ilink",
+            **payload,
+            "route": "/api/runtime-center/channel-runtimes/weixin_ilink",
+        }
 
     def get_external_runtime_detail(self, runtime_id: str) -> dict[str, object] | None:
         service = getattr(self, "_external_runtime_service", None)

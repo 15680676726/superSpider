@@ -236,6 +236,7 @@ class RuntimeBootstrap:
     actor_worker: ActorWorker
     actor_supervisor: ActorSupervisor
     external_runtime_service: Any | None = None
+    weixin_ilink_runtime_state: Any | None = None
     research_session_service: Any | None = None
     buddy_onboarding_service: BuddyOnboardingService | None = None
     buddy_projection_service: BuddyProjectionService | None = None
