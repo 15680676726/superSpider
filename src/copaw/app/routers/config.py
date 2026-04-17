@@ -11,6 +11,11 @@ from ...config import (
     get_available_channels,
 )
 from ..channels.registry import BUILTIN_CHANNEL_KEYS
+from ..channels.weixin_ilink.client import (
+    WeixinILinkApiClient,
+    write_bot_token_file,
+)
+from ..channels.weixin_ilink.runtime_state import WeixinILinkRuntimeState
 from ...config.config import AgentsLLMRoutingConfig
 from .governed_mutations import dispatch_governed_mutation
 
@@ -33,6 +38,25 @@ async def _dispatch_config_mutation(
         environment_ref="config:runtime",
         fallback_risk=fallback_risk,
     )
+
+
+def _get_weixin_ilink_runtime_state(request: Request) -> WeixinILinkRuntimeState:
+    runtime_state = getattr(request.app.state, "weixin_ilink_runtime_state", None)
+    if runtime_state is None:
+        runtime_state = WeixinILinkRuntimeState()
+        request.app.state.weixin_ilink_runtime_state = runtime_state
+    return runtime_state
+
+
+def _get_weixin_ilink_config():
+    config = load_config()
+    channel_config = getattr(config.channels, "weixin_ilink", None)
+    if channel_config is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Channel 'weixin_ilink' not found",
+        )
+    return channel_config
 
 
 @router.get(
@@ -77,6 +101,72 @@ async def list_channels() -> dict:
 async def list_channel_types() -> List[str]:
     """Return available channel type identifiers (env-filtered)."""
     return list(get_available_channels())
+
+
+@router.post(
+    "/channels/weixin_ilink/login/qr",
+    response_model=dict[str, object],
+    summary="Create Weixin iLink login QR",
+)
+async def create_weixin_ilink_login_qr(
+    request: Request,
+) -> dict[str, object]:
+    channel_config = _get_weixin_ilink_config()
+    runtime_state = _get_weixin_ilink_runtime_state(request)
+    client = WeixinILinkApiClient(
+        bot_token=getattr(channel_config, "bot_token", ""),
+        base_url=getattr(channel_config, "base_url", ""),
+    )
+    session = await client.get_bot_qrcode()
+    return runtime_state.begin_qr_login(
+        qrcode=session.qrcode,
+        qrcode_img_content=session.qrcode_img_content,
+        base_url=client.base_url,
+    )
+
+
+@router.get(
+    "/channels/weixin_ilink/login/status",
+    response_model=dict[str, object],
+    summary="Get Weixin iLink login status",
+)
+async def get_weixin_ilink_login_status(
+    request: Request,
+) -> dict[str, object]:
+    channel_config = _get_weixin_ilink_config()
+    runtime_state = _get_weixin_ilink_runtime_state(request)
+    qrcode = runtime_state.qrcode
+    if not qrcode:
+        return runtime_state.snapshot()
+    client = WeixinILinkApiClient(
+        bot_token=getattr(channel_config, "bot_token", ""),
+        base_url=getattr(channel_config, "base_url", ""),
+    )
+    status = await client.get_qrcode_status(qrcode)
+    if status.status == "confirmed" and status.bot_token:
+        write_bot_token_file(channel_config.bot_token_file, status.bot_token)
+        return runtime_state.mark_authorized_pending_save(
+            bot_token=status.bot_token,
+            base_url=status.base_url,
+            ilink_bot_id=status.ilink_bot_id,
+            ilink_user_id=status.ilink_user_id,
+            token_source="qr",
+        )
+    if status.status in {"expired", "invalid"}:
+        return runtime_state.mark_auth_expired(reason="qrcode_expired")
+    return runtime_state.snapshot()
+
+
+@router.post(
+    "/channels/weixin_ilink/login/rebind",
+    response_model=dict[str, object],
+    summary="Rebind Weixin iLink login",
+)
+async def rebind_weixin_ilink_login(
+    request: Request,
+) -> dict[str, object]:
+    runtime_state = _get_weixin_ilink_runtime_state(request)
+    return runtime_state.mark_auth_expired(reason="rebind_requested")
 
 
 @router.put(
