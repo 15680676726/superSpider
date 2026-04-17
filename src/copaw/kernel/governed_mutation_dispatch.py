@@ -65,7 +65,7 @@ def find_inflight_governed_mutation_result(
                     trace_id=getattr(task, "trace_id", None),
                     success=False,
                     phase="waiting-confirm",
-                    summary="Equivalent runtime mutation already awaits confirmation.",
+                    summary="等价的运行时变更仍在等待确认。",
                     decision_request_id=decision_request_id,
                 )
             return KernelResult(
@@ -73,7 +73,7 @@ def find_inflight_governed_mutation_result(
                 trace_id=getattr(task, "trace_id", None),
                 success=True,
                 phase="executing",
-                summary="Equivalent runtime mutation already in progress.",
+                summary="等价的运行时变更已经在执行中。",
                 decision_request_id=decision_request_id,
             )
     return None

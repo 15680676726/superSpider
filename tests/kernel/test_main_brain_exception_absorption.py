@@ -62,7 +62,9 @@ def test_absorption_service_classifies_writer_contention_from_repeated_conflicts
     assert [case.case_kind for case in summary.active_cases] == ["writer-contention"]
     assert summary.case_counts["writer-contention"] == 1
     assert summary.recovery_counts["cleanup"] == 1
-    assert "internal execution pressure" in summary.main_brain_summary
+    assert summary.main_brain_summary == (
+        "主脑正在吸收内部执行压力，并在升级前继续尝试自主恢复。"
+    )
 
 
 def test_absorption_service_classifies_waiting_confirm_orphan_without_creating_new_truth() -> None:
@@ -90,6 +92,24 @@ def test_absorption_service_classifies_waiting_confirm_orphan_without_creating_n
     assert [case.case_kind for case in summary.active_cases] == ["waiting-confirm-orphan"]
     assert summary.active_cases[0].recovery_rung == "escalate"
     assert summary.active_cases[0].human_required is True
+    assert summary.main_brain_summary == (
+        "主脑正在吸收内部执行压力，且至少有一个案例现在需要受治理的人类动作。"
+    )
+
+
+def test_absorption_service_uses_chinese_clear_summary_when_no_active_cases() -> None:
+    now = datetime(2026, 4, 7, 10, 0, tzinfo=UTC)
+    service = MainBrainExceptionAbsorptionService()
+
+    summary = service.scan(
+        runtimes=[],
+        mailbox_items=[],
+        human_assist_tasks=[],
+        now=now,
+    )
+
+    assert summary.active_cases == []
+    assert summary.main_brain_summary == "主脑当前没有活跃的内部异常压力。"
 
 
 def test_absorption_service_classifies_retry_loop_and_progressless_runtime() -> None:

@@ -708,7 +708,7 @@ class GovernanceService:
         try:
             closer(
                 task_id,
-                summary="Runtime host handoff no longer blocks this control thread.",
+                summary="运行时宿主交接已不再阻塞这条控制线程。",
                 resume_payload={
                     "resumed": False,
                     "reason": "stale-host-handoff-cleared",

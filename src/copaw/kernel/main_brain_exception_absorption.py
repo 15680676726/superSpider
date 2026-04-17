@@ -443,7 +443,7 @@ class MainBrainExceptionAbsorptionService:
                         or _string(metadata.get("blocked_scope_ref"))
                     ),
                     recovery_rung="cleanup",
-                    summary="Repeated writer conflicts are blocking the same surface.",
+                    summary="重复写冲突正在阻塞同一执行面。",
                 )
             )
 
@@ -459,7 +459,7 @@ class MainBrainExceptionAbsorptionService:
                         or _string(metadata.get("lane_id"))
                     ),
                     recovery_rung="replan",
-                    summary="Repeated blocker pressure is hitting the same execution scope.",
+                    summary="重复阻塞压力正在命中同一执行范围。",
                 )
             )
 
@@ -471,7 +471,7 @@ class MainBrainExceptionAbsorptionService:
                     owner_agent_id=agent_id,
                     scope_ref=_string(metadata.get("blocked_scope_ref")) or _string(metadata.get("assignment_id")),
                     recovery_rung="retry",
-                    summary="The runtime is retrying repeatedly without clearing the blocker.",
+                    summary="运行时正在反复重试，但始终没有清掉阻塞。",
                 )
             )
 
@@ -491,7 +491,7 @@ class MainBrainExceptionAbsorptionService:
                     owner_agent_id=agent_id,
                     scope_ref=_string(metadata.get("work_context_id")) or _string(metadata.get("assignment_id")),
                     recovery_rung="replan",
-                    summary="The runtime is still alive but has not made useful progress.",
+                    summary="运行时虽然仍然存活，但还没有产生有效进展。",
                 )
             )
 
@@ -508,7 +508,7 @@ class MainBrainExceptionAbsorptionService:
                         owner_agent_id=agent_id,
                         scope_ref=_string(metadata.get("environment_ref")) or _string(metadata.get("work_context_id")),
                         recovery_rung="cleanup",
-                        summary="A lease has been held too long without resolving the work.",
+                        summary="有一条租约占用过久，但对应工作仍未收口。",
                     )
                 )
 
@@ -528,7 +528,7 @@ class MainBrainExceptionAbsorptionService:
             scope_ref=_string(_field(item, "task_id")) or _string(metadata.get("checkpoint_id")),
             recovery_rung="escalate",
             human_required=True,
-            summary="A confirmation-bound task has remained blocked past its safe waiting window.",
+            summary="一个绑定确认的人类步骤已经超过安全等待窗口，仍然处于阻塞状态。",
         )
 
     def _build_main_brain_summary(
@@ -541,19 +541,14 @@ class MainBrainExceptionAbsorptionService:
         if not active_cases:
             if active_human_assist_count > 0:
                 return (
-                    "Main brain is clear of active internal exception pressure, "
-                    "but there are still open human-assist checkpoints."
+                    "主脑当前没有活跃的内部异常压力，但仍有未关闭的人类协助检查点。"
                 )
-            return "Main brain is clear of active internal exception pressure."
+            return "主脑当前没有活跃的内部异常压力。"
         if human_required_case_count > 0:
             return (
-                "Main brain is absorbing internal execution pressure and at least one case "
-                "now requires a governed human step."
+                "主脑正在吸收内部执行压力，且至少有一个案例现在需要受治理的人类动作。"
             )
-        return (
-            "Main brain is absorbing internal execution pressure and is still attempting "
-            "autonomous recovery before escalating."
-        )
+        return "主脑正在吸收内部执行压力，并在升级前继续尝试自主恢复。"
 
     def _count_active_human_assist_tasks(
         self,

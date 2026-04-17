@@ -1459,6 +1459,17 @@ def test_main_brain_chat_service_prompt_includes_exception_absorption_summary_wi
     assert "waiting-confirm-orphan" not in context_prompt
 
 
+def test_main_brain_chat_service_localizes_exception_absorption_fallback_summary() -> None:
+    rendered = main_brain_chat_service_module._format_exception_absorption_snapshot(
+        {
+            "case_count": 0,
+            "human_required_case_count": 0,
+        }
+    )
+
+    assert "主脑当前没有活跃的内部异常压力。" in rendered
+
+
 def test_main_brain_chat_service_default_shell_tail_reinforces_short_direct_replies():
     service = MainBrainChatService(
         session_backend=_FakeSessionBackend(),

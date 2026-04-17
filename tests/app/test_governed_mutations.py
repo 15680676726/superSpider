@@ -144,6 +144,77 @@ def test_requestless_governed_mutation_helper_dispatches_through_kernel() -> Non
     assert dispatcher.executed == [dispatcher.submitted[0].id]
 
 
+def test_find_inflight_governed_mutation_result_localizes_waiting_confirm_summary() -> None:
+    from copaw.kernel.governed_mutation_dispatch import find_inflight_governed_mutation_result
+
+    task = SimpleNamespace(
+        id="task-waiting",
+        capability_ref="system:set_capability_enabled",
+        payload={
+            "capability_id": "skill:research",
+            "enabled": True,
+            "actor": "copaw-operator",
+        },
+    )
+    dispatcher = SimpleNamespace(
+        task_store=SimpleNamespace(
+            list_tasks=lambda **kwargs: [task] if kwargs.get("phase") == "waiting-confirm" else [],
+            list_decision_requests=lambda **kwargs: [SimpleNamespace(id="decision-1", status="open")],
+        )
+    )
+
+    result = find_inflight_governed_mutation_result(
+        dispatcher,
+        capability_ref="system:set_capability_enabled",
+        owner_agent_id="copaw-operator",
+        payload={
+            "capability_id": "skill:research",
+            "enabled": True,
+            "actor": "copaw-operator",
+        },
+    )
+
+    assert result is not None
+    assert result.phase == "waiting-confirm"
+    assert result.summary == "等价的运行时变更仍在等待确认。"
+    assert result.decision_request_id == "decision-1"
+
+
+def test_find_inflight_governed_mutation_result_localizes_executing_summary() -> None:
+    from copaw.kernel.governed_mutation_dispatch import find_inflight_governed_mutation_result
+
+    task = SimpleNamespace(
+        id="task-executing",
+        capability_ref="system:set_capability_enabled",
+        payload={
+            "capability_id": "skill:research",
+            "enabled": True,
+            "actor": "copaw-operator",
+        },
+    )
+    dispatcher = SimpleNamespace(
+        task_store=SimpleNamespace(
+            list_tasks=lambda **kwargs: [task] if kwargs.get("phase") == "executing" else [],
+            list_decision_requests=lambda **kwargs: [],
+        )
+    )
+
+    result = find_inflight_governed_mutation_result(
+        dispatcher,
+        capability_ref="system:set_capability_enabled",
+        owner_agent_id="copaw-operator",
+        payload={
+            "capability_id": "skill:research",
+            "enabled": True,
+            "actor": "copaw-operator",
+        },
+    )
+
+    assert result is not None
+    assert result.phase == "executing"
+    assert result.summary == "等价的运行时变更已经在执行中。"
+
+
 def test_shared_governed_mutation_helper_translates_dispatcher_errors() -> None:
     from copaw.app.routers.governed_mutations import translate_dispatcher_error
 

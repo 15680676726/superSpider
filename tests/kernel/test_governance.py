@@ -655,6 +655,9 @@ def test_governance_admission_closes_stale_host_handoff_task_when_environment_no
         chat_thread_id="industry-chat:buddy:profile-1:domain-stock:execution-core",
     )
     assert tasks[0].status == "closed"
+    assert tasks[0].verification_payload["resume"]["summary"] == (
+        "运行时宿主交接已不再阻塞这条控制线程。"
+    )
 
 
 def test_governance_status_closes_stale_host_handoff_task_when_environment_no_longer_requires_return(
@@ -713,6 +716,9 @@ def test_governance_status_closes_stale_host_handoff_task_when_environment_no_lo
         chat_thread_id="industry-chat:buddy:profile-1:domain-stock:execution-core",
     )
     assert tasks[0].status == "closed"
+    assert tasks[0].verification_payload["resume"]["summary"] == (
+        "运行时宿主交接已不再阻塞这条控制线程。"
+    )
 
 
 def test_governance_admission_resolves_full_buddy_instance_id_from_control_thread(
