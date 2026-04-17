@@ -15,6 +15,19 @@ class _QueryExecutionToolsMixin:
         kernel_task_id: str | None = None,
         delegation_guard: _DelegationFirstGuard | None = None,
     ) -> list[Any]:
+        source_collection_service = getattr(self, "_source_collection_frontdoor", None)
+        source_collection_runner = getattr(
+            source_collection_service,
+            "run_source_collection_frontdoor",
+            None,
+        )
+        collect_sources_available = callable(source_collection_runner) and bool(
+            {
+                capability_id
+                for capability_id in (system_capability_ids or set())
+                if capability_id in {"system:dispatch_query", "system:delegate_task"}
+            },
+        )
         supported = {
             capability_id
             for capability_id in (system_capability_ids or set())
@@ -25,7 +38,7 @@ class _QueryExecutionToolsMixin:
                 "system:delegate_task",
             }
         }
-        if not supported:
+        if not supported and not collect_sources_available:
             return []
 
         current_industry_instance_id = _first_non_empty(
@@ -59,7 +72,7 @@ class _QueryExecutionToolsMixin:
             supported.difference_update(
                 {"system:dispatch_query", "system:delegate_task"},
             )
-            if not supported:
+            if not supported and not collect_sources_available:
                 return []
 
         tools: list[Any] = []
@@ -161,6 +174,132 @@ class _QueryExecutionToolsMixin:
                     "target_role_name": _first_non_empty(getattr(resolution, "role_name", None)),
                 },
             )
+
+        if collect_sources_available:
+            async def collect_sources(
+                question: str,
+                requested_sources: list[str] | None = None,
+                goal: str | None = None,
+                why_needed: str | None = None,
+                done_when: str | None = None,
+                collection_mode_hint: str = "auto",
+                title: str | None = None,
+            ) -> ToolResponse:
+                """Collect sources through the unified source-collection front door."""
+                _ = title
+                normalized_question = str(question or "").strip()
+                if not normalized_question:
+                    return _json_tool_response(
+                        {"success": False, "error": "question is required"},
+                    )
+                normalized_goal = str(goal or normalized_question).strip()
+                normalized_sources = [
+                    str(item).strip()
+                    for item in list(requested_sources or [])
+                    if str(item).strip()
+                ]
+                work_context_id = _first_non_empty(getattr(request, "work_context_id", None))
+                assignment_id = _first_non_empty(getattr(request, "assignment_id", None))
+                writeback_target: dict[str, Any] | None = None
+                if work_context_id is not None:
+                    writeback_target = {
+                        "scope_type": "work_context",
+                        "scope_id": work_context_id,
+                    }
+                elif assignment_id is not None:
+                    writeback_target = {
+                        "scope_type": "assignment",
+                        "scope_id": assignment_id,
+                    }
+                elif current_industry_instance_id is not None:
+                    writeback_target = {
+                        "scope_type": "industry",
+                        "scope_id": current_industry_instance_id,
+                    }
+                researcher_resolution = _resolve_teammate(
+                    candidate_agent_id=None,
+                    target_role_id="researcher",
+                    target_role_name=None,
+                )
+                preferred_researcher_agent_id = _first_non_empty(
+                    getattr(researcher_resolution, "agent_id", None),
+                )
+                if preferred_researcher_agent_id is None and current_industry_instance_id is not None:
+                    detail_getter = getattr(self._industry_service, "get_instance_detail", None)
+                    if callable(detail_getter):
+                        try:
+                            detail = detail_getter(current_industry_instance_id)
+                        except Exception:
+                            detail = None
+                        staffing = _mapping_value(_mapping_value(detail).get("staffing"))
+                        researcher = _mapping_value(staffing.get("researcher"))
+                        preferred_researcher_agent_id = _first_non_empty(
+                            researcher.get("agent_id"),
+                        )
+                result = source_collection_runner(
+                    goal=normalized_goal,
+                    question=normalized_question,
+                    why_needed=_first_non_empty(why_needed),
+                    done_when=_first_non_empty(done_when),
+                    trigger_source="agent-entry",
+                    owner_agent_id=owner_agent_id,
+                    preferred_researcher_agent_id=preferred_researcher_agent_id,
+                    industry_instance_id=current_industry_instance_id,
+                    work_context_id=work_context_id,
+                    assignment_id=assignment_id,
+                    task_id=current_parent_task_id,
+                    supervisor_agent_id=owner_agent_id,
+                    collection_mode_hint=(
+                        _first_non_empty(collection_mode_hint, "auto") or "auto"
+                    ),
+                    requested_sources=normalized_sources,
+                    writeback_target=writeback_target,
+                    metadata={
+                        "entry_surface": "query-execution-tools",
+                        "entry_source": current_entry_source,
+                        "request_channel": current_channel,
+                    },
+                )
+                if asyncio.iscoroutine(result):
+                    result = await result
+                model_dump = getattr(result, "model_dump", None)
+                payload = (
+                    model_dump(mode="json")
+                    if callable(model_dump)
+                    else dict(result)
+                    if isinstance(result, dict)
+                    else {}
+                )
+                if not payload:
+                    payload = {
+                        "session_id": _first_non_empty(getattr(result, "session_id", None)),
+                        "status": _first_non_empty(getattr(result, "status", None)),
+                        "route_mode": _first_non_empty(getattr(result, "route_mode", None)),
+                        "execution_agent_id": _first_non_empty(
+                            getattr(result, "execution_agent_id", None),
+                        ),
+                        "findings": list(getattr(result, "findings", []) or []),
+                        "collected_sources": list(
+                            getattr(result, "collected_sources", []) or [],
+                        ),
+                        "conflicts": list(getattr(result, "conflicts", []) or []),
+                        "gaps": list(getattr(result, "gaps", []) or []),
+                    }
+                return _json_tool_response(
+                    {
+                        "success": True,
+                        "session_id": payload.get("session_id"),
+                        "status": payload.get("status"),
+                        "route_mode": payload.get("route_mode"),
+                        "execution_agent_id": payload.get("execution_agent_id"),
+                        "findings": list(payload.get("findings") or []),
+                        "collected_sources": list(payload.get("collected_sources") or []),
+                        "conflicts": list(payload.get("conflicts") or []),
+                        "gaps": list(payload.get("gaps") or []),
+                    },
+                )
+
+            tools.append(collect_sources)
 
         if "system:dispatch_query" in supported:
             async def dispatch_query(

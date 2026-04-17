@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -169,6 +169,39 @@ class RuntimeRepositories:
     automation_loop_runtime_repository: SqliteAutomationLoopRuntimeRepository
     session_mount_repository: SessionMountRepository
     external_runtime_repository: Any | None = None
+
+
+@dataclass(slots=True)
+class SourceCollectionFrontdoorResult:
+    session_id: str | None
+    status: str
+    route_mode: str
+    execution_agent_id: str
+    trigger_source: str
+    goal: str
+    stop_reason: str | None = None
+    findings: list[dict[str, Any]] = field(default_factory=list)
+    collected_sources: list[dict[str, Any]] = field(default_factory=list)
+    conflicts: list[str] = field(default_factory=list)
+    gaps: list[str] = field(default_factory=list)
+    final_report_id: str | None = None
+
+    def model_dump(self, *, mode: str = "json") -> dict[str, Any]:
+        _ = mode
+        return {
+            "session_id": self.session_id,
+            "status": self.status,
+            "route_mode": self.route_mode,
+            "execution_agent_id": self.execution_agent_id,
+            "trigger_source": self.trigger_source,
+            "goal": self.goal,
+            "stop_reason": self.stop_reason,
+            "findings": list(self.findings),
+            "collected_sources": list(self.collected_sources),
+            "conflicts": list(self.conflicts),
+            "gaps": list(self.gaps),
+            "final_report_id": self.final_report_id,
+        }
 
 
 @dataclass(slots=True)

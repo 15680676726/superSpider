@@ -155,9 +155,6 @@ class CronExecutor:
         research_mode = _string_value(meta.get("research_mode"))
         if research_provider != "baidu-page" or research_mode != "monitoring-brief":
             return False
-        starter = getattr(service, "start_session", None)
-        if not callable(starter):
-            return False
         request_payload = (
             job.request.model_dump(mode="json")
             if job.request is not None
@@ -176,6 +173,66 @@ class CronExecutor:
             request_payload.get("agent_id"),
         )
         if goal is None or owner_agent_id is None:
+            return False
+        requested_sources = [
+            str(item).strip()
+            for item in list(
+                meta.get("requested_sources")
+                or meta.get("research_requested_sources")
+                or []
+            )
+            if str(item).strip()
+        ]
+        collection_mode_hint = _first_non_empty_text(
+            meta.get("collection_mode_hint"),
+            meta.get("research_collection_mode_hint"),
+            "heavy",
+        ) or "heavy"
+        frontdoor = getattr(service, "run_source_collection_frontdoor", None)
+        if callable(frontdoor):
+            frontdoor(
+                goal=goal,
+                question=_first_non_empty_text(
+                    meta.get("research_question"),
+                    goal,
+                ),
+                why_needed=_first_non_empty_text(meta.get("research_why_needed")),
+                done_when=_first_non_empty_text(meta.get("research_done_when")),
+                trigger_source="monitoring",
+                owner_agent_id=owner_agent_id,
+                preferred_researcher_agent_id=None,
+                industry_instance_id=_first_non_empty_text(
+                    meta.get("industry_instance_id"),
+                    request_payload.get("industry_instance_id"),
+                ),
+                work_context_id=_first_non_empty_text(
+                    meta.get("work_context_id"),
+                    request_payload.get("work_context_id"),
+                ),
+                assignment_id=_first_non_empty_text(meta.get("assignment_id")),
+                task_id=_first_non_empty_text(meta.get("task_id")),
+                supervisor_agent_id=_first_non_empty_text(
+                    meta.get("supervisor_agent_id"),
+                    meta.get("control_agent_id"),
+                ),
+                collection_mode_hint=collection_mode_hint,
+                requested_sources=requested_sources,
+                writeback_target=(
+                    dict(meta.get("writeback_target"))
+                    if isinstance(meta.get("writeback_target"), dict)
+                    else None
+                ),
+                metadata={
+                    "entry_surface": "cron-monitoring",
+                    "schedule_id": job.id,
+                    "schedule_name": job.name,
+                    "research_provider": research_provider,
+                    "research_mode": research_mode,
+                },
+            )
+            return True
+        starter = getattr(service, "start_session", None)
+        if not callable(starter):
             return False
         session_result = starter(
             goal=goal,

@@ -566,7 +566,7 @@ def _format_exception_absorption_snapshot(snapshot: object | None) -> str:
         return ""
     case_count = _int(normalized.get("case_count"), 0)
     human_required_case_count = _int(normalized.get("human_required_case_count"), 0)
-    summary = _first_non_empty(normalized.get("summary")) or "Main brain is clear of active internal exception pressure."
+    summary = _first_non_empty(normalized.get("summary")) or "主脑当前没有活跃的内部异常压力。"
     lines = [
         f"- 状态：{summary}",
         f"- 当前内部恢复中的问题数：{case_count}",
@@ -1000,6 +1000,66 @@ class MainBrainChatService:
         owner_agent_id = self._resolve_research_owner_agent_id(request=request)
         if owner_agent_id is None:
             return None
+        question = _safe_text(brief.get("question")) or goal
+        why_needed = _safe_text(brief.get("why_needed"))
+        done_when = _safe_text(brief.get("done_when"))
+        requested_sources = [
+            str(item).strip()
+            for item in list(brief.get("requested_sources") or [])
+            if str(item).strip()
+        ]
+        collection_mode_hint = (
+            _safe_text(brief.get("collection_mode_hint"))
+            or "heavy"
+        )
+        writeback_target = _safe_mapping(brief.get("writeback_target")) or None
+        frontdoor = getattr(service, "run_source_collection_frontdoor", None)
+        if callable(frontdoor):
+            session_result = frontdoor(
+                goal=goal,
+                question=question,
+                why_needed=why_needed,
+                done_when=done_when,
+                trigger_source=trigger_source,
+                owner_agent_id=owner_agent_id,
+                industry_instance_id=_safe_text(getattr(request, "industry_instance_id", None)),
+                work_context_id=_safe_text(getattr(request, "work_context_id", None)),
+                supervisor_agent_id=_safe_text(getattr(request, "agent_id", None)),
+                collection_mode_hint=collection_mode_hint,
+                requested_sources=requested_sources,
+                writeback_target=writeback_target,
+                metadata={"entry_surface": "main-brain-chat"},
+            )
+            session_payload = _safe_mapping(session_result)
+            session_id = _safe_text(
+                _first_non_empty(
+                    session_payload.get("session_id"),
+                    getattr(getattr(session_result, "session", None), "id", None),
+                ),
+            )
+            status = _safe_text(
+                _first_non_empty(
+                    session_payload.get("status"),
+                    getattr(getattr(session_result, "session", None), "status", None),
+                ),
+            )
+            reply_text = (
+                "研究任务已建立，但百度还没登录。你先登录百度，我再继续。"
+                if status == "waiting-login"
+                else "研究任务已经启动，我去查资料并整理成正式汇报。"
+            )
+            return (
+                _build_assistant_message(
+                    text=reply_text,
+                    message_id=assistant_message_id,
+                ),
+                {
+                    "research_session_id": session_id,
+                    "trigger_source": trigger_source,
+                    "status": status,
+                    "goal": goal,
+                },
+            )
         starter = getattr(service, "start_session", None)
         if not callable(starter):
             return None

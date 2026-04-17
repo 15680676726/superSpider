@@ -3,10 +3,13 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 
+from copaw.app.crons.executor import CronExecutor
+from copaw.app.crons.models import CronJobSpec
 from copaw.agents.tools.browser_control import list_browser_downloads, run_browser_use_json
 from copaw.research import BaiduPageResearchService
 from copaw.state import SQLiteStateStore
@@ -126,6 +129,127 @@ def test_baidu_research_live_smoke_skip_reason_declares_opt_in_boundary() -> Non
     reason = str(skipif_mark.kwargs.get("reason", "")).lower()
     assert "opt-in" in reason
     assert "not part of default regression coverage" in reason
+
+
+class _FakeKernelDispatcher:
+    def submit(self, task):
+        return SimpleNamespace(phase="executing", task_id=task.id)
+
+    async def execute_task(self, task_id: str):
+        _ = task_id
+        return SimpleNamespace(success=True, error=None, summary="ok")
+
+
+class _FakeSourceCollectionFrontdoor:
+    def __init__(self, *, final_status: str = "completed") -> None:
+        self.final_status = final_status
+        self.calls: list[dict[str, object]] = []
+
+    def start_session(self, **kwargs):
+        _ = kwargs
+        raise AssertionError("legacy research session methods should not be called")
+
+    def run_session(self, session_id: str):
+        _ = session_id
+        raise AssertionError("legacy research session methods should not be called")
+
+    def summarize_session(self, session_id: str):
+        _ = session_id
+        raise AssertionError("legacy research session methods should not be called")
+
+    def run_source_collection_frontdoor(self, **kwargs):
+        self.calls.append(dict(kwargs))
+        return SimpleNamespace(
+            session_id="research-monitoring-1",
+            status=self.final_status,
+            route_mode="heavy",
+            execution_agent_id=str(kwargs.get("owner_agent_id") or ""),
+        )
+
+
+def test_monitoring_frontdoor_prefers_unified_source_collection_entry() -> None:
+    executor = CronExecutor(
+        kernel_dispatcher=_FakeKernelDispatcher(),
+        research_session_service=_FakeSourceCollectionFrontdoor(),
+    )
+    job = CronJobSpec.model_validate(
+        {
+            "id": "cron-monitoring-1",
+            "name": "Explicit monitoring brief",
+            "enabled": True,
+            "schedule": {
+                "type": "cron",
+                "cron": "0 9 * * 1",
+                "timezone": "UTC",
+            },
+            "task_type": "agent",
+            "request": {
+                "input": [
+                    {
+                        "role": "user",
+                        "content": [{"type": "text", "text": "run monitoring brief"}],
+                    }
+                ],
+                "industry_instance_id": "industry-v1-demo",
+                "work_context_id": "ctx-monitoring-1",
+            },
+            "dispatch": {
+                "type": "channel",
+                "channel": "console",
+                "target": {"user_id": "workflow", "session_id": "monitoring-run-1"},
+                "mode": "final",
+                "meta": {"summary": "monitoring follow-up"},
+            },
+            "runtime": {
+                "max_concurrency": 1,
+                "timeout_seconds": 30,
+                "misfire_grace_seconds": 30,
+            },
+            "meta": {
+                "research_provider": "baidu-page",
+                "research_mode": "monitoring-brief",
+                "research_goal": "每天早上整理持仓股票相关新闻和监管变化",
+                "research_question": "每天早上整理持仓股票相关新闻、监管变化和官网公告。",
+                "research_why_needed": "主脑要判断是否需要发起新的 follow-up assignment。",
+                "research_done_when": "至少形成 3 条可信变化并标注来源。",
+                "requested_sources": ["search", "web_page"],
+                "collection_mode_hint": "heavy",
+                "owner_agent_id": "industry-researcher-demo",
+                "industry_instance_id": "industry-v1-demo",
+                "work_context_id": "ctx-monitoring-1",
+                "supervisor_agent_id": "copaw-agent-runner",
+            },
+        }
+    )
+
+    asyncio_result = __import__("asyncio").run(executor.execute(job))
+    assert asyncio_result is None
+    assert executor._research_session_service.calls == [  # type: ignore[attr-defined]
+        {
+            "goal": "每天早上整理持仓股票相关新闻和监管变化",
+            "question": "每天早上整理持仓股票相关新闻、监管变化和官网公告。",
+            "why_needed": "主脑要判断是否需要发起新的 follow-up assignment。",
+            "done_when": "至少形成 3 条可信变化并标注来源。",
+            "trigger_source": "monitoring",
+            "owner_agent_id": "industry-researcher-demo",
+            "preferred_researcher_agent_id": None,
+            "industry_instance_id": "industry-v1-demo",
+            "work_context_id": "ctx-monitoring-1",
+            "assignment_id": None,
+            "task_id": None,
+            "supervisor_agent_id": "copaw-agent-runner",
+            "collection_mode_hint": "heavy",
+            "requested_sources": ["search", "web_page"],
+            "writeback_target": None,
+            "metadata": {
+                "entry_surface": "cron-monitoring",
+                "schedule_id": "cron-monitoring-1",
+                "schedule_name": "Explicit monitoring brief",
+                "research_provider": "baidu-page",
+                "research_mode": "monitoring-brief",
+            },
+        }
+    ]
 
 
 @pytest.mark.skipif(

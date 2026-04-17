@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
 from ..capabilities import CapabilityService
 from ..compiler import (
@@ -43,10 +45,14 @@ from ..memory import (
 )
 from ..predictions import PredictionService
 from ..research import BaiduPageResearchService
+from ..research.source_collection import SourceCollectionService
+from ..research.source_collection.adapters import build_source_collection_adapters
+from ..research.source_collection.contracts import ResearchBrief
+from ..research.source_collection.routing import route_collection_mode
 from ..providers.runtime_provider_facade import ProviderRuntimeSurface
 from ..routines import RoutineService
 from ..sop_kernel import FixedSopService
-from ..state import SQLiteStateStore
+from ..state import ResearchSessionRecord, ResearchSessionRoundRecord, SQLiteStateStore
 from ..state.agent_experience_service import AgentExperienceMemoryService
 from ..state.knowledge_service import StateKnowledgeService
 from ..state.main_brain_service import (
@@ -62,9 +68,325 @@ from ..state.work_context_service import WorkContextService
 from ..workflows import WorkflowTemplateService
 from ..agents.tools.browser_control import list_browser_downloads, run_browser_use_json
 from .mcp import MCPClientManager
-from .runtime_bootstrap_models import RuntimeRepositories
+from .runtime_bootstrap_models import (
+    RuntimeRepositories,
+    SourceCollectionFrontdoorResult,
+)
 from .runtime_center import RuntimeCenterStateQueryService
 from .runtime_events import RuntimeEventBus
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _string(value: object | None) -> str | None:
+    text = str(value or "").strip()
+    return text or None
+
+
+def _string_list(value: object | None) -> list[str]:
+    if value is None:
+        return []
+    items = value if isinstance(value, list) else [value]
+    normalized: list[str] = []
+    for item in items:
+        text = _string(item)
+        if text is None or text in normalized:
+            continue
+        normalized.append(text)
+    return normalized
+
+
+def _mapping(value: object | None) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        payload = model_dump(mode="json")
+        if isinstance(payload, dict):
+            return dict(payload)
+    namespace = getattr(value, "__dict__", None)
+    if isinstance(namespace, dict):
+        return dict(namespace)
+    return {}
+
+
+class SourceCollectionFrontdoorService:
+    def __init__(
+        self,
+        *,
+        heavy_research_service: object,
+        research_session_repository: object,
+        report_repository: object | None = None,
+    ) -> None:
+        self._heavy_research_service = heavy_research_service
+        self._source_collection_service = SourceCollectionService(
+            adapters=build_source_collection_adapters(),
+        )
+        self.research_session_repository = research_session_repository
+        self.report_repository = report_repository
+
+    def run_source_collection_frontdoor(
+        self,
+        *,
+        goal: str,
+        question: str | None = None,
+        why_needed: str | None = None,
+        done_when: str | None = None,
+        trigger_source: str,
+        owner_agent_id: str,
+        preferred_researcher_agent_id: str | None = None,
+        industry_instance_id: str | None = None,
+        work_context_id: str | None = None,
+        assignment_id: str | None = None,
+        task_id: str | None = None,
+        supervisor_agent_id: str | None = None,
+        collection_mode_hint: str = "auto",
+        requested_sources: list[str] | None = None,
+        writeback_target: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> SourceCollectionFrontdoorResult:
+        normalized_goal = _string(goal)
+        if normalized_goal is None:
+            raise ValueError("goal is required")
+        normalized_owner_agent_id = _string(owner_agent_id)
+        if normalized_owner_agent_id is None:
+            raise ValueError("owner_agent_id is required")
+        normalized_question = _string(question) or normalized_goal
+        normalized_requested_sources = _string_list(requested_sources)
+        normalized_metadata = _mapping(metadata)
+        normalized_writeback_target = _mapping(writeback_target) or None
+        brief = ResearchBrief(
+            owner_agent_id=normalized_owner_agent_id,
+            supervisor_agent_id=_string(supervisor_agent_id),
+            industry_instance_id=_string(industry_instance_id),
+            work_context_id=_string(work_context_id),
+            assignment_id=_string(assignment_id),
+            task_id=_string(task_id),
+            goal=normalized_goal,
+            question=normalized_question,
+            why_needed=_string(why_needed) or "",
+            done_when=_string(done_when) or "",
+            writeback_target=normalized_writeback_target,
+            collection_mode_hint=(
+                _string(collection_mode_hint) or "auto"
+            ),
+            metadata=normalized_metadata,
+        )
+        route = route_collection_mode(
+            brief,
+            requested_sources=normalized_requested_sources,
+            preferred_researcher_agent_id=_string(preferred_researcher_agent_id),
+        )
+        brief_payload = {
+            "goal": brief.goal,
+            "question": brief.question,
+            "why_needed": _string(why_needed),
+            "done_when": _string(done_when),
+            "collection_mode_hint": brief.collection_mode_hint,
+            "requested_sources": normalized_requested_sources,
+            "writeback_target": normalized_writeback_target,
+        }
+        route_payload = route.model_dump(mode="json")
+        entry_metadata = {
+            **normalized_metadata,
+            "brief": brief_payload,
+            "route": route_payload,
+        }
+        if route.mode == "heavy":
+            return self._run_heavy_path(
+                brief=brief,
+                route_payload=route_payload,
+                metadata=entry_metadata,
+                trigger_source=trigger_source,
+            )
+        return self._run_light_path(
+            brief=brief,
+            requested_sources=normalized_requested_sources,
+            route_payload=route_payload,
+            metadata=entry_metadata,
+            trigger_source=trigger_source,
+        )
+
+    def _run_heavy_path(
+        self,
+        *,
+        brief: ResearchBrief,
+        route_payload: dict[str, Any],
+        metadata: dict[str, Any],
+        trigger_source: str,
+    ) -> SourceCollectionFrontdoorResult:
+        service = self._heavy_research_service
+        starter = getattr(service, "start_session", None)
+        if not callable(starter):
+            raise RuntimeError("Heavy research service is missing start_session")
+        session_result = starter(
+            goal=brief.goal,
+            trigger_source=trigger_source,
+            owner_agent_id=str(route_payload.get("execution_agent_id") or brief.owner_agent_id),
+            industry_instance_id=brief.industry_instance_id,
+            work_context_id=brief.work_context_id,
+            supervisor_agent_id=brief.supervisor_agent_id,
+            metadata=metadata,
+        )
+        session_id = _string(
+            _mapping(_mapping(session_result).get("session")).get("id")
+            or getattr(getattr(session_result, "session", None), "id", None)
+            or getattr(session_result, "session_id", None)
+        )
+        status = _string(
+            getattr(getattr(session_result, "session", None), "status", None)
+        ) or "queued"
+        runner = getattr(service, "run_session", None)
+        if callable(runner) and session_id is not None:
+            run_result = runner(session_id)
+            status = (
+                _string(getattr(getattr(run_result, "session", None), "status", None))
+                or status
+            )
+            session_result = run_result
+        summarizer = getattr(service, "summarize_session", None)
+        if callable(summarizer) and session_id is not None:
+            summary_result = summarizer(session_id)
+            summary_payload = _mapping(summary_result)
+        else:
+            summary_payload = {}
+        stop_reason = _string(
+            _mapping(summary_payload).get("stop_reason")
+            or getattr(session_result, "stop_reason", None)
+        )
+        final_report_id = _string(
+            _mapping(summary_payload).get("final_report_id")
+            or getattr(summary_result, "final_report_id", None)
+            if "summary_result" in locals()
+            else None
+        )
+        return SourceCollectionFrontdoorResult(
+            session_id=session_id,
+            status=status,
+            route_mode="heavy",
+            execution_agent_id=str(route_payload.get("execution_agent_id") or brief.owner_agent_id),
+            trigger_source=trigger_source,
+            goal=brief.goal,
+            stop_reason=stop_reason,
+            final_report_id=final_report_id,
+        )
+
+    def _run_light_path(
+        self,
+        *,
+        brief: ResearchBrief,
+        requested_sources: list[str],
+        route_payload: dict[str, Any],
+        metadata: dict[str, Any],
+        trigger_source: str,
+    ) -> SourceCollectionFrontdoorResult:
+        collection = self._source_collection_service.collect(
+            brief=brief,
+            owner_agent_id=brief.owner_agent_id,
+            requested_sources=requested_sources,
+        )
+        findings_payload = [
+            finding.model_dump(mode="json")
+            for finding in list(collection.findings or [])
+        ]
+        sources_payload = [
+            source.model_dump(mode="json")
+            for source in list(collection.collected_sources or [])
+        ]
+        now = _utc_now()
+        session_id = f"research-session:{uuid4().hex}"
+        session = ResearchSessionRecord(
+            id=session_id,
+            provider="source-collection",
+            industry_instance_id=brief.industry_instance_id,
+            work_context_id=brief.work_context_id,
+            owner_agent_id=str(route_payload.get("execution_agent_id") or brief.owner_agent_id),
+            supervisor_agent_id=brief.supervisor_agent_id,
+            trigger_source=trigger_source,
+            goal=brief.goal,
+            status="completed",
+            round_count=1,
+            stable_findings=[
+                str(item.get("summary") or "").strip()
+                for item in findings_payload
+                if str(item.get("summary") or "").strip()
+            ],
+            open_questions=list(collection.gaps or []),
+            metadata={
+                **metadata,
+                "conflicts": list(collection.conflicts or []),
+                "gaps": list(collection.gaps or []),
+            },
+            created_at=now,
+            updated_at=now,
+            completed_at=now,
+        )
+        links_payload = [
+            {
+                "url": str(item.get("source_ref") or "").strip(),
+                "title": str(item.get("title") or "").strip(),
+                "kind": str(item.get("source_kind") or "").strip() or "source",
+            }
+            for item in sources_payload
+            if str(item.get("source_ref") or "").strip()
+        ]
+        round_record = ResearchSessionRoundRecord(
+            id=f"{session_id}:round:1",
+            session_id=session_id,
+            round_index=1,
+            question=brief.question,
+            response_summary=(
+                str(findings_payload[0].get("summary") or "").strip()
+                if findings_payload
+                else None
+            ),
+            raw_links=links_payload,
+            selected_links=links_payload,
+            new_findings=[
+                str(item.get("summary") or "").strip()
+                for item in findings_payload
+                if str(item.get("summary") or "").strip()
+            ],
+            remaining_gaps=list(collection.gaps or []),
+            decision="stop",
+            metadata={
+                "findings": findings_payload,
+                "collected_sources": sources_payload,
+                "conflicts": list(collection.conflicts or []),
+                "gaps": list(collection.gaps or []),
+            },
+            created_at=now,
+            updated_at=now,
+        )
+        upsert_session = getattr(
+            self.research_session_repository,
+            "upsert_research_session",
+            None,
+        )
+        upsert_round = getattr(
+            self.research_session_repository,
+            "upsert_research_round",
+            None,
+        )
+        if callable(upsert_session):
+            upsert_session(session)
+        if callable(upsert_round):
+            upsert_round(round_record)
+        return SourceCollectionFrontdoorResult(
+            session_id=session_id,
+            status="completed",
+            route_mode="light",
+            execution_agent_id=str(route_payload.get("execution_agent_id") or brief.owner_agent_id),
+            trigger_source=trigger_source,
+            goal=brief.goal,
+            stop_reason="light-collection-complete",
+            findings=findings_payload,
+            collected_sources=sources_payload,
+            conflicts=list(collection.conflicts or []),
+            gaps=list(collection.gaps or []),
+        )
 
 
 @dataclass(slots=True)
@@ -462,13 +784,18 @@ def build_runtime_domain_services(
             knowledge_graph_service=knowledge_graph_service,
         ),
     )
-    research_session_service = BaiduPageResearchService(
+    heavy_research_session_service = BaiduPageResearchService(
         research_session_repository=repositories.research_session_repository,
         browser_action_runner=run_browser_use_json,
         browser_download_resolver=list_browser_downloads,
         report_repository=repositories.agent_report_repository,
         knowledge_service=knowledge_service,
         work_context_service=work_context_service,
+    )
+    research_session_service = SourceCollectionFrontdoorService(
+        heavy_research_service=heavy_research_session_service,
+        research_session_repository=repositories.research_session_repository,
+        report_repository=repositories.agent_report_repository,
     )
     set_research_session_service = getattr(
         main_brain_chat_service,
@@ -477,6 +804,10 @@ def build_runtime_domain_services(
     )
     if callable(set_research_session_service):
         set_research_session_service(research_session_service)
+    try:
+        setattr(query_execution_service, "_source_collection_frontdoor", research_session_service)
+    except Exception:
+        pass
 
     return RuntimeDomainServices(
         goal_service=goal_service,
