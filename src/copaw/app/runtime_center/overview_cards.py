@@ -467,26 +467,26 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
         default_summary = "运行时正在接收新工作。"
         if emergency_active:
             failure_source = "emergency-stop"
-            blocked_next_step = "Clear the emergency stop before resuming runtime dispatch."
-            default_summary = "Emergency stop is active and runtime dispatch remains paused."
+            blocked_next_step = "请先解除紧急停止，再恢复运行时分派。"
+            default_summary = "紧急停止当前仍处于激活状态，运行时分派继续暂停。"
         elif handoff.get("active"):
             failure_source = "handoff"
             blocked_next_step = (
-                "Confirm the active handoff return condition before resuming runtime dispatch."
+                "请先确认当前交接的返回条件，再恢复运行时分派。"
             )
-            summary = summary or "Human handoff is active and runtime dispatch is temporarily gated."
+            summary = summary or "人工交接当前仍处于激活状态，运行时分派暂时被门控。"
         elif int(staffing.get("pending_confirmation_count") or 0) > 0:
             failure_source = "staffing"
             blocked_next_step = (
-                "Confirm who owns the runtime follow-up before resuming automatic execution."
+                "请先确认运行时后续任务由谁接手，再恢复自动执行。"
             )
-            summary = summary or "Staffing confirmation is still pending for active runtime work."
+            summary = summary or "活跃运行时工作仍有 staffing 确认待完成。"
         elif int(human_assist.get("blocked_count") or 0) > 0:
             failure_source = "human-assist"
             blocked_next_step = (
-                "Review the blocking human assist tasks and resume only after evidence is accepted."
+                "请先处理阻塞中的人类协助任务，并在证据通过后再恢复。"
             )
-            summary = summary or "Human assist tasks are still blocking automatic continuation."
+            summary = summary or "人类协助任务仍在阻塞自动续行。"
         if (
             failure_source is None
             and isinstance(sidecar_memory, dict)
@@ -521,24 +521,24 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
                 else ""
             )
             if canonical_host_ready or normalized_scheduler_action in {"proceed", "ready", "clear", "none"}:
-                summary = "Host twin ready"
+                summary = "宿主镜像已就绪"
                 if selected_seat_ref:
-                    summary += f" on {selected_seat_ref}"
+                    summary += f"，目标座席 {selected_seat_ref}"
                 if seat_selection_policy:
-                    summary += f" via {seat_selection_policy}"
+                    summary += f"，选座策略 {seat_selection_policy}"
                 if active_family_keys:
-                    summary += "; active app families: " + ", ".join(active_family_keys)
-                summary += "."
+                    summary += "；活跃应用族：" + "、".join(active_family_keys)
+                summary += "。"
             else:
                 failure_source = failure_source or "host-twin"
                 blocked_next_step = blocked_next_step or (
-                    f"Follow the host coordination action: {coordination_action}."
+                    f"请按宿主协调动作继续处理：{coordination_action}。"
                 )
                 active_count = int(host_twin_summary_payload.get("active_app_family_count") or 0)
                 summary = (
-                    "Host twin coordination recommends "
-                    f"{coordination_action} "
-                    f"with {active_count} active app family twin(s)."
+                    "宿主镜像协调当前建议执行 "
+                    f"{coordination_action}，"
+                    f"当前共有 {active_count} 个活跃应用族镜像。"
                 )
         diagnostics = build_execution_diagnostics(
             failure_source=failure_source,

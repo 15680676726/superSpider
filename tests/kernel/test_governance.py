@@ -442,7 +442,11 @@ def test_governance_admission_blocks_dispatch_when_runtime_governance_requires_h
     reason = service.admission_block_reason(task)
 
     assert reason is not None
-    assert "handoff" in reason.lower()
+    assert reason == (
+        "环境 'session:web:main' 当前存在运行时交接。"
+        "必须等待人工交接返回后才能继续分派。"
+        "负责人：human-operator:alice。"
+    )
 
 
 def test_governance_admission_issues_human_assist_task_for_host_handoff_once(
@@ -746,7 +750,11 @@ def test_governance_admission_resolves_full_buddy_instance_id_from_control_threa
     reason = service.admission_block_reason(task)
 
     assert reason is not None
-    assert "Runtime handoff is active" in reason
+    assert reason == (
+        "环境 'session:console:industry:buddy:profile-1:domain-stock' "
+        "当前存在运行时交接。必须等待人工交接返回后才能继续分派。"
+        "负责人：human-operator:alice。"
+    )
 
 
 def test_governance_status_prefers_canonical_ready_host_twin_summary(

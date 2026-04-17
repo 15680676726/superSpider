@@ -409,8 +409,8 @@ class GovernanceService:
         control = self.get_control()
         capability_ref = str(getattr(task, "capability_ref", "") or "")
         if control.emergency_stop_active and self._should_block_capability(capability_ref):
-            reason = control.emergency_reason or "Emergency stop is active."
-            return f"Emergency stop blocked capability '{capability_ref}'. {reason}"
+            reason = control.emergency_reason or "紧急停止当前处于激活状态。"
+            return f"能力 '{capability_ref}' 已被紧急停止阻断。{reason}"
         if capability_ref not in _RUNTIME_GOVERNANCE_BLOCKED_CAPABILITIES:
             return None
         if self._is_writeback_only_query_task(task):
@@ -464,10 +464,10 @@ class GovernanceService:
             _mapping_value(host_twin.get("ownership")).get("handoff_owner_ref"),
             host_twin.get("handoff_owner_ref"),
         )
-        owner_suffix = f" Owner: {owner_ref}." if owner_ref else ""
+        owner_suffix = f"负责人：{owner_ref}。" if owner_ref else ""
         return (
-            f"Runtime handoff is active for environment '{session_ref}'. "
-            f"Dispatch must wait for the human handoff to return.{owner_suffix}"
+            f"环境 '{session_ref}' 当前存在运行时交接。"
+            f"必须等待人工交接返回后才能继续分派。{owner_suffix}"
         )
 
     def _ensure_environment_handoff_human_assist_task(
@@ -624,13 +624,13 @@ class GovernanceService:
                 continue
             if status == "need_more_evidence":
                 return (
-                    f"Human assist evidence is still incomplete for chat thread '{chat_thread_id}'. "
-                    "Dispatch must wait for more evidence."
+                    f"聊天线程 '{chat_thread_id}' 的人类协助证据仍不完整。"
+                    "必须等待更多证据后才能继续分派。"
                 )
             return (
-            f"Human assist handoff is still open for chat thread '{chat_thread_id}'. "
-            f"Current status: {status}."
-        )
+                f"聊天线程 '{chat_thread_id}' 的人类协助交接仍未关闭。"
+                f"当前状态：{status}。"
+            )
         return None
 
     def _resolve_environment_handoff_candidate(
@@ -756,8 +756,8 @@ class GovernanceService:
                 blocker.get("summary"),
             ) or instance_id
             return (
-                f"Staffing confirmation is still required for industry '{instance_id}' "
-                f"before dispatch can continue. Pending gap: {role_name}."
+                f"行业 '{instance_id}' 仍需要完成 staffing 确认后才能继续分派。"
+                f"当前待确认缺口：{role_name}。"
             )
         return None
 

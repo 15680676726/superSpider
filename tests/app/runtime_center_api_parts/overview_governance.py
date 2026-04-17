@@ -2689,8 +2689,8 @@ def test_runtime_center_overview_governance_uses_canonical_host_twin_summary_for
         is None
     )
     assert governance["summary"] == (
-        "Host twin ready on env:desktop:seat-a via sticky-active-seat; "
-        "active app families: browser_backoffice, office_document."
+        "宿主镜像已就绪，目标座席 env:desktop:seat-a，选座策略 sticky-active-seat；"
+        "活跃应用族：browser_backoffice、office_document。"
     )
     assert cards["growth"]["source"] == "learning_service"
     assert cards["growth"]["count"] == 1
@@ -2723,16 +2723,16 @@ def test_runtime_center_overview_governance_exposes_canonical_execution_diagnost
     cards = {card["key"]: card for card in response.json()["cards"]}
     governance = cards["governance"]
     assert governance["summary"] == (
-        "Human assist tasks are still blocking automatic continuation."
+        "人类协助任务仍在阻塞自动续行。"
     )
     assert governance["meta"]["failure_source"] == "human-assist"
     assert governance["meta"]["blocked_next_step"] == (
-        "Review the blocking human assist tasks and resume only after evidence is accepted."
+        "请先处理阻塞中的人类协助任务，并在证据通过后再恢复。"
     )
     assert governance["meta"]["remediation_summary"] == governance["summary"]
     assert governance["entries"][0]["meta"]["failure_source"] == "human-assist"
     assert governance["entries"][0]["meta"]["blocked_next_step"] == (
-        "Review the blocking human assist tasks and resume only after evidence is accepted."
+        "请先处理阻塞中的人类协助任务，并在证据通过后再恢复。"
     )
 
 
