@@ -244,3 +244,87 @@ def test_runtime_center_research_surface_derives_minimum_truth_without_structure
         "scope_id": "ctx-research-2",
         "report_id": "report-research-2",
     }
+
+
+def test_runtime_center_research_surface_prefers_formal_brief_and_round_source_fields(
+    tmp_path,
+) -> None:
+    client, repository = _build_client(tmp_path)
+    session = repository.upsert_research_session(
+        ResearchSessionRecord(
+            id="research-session-formal-fields",
+            provider="source-collection",
+            owner_agent_id="writer-agent",
+            supervisor_agent_id="main-brain",
+            work_context_id="ctx-formal-1",
+            trigger_source="agent-entry",
+            goal="查官网定价",
+            status="completed",
+            round_count=1,
+            brief={
+                "goal": "查官网定价",
+                "question": "官网定价是多少",
+                "why_needed": "主脑要做价格对比",
+                "done_when": "拿到官网价格和来源",
+                "collection_mode_hint": "light",
+                "requested_sources": ["web_page"],
+                "writeback_target": {
+                    "scope_type": "work_context",
+                    "scope_id": "ctx-formal-1",
+                },
+            },
+        ),
+    )
+    repository.upsert_research_round(
+        ResearchSessionRoundRecord(
+            id="research-session-formal-fields:round:1",
+            session_id=session.id,
+            round_index=1,
+            question="官网定价是多少",
+            response_summary="官网定价页显示基础套餐 299 元 / 月。",
+            new_findings=["官网定价页显示基础套餐 299 元 / 月。"],
+            sources=[
+                {
+                    "source_id": "source-formal-1",
+                    "source_kind": "web_page",
+                    "collection_action": "read",
+                    "source_ref": "https://example.com/pricing",
+                    "normalized_ref": "https://example.com/pricing",
+                    "title": "官网定价页",
+                    "snippet": "基础套餐 299 元 / 月",
+                }
+            ],
+        ),
+    )
+
+    response = client.get("/runtime-center/research")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["brief"] == {
+        "goal": "查官网定价",
+        "question": "官网定价是多少",
+        "why_needed": "主脑要做价格对比",
+        "done_when": "拿到官网价格和来源",
+        "collection_mode_hint": "light",
+        "requested_sources": ["web_page"],
+        "writeback_target": {
+            "scope_type": "work_context",
+            "scope_id": "ctx-formal-1",
+        },
+    }
+    assert payload["sources"] == [
+        {
+            "source_id": "source-formal-1",
+            "source_kind": "web_page",
+            "collection_action": "read",
+            "source_ref": "https://example.com/pricing",
+            "normalized_ref": "https://example.com/pricing",
+            "title": "官网定价页",
+            "snippet": "基础套餐 299 元 / 月",
+            "access_status": "",
+            "evidence_id": None,
+            "artifact_id": None,
+            "captured_at": None,
+        }
+    ]

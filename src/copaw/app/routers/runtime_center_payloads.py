@@ -115,8 +115,11 @@ def serialize_runtime_research_brief(
 ) -> dict[str, object]:
     session_metadata = _runtime_mapping(session_payload.get("metadata"))
     round_metadata = _runtime_mapping(round_payload.get("metadata"))
-    brief_payload = _runtime_mapping(round_metadata.get("brief")) or _runtime_mapping(
-        session_metadata.get("brief"),
+    brief_payload = (
+        _runtime_mapping(round_payload.get("brief"))
+        or _runtime_mapping(session_payload.get("brief"))
+        or _runtime_mapping(round_metadata.get("brief"))
+        or _runtime_mapping(session_metadata.get("brief"))
     )
     writeback_target = _runtime_writeback_target(session_payload, brief_payload)
     return {
@@ -186,7 +189,9 @@ def serialize_runtime_research_sources(
 ) -> list[dict[str, object]]:
     session_id = _runtime_non_empty_str(session_payload.get("id")) or "runtime-center-research"
     round_metadata = _runtime_mapping(round_payload.get("metadata"))
-    structured_sources = _runtime_mapping_list(round_metadata.get("collected_sources"))
+    structured_sources = _runtime_mapping_list(round_payload.get("sources")) or _runtime_mapping_list(
+        round_metadata.get("collected_sources"),
+    )
     if structured_sources:
         return [
             {

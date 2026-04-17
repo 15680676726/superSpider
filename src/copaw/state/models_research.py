@@ -91,6 +91,7 @@ class ResearchSessionRecord(UpdatedRecord):
             payload["brief"] = (
                 reserved.get("brief")
                 or metadata.get("research_brief")
+                or metadata.get("brief")
                 or {}
             )
         return payload
@@ -140,6 +141,7 @@ class ResearchSessionRoundRecord(UpdatedRecord):
         if payload.get("sources") is None:
             payload["sources"] = (
                 reserved.get("sources")
+                or metadata.get("collected_sources")
                 or metadata.get("research_sources")
                 or metadata.get("sources")
                 or []

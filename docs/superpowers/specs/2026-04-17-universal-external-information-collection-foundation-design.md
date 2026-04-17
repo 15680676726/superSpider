@@ -220,14 +220,18 @@ Recommended modules:
   - light-collection vs heavy-research routing
 - `synthesis.py`
   - dedupe, merge, conflict/gap marking
-- `writeback.py`
-  - evidence/session/work-context/report writeback
 - `adapters/search.py`
 - `adapters/web_page.py`
 - `adapters/github.py`
 - `adapters/artifact.py`
-- `providers/baidu_page.py`
-  - optional provider adapter that wraps current Baidu logic
+
+Current mainline status:
+
+- phase-1 did **not** materialize a dedicated `writeback.py`
+- phase-1 currently reuses:
+  - `BaiduPageResearchService.summarize_session(...)` for heavy-path report + knowledge-summary writeback
+  - `StateKnowledgeService.ingest_research_session(...)` and `KnowledgeWritebackService.build_research_session_writeback(...)` as reusable formal builders
+- the provider split is also not yet extracted into `providers/baidu_page.py`; current mainline still reuses `src/copaw/research/baidu_page_research_service.py`
 
 This layer should own the universal collection chain, while providers/adapters only own source-specific execution.
 
@@ -514,12 +518,21 @@ This ensures the system does not force every information need through one specia
 
 Collection results must not stop at chat text.
 
-At minimum, phase 1 must write back into:
+At minimum, phase 1 must formally persist into:
 
 - `ResearchSessionRecord / ResearchSessionRoundRecord`
 - `EvidenceRecord`
 - work-context/report/assignment-facing downstream truth where relevant
 - main-brain visible summary surfaces
+
+Current mainline boundary:
+
+- heavy research already writes report + knowledge summary through `summarize_session()`
+- universal light inline collection already persists formal `ResearchSessionRecord.brief` + `ResearchSessionRoundRecord.sources`
+- `findings / gaps / conflicts` currently still surface via `stable_findings / open_questions / metadata` projections, not dedicated top-level persisted fields
+- phase-1 light adapters are currently metadata-backed typed adapters; real external multi-round collection is still owned by the heavy `BaiduPageResearchService`
+- light inline collection does **not** yet create a dedicated `EvidenceRecord` on the live frontdoor
+- but light inline collection does **not** yet auto-apply report / knowledge / graph writeback on the live frontdoor
 
 The foundation is incomplete if it can collect but cannot formally feed the system's truth chain.
 
