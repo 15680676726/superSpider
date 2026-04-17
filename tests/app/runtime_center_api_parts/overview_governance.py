@@ -865,7 +865,7 @@ def test_runtime_center_main_brain_route_exposes_human_cockpit_surface():
     assert cockpit["main_brain"]["approvals"][0]["kind"] == "decision"
 
     assert [item["agent_id"] for item in cockpit["agents"]] == ["ops-agent"]
-    assert cockpit["agents"][0]["card"]["role"] == "operator"
+    assert cockpit["agents"][0]["card"]["role"] == "操作执行"
     assert cockpit["agents"][0]["summary_fields"][0]["label"] == "职业"
     assert cockpit["agents"][0]["morning_report"]["title"] == "早报"
 
@@ -1100,6 +1100,18 @@ def test_runtime_center_human_cockpit_prefers_latest_reports_and_chinese_fallbac
     )
     assert agents["ops-agent"]["evening_report"]["items"][0] == "Ops latest report"
     assert agents["research-agent"]["evening_report"]["items"][0] == "Research latest report"
+
+    ops_summary_fields = {item["label"]: item["value"] for item in agents["ops-agent"]["summary_fields"]}
+    research_summary_fields = {
+        item["label"]: item["value"] for item in agents["research-agent"]["summary_fields"]
+    }
+
+    assert agents["ops-agent"]["card"]["role"] == "运营"
+    assert ops_summary_fields["职业"] == "运营"
+    assert ops_summary_fields["职责"] == "负责运营相关执行推进与结果回传。"
+    assert agents["research-agent"]["card"]["role"] == "研究员"
+    assert research_summary_fields["职业"] == "研究员"
+    assert research_summary_fields["职责"] == "负责研究、情报收集与结论汇总。"
 
 
 def test_runtime_center_human_cockpit_prefers_latest_unconsumed_report_for_main_brain_focus():

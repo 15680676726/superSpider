@@ -48,6 +48,52 @@ logger = logging.getLogger(__name__)
 
 _MISSING = object()
 
+_HUMAN_COCKPIT_ROLE_LABELS: dict[str, str] = {
+    "operations": "运营",
+    "operation": "运营",
+    "ops": "运营",
+    "research": "研究员",
+    "researcher": "研究员",
+    "execution core": "执行中枢",
+    "main brain": "主脑",
+    "manager": "管理中枢",
+    "operator": "操作执行",
+    "planner": "规划专员",
+    "reviewer": "审核专员",
+    "designer": "设计专员",
+    "analyst": "分析专员",
+    "closer": "收口专员",
+    "browser operator": "浏览器执行专员",
+    "support": "支持专员",
+    "solution lead": "方案负责人",
+}
+
+_HUMAN_COCKPIT_ROLE_SUMMARY_TEXT: dict[str, str] = {
+    "push execution tasks and return results.": "负责运营相关执行推进与结果回传。",
+    "collect intel and summarize decisions.": "负责研究、情报收集与结论汇总。",
+    "owns runtime coordination.": "负责运行时协同。",
+    "owns runtime closeout.": "负责运行收口。",
+    "owns the execution loop.": "负责推进执行闭环。",
+    "operate as acme's execution brain.": "负责担任团队执行中枢并统一调度推进。",
+}
+
+_HUMAN_COCKPIT_ROLE_SUMMARY_BY_LABEL: dict[str, str] = {
+    "执行中枢": "负责统筹执行链路、调度协作并回收结果。",
+    "主脑": "负责统筹主脑判断、节奏推进与正式动作路由。",
+    "运营": "负责运营相关执行推进与结果回传。",
+    "研究员": "负责研究、情报收集与结论汇总。",
+    "管理中枢": "负责管理协同、节奏把控与异常收口。",
+    "操作执行": "负责具体操作执行、状态回写与结果回传。",
+    "规划专员": "负责规划拆解、行动编排与下一步建议。",
+    "审核专员": "负责审核把关、风险提示与结果校验。",
+    "设计专员": "负责设计产出、视觉交付与素材完善。",
+    "分析专员": "负责分析指标、定位异常并输出判断。",
+    "收口专员": "负责结果收口、回访跟进与闭环确认。",
+    "浏览器执行专员": "负责浏览器链路执行、页面操作与结果回传。",
+    "支持专员": "负责支持事项推进、跟进与结果回传。",
+    "方案负责人": "负责方案推进、关键判断与交付收口。",
+}
+
 
 class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixin):
     """Shared Runtime Center overview card construction helpers."""
@@ -1828,10 +1874,9 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             )
 
         if not records:
-            focus_message = self._first_human_cockpit_text(
-                agent.get("current_focus"),
-                agent.get("role_summary"),
-            )
+            focus_message = self._first_human_cockpit_text(agent.get("current_focus"))
+            if focus_message is None:
+                focus_message = self._human_cockpit_role_summary_text(agent, fallback=False)
             if focus_message is not None:
                 records.append(
                     self._build_human_cockpit_trace_line(
@@ -1844,6 +1889,48 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
                 )
 
         return self._sort_human_cockpit_trace(records)
+
+    def _human_cockpit_role_name_text(self, *values: Any) -> str | None:
+        text = self._first_human_cockpit_text(*values)
+        if text is None:
+            return None
+        normalized = text.strip()
+        if not normalized:
+            return None
+        if self._contains_cjk(normalized):
+            return normalized
+        return _HUMAN_COCKPIT_ROLE_LABELS.get(normalized.lower(), normalized)
+
+    def _human_cockpit_role_summary_text(
+        self,
+        agent: Mapping[str, Any],
+        *,
+        fallback: bool = True,
+    ) -> str | None:
+        raw_summary = self._first_human_cockpit_text(agent.get("role_summary"))
+        normalized_role = self._human_cockpit_role_name_text(agent.get("role_name"))
+        if raw_summary:
+            normalized_summary = raw_summary.strip()
+            if self._contains_cjk(normalized_summary):
+                return normalized_summary
+            translated = _HUMAN_COCKPIT_ROLE_SUMMARY_TEXT.get(normalized_summary.lower())
+            if translated:
+                return translated
+        if normalized_role:
+            by_role = _HUMAN_COCKPIT_ROLE_SUMMARY_BY_LABEL.get(normalized_role)
+            if by_role:
+                return by_role
+            if fallback:
+                return f"负责{normalized_role}相关执行推进与结果回传。"
+        if raw_summary and not fallback:
+            return raw_summary.strip() or None
+        if fallback:
+            return "负责对应岗位的执行与结果回传。"
+        return None
+
+    @staticmethod
+    def _contains_cjk(value: str) -> bool:
+        return any("\u4e00" <= ch <= "\u9fff" for ch in value)
 
     async def _call_human_cockpit_service_list(
         self,
@@ -2057,7 +2144,7 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
                 self._first_human_cockpit_text(agent.get("name"), agent_id)
                 or agent_id
             ),
-            role=self._first_human_cockpit_text(agent.get("role_name")) or "职业智能体",
+            role=self._human_cockpit_role_name_text(agent.get("role_name")) or "职业智能体",
             status=status,
             progress=progress,
             needs_attention=attention,
@@ -2075,14 +2162,11 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
         return [
             RuntimeHumanCockpitSummaryField(
                 label="职业",
-                value=self._first_human_cockpit_text(agent.get("role_name")) or "职业智能体",
+                value=self._human_cockpit_role_name_text(agent.get("role_name")) or "职业智能体",
             ),
             RuntimeHumanCockpitSummaryField(
                 label="职责",
-                value=(
-                    self._first_human_cockpit_text(agent.get("role_summary"))
-                    or "负责对应岗位的执行与结果回传。"
-                ),
+                value=self._human_cockpit_role_summary_text(agent),
             ),
             RuntimeHumanCockpitSummaryField(
                 label="主要负责工作",
@@ -2109,7 +2193,7 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
         related_assignments: list[dict[str, Any]],
     ) -> RuntimeHumanCockpitReportBlock | None:
         related_assignment = self._latest_human_cockpit_record(related_assignments)
-        role_summary = self._first_human_cockpit_text(agent.get("role_summary"))
+        role_summary = self._human_cockpit_role_summary_text(agent, fallback=False)
         return self._build_human_cockpit_report_block(
             "早报",
             [
