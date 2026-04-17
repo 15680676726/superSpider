@@ -906,6 +906,44 @@ def test_run_browser_use_json_returns_parsed_payload(monkeypatch) -> None:
     assert payload == {"ok": True, "page_id": "page-1"}
 
 
+def test_run_browser_use_json_reuses_stable_event_loop_across_sync_calls(
+    monkeypatch,
+) -> None:
+    seen_loop = {"loop": None}
+
+    async def fake_browser_use(**_payload):
+        current_loop = asyncio.get_running_loop()
+        previous_loop = seen_loop["loop"]
+        if previous_loop is None:
+            seen_loop["loop"] = current_loop
+        elif previous_loop is not current_loop:
+            raise RuntimeError("browser_use loop changed across sync calls")
+        return _json_response({"ok": True, "session_id": _payload.get("session_id")})
+
+    monkeypatch.setattr(browser_control_module, "browser_use", fake_browser_use)
+
+    first = run_browser_use_json(action="start", session_id="stable-loop-1")
+    second = run_browser_use_json(action="start", session_id="stable-loop-2")
+
+    assert first["ok"] is True
+    assert second["ok"] is True
+
+
+def test_browser_use_sync_bridge_prefers_proactor_loop_under_selector_policy() -> None:
+    if not hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
+        return
+    original_policy = asyncio.get_event_loop_policy()
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    try:
+        loop = browser_control_module._create_sync_bridge_loop()
+    finally:
+        asyncio.set_event_loop_policy(original_policy)
+    try:
+        assert "Proactor" in loop.__class__.__name__
+    finally:
+        loop.close()
+
+
 def test_fill_form_fails_when_requested_ref_is_missing(monkeypatch) -> None:
     monkeypatch.setattr(
         browser_control_actions_extended,

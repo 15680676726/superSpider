@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import atexit
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
+import sys
+import threading
 from typing import Any
 
 from . import browser_control_actions_core as browser_control_actions_core_module
@@ -29,6 +31,86 @@ if browser_control_actions_core_module._attach_page_listeners is not _attach_pag
     browser_control_actions_core_module._attach_page_listeners = _attach_page_listeners_with_downloads
 
 
+_SYNC_BRIDGE_LOOP: asyncio.AbstractEventLoop | None = None
+_SYNC_BRIDGE_THREAD: threading.Thread | None = None
+_SYNC_BRIDGE_READY = threading.Event()
+_SYNC_BRIDGE_LOCK = threading.Lock()
+
+
+def _create_sync_bridge_loop() -> asyncio.AbstractEventLoop:
+    if sys.platform == "win32" and hasattr(asyncio, "WindowsProactorEventLoopPolicy"):
+        policy = asyncio.get_event_loop_policy()
+        if isinstance(policy, asyncio.WindowsSelectorEventLoopPolicy):
+            return asyncio.WindowsProactorEventLoopPolicy().new_event_loop()
+    return asyncio.new_event_loop()
+
+
+def _run_sync_bridge_loop(loop: asyncio.AbstractEventLoop) -> None:
+    asyncio.set_event_loop(loop)
+    _SYNC_BRIDGE_READY.set()
+    loop.run_forever()
+    pending = asyncio.all_tasks(loop)
+    for task in pending:
+        task.cancel()
+    if pending:
+        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+    loop.close()
+
+
+def _get_sync_bridge_loop() -> asyncio.AbstractEventLoop:
+    global _SYNC_BRIDGE_LOOP, _SYNC_BRIDGE_THREAD
+    with _SYNC_BRIDGE_LOCK:
+        if (
+            _SYNC_BRIDGE_LOOP is not None
+            and _SYNC_BRIDGE_THREAD is not None
+            and _SYNC_BRIDGE_THREAD.is_alive()
+            and not _SYNC_BRIDGE_LOOP.is_closed()
+        ):
+            return _SYNC_BRIDGE_LOOP
+        _SYNC_BRIDGE_READY.clear()
+        loop = _create_sync_bridge_loop()
+        thread = threading.Thread(
+            target=_run_sync_bridge_loop,
+            args=(loop,),
+            name="browser-use-json-loop",
+            daemon=True,
+        )
+        _SYNC_BRIDGE_LOOP = loop
+        _SYNC_BRIDGE_THREAD = thread
+        thread.start()
+    _SYNC_BRIDGE_READY.wait(timeout=5)
+    return loop
+
+
+def _run_browser_use_json_sync(coro: Any) -> ToolResponse:
+    loop = _get_sync_bridge_loop()
+    future = asyncio.run_coroutine_threadsafe(coro, loop)
+    return future.result()
+
+
+def _shutdown_sync_bridge_loop() -> None:
+    global _SYNC_BRIDGE_LOOP, _SYNC_BRIDGE_THREAD
+    with _SYNC_BRIDGE_LOCK:
+        loop = _SYNC_BRIDGE_LOOP
+        thread = _SYNC_BRIDGE_THREAD
+        _SYNC_BRIDGE_LOOP = None
+        _SYNC_BRIDGE_THREAD = None
+    if loop is None or loop.is_closed():
+        return
+    if _is_browser_running():
+        try:
+            future = asyncio.run_coroutine_threadsafe(_action_stop(), loop)
+            future.result(timeout=5)
+        except Exception:
+            pass
+    loop.call_soon_threadsafe(loop.stop)
+    if thread is not None and thread.is_alive():
+        thread.join(timeout=1)
+
+
+atexit.register(_shutdown_sync_bridge_loop)
+
+
 def run_browser_use_json(**payload: Any) -> dict[str, Any]:
     async def _invoke() -> ToolResponse:
         return await browser_use(**payload)
@@ -36,12 +118,10 @@ def run_browser_use_json(**payload: Any) -> dict[str, Any]:
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        response = asyncio.run(_invoke())
+        response = _run_browser_use_json_sync(_invoke())
         return _parse_tool_response_json(response)
 
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(lambda: asyncio.run(_invoke()))
-        response = future.result()
+    response = _run_browser_use_json_sync(_invoke())
     return _parse_tool_response_json(response)
 
 
