@@ -220,6 +220,24 @@ class _MultiCandidateContractCompiler(_DeterministicContractCompiler):
         )
 
 
+class _DirectionalMultiCandidateContractCompiler(_MultiCandidateContractCompiler):
+    def compile_contract_for_direction(
+        self,
+        *,
+        profile,
+        collaboration_contract,
+        preferred_direction: str,
+    ) -> _ContractCompileResult:
+        final_goal, why_it_matters, backlog_items = self._growth_plan(preferred_direction)
+        return _ContractCompileResult(
+            candidate_directions=[_STOCKS_DIRECTION, _CREATOR_DIRECTION],
+            recommended_direction=preferred_direction,
+            final_goal=final_goal,
+            why_it_matters=why_it_matters,
+            backlog_items=backlog_items,
+        )
+
+
 def _build_service(
     tmp_path,
     *,
@@ -561,6 +579,48 @@ def test_confirm_primary_direction_rejects_selected_direction_without_matching_c
 
     assert service._growth_target_repository.get_active_target(identity.profile.profile_id) is None  # pylint: disable=protected-access
     assert len(compiler.compile_calls) == 1
+
+
+def test_confirm_primary_direction_recompiles_selected_alternate_candidate_when_reasoner_supports_it(
+    tmp_path,
+) -> None:
+    compiler = _DirectionalMultiCandidateContractCompiler()
+    service, _store = _build_service_with_planning(tmp_path, compiler=compiler)
+    identity = service.submit_identity(
+        display_name="Kai",
+        profession="Trader",
+        current_stage="restart",
+        interests=["stocks", "writing"],
+        strengths=["discipline"],
+        constraints=["money"],
+        goal_intention="I want a real stock trading path with visible proof.",
+    )
+    compiled = service.submit_contract(
+        session_id=identity.session_id,
+        **_contract_payload(
+            service_intent="Turn trading ambition into a disciplined weekly execution path.",
+        ),
+    )
+
+    assert compiled.candidate_directions == [_STOCKS_DIRECTION, _CREATOR_DIRECTION]
+
+    preview = service.preview_primary_direction_transition(
+        session_id=identity.session_id,
+        selected_direction=_CREATOR_DIRECTION,
+    )
+    result = service.confirm_primary_direction(
+        session_id=identity.session_id,
+        selected_direction=_CREATOR_DIRECTION,
+        capability_action="start-new",
+    )
+
+    assert preview.selected_direction == _CREATOR_DIRECTION
+    assert result.growth_target.primary_direction == _CREATOR_DIRECTION
+    assert result.growth_target.final_goal == (
+        "Build a durable writing and publishing path with visible proof-of-work."
+    )
+    assert result.session.recommended_direction == _CREATOR_DIRECTION
+    assert result.session.selected_direction == _CREATOR_DIRECTION
 
 
 def test_submit_contract_clears_stale_failed_async_operation_state(tmp_path) -> None:

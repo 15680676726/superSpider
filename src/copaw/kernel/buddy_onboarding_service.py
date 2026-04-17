@@ -595,6 +595,11 @@ class BuddyOnboardingService:
             session=session,
             selected_direction=selected_direction,
         )
+        self._require_confirmable_contract_compile(
+            session=session,
+            profile=profile,
+            selected_direction=normalized,
+        )
         active_record = None
         archived_records: list[BuddyDomainCapabilityRecord] = []
         if self._domain_capability_repository is not None:
@@ -644,6 +649,7 @@ class BuddyOnboardingService:
         )
         compiled_contract = self._require_confirmable_contract_compile(
             session=session,
+            profile=profile,
             selected_direction=normalized,
         )
         resolved_capability_action = str(
@@ -722,7 +728,14 @@ class BuddyOnboardingService:
                     "status": "confirmed",
                     **self._clear_operation_state(),
                     "selected_direction": normalized,
-                    "recommended_direction": session.recommended_direction or normalized,
+                    "recommended_direction": normalized,
+                    "candidate_directions": _unique(
+                        [
+                            normalized,
+                            *list(compiled_contract.candidate_directions or []),
+                            *list(session.candidate_directions or []),
+                        ],
+                    )[:3],
                     **self._build_contract_compile_cache(compiled_contract),
                 },
             ),
@@ -1330,6 +1343,7 @@ class BuddyOnboardingService:
         self,
         *,
         session: BuddyOnboardingSessionRecord,
+        profile: HumanProfile,
         selected_direction: str,
     ) -> BuddyOnboardingContractCompileResult:
         normalized_direction = selected_direction.strip()
@@ -1343,10 +1357,43 @@ class BuddyOnboardingService:
         if cached is not None:
             return self._validate_contract_compile_result(cached)
         if str(session.draft_direction or "").strip():
+            directional = self._resolve_direction_specific_contract_compile(
+                session=session,
+                profile=profile,
+                selected_direction=normalized_direction,
+            )
+            if directional is not None:
+                return directional
             raise ValueError(
                 "当前所选主方向需要重新编译协作合同后才能确认。",
             )
         raise ValueError("请先完成协作合同编译，再确认主方向。")
+
+    def _resolve_direction_specific_contract_compile(
+        self,
+        *,
+        session: BuddyOnboardingSessionRecord,
+        profile: HumanProfile,
+        selected_direction: str,
+    ) -> BuddyOnboardingContractCompileResult | None:
+        normalized_direction = selected_direction.strip()
+        if not normalized_direction:
+            return None
+        compiler = self._onboarding_reasoner
+        directional_compile = getattr(compiler, "compile_contract_for_direction", None)
+        if not callable(directional_compile):
+            return None
+        growth_plan = directional_compile(
+            profile=profile,
+            collaboration_contract=self._build_contract_from_session(session),
+            preferred_direction=normalized_direction,
+        )
+        validated = self._validate_contract_compile_result(growth_plan)
+        if str(validated.recommended_direction or "").strip() != normalized_direction:
+            raise BuddyOnboardingReasonerUnavailableError(
+                "伙伴建档模型未返回与所选主方向一致的收口结果。",
+            )
+        return validated
 
     def _resolve_contract_compile(
         self,

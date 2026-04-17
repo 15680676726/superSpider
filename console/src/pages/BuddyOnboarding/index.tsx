@@ -505,8 +505,10 @@ export default function BuddyOnboardingPage() {
           ? preview.archived_matches[0]?.domain_id
           : undefined,
       );
-    } catch {
-      setError("主方向预览失败，请稍后重试。");
+    } catch (rawError) {
+      setError(
+        resolveApiErrorMessage(rawError, "主方向预览失败，请稍后重试。"),
+      );
     } finally {
       setSubmitting(false);
     }

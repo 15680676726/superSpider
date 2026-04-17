@@ -404,4 +404,81 @@ describe("BuddyOnboardingPage", () => {
     });
     expect(runtimeChatMock.openRuntimeChat).toHaveBeenCalled();
   });
+
+  it("shows backend preview detail when the selected alternate direction needs additional handling", async () => {
+    apiMock.submitBuddyIdentity.mockResolvedValue({
+      session_id: "session-1",
+      profile: {
+        profile_id: "profile-1",
+        display_name: "Alex",
+        profession: "Writer",
+        current_stage: "restart",
+        interests: [],
+        strengths: [],
+        constraints: [],
+        goal_intention: "Write and publish a real novel.",
+      },
+      status: "contract-draft",
+    });
+    apiMock.submitBuddyContract.mockResolvedValue({
+      session_id: "session-1",
+      status: "contract-ready",
+      service_intent: "Help me build a durable writing rhythm.",
+      collaboration_role: "orchestrator",
+      autonomy_level: "guarded-proactive",
+      confirm_boundaries: ["external spend"],
+      report_style: "decision-first",
+      collaboration_notes: "Keep reports concise.",
+      candidate_directions: [
+        "Build a durable writing lane.",
+        "Launch a small publishing business.",
+      ],
+      recommended_direction: "Build a durable writing lane.",
+      final_goal: "Publish the first real novel.",
+      why_it_matters: "Turn writing into real proof-of-work.",
+      backlog_items: [
+        {
+          lane_hint: "growth-focus",
+          title: "Lock the publishing rhythm",
+          summary: "Choose the first cadence.",
+          priority: 3,
+          source_key: "publishing-rhythm",
+        },
+      ],
+    });
+    apiMock.previewBuddyDirectionTransition.mockRejectedValue({
+      status: 400,
+      detail: "当前所选主方向需要重新编译协作合同后才能确认。",
+    });
+
+    render(<BuddyOnboardingPage />);
+
+    fireEvent.change(await screen.findByTestId("buddy-identity-display-name"), {
+      target: { value: "Alex" },
+    });
+    fireEvent.change(screen.getByTestId("buddy-identity-profession"), {
+      target: { value: "Writer" },
+    });
+    fireEvent.change(screen.getByTestId("buddy-identity-current-stage"), {
+      target: { value: "restart" },
+    });
+    fireEvent.change(screen.getByTestId("buddy-identity-goal-intention"), {
+      target: { value: "Write and publish a real novel." },
+    });
+    fireEvent.submit(screen.getByTestId("buddy-identity-form"));
+
+    expect(await screen.findByTestId("buddy-contract-form")).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId("buddy-contract-service-intent"), {
+      target: { value: "Help me build a durable writing rhythm." },
+    });
+    fireEvent.click(screen.getByTestId("buddy-contract-submit"));
+
+    expect(await screen.findByTestId("buddy-contract-summary")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Launch a small publishing business."));
+    fireEvent.click(screen.getByTestId("buddy-direction-confirm"));
+
+    expect(
+      await screen.findByText("当前所选主方向需要重新编译协作合同后才能确认。"),
+    ).toBeInTheDocument();
+  });
 });

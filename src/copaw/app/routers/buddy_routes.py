@@ -569,6 +569,10 @@ async def preview_buddy_direction_transition(
             session_id=payload.session_id,
             selected_direction=payload.selected_direction,
         )
+    except TimeoutError as exc:
+        raise HTTPException(504, detail=_BUDDY_ONBOARDING_TIMEOUT_MESSAGE) from exc
+    except BuddyOnboardingReasonerUnavailableError as exc:
+        raise HTTPException(503, detail=str(exc) or _BUDDY_ONBOARDING_MODEL_UNAVAILABLE) from exc
     except ValueError as exc:
         raise HTTPException(400, detail=str(exc)) from exc
     return result.model_dump(mode="json")

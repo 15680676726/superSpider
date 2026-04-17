@@ -293,12 +293,56 @@ class ModelDrivenBuddyOnboardingReasoner:
         profile: HumanProfile,
         collaboration_contract: BuddyCollaborationContract,
     ) -> BuddyOnboardingContractCompileResult | None:
+        return self._compile_contract(
+            profile=profile,
+            collaboration_contract=collaboration_contract,
+        )
+
+    def compile_contract_for_direction(
+        self,
+        *,
+        profile: HumanProfile,
+        collaboration_contract: BuddyCollaborationContract,
+        preferred_direction: str,
+    ) -> BuddyOnboardingContractCompileResult | None:
+        return self._compile_contract(
+            profile=profile,
+            collaboration_contract=collaboration_contract,
+            preferred_direction=preferred_direction,
+        )
+
+    def _compile_contract(
+        self,
+        *,
+        profile: HumanProfile,
+        collaboration_contract: BuddyCollaborationContract,
+        preferred_direction: str | None = None,
+    ) -> BuddyOnboardingContractCompileResult | None:
         request_payload = {
             "profile": profile.model_dump(mode="json"),
             "collaboration_contract": collaboration_contract.model_dump(mode="json"),
         }
+        normalized_preferred_direction = str(preferred_direction or "").strip()
+        if normalized_preferred_direction:
+            request_payload["preferred_direction"] = normalized_preferred_direction
         messages = [
-            {"role": "system", "content": _BUDDY_ONBOARDING_REASONER_PROMPT},
+            {
+                "role": "system",
+                "content": "\n\n".join(
+                    part
+                    for part in (
+                        _BUDDY_ONBOARDING_REASONER_PROMPT,
+                        (
+                            "如果输入里给出 preferred_direction，你必须围绕这个方向重新收口，"
+                            "recommended_direction 必须严格等于 preferred_direction，"
+                            "不要再改写成别的推荐方向。"
+                        )
+                        if normalized_preferred_direction
+                        else "",
+                    )
+                    if part
+                ),
+            },
             {
                 "role": "user",
                 "content": (
@@ -347,6 +391,13 @@ class ModelDrivenBuddyOnboardingReasoner:
         recommended = str(payload.recommended_direction or "").strip()
         if recommended and recommended not in directions:
             directions = [recommended, *directions]
+        if normalized_preferred_direction:
+            if recommended != normalized_preferred_direction:
+                raise BuddyOnboardingReasonerUnavailableError(
+                    "伙伴建档模型未返回与所选主方向一致的收口结果。",
+                )
+            if normalized_preferred_direction not in directions:
+                directions = [normalized_preferred_direction, *directions]
         final_goal = str(payload.final_goal or "").strip()
         why_it_matters = str(payload.why_it_matters or "").strip()
         backlog_items = [

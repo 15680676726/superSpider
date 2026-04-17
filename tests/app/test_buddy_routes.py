@@ -170,6 +170,42 @@ class _DeterministicContractCompiler:
         )
 
 
+class _MultiCandidateDirectionalCompiler(_DeterministicContractCompiler):
+    def compile_contract(
+        self,
+        *,
+        profile,
+        collaboration_contract,
+    ) -> _ContractCompileResult:
+        compiled = super().compile_contract(
+            profile=profile,
+            collaboration_contract=collaboration_contract,
+        )
+        return _ContractCompileResult(
+            candidate_directions=[_STOCKS_DIRECTION, _CREATOR_DIRECTION],
+            recommended_direction=_STOCKS_DIRECTION,
+            final_goal=compiled.final_goal,
+            why_it_matters=compiled.why_it_matters,
+            backlog_items=compiled.backlog_items,
+        )
+
+    def compile_contract_for_direction(
+        self,
+        *,
+        profile,
+        collaboration_contract,
+        preferred_direction: str,
+    ) -> _ContractCompileResult:
+        final_goal, why_it_matters, backlog_items = self._growth_plan(preferred_direction)
+        return _ContractCompileResult(
+            candidate_directions=[_STOCKS_DIRECTION, _CREATOR_DIRECTION],
+            recommended_direction=preferred_direction,
+            final_goal=final_goal,
+            why_it_matters=why_it_matters,
+            backlog_items=backlog_items,
+        )
+
+
 class _FakeCronManager:
     def __init__(self) -> None:
         self.jobs: list[object] = []
@@ -442,6 +478,56 @@ def test_direction_transition_preview_suggests_keep_active_for_same_domain(tmp_p
     assert preview.status_code == 200
     assert preview.json()["suggestion_kind"] == "same-domain"
     assert preview.json()["recommended_action"] == "keep-active"
+
+
+def test_direction_transition_preview_and_confirm_supports_directional_recompile_for_second_candidate(
+    tmp_path,
+) -> None:
+    client, _store = _build_client(tmp_path)
+    client.app.state.buddy_onboarding_service._onboarding_reasoner = _MultiCandidateDirectionalCompiler()  # pylint: disable=protected-access
+    identity = client.post(
+        "/buddy/onboarding/identity",
+        json={
+            "display_name": "Mina",
+            "profession": "Trader",
+            "current_stage": "restart",
+            "interests": ["stocks", "writing"],
+            "strengths": ["consistency"],
+            "constraints": ["money"],
+            "goal_intention": "Build a real trading path but keep writing as an alternative direction.",
+        },
+    ).json()
+    compiled = client.post(
+        "/buddy/onboarding/contract",
+        json={
+            "session_id": identity["session_id"],
+            **_contract_payload(
+                service_intent="Turn trading ambition into a disciplined weekly execution path.",
+            ),
+        },
+    ).json()
+
+    preview = client.post(
+        "/buddy/onboarding/direction-transition-preview",
+        json={
+            "session_id": identity["session_id"],
+            "selected_direction": _CREATOR_DIRECTION,
+        },
+    )
+    confirm = client.post(
+        "/buddy/onboarding/confirm-direction",
+        json={
+            "session_id": identity["session_id"],
+            "selected_direction": _CREATOR_DIRECTION,
+            "capability_action": "start-new",
+        },
+    )
+
+    assert compiled["candidate_directions"] == [_STOCKS_DIRECTION, _CREATOR_DIRECTION]
+    assert preview.status_code == 200
+    assert preview.json()["selected_direction"] == _CREATOR_DIRECTION
+    assert confirm.status_code == 200
+    assert confirm.json()["growth_target"]["primary_direction"] == _CREATOR_DIRECTION
 
 
 def test_buddy_surface_is_pure_read_without_repair_side_effects(
