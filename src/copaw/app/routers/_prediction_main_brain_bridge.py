@@ -100,7 +100,7 @@ def _build_prediction_backlog_spec(
         or _string(metadata.get("target_agent_id"))
         or _string(action_payload.get("agent_id"))
     )
-    title = _string(recommendation.get("title")) or "Cycle Opportunity"
+    title = _string(recommendation.get("title")) or "周期机会"
     return {
         "lane_id": _resolve_prediction_lane_id(
             industry_service,
@@ -110,7 +110,7 @@ def _build_prediction_backlog_spec(
         "title": title,
         "summary": (
             _string(recommendation.get("summary"))
-            or "Prediction surfaced a governed opportunity for the main brain."
+            or "预测发现了一个需要主脑接管的治理机会。"
         ),
         "priority": _prediction_backlog_priority(recommendation.get("priority")),
         "source_ref": _stable_prediction_source_ref(
@@ -316,7 +316,7 @@ async def coordinate_prediction_recommendation(
         backlog_item = backlog_service.record_generated_item(
             industry_instance_id=industry_instance_id,
             lane_id=_string(spec.get("lane_id")),
-            title=_string(spec.get("title")) or "Cycle Opportunity",
+            title=_string(spec.get("title")) or "周期机会",
             summary=_string(spec.get("summary")) or "",
             priority=int(spec.get("priority") or 0),
             source_kind="prediction",

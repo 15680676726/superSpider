@@ -665,9 +665,9 @@ class RuntimeCenterMainBrainAssembly:
                 self._string(persisted.get("summary"))
                 or self._string(raw_decision.get("summary"))
                 or (
-                    "No unresolved report synthesis pressure."
+                    "当前没有未解决的汇报综合重排压力。"
                     if decision_kind == "clear"
-                    else "Report synthesis requires main-brain replan."
+                    else "汇报综合结果要求主脑执行重规划。"
                 )
             ),
             "trigger_families": trigger_families,

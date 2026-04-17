@@ -1259,6 +1259,53 @@ def test_runtime_views_live_focus_prefers_latest_operator_writeback_chain_when_n
     assert payload["current_backlog_id"] == "backlog-operator"
 
 
+def test_instance_main_chain_uses_chinese_default_read_copy() -> None:
+    strategy = StrategyMemoryRecord(
+        strategy_id="strategy-industry-1",
+        scope_type="industry",
+        scope_id="industry-1",
+        title="Planning truth",
+    )
+    runtime_views = _RuntimeViewsHarness(strategy)
+    record = IndustryInstanceRecord(
+        instance_id="industry-1",
+        label="Northwind Robotics",
+        owner_scope="industry:northwind",
+        autonomy_status="active",
+    )
+
+    payload = runtime_views._build_instance_main_chain(
+        record=record,
+        lanes=[],
+        backlog=[],
+        current_cycle=None,
+        cycles=[],
+        assignments=[],
+        agent_reports=[],
+        goals=[],
+        agents=[],
+        tasks=[],
+        evidence=[],
+        execution=None,
+        strategy_memory=None,
+    ).model_dump(mode="json")
+
+    nodes = {node["node_id"]: node for node in payload["nodes"]}
+    assert nodes["carrier"]["summary"] == "当前共有 0 条泳道、0 个打开的 backlog、0 个 assignment、0 条汇报。"
+    assert nodes["writeback"]["summary"] == "还没有记录正式聊天回写。"
+    assert nodes["strategy"]["summary"] == "还没有挂接激活中的战略记忆。"
+    assert nodes["lane"]["summary"] == "当前还没有选中的执行泳道。"
+    assert nodes["backlog"]["summary"] == "当前还没有选中的 backlog 事项。"
+    assert nodes["cycle"]["summary"] == "当前还没有选中的执行周期。"
+    assert nodes["assignment"]["summary"] == "当前还没有选中的正式 assignment。"
+    assert nodes["routine"]["summary"] == "当前任务还没有挂接正式 SOP 或例行执行。"
+    assert nodes["child-task"]["summary"] == "当前还没有挂接委派出来的子任务。"
+    assert nodes["evidence"]["summary"] == "还没有写入正式证据。"
+    assert nodes["report"]["summary"] == "还没有结构化执行汇报回流。"
+    assert nodes["replan"]["summary"] == "当前没有明确的重排请求。"
+    assert nodes["instance-reconcile"]["summary"] == "团队当前状态为 draft。"
+
+
 def test_live_focus_payload_keeps_focus_selection_without_overriding_runtime_focus_truth() -> None:
     strategy = StrategyMemoryRecord(
         strategy_id="strategy-industry-1",

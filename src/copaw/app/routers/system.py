@@ -357,20 +357,24 @@ async def run_system_self_check(request: Request) -> dict[str, object]:
     add_check(
         "working_dir",
         "pass" if WORKING_DIR.is_dir() else "fail",
-        f"Working directory {'exists' if WORKING_DIR.is_dir() else 'is missing'}.",
+        "工作目录存在。" if WORKING_DIR.is_dir() else "工作目录缺失。",
         path=str(WORKING_DIR),
     )
     add_check(
         "state_store",
         "pass" if _service_present(app_state, "state_store") and state_db_path.exists() else "warn",
-        "Unified state store is wired." if _service_present(app_state, "state_store") else "State store is not attached to app.state.",
+        "统一状态库已接线。"
+        if _service_present(app_state, "state_store")
+        else "状态库尚未挂到 app.state。",
         path=str(state_db_path),
         exists=state_db_path.exists(),
     )
     add_check(
         "evidence_ledger",
         "pass" if _service_present(app_state, "evidence_ledger") and evidence_db_path.exists() else "warn",
-        "Evidence ledger is wired." if _service_present(app_state, "evidence_ledger") else "Evidence ledger is not attached to app.state.",
+        "证据账本已接线。"
+        if _service_present(app_state, "evidence_ledger")
+        else "证据账本尚未挂到 app.state。",
         path=str(evidence_db_path),
         exists=evidence_db_path.exists(),
     )

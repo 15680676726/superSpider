@@ -404,7 +404,7 @@ def test_synthesize_reports_uses_latest_report_per_topic_and_clears_old_pressure
     assert synthesis["replan_decision"] == {
         "decision_id": "report-synthesis:clear",
         "status": "clear",
-        "summary": "No unresolved report synthesis pressure.",
+        "summary": "当前没有未解决的汇报综合重排压力。",
         "reason_ids": [],
         "source_report_ids": [],
         "topic_keys": [],

@@ -277,13 +277,12 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             if last_fallback and "memory" in last_fallback.lower():
                 routine_failure_source = "sidecar-memory"
                 routine_remediation_summary = (
-                    "Routine execution is continuing on canonical state only because the "
-                    "memory sidecar fallback is active."
+                    "例行执行目前仅依赖规范状态继续运行，因为侧车记忆回退链路仍处于激活状态。"
                 )
             else:
                 routine_failure_source = "degraded-runtime"
                 routine_remediation_summary = (
-                    "One or more routines are running in degraded mode and require runtime review."
+                    "一个或多个例行当前处于降级运行状态，需要检查运行时。"
                 )
         routine_diagnostics = build_execution_diagnostics(
             failure_source=routine_failure_source,

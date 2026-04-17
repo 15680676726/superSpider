@@ -244,6 +244,11 @@ def test_system_self_check_uses_runtime_root_for_preflight_paths(
         workspace_root / "evidence" / "phase1.sqlite3"
     )
 
+    checks_by_name = {item["name"]: item for item in self_check["checks"]}
+    assert checks_by_name["working_dir"]["summary"] == "工作目录存在。"
+    assert checks_by_name["state_store"]["summary"] == "统一状态库已接线。"
+    assert checks_by_name["evidence_ledger"]["summary"] == "证据账本已接线。"
+
     preflight_by_name = {
         item["name"]: item for item in self_check["environment_preflight"]["checks"]
     }

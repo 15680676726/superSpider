@@ -455,7 +455,7 @@ def _build_replan_decision_with_activation(
         return {
             "decision_id": "report-synthesis:clear",
             "status": "clear",
-            "summary": "No unresolved report synthesis pressure.",
+            "summary": "当前没有未解决的汇报综合重排压力。",
             "reason_ids": [],
             "source_report_ids": [],
             "topic_keys": [],

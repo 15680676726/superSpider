@@ -7,6 +7,9 @@ from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from copaw.app.routers._prediction_main_brain_bridge import (
+    _build_prediction_backlog_spec,
+)
 from copaw.app.routers.predictions import router as predictions_router
 from copaw.app.routers.runtime_center import router as runtime_center_router
 from copaw.capabilities import CapabilityService
@@ -1354,6 +1357,30 @@ def test_prediction_recommendation_coordinate_route_hands_off_to_main_brain(tmp_
     assert payload["chat_thread_id"] == "industry-chat:industry-demo:execution-core"
     assert payload["chat_route"] == "/chat?threadId=industry-chat%3Aindustry-demo%3Aexecution-core"
     assert payload["coordination_reason"] in {"open-backlog", "cycle-inflight"}
+
+
+def test_prediction_main_brain_bridge_uses_chinese_default_backlog_copy(tmp_path) -> None:
+    app = _build_predictions_app(tmp_path)
+
+    spec = _build_prediction_backlog_spec(
+        app.state.industry_service,
+        industry_instance_id="industry-demo",
+        actor="copaw-operator",
+        case_id="case-demo",
+        case_payload={"case_kind": "capability_gap"},
+        recommendation={
+            "recommendation_id": "rec-demo",
+            "action_kind": "manual:coordinate-main-brain",
+            "priority": 0,
+            "metadata": {},
+            "action_payload": {},
+        },
+        source_route="/predictions/case-demo",
+        meeting_window=None,
+    )
+
+    assert spec["title"] == "周期机会"
+    assert spec["summary"] == "预测发现了一个需要主脑接管的治理机会。"
 
 
 def test_prediction_service_drops_retired_dispatch_goal_recommendations_on_startup(

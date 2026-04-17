@@ -739,6 +739,37 @@ def test_runtime_center_overview_governance_surfaces_weixin_ilink_runtime_summar
     assert cards["governance"]["summary"].endswith("微信个人（iLink）等待扫码；轮询未运行。")
 
 
+def test_runtime_center_overview_localizes_degraded_routine_remediation_summary() -> None:
+    class _DegradedRoutineService(FakeRoutineService):
+        def get_runtime_center_overview(self, *, limit: int = 5) -> dict[str, object]:
+            overview = super().get_runtime_center_overview(limit=limit)
+            overview["degraded"] = 1
+            overview["last_fallback"] = "memory-sidecar-fallback"
+            return overview
+
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = FakeIndustryService()
+    app.state.prediction_service = FakePredictionService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = _DegradedRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+
+    client = TestClient(app)
+
+    response = client.get("/runtime-center/surface")
+
+    assert response.status_code == 200
+    cards = {card["key"]: card for card in response.json()["cards"]}
+    assert cards["routines"]["summary"].startswith(
+        "例行执行目前仅依赖规范状态继续运行，因为侧车记忆回退链路仍处于激活状态。"
+    )
+
+
 def test_runtime_center_surface_route_uses_one_canonical_surface_contract():
     app = build_runtime_center_app()
     app.state.state_query_service = FakeStateQueryService()

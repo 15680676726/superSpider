@@ -690,7 +690,7 @@ class _IndustryRuntimeViewsMixin:
             or "report-synthesis:clear",
             "summary": _string(sidecar_payload.get("summary"))
             or _string(compiled.get("summary"))
-            or "No unresolved report synthesis pressure.",
+            or "当前没有未解决的汇报综合重排压力。",
             "reason_ids": _unique_strings(
                 compiled.get("reason_ids"),
                 sidecar_payload.get("reason_ids"),
@@ -1267,12 +1267,12 @@ class _IndustryRuntimeViewsMixin:
         current_execution_summary = (
             current_execution_name
             or (
-                "The current assignment is executing through a governed SOP binding."
+                "当前 assignment 正通过受治理的 SOP 绑定执行。"
                 if current_sop_binding_id is not None
                 else (
-                    "The current assignment is executing through a formal routine replay."
+                    "当前 assignment 正通过正式例行回放执行。"
                     if current_routine_id is not None
-                    else "No formal routine or SOP binding is currently attached to the selected task."
+                    else "当前任务还没有挂接正式 SOP 或例行执行。"
                 )
             )
         )
@@ -1456,31 +1456,31 @@ class _IndustryRuntimeViewsMixin:
             )
         elif followup_backlog_items:
             replan_summary = (
-                f"{len(followup_backlog_items)} follow-up backlog item(s) remain open; "
-                "keep replan active until continuity pressure is closed."
+                f"当前仍有 {len(followup_backlog_items)} 个 follow-up backlog 处于打开状态；"
+                "在连续性压力关闭前继续保持重规划激活。"
             )
         elif replan_decision_kind == "strategy_review_required":
             replan_summary = (
                 _string(replan_payload.get("summary"))
-                or "Escalate the current report pressure into an explicit strategy review."
+                or "把当前汇报压力升级成明确的战略复核。"
             )
         elif replan_decision_kind == "cycle_rebalance":
             replan_summary = (
                 _string(replan_payload.get("summary"))
-                or "Rebalance the current operating cycle before dispatching more work."
+                or "在继续分派更多工作之前，先重平衡当前执行周期。"
             )
         elif replan_decision_kind == "lane_reweight":
             replan_summary = (
                 _string(replan_payload.get("summary"))
-                or "Reweight lane investment before selecting the next cycle work."
+                or "在选择下一轮周期工作之前，先重调泳道投入。"
             )
         elif replan_needed:
             replan_summary = (
                 _string(replan_payload.get("summary"))
-                or "Main brain should review the latest cycle synthesis before dispatching more work."
+                or "主脑需要先复核最新周期综合结果，再继续分派更多工作。"
             )
         else:
-            replan_summary = "No explicit replan request is pending."
+            replan_summary = "当前没有明确的重排请求。"
         recommended_replan_action = None
         if pending_followup_confirmations:
             recommended_replan_action = "close-staffing-or-human-handoff-before-dispatch"
@@ -1505,8 +1505,8 @@ class _IndustryRuntimeViewsMixin:
                 current_ref=record.instance_id,
                 route=f"/api/runtime-center/industry/{quote(record.instance_id)}",
                 summary=(
-                    f"{len(lanes)} lanes, {open_backlog_count} open backlog item(s), "
-                    f"{len(assignments)} assignment(s), {len(agent_reports)} report(s)."
+                    f"当前共有 {len(lanes)} 条泳道、{open_backlog_count} 个打开的 backlog、"
+                    f"{len(assignments)} 个 assignment、{len(agent_reports)} 条汇报。"
                 ),
                 backflow_port="IndustryService.run_operating_cycle() / reconcile_instance_status()",
                 metrics={
@@ -1534,7 +1534,7 @@ class _IndustryRuntimeViewsMixin:
                     _string(latest_writeback.get("title"))
                     or _string(latest_writeback.get("summary"))
                     if isinstance(latest_writeback, dict)
-                    else "No formal chat writeback has been recorded yet."
+                    else "还没有记录正式聊天回写。"
                 ),
                 backflow_port="IndustryService.apply_execution_chat_writeback()",
                 metrics={
@@ -1559,7 +1559,7 @@ class _IndustryRuntimeViewsMixin:
                 summary=(
                     (_string(strategy_memory.north_star) or _string(strategy_memory.summary))
                     if strategy_memory is not None
-                    else "No active strategy memory is linked yet."
+                    else "还没有挂接激活中的战略记忆。"
                 ),
                 backflow_port="StateStrategyMemoryService.resolve_strategy_payload()",
                 metrics={
@@ -1599,7 +1599,7 @@ class _IndustryRuntimeViewsMixin:
                     _string(current_lane.get("title"))
                     or _string(current_lane.get("summary"))
                     if isinstance(current_lane, dict)
-                    else "No operating lane is currently selected."
+                    else "当前还没有选中的执行泳道。"
                 ),
                 backflow_port="OperatingLaneService.resolve_lane()",
                 metrics={
@@ -1626,7 +1626,7 @@ class _IndustryRuntimeViewsMixin:
                     _string(current_backlog.get("title"))
                     or _string(current_backlog.get("summary"))
                     if isinstance(current_backlog, dict)
-                    else "No backlog item is currently selected."
+                    else "当前还没有选中的 backlog 事项。"
                 ),
                 backflow_port="BacklogService.record_chat_writeback() / mark_item_materialized()",
                 metrics={
@@ -1653,7 +1653,7 @@ class _IndustryRuntimeViewsMixin:
                     _string(current_cycle_entry.get("title"))
                     or _string(current_cycle_entry.get("summary"))
                     if isinstance(current_cycle_entry, dict)
-                    else "No active operating cycle is currently selected."
+                    else "当前还没有选中的执行周期。"
                 ),
                 backflow_port="OperatingCycleService.reconcile_cycle()",
                 metrics={
@@ -1681,7 +1681,7 @@ class _IndustryRuntimeViewsMixin:
                     _string(current_assignment.get("title"))
                     or _string(current_assignment.get("summary"))
                     if isinstance(current_assignment, dict)
-                    else "No formal assignment is currently selected."
+                    else "当前还没有选中的正式 assignment。"
                 ),
                 backflow_port="AssignmentService.reconcile_assignments()",
                 metrics={
@@ -1716,9 +1716,9 @@ class _IndustryRuntimeViewsMixin:
                 summary=(
                     _string(current_child_payload.get("title"))
                     or (
-                        f"{len(child_tasks)} delegated child task(s) linked to the parent chain."
+                        f"当前有 {len(child_tasks)} 个委派子任务挂在父链路上。"
                         if child_tasks
-                        else "No delegated child task is currently attached."
+                        else "当前还没有挂接委派出来的子任务。"
                     )
                 ),
                 backflow_port="KernelDispatcher._reconcile_parent_after_child_terminal()",
@@ -1732,7 +1732,7 @@ class _IndustryRuntimeViewsMixin:
                 current_ref=latest_evidence_id,
                 route=evidence_route,
                 summary=self._evidence_summary(latest_evidence)
-                or ("No evidence written yet." if not evidence else None),
+                or ("还没有写入正式证据。" if not evidence else None),
                 backflow_port="EvidenceLedger + Runtime Center evidence reads",
                 metrics={"evidence_count": len(evidence)},
             ),
@@ -1755,7 +1755,7 @@ class _IndustryRuntimeViewsMixin:
                     _string(current_report.get("headline"))
                     or _string(current_report.get("summary"))
                     if isinstance(current_report, dict)
-                    else "No structured agent report has flowed back yet."
+                    else "还没有结构化执行汇报回流。"
                 ),
                 backflow_port="AgentReportService.mark_processed() + BacklogService.mark_item_completed()",
                 metrics={
@@ -1805,7 +1805,7 @@ class _IndustryRuntimeViewsMixin:
                 truth_source="IndustryService.reconcile_instance_status() over IndustryInstanceRecord + cycle/backlog/goal/report state",
                 current_ref=record.instance_id,
                 route=f"/api/runtime-center/industry/{quote(record.instance_id)}",
-                summary=f"Team status is {_string(record.status) or 'active'}.",
+                summary=f"团队当前状态为 {_string(record.status) or 'active'}。",
                 backflow_port="IndustryService._sync_strategy_memory_for_instance()",
                 metrics={
                     "active_assignment_count": sum(
