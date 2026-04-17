@@ -62,6 +62,33 @@ def _text_score(text: str, query_tokens: set[str]) -> float:
     return float(len(query_tokens.intersection(text_tokens)))
 
 
+def _profile_hit_summary(profile: object, query_tokens: set[str]) -> str:
+    fallback = str(getattr(profile, "current_focus_summary", "") or "").strip()
+    candidates: list[str] = []
+    for value in [
+        fallback,
+        *list(getattr(profile, "current_operating_context", []) or []),
+        *list(getattr(profile, "active_constraints", []) or []),
+        *list(getattr(profile, "dynamic_profile", []) or []),
+        *list(getattr(profile, "static_profile", []) or []),
+    ]:
+        text = str(value or "").strip()
+        if not text or text in candidates:
+            continue
+        candidates.append(text)
+    if not candidates:
+        return "Shared truth-derived memory profile."
+    if not query_tokens:
+        return candidates[0]
+    ranked = sorted(
+        candidates,
+        key=lambda item: (_text_score(item, query_tokens), len(item)),
+        reverse=True,
+    )
+    best = ranked[0]
+    return best or "Shared truth-derived memory profile."
+
+
 def _sleep_value(item: object, field_name: str, default: object = None) -> object:
     if isinstance(item, dict):
         return item.get(field_name, default)
@@ -174,7 +201,7 @@ class MemoryRecallService:
                         entry_id=f"profile:{views.profile.scope_type}:{views.profile.scope_id}",
                         kind="memory_profile",
                         title="Shared Memory Profile",
-                        summary=views.profile.current_focus_summary or "Shared truth-derived memory profile.",
+                        summary=_profile_hit_summary(views.profile, query_tokens),
                         content_excerpt=profile_text[:320],
                         source_type="memory_profile",
                         source_ref=f"profile:{views.profile.scope_type}:{views.profile.scope_id}",

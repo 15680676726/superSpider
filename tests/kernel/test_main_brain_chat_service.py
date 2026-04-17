@@ -415,6 +415,70 @@ class _TruthFirstMemoryRecallService:
         )
 
 
+class _OverlayAwareMemoryRecallService:
+    def __init__(self) -> None:
+        now = datetime.now(UTC)
+        self.calls: list[dict[str, object]] = []
+        latest = SimpleNamespace(
+            title="Current operator preference",
+            summary="Use the governed checklist before outbound execution.",
+            content_excerpt="Use the governed checklist before outbound execution.",
+            updated_at=now,
+            created_at=now - timedelta(minutes=5),
+        )
+        history = SimpleNamespace(
+            title="Older follow-up history",
+            summary="Previous cycle required evidence review before outbound release.",
+            content_excerpt="Previous cycle required evidence review before outbound release.",
+            updated_at=now - timedelta(days=2),
+            created_at=now - timedelta(days=2, minutes=5),
+        )
+        self._profile_service = SimpleNamespace(
+            build_views=lambda **kwargs: SimpleNamespace(
+                profile=SimpleNamespace(
+                    scope_type=str(kwargs.get("scope_type") or "work_context"),
+                    scope_id=str(kwargs.get("scope_id") or "ctx-truth-first"),
+                    static_profile=["Industry baseline"],
+                    dynamic_profile=["Use the governed checklist before outbound execution."],
+                    active_preferences=[],
+                    active_constraints=["Evidence review stays mandatory before outbound approval."],
+                    current_focus_summary="Current operator preference",
+                    current_operating_context=["Use the governed checklist before outbound execution."],
+                    source_refs=["chunk-overlay-latest"],
+                    read_layer="work_context_overlay",
+                    overlay_id="overlay:ctx-truth-first:v2",
+                    industry_profile_id="industry-profile:industry-1:v1",
+                ),
+                latest=[latest],
+                history=[history],
+            ),
+        )
+
+    def recall(self, **kwargs):
+        self.calls.append(dict(kwargs))
+        return MemoryRecallResponse(
+            query=str(kwargs.get("query") or ""),
+            backend_used="lexical",
+            hits=[
+                MemoryRecallHit(
+                    entry_id="memory-hit-lexical",
+                    kind="knowledge_chunk",
+                    title="Lexical fallback note",
+                    summary="Lexical fallback still works after overlay profile injection.",
+                    content_excerpt="Lexical fallback still works after overlay profile injection.",
+                    source_type="knowledge_chunk",
+                    source_ref="chunk-lexical",
+                    scope_type="work_context",
+                    scope_id="ctx-truth-first",
+                    confidence=0.8,
+                    quality_score=0.7,
+                    score=1.0,
+                    backend="lexical",
+                )
+            ],
+        )
+
+
 class _SnapshotCountingIndustryService:
     def __init__(self) -> None:
         self.version = 1
@@ -1180,6 +1244,35 @@ def test_main_brain_chat_service_prefers_memory_surface_service_for_scope_snapsh
 
     context_prompt = prompt_messages[1]["content"]
     assert "Use the facade-backed truth-first snapshot." in context_prompt
+
+
+def test_main_brain_chat_service_scope_snapshot_prefers_overlay_profile_surface():
+    recall_service = _OverlayAwareMemoryRecallService()
+    service = MainBrainChatService(
+        session_backend=_FakeSessionBackend(),
+        memory_recall_service=recall_service,
+        model_factory=lambda: _StaticResponseModel("ok"),
+    )
+    request = SimpleNamespace(
+        session_id="sess-overlay-snapshot",
+        user_id="user-overlay-snapshot",
+        industry_instance_id=None,
+        work_context_id="ctx-truth-first",
+        agent_id="ops-agent",
+    )
+
+    prompt_messages = service._build_prompt_messages(  # pylint: disable=protected-access
+        request=request,
+        query="Please use the current checklist before outbound execution",
+        prior_messages=[],
+        current_messages=[],
+    )
+
+    context_prompt = prompt_messages[1]["content"]
+    assert "## Truth-First Memory Profile" in context_prompt
+    assert "Read layer: work_context_overlay" in context_prompt
+    assert "overlay:ctx-truth-first:v2" in context_prompt
+    assert "industry-profile:industry-1:v1" in context_prompt
 
 
 @pytest.mark.asyncio

@@ -177,6 +177,188 @@ def _browser_continuity_contract(
     }
 
 
+def _mapping_payload(value: object) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _normalize_string(*values: object) -> str | None:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return None
+
+
+def _json_string(value: object) -> str | None:
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False)
+    text = str(value or "").strip()
+    return text or None
+
+
+def _int_value(value: object) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _float_value(value: object) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _bool_value(value: object) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off"}:
+            return False
+    return None
+
+
+class _BrowserCompanionExecutor:
+    """Default production executor that drives the attached browser via browser_use."""
+
+    _STRING_FIELDS = (
+        "url",
+        "page_id",
+        "selector",
+        "text",
+        "code",
+        "path",
+        "filename",
+        "prompt_text",
+        "ref",
+        "element",
+        "key",
+        "screenshot_type",
+        "snapshot_filename",
+        "button",
+        "start_ref",
+        "end_ref",
+        "start_selector",
+        "end_selector",
+        "start_element",
+        "end_element",
+        "tab_action",
+        "text_gone",
+        "frame_selector",
+        "profile_id",
+        "entry_url",
+        "storage_state_path",
+    )
+    _INT_FIELDS = ("wait", "width", "height", "index")
+    _FLOAT_FIELDS = ("wait_time", "action_timeout_seconds")
+    _BOOL_FIELDS = (
+        "full_page",
+        "accept",
+        "submit",
+        "slowly",
+        "include_static",
+        "double_click",
+        "headed",
+        "persist_login_state",
+    )
+    _JSON_FIELDS = {
+        "paths_json": ("paths_json", "paths"),
+        "fields_json": ("fields_json", "fields"),
+        "modifiers_json": ("modifiers_json", "modifiers"),
+        "values_json": ("values_json", "values"),
+        "navigation_guard_json": ("navigation_guard_json", "navigation_guard"),
+    }
+
+    def __init__(self, runtime_service: "BrowserRuntimeService") -> None:
+        self._runtime_service = runtime_service
+
+    async def __call__(self, **kwargs) -> dict[str, Any]:
+        action = _normalize_string(kwargs.get("action"))
+        if action is None:
+            raise RuntimeError("Browser companion action is missing.")
+        provider_session_ref = self._resolve_provider_session_ref(kwargs)
+        if provider_session_ref is None:
+            raise RuntimeError(
+                "Browser companion action requires a provider_session_ref for the attached browser.",
+            )
+        contract = _mapping_payload(kwargs.get("contract"))
+        response = await browser_use(
+            **self._build_browser_use_kwargs(
+                action=action,
+                session_id=provider_session_ref,
+                contract=contract,
+            ),
+        )
+        text = self._runtime_service._tool_response_text(response)
+        return self._runtime_service._tool_response_json(text)
+
+    def _resolve_provider_session_ref(self, kwargs: dict[str, Any]) -> str | None:
+        snapshot = _mapping_payload(kwargs.get("snapshot"))
+        companion = _mapping_payload(snapshot.get("browser_companion"))
+        return _normalize_string(
+            kwargs.get("provider_session_ref"),
+            companion.get("provider_session_ref"),
+        )
+
+    def _build_browser_use_kwargs(
+        self,
+        *,
+        action: str,
+        session_id: str,
+        contract: dict[str, Any],
+    ) -> dict[str, Any]:
+        surface_contract = _mapping_payload(contract.get("surface_contract"))
+        payload: dict[str, Any] = {
+            "action": action,
+            "session_id": session_id,
+            "page_id": _normalize_string(
+                contract.get("page_id"),
+                surface_contract.get("page_id"),
+                "default",
+            )
+            or "default",
+        }
+        for field in self._STRING_FIELDS:
+            value = _normalize_string(contract.get(field), surface_contract.get(field))
+            if value is not None:
+                payload[field] = value
+        for field in self._INT_FIELDS:
+            value = _int_value(contract.get(field))
+            if value is None:
+                value = _int_value(surface_contract.get(field))
+            if value is not None:
+                payload[field] = value
+        for field in self._FLOAT_FIELDS:
+            value = _float_value(contract.get(field))
+            if value is None:
+                value = _float_value(surface_contract.get(field))
+            if value is not None:
+                payload[field] = value
+        for field in self._BOOL_FIELDS:
+            value = _bool_value(contract.get(field))
+            if value is None:
+                value = _bool_value(surface_contract.get(field))
+            if value is not None:
+                payload[field] = value
+        for target, aliases in self._JSON_FIELDS.items():
+            raw = None
+            for alias in aliases:
+                if alias in contract:
+                    raw = contract.get(alias)
+                    break
+                if alias in surface_contract:
+                    raw = surface_contract.get(alias)
+                    break
+            encoded = _json_string(raw)
+            if encoded is not None:
+                payload[target] = encoded
+        return payload
+
+
 class BrowserProfileRecord(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
@@ -241,12 +423,76 @@ class BrowserRuntimeService:
         self._store.initialize()
         self._initialize_schema()
 
+    def set_environment_service(self, environment_service: object | None) -> None:
+        self._environment_service = environment_service
+        setter = getattr(environment_service, "set_default_browser_companion_executor", None)
+        if callable(setter):
+            setter(self._default_browser_companion_executor())
+        self._sync_browser_companion_executors()
+
     def _initialize_schema(self) -> None:
         with self._store.connection() as conn:
             conn.executescript(self._SCHEMA)
 
     def _resolve_environment_service(self) -> object | None:
         return getattr(self, "_environment_service", None)
+
+    def _default_browser_companion_executor(self) -> object:
+        executor = getattr(self, "_default_browser_companion_executor_instance", None)
+        if executor is None:
+            executor = _BrowserCompanionExecutor(self)
+            setattr(self, "_default_browser_companion_executor_instance", executor)
+        return executor
+
+    def _register_browser_companion_executor_snapshot(
+        self,
+        snapshot: object,
+        *,
+        executor: object | None = None,
+    ) -> None:
+        environment_service = self._resolve_environment_service()
+        if environment_service is None:
+            return
+        register = getattr(environment_service, "register_browser_companion_executor", None)
+        if not callable(register):
+            return
+        payload = _mapping_payload(snapshot)
+        companion = _mapping_payload(payload.get("browser_companion"))
+        refs = [
+            ref
+            for ref in (
+                _normalize_string(companion.get("transport_ref")),
+                _normalize_string(companion.get("provider_session_ref")),
+            )
+            if ref is not None
+        ]
+        if not refs:
+            return
+        bound_executor = executor or self._default_browser_companion_executor()
+        for ref in refs:
+            register(ref, bound_executor)
+
+    def _sync_browser_companion_executors(self) -> None:
+        environment_service = self._resolve_environment_service()
+        if environment_service is None:
+            return
+        list_sessions = getattr(environment_service, "list_sessions", None)
+        snapshotter = getattr(environment_service, "browser_companion_snapshot", None)
+        if not callable(list_sessions) or not callable(snapshotter):
+            return
+        executor = self._default_browser_companion_executor()
+        for session in list_sessions(channel="browser", limit=500):
+            session_mount_id = _normalize_string(getattr(session, "id", None))
+            if session_mount_id is None:
+                continue
+            try:
+                snapshot = snapshotter(session_mount_id=session_mount_id)
+            except Exception:
+                continue
+            self._register_browser_companion_executor_snapshot(
+                snapshot,
+                executor=executor,
+            )
 
     def _resolve_existing_browser_mount(
         self,
@@ -505,7 +751,7 @@ class BrowserRuntimeService:
     ) -> dict[str, Any]:
         if self._browser_companion_runtime is None:
             raise RuntimeError("Browser companion runtime is not configured.")
-        return self._browser_companion_runtime.register_companion(
+        snapshot = self._browser_companion_runtime.register_companion(
             environment_id=environment_id,
             session_mount_id=session_mount_id,
             transport_ref=transport_ref,
@@ -517,6 +763,8 @@ class BrowserRuntimeService:
             provider_session_ref=provider_session_ref,
             execution_guardrails=execution_guardrails,
         )
+        self._register_browser_companion_executor_snapshot(snapshot)
+        return snapshot
 
     def companion_snapshot(
         self,

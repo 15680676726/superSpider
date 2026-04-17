@@ -127,6 +127,8 @@ def test_sqlite_state_store_initialize_upgrades_legacy_tables_before_schema_inde
         assert "buddy_domain_capabilities" in _table_names(conn)
         assert "work_contexts" in _table_names(conn)
         assert "human_assist_tasks" in _table_names(conn)
+        assert "memory_industry_slot_preferences" in _table_names(conn)
+        assert "memory_continuity_details" in _table_names(conn)
         assert "sop_adapter_templates" not in _table_names(conn)
         assert "sop_adapter_bindings" not in _table_names(conn)
         assert {
@@ -188,6 +190,27 @@ def test_sqlite_state_store_initialize_upgrades_legacy_tables_before_schema_inde
             "demotion_cooldown_until",
             "evolution_stage",
         }.issubset(_column_names(conn, "buddy_domain_capabilities"))
+        assert {
+            "preference_id",
+            "industry_instance_id",
+            "slot_key",
+            "scope_level",
+            "scope_id",
+            "promotion_count",
+            "demotion_count",
+            "status",
+        }.issubset(_column_names(conn, "memory_industry_slot_preferences"))
+        assert {
+            "detail_id",
+            "scope_type",
+            "scope_id",
+            "detail_key",
+            "detail_text",
+            "source_kind",
+            "pinned",
+            "pinned_until_phase",
+            "status",
+        }.issubset(_column_names(conn, "memory_continuity_details"))
         assert {
             "chat_thread_id",
             "acceptance_mode",

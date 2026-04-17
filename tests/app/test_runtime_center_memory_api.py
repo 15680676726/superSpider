@@ -14,10 +14,17 @@ from copaw.memory import (
     MemorySleepInferenceService,
     MemorySleepService,
 )
-from copaw.state import SQLiteStateStore, StrategyMemoryRecord
+from copaw.state import (
+    IndustryMemoryProfileRecord,
+    IndustryMemorySlotPreferenceRecord,
+    MemoryContinuityDetailRecord,
+    MemoryStructureProposalRecord,
+    SQLiteStateStore,
+    StrategyMemoryRecord,
+)
 from copaw.state.models_goals_tasks import AgentReportRecord
-from copaw.state.knowledge_service import StateKnowledgeService
 from copaw.state.models_memory import MemoryRelationViewRecord
+from copaw.state.knowledge_service import StateKnowledgeService
 from copaw.state.repositories import (
     SqliteKnowledgeChunkRepository,
     SqliteMemoryEntityViewRepository,
@@ -845,6 +852,279 @@ def test_runtime_center_memory_sleep_routes_expose_profiles_overlays_and_structu
     assert sleep_payload["structure_proposals"]
 
 
+def test_runtime_center_memory_surface_work_context_resolves_industry_profile_without_manual_scope_binding(
+    tmp_path,
+) -> None:
+    client = _build_client(tmp_path)
+
+    industry_id = "industry-surface-auto-bind"
+    work_context_id = "ctx-surface-auto-bind"
+
+    industry_response = client.post(
+        "/runtime-center/knowledge/memory",
+        json={
+            "title": "Industry outbound rule",
+            "content": "Outbound approval must wait for finance review before any message is sent.",
+            "scope_type": "industry",
+            "scope_id": industry_id,
+            "source_ref": f"memory:{industry_id}:1",
+            "tags": ["approval", "finance"],
+        },
+    )
+    assert industry_response.status_code == 200
+    assert client.post(
+        "/runtime-center/memory/sleep/run",
+        json={"scope_type": "industry", "scope_id": industry_id, "trigger_kind": "manual"},
+    ).status_code == 200
+
+    work_context_response = client.post(
+        "/runtime-center/knowledge/memory",
+        json={
+            "title": "Work context blocker",
+            "content": "Wait for finance review before outbound approval.",
+            "scope_type": "work_context",
+            "scope_id": work_context_id,
+            "source_ref": f"industry:{industry_id}",
+            "tags": ["approval", "finance"],
+        },
+    )
+    assert work_context_response.status_code == 200
+    assert client.post(
+        "/runtime-center/memory/sleep/run",
+        json={"scope_type": "work_context", "scope_id": work_context_id, "trigger_kind": "manual"},
+    ).status_code == 200
+
+    surface_response = client.get(
+        "/runtime-center/memory/surface",
+        params={"work_context_id": work_context_id, "industry_instance_id": industry_id},
+    )
+
+    assert surface_response.status_code == 200
+    sleep_payload = surface_response.json()["sleep"]
+    assert sleep_payload["work_context_overlay"]["industry_instance_id"] == industry_id
+    assert sleep_payload["industry_profile"]["industry_instance_id"] == industry_id
+
+
+def test_runtime_center_memory_sleep_governance_and_version_routes(tmp_path) -> None:
+    client = _build_client(tmp_path)
+
+    assert client.post(
+        "/runtime-center/knowledge/memory",
+        json={
+            "title": "行业规则 v1",
+            "content": "行业要求所有外呼审批都必须先完成财务复核。",
+            "scope_type": "industry",
+            "scope_id": "industry-versioned",
+            "source_ref": "memory:industry-versioned:1",
+            "tags": ["approval", "finance"],
+        },
+    ).status_code == 200
+    assert client.post(
+        "/runtime-center/memory/sleep/run",
+        json={"scope_type": "industry", "scope_id": "industry-versioned", "trigger_kind": "manual"},
+    ).status_code == 200
+    assert client.post(
+        "/runtime-center/knowledge/memory",
+        json={
+            "title": "行业规则 v2",
+            "content": "行业当前要求先完成财务复核，再做外呼审批和证据归档。",
+            "scope_type": "industry",
+            "scope_id": "industry-versioned",
+            "source_ref": "memory:industry-versioned:2",
+            "tags": ["approval", "finance"],
+        },
+    ).status_code == 200
+    assert client.post(
+        "/runtime-center/memory/sleep/run",
+        json={"scope_type": "industry", "scope_id": "industry-versioned", "trigger_kind": "manual"},
+    ).status_code == 200
+
+    assert client.post(
+        "/runtime-center/knowledge/memory",
+        json={
+            "title": "工作上下文 v1",
+            "content": "当前工作上下文正在处理财务复核和外呼审批。",
+            "scope_type": "work_context",
+            "scope_id": "ctx-versioned-memory",
+            "source_ref": "memory:ctx-versioned-memory:1",
+            "tags": ["approval", "finance"],
+        },
+    ).status_code == 200
+    client.app.state.memory_sleep_service.mark_scope_dirty(
+        scope_type="work_context",
+        scope_id="ctx-versioned-memory",
+        industry_instance_id="industry-versioned",
+        reason="bind-industry",
+        source_ref="memory:ctx-versioned-memory:1",
+    )
+    assert client.post(
+        "/runtime-center/memory/sleep/run",
+        json={"scope_type": "work_context", "scope_id": "ctx-versioned-memory", "trigger_kind": "manual"},
+    ).status_code == 200
+    assert client.post(
+        "/runtime-center/knowledge/memory",
+        json={
+            "title": "工作上下文 v2",
+            "content": "当前工作上下文要求先补齐财务证据，再继续外呼审批。",
+            "scope_type": "work_context",
+            "scope_id": "ctx-versioned-memory",
+            "source_ref": "memory:ctx-versioned-memory:2",
+            "tags": ["approval", "finance"],
+        },
+    ).status_code == 200
+    client.app.state.memory_sleep_service.mark_scope_dirty(
+        scope_type="work_context",
+        scope_id="ctx-versioned-memory",
+        industry_instance_id="industry-versioned",
+        reason="update-work-context",
+        source_ref="memory:ctx-versioned-memory:2",
+    )
+    assert client.post(
+        "/runtime-center/memory/sleep/run",
+        json={"scope_type": "work_context", "scope_id": "ctx-versioned-memory", "trigger_kind": "manual"},
+    ).status_code == 200
+
+    proposals_response = client.get(
+        "/runtime-center/memory/sleep/structure-proposals",
+        params={"scope_type": "work_context", "scope_id": "ctx-versioned-memory", "status": "pending"},
+    )
+    assert proposals_response.status_code == 200
+    proposal_id = proposals_response.json()[0]["proposal_id"]
+
+    reject_response = client.post(
+        f"/runtime-center/memory/sleep/structure-proposals/{proposal_id}/reject",
+        json={"actor": "tester", "note": "这次不接受结构改动。"},
+    )
+    assert reject_response.status_code == 200
+    assert reject_response.json()["status"] == "rejected"
+
+    overlay_diff_response = client.get(
+        "/runtime-center/memory/sleep/work-context-overlays/ctx-versioned-memory/diff",
+        params={"from_version": 1, "to_version": 2},
+    )
+    assert overlay_diff_response.status_code == 200
+    assert overlay_diff_response.json()["changes"]
+
+    industry_diff_response = client.get(
+        "/runtime-center/memory/sleep/industry-profiles/industry-versioned/diff",
+        params={"from_version": 1, "to_version": 2},
+    )
+    assert industry_diff_response.status_code == 200
+    assert industry_diff_response.json()["changes"]
+
+    rollback_overlay_response = client.post(
+        "/runtime-center/memory/sleep/work-context-overlays/ctx-versioned-memory/rollback",
+        json={"version": 1, "actor": "tester"},
+    )
+    assert rollback_overlay_response.status_code == 200
+    assert rollback_overlay_response.json()["status"] == "active"
+    assert rollback_overlay_response.json()["version"] >= 3
+
+    rollback_industry_response = client.post(
+        "/runtime-center/memory/sleep/industry-profiles/industry-versioned/rollback",
+        json={"version": 1, "actor": "tester"},
+    )
+    assert rollback_industry_response.status_code == 200
+    assert rollback_industry_response.json()["status"] == "active"
+    assert rollback_industry_response.json()["version"] >= 3
+
+    rebuild_response = client.post(
+        "/runtime-center/memory/sleep/rebuild",
+        json={"scope_type": "work_context", "scope_id": "ctx-versioned-memory", "trigger_kind": "rebuild"},
+    )
+    assert rebuild_response.status_code == 200
+    rebuild_payload = rebuild_response.json()
+    assert rebuild_payload["sleep_job"]["status"] == "completed"
+    assert rebuild_payload["sleep_job"]["trigger_kind"] == "manual"
+    assert rebuild_payload["sleep_job"]["metadata"]["requested_trigger_kind"] == "rebuild"
+    assert rebuild_payload["work_context_overlay"]["work_context_id"] == "ctx-versioned-memory"
+
+
+def test_runtime_center_memory_surface_exposes_structure_truth_after_industry_proposal_apply(
+    tmp_path,
+) -> None:
+    client = _build_client(tmp_path)
+    repository = client.app.state.memory_sleep_service._repository
+
+    first_profile = repository.upsert_industry_profile(
+        IndustryMemoryProfileRecord(
+            profile_id="industry-profile:industry-surface-apply:v1",
+            industry_instance_id="industry-surface-apply",
+            headline="Initial profile",
+            summary="Original industry direction",
+            strategic_direction="second direction",
+            active_constraints=["second constraint", "first constraint"],
+            active_focuses=["second direction", "first direction"],
+            key_entities=["entity-a"],
+            key_relations=["second relation", "first relation"],
+            version=1,
+            status="active",
+            metadata={"source": "test"},
+        )
+    )
+    repository.upsert_slot_preference(
+        IndustryMemorySlotPreferenceRecord(
+            preference_id="pref:industry-surface-apply:first-direction",
+            industry_instance_id="industry-surface-apply",
+            slot_key="first_direction",
+            slot_label="First Direction",
+            scope_level="industry",
+            scope_id="industry-surface-apply",
+            status="active",
+            promotion_count=3,
+        )
+    )
+    repository.upsert_continuity_detail(
+        MemoryContinuityDetailRecord(
+            detail_id="detail:industry:industry-surface-apply:guardrail",
+            scope_type="industry",
+            scope_id="industry-surface-apply",
+            detail_key="guardrail",
+            detail_text="Never drop the first-direction continuity guardrail.",
+            source_kind="manual",
+            status="active",
+            pinned=True,
+        )
+    )
+    proposal = repository.upsert_structure_proposal(
+        MemoryStructureProposalRecord(
+            proposal_id="structure:industry:industry-surface-apply:manual",
+            scope_type="industry",
+            scope_id="industry-surface-apply",
+            industry_instance_id="industry-surface-apply",
+            proposal_kind="read-order-optimization",
+            title="Promote first direction",
+            summary="Move first direction ahead of second direction.",
+            recommended_action="Make first direction the primary industry focus.",
+            candidate_profile_id=first_profile.profile_id,
+            risk_level="medium",
+            status="pending",
+        )
+    )
+
+    apply_response = client.post(
+        f"/runtime-center/memory/sleep/structure-proposals/{proposal.proposal_id}/apply",
+        json={"actor": "tester"},
+    )
+
+    assert apply_response.status_code == 200
+    assert apply_response.json()["status"] == "accepted"
+
+    surface_response = client.get(
+        "/runtime-center/memory/surface",
+        params={"scope_type": "industry", "scope_id": "industry-surface-apply"},
+    )
+
+    assert surface_response.status_code == 200
+    sleep_payload = surface_response.json()["sleep"]
+    assert sleep_payload["industry_profile"]["profile_id"] != first_profile.profile_id
+    assert sleep_payload["industry_profile"]["version"] == 2
+    assert sleep_payload["industry_profile"]["active_focuses"][0] == "first direction"
+    assert sleep_payload["industry_profile"]["metadata"]["last_applied_proposal_id"] == proposal.proposal_id
+    assert sleep_payload["slot_preferences"][0]["slot_key"] == "first_direction"
+    assert sleep_payload["continuity_details"][0]["detail_key"] == "guardrail"
+
+
 def test_runtime_center_memory_surface_filters_internal_noise_from_entities_and_relation_summaries(tmp_path) -> None:
     client = _build_client(tmp_path)
 
@@ -951,6 +1231,303 @@ def test_runtime_center_memory_surface_filters_internal_noise_from_entities_and_
         not item["summary"].lower().startswith("finance requires approval supports")
         for item in surface_payload["relations"]
     )
+
+
+def test_runtime_center_memory_pin_continuity_detail_enters_formal_memory_truth(tmp_path) -> None:
+    client = _build_client(tmp_path)
+
+    pin_response = client.post(
+        "/runtime-center/memory/continuity-details/pin",
+        json={
+            "scope_type": "work_context",
+            "scope_id": "ctx-pin-1",
+            "industry_instance_id": "industry-pin-1",
+            "work_context_id": "ctx-pin-1",
+            "detail_key": "risk-boundary",
+            "detail_text": "Do not average down after stop-loss.",
+            "pinned_until_phase": "week-1",
+        },
+    )
+
+    assert pin_response.status_code == 200
+    payload = pin_response.json()
+    assert payload["detail_key"] == "risk-boundary"
+    assert payload["pinned"] is True
+    assert payload["source_kind"] == "manual"
+
+    surface_response = client.get(
+        "/runtime-center/memory/surface",
+        params={"scope_type": "work_context", "scope_id": "ctx-pin-1"},
+    )
+
+    assert surface_response.status_code == 200
+    details = surface_response.json()["sleep"]["continuity_details"]
+    assert details
+    assert details[0]["detail_key"] == "risk-boundary"
+    assert details[0]["pinned"] is True
+
+
+def test_runtime_center_memory_sleep_keeps_core_continuity_ahead_of_new_noise(tmp_path) -> None:
+    client = _build_client(tmp_path)
+
+    industry_id = "industry-story-memory"
+    work_context_id = "ctx-story-memory"
+    client.app.state.strategy_memory_service.upsert_strategy(
+        StrategyMemoryRecord(
+            strategy_id=f"strategy:industry:{industry_id}:main-brain",
+            scope_type="industry",
+            scope_id=industry_id,
+            owner_agent_id="main-brain",
+            industry_instance_id=industry_id,
+            title="Story continuity baseline",
+            summary="Protect story continuity before style chatter.",
+            execution_constraints=[
+                "Do not break the ring truth or the old pier timeline.",
+            ],
+            current_focuses=[
+                "Keep the main continuity anchors stable.",
+            ],
+        )
+    )
+    assert client.post(
+        "/runtime-center/knowledge/memory",
+        json={
+            "title": "Story continuity baseline",
+            "content": "The industry baseline keeps ring truth, old pier timeline, and role identity stable.",
+            "scope_type": "industry",
+            "scope_id": industry_id,
+            "source_ref": f"industry:{industry_id}",
+            "tags": ["story", "continuity"],
+        },
+    ).status_code == 200
+    assert client.post(
+        "/runtime-center/memory/sleep/run",
+        json={
+            "scope_type": "industry",
+            "scope_id": industry_id,
+            "trigger_kind": "manual",
+        },
+    ).status_code == 200
+
+    for item in (
+        {
+            "title": "Ring truth",
+            "content": "Lin Xia must not learn the ring truth before chapter twelve.",
+            "scope_type": "work_context",
+            "scope_id": work_context_id,
+            "source_ref": f"memory:{work_context_id}:ring-truth",
+            "tags": ["story", "continuity"],
+        },
+        {
+            "title": "Old pier timeline",
+            "content": "The old pier remains the agreed handoff scene after the storm.",
+            "scope_type": "work_context",
+            "scope_id": work_context_id,
+            "source_ref": f"memory:{work_context_id}:old-pier",
+            "tags": ["story", "continuity"],
+        },
+    ):
+        assert client.post("/runtime-center/knowledge/memory", json=item).status_code == 200
+
+    client.app.state.memory_sleep_service.mark_scope_dirty(
+        scope_type="work_context",
+        scope_id=work_context_id,
+        industry_instance_id=industry_id,
+        reason="bind-industry",
+        source_ref=f"industry:{industry_id}",
+    )
+    assert client.post(
+        "/runtime-center/memory/continuity-details/pin",
+        json={
+            "scope_type": "work_context",
+            "scope_id": work_context_id,
+            "industry_instance_id": industry_id,
+            "work_context_id": work_context_id,
+            "detail_key": "ring-truth",
+            "detail_text": "The ring truth must remain stable until chapter twelve.",
+            "pinned_until_phase": "chapter-12",
+        },
+    ).status_code == 200
+    assert client.post(
+        "/runtime-center/memory/sleep/run",
+        json={
+            "scope_type": "work_context",
+            "scope_id": work_context_id,
+            "trigger_kind": "manual",
+        },
+    ).status_code == 200
+
+    for index in range(1, 4):
+        assert client.post(
+            "/runtime-center/knowledge/memory",
+            json={
+                "title": f"noise-{index}",
+                "content": f"Noise {index} is only a casual coffee, lunch, or palette chat.",
+                "scope_type": "work_context",
+                "scope_id": work_context_id,
+                "source_ref": f"memory:{work_context_id}:noise-{index}",
+                "tags": ["noise"],
+            },
+        ).status_code == 200
+    assert client.post(
+        "/runtime-center/memory/sleep/run",
+        json={
+            "scope_type": "work_context",
+            "scope_id": work_context_id,
+            "trigger_kind": "manual",
+        },
+    ).status_code == 200
+
+    surface_response = client.get(
+        "/runtime-center/memory/surface",
+        params={
+            "scope_type": "work_context",
+            "scope_id": work_context_id,
+            "query": "ring truth old pier continuity",
+        },
+    )
+    recall_response = client.get(
+        "/runtime-center/memory/recall",
+        params={
+            "scope_type": "work_context",
+            "scope_id": work_context_id,
+            "query": "ring truth old pier continuity",
+            "limit": 5,
+        },
+    )
+
+    assert surface_response.status_code == 200
+    assert recall_response.status_code == 200
+
+    sleep_payload = surface_response.json()["sleep"]
+    overlay = sleep_payload["work_context_overlay"]
+    recall_payload = recall_response.json()
+    top_hit = recall_payload["hits"][0]
+
+    assert not str(overlay["headline"]).startswith("noise-")
+    assert not str(overlay["summary"]).startswith("noise-")
+    assert not str(overlay["focus_summary"]).startswith("noise-")
+    assert "casual coffee" not in str(overlay["headline"]).lower()
+    assert "casual coffee" not in str(overlay["summary"]).lower()
+    assert "casual coffee" not in str(overlay["focus_summary"]).lower()
+    assert any(
+        anchor in " ".join(
+            [
+                str(overlay["headline"]),
+                str(overlay["summary"]),
+                str(overlay["focus_summary"]),
+                *list(overlay.get("active_constraints") or []),
+                *list(overlay.get("active_focuses") or []),
+            ]
+        ).lower()
+        for anchor in ("ring truth", "old pier", "continuity")
+    )
+    assert sleep_payload["continuity_details"]
+    assert sleep_payload["continuity_details"][0]["detail_key"] == "ring-truth"
+    assert sleep_payload["continuity_details"][0]["pinned"] is True
+    assert top_hit["source_type"] == "memory_profile"
+    assert not str(top_hit["summary"]).startswith("noise-")
+    assert "casual coffee" not in str(top_hit["summary"]).lower()
+    assert "casual coffee" not in str(top_hit["content_excerpt"]).lower()
+    assert any(
+        anchor in str(top_hit["content_excerpt"]).lower()
+        for anchor in ("ring truth", "old pier", "continuity")
+    )
+
+
+def test_runtime_center_memory_sleep_rejects_weak_generated_titles_from_main_read_surface(tmp_path) -> None:
+    client = _build_client(tmp_path)
+
+    industry_id = "industry-weak-title-memory"
+    work_context_id = "ctx-weak-title-memory"
+    assert client.post(
+        "/runtime-center/knowledge/memory",
+        json={
+            "title": "Story continuity baseline",
+            "content": "Keep ring truth and role identity stable across chapter transitions.",
+            "scope_type": "industry",
+            "scope_id": industry_id,
+            "source_ref": f"industry:{industry_id}",
+            "tags": ["story", "continuity"],
+        },
+    ).status_code == 200
+    assert client.post(
+        "/runtime-center/memory/sleep/run",
+        json={
+            "scope_type": "industry",
+            "scope_id": industry_id,
+            "trigger_kind": "manual",
+        },
+    ).status_code == 200
+    assert client.post(
+        "/runtime-center/knowledge/memory",
+        json={
+            "title": "story core round 2",
+            "content": "Role identity and ring truth remain the top continuity guardrails.",
+            "scope_type": "work_context",
+            "scope_id": work_context_id,
+            "source_ref": f"industry:{industry_id}",
+            "tags": ["story", "continuity"],
+        },
+    ).status_code == 200
+    assert client.post(
+        "/runtime-center/memory/continuity-details/pin",
+        json={
+            "scope_type": "work_context",
+            "scope_id": work_context_id,
+            "industry_instance_id": industry_id,
+            "work_context_id": work_context_id,
+            "detail_key": "role-identity",
+            "detail_text": "Role identity and ring truth must remain stable.",
+            "pinned_until_phase": "chapter-12",
+        },
+    ).status_code == 200
+    assert client.post(
+        "/runtime-center/memory/sleep/run",
+        json={
+            "scope_type": "work_context",
+            "scope_id": work_context_id,
+            "trigger_kind": "manual",
+        },
+    ).status_code == 200
+
+    surface_response = client.get(
+        "/runtime-center/memory/surface",
+        params={
+            "scope_type": "work_context",
+            "scope_id": work_context_id,
+            "query": "ring truth role identity continuity",
+        },
+    )
+    recall_response = client.get(
+        "/runtime-center/memory/recall",
+        params={
+            "scope_type": "work_context",
+            "scope_id": work_context_id,
+            "query": "ring truth role identity continuity",
+            "limit": 5,
+        },
+    )
+
+    assert surface_response.status_code == 200
+    assert recall_response.status_code == 200
+
+    overlay = surface_response.json()["sleep"]["work_context_overlay"]
+    top_hit = recall_response.json()["hits"][0]
+
+    assert str(overlay["headline"]).lower() != "story core round 2"
+    assert str(overlay["focus_summary"]).lower() != "story core round 2"
+    assert "ring truth" in " ".join(
+        [
+            str(overlay["headline"]),
+            str(overlay["summary"]),
+            str(overlay["focus_summary"]),
+            *list(overlay.get("active_constraints") or []),
+            *list(overlay.get("active_focuses") or []),
+        ]
+    ).lower()
+    assert str(top_hit["summary"]).lower() != "story core round 2"
+    assert "role identity" in str(top_hit["content_excerpt"]).lower()
 
 
 def test_runtime_center_memory_surface_supports_chinese_memory_summaries(tmp_path) -> None:

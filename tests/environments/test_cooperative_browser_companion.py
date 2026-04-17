@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import patch
 
 import pytest
 
@@ -287,6 +288,120 @@ async def test_browser_runtime_service_shutdown_stops_all_active_sessions(
     assert stopped == ["first", "second"]
     assert result["stopped_session_ids"] == ["first", "second"]
     assert result["remaining_session_ids"] == []
+
+
+async def test_browser_runtime_service_registers_default_companion_executor_for_existing_mount(
+    tmp_path,
+) -> None:
+    (
+        environment_service,
+        _env_repo,
+        _session_repo,
+        _event_bus,
+        environment,
+        session,
+        companion_runtime,
+        browser_runtime,
+    ) = _build_services(tmp_path)
+
+    companion_runtime.register_companion(
+        environment_id=environment.id,
+        session_mount_id=session.id,
+        transport_ref="transport:browser-companion:localhost",
+        status="attached",
+        available=True,
+        provider_session_ref="browser-session:web:main",
+    )
+    environment_service.register_browser_attach_transport(
+        session_mount_id=session.id,
+        transport_ref="transport:browser-companion:localhost",
+        status="attached",
+        browser_session_ref="browser-session:web:main",
+        browser_scope_ref="browser:baidu:main",
+        reconnect_token="reconnect-browser-session",
+    )
+
+    class _ToolBlock:
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+    class _ToolResponse:
+        def __init__(self, text: str) -> None:
+            self.content = [_ToolBlock(text)]
+
+    browser_runtime.set_environment_service(environment_service)
+
+    with patch(
+        "copaw.capabilities.browser_runtime.browser_use",
+        return_value=_ToolResponse('{"ok": true, "message": "attached open"}'),
+    ) as mocked_browser_use:
+        result = await environment_service.execute_browser_action(
+            session_mount_id=session.id,
+            action="open",
+            contract={
+                "url": "https://www.baidu.com",
+                "page_id": "page-1",
+            },
+        )
+
+    assert result["ok"] is True
+    assert result["message"] == "attached open"
+    assert mocked_browser_use.call_args.kwargs["action"] == "open"
+    assert mocked_browser_use.call_args.kwargs["session_id"] == "browser-session:web:main"
+    assert mocked_browser_use.call_args.kwargs["url"] == "https://www.baidu.com"
+    assert mocked_browser_use.call_args.kwargs["page_id"] == "page-1"
+
+
+@pytest.mark.asyncio
+async def test_browser_runtime_service_executes_late_registered_companion_mount_after_environment_binding(
+    tmp_path,
+) -> None:
+    (
+        environment_service,
+        _env_repo,
+        _session_repo,
+        _event_bus,
+        environment,
+        session,
+        companion_runtime,
+        browser_runtime,
+    ) = _build_services(tmp_path)
+
+    class _ToolBlock:
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+    class _ToolResponse:
+        def __init__(self, text: str) -> None:
+            self.content = [_ToolBlock(text)]
+
+    browser_runtime.set_environment_service(environment_service)
+
+    companion_runtime.register_companion(
+        environment_id=environment.id,
+        session_mount_id=session.id,
+        transport_ref="transport:browser-companion:localhost",
+        status="attached",
+        available=True,
+        provider_session_ref="browser-session:web:main",
+    )
+
+    with patch(
+        "copaw.capabilities.browser_runtime.browser_use",
+        return_value=_ToolResponse('{"ok": true, "message": "late mount open"}'),
+    ) as mocked_browser_use:
+        result = await environment_service.execute_browser_action(
+            session_mount_id=session.id,
+            action="open",
+            contract={
+                "url": "https://www.baidu.com",
+                "page_id": "page-1",
+            },
+        )
+
+    assert result["ok"] is True
+    assert result["message"] == "late mount open"
+    assert mocked_browser_use.call_args.kwargs["session_id"] == "browser-session:web:main"
 
 
 def test_browser_companion_registration_persists_execution_guardrails(

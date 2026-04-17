@@ -819,8 +819,15 @@
       - `GET /runtime-center/memory/sleep/industry-profiles`
       - `GET /runtime-center/memory/sleep/work-context-overlays`
       - `GET /runtime-center/memory/sleep/structure-proposals`
+      - `POST /runtime-center/memory/sleep/structure-proposals/{proposal_id}/apply`
+      - `POST /runtime-center/memory/sleep/structure-proposals/{proposal_id}/reject`
     - `/runtime-center/memory/profiles*` 已改为复用 `MemoryProfileService` 正式读层，不再允许继续保留旧的首条摘要 heuristics
     - recall/profile 正式读面元数据已补到：`read_layer / overlay_id / industry_profile_id`
+    - `2026-04-16` 真实性补充：
+      - 当前 `industry / work_context` 两类 `B+` 主链已通过 fresh regression 与 live HTTP smoke，不应再写成“只停留在设计”
+      - `POST /runtime-center/memory/sleep/structure-proposals/{proposal_id}/apply` 当前语义已是治理接受 + 真执行；它会把 proposal 推进到 `accepted`，并立即 materialize 成新的 active overlay/profile 版本，旧 active 版本同步 superseded
+      - formal memory 的正式写边界仍以 `selective ingestion` 为默认入口，但当前仓库已补入 `MemoryContinuityDetailRecord` 正式链，用于更强的 continuity detail 选择与手动 pin；更大范围的自动 durable write-in 仍属于下一轮增强
+      - 更长时长的 mixed long-run soak 仍是发布级验证尾巴；当前已完成 live / restart / parallel / scheduled 覆盖，但尚未等同于长时间连续混跑 fully signed-off
 
 ---
 

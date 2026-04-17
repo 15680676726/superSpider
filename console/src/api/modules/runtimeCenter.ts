@@ -428,6 +428,13 @@ export interface RuntimeHumanCockpitTrendPoint {
   quality: number;
 }
 
+export interface RuntimeHumanCockpitTraceEntry {
+  timestamp: string;
+  level: "info" | "warn" | "error";
+  message: string;
+  route?: string | null;
+}
+
 export interface RuntimeHumanCockpitApproval {
   id: string;
   kind: "decision" | "patch";
@@ -453,6 +460,7 @@ export interface RuntimeHumanCockpitAgent {
   morning_report?: RuntimeHumanCockpitReportBlock | null;
   evening_report?: RuntimeHumanCockpitReportBlock | null;
   trend: RuntimeHumanCockpitTrendPoint[];
+  trace: RuntimeHumanCockpitTraceEntry[];
 }
 
 export interface RuntimeHumanCockpitMainBrain {
@@ -461,6 +469,7 @@ export interface RuntimeHumanCockpitMainBrain {
   morning_report?: RuntimeHumanCockpitReportBlock | null;
   evening_report?: RuntimeHumanCockpitReportBlock | null;
   trend: RuntimeHumanCockpitTrendPoint[];
+  trace: RuntimeHumanCockpitTraceEntry[];
   approvals: RuntimeHumanCockpitApproval[];
   stage_summary?: RuntimeHumanCockpitStageSummary | null;
 }

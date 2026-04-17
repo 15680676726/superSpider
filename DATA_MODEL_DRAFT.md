@@ -2151,6 +2151,12 @@ Hard boundary remains:
 - no private conversation compaction input becomes canonical shared sleep truth
 - no model write may overwrite raw `EvidenceRecord / KnowledgeChunkRecord / Assignment / AgentReport` facts
 - this section records the approved contract; the current repo has already landed the first runtime implementation for `industry / work_context` sleep scopes
+
+`2026-04-16` current implementation boundary supplement:
+
+- `MemoryStructureProposalRecord.status=accepted` now means governance acceptance plus runtime materialization: the accepted proposal is executed into a newly rewritten active `IndustryMemoryProfileRecord` or `WorkContextMemoryOverlayRecord`, and the prior active version is superseded rather than left as the live read truth
+- formal memory write boundary still defaults to `selective ingestion`, but the repo now also carries a formal `MemoryContinuityDetailRecord` lane for stronger continuity anchors, including promoted strong details and manual pinning; broader automatic durable-write expansion still remains a next-round enhancement boundary
+- current repo has already verified live `restart / parallel / scheduled` smoke for `B+` scopes, but a longer-duration soak remains a release-validation requirement rather than a finished model contract
 ---
 
 ## 12.7 2026-03-19 media analysis ingest boundary

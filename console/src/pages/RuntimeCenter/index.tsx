@@ -10,6 +10,7 @@ import type {
   RuntimeHumanCockpitReportBlock,
   RuntimeHumanCockpitStageSummary,
   RuntimeHumanCockpitSummaryField,
+  RuntimeHumanCockpitTraceEntry,
   RuntimeHumanCockpitTrendPoint,
   RuntimeMainBrainRecord,
   RuntimeMainBrainResponse,
@@ -28,6 +29,7 @@ import AgentWorkPanel, {
   type CockpitTrendPoint,
   type DayMode,
 } from "./AgentWorkPanel";
+import { type CockpitTraceLine } from "./CockpitTraceSection";
 import MainBrainCockpitPanel, {
   type MainBrainStageSummary,
   type PendingApprovalItem,
@@ -617,6 +619,17 @@ function mapCockpitTrend(
   }));
 }
 
+function mapCockpitTrace(
+  trace: RuntimeHumanCockpitTraceEntry[] | undefined,
+): CockpitTraceLine[] {
+  return (trace ?? []).map((item) => ({
+    timestamp: item.timestamp,
+    level: item.level,
+    message: item.message,
+    route: item.route ?? undefined,
+  }));
+}
+
 function mapCockpitApprovals(
   approvals: RuntimeHumanCockpitApproval[] | undefined,
 ): PendingApprovalItem[] {
@@ -841,6 +854,7 @@ export default function RuntimeCenterPage() {
           morningReport={mainBrainReports.morningReport}
           eveningReport={mainBrainReports.eveningReport}
           trend={mainBrainTrend}
+          trace={cockpitMainBrain ? mapCockpitTrace(cockpitMainBrain.trace) : []}
           approvals={approvals}
           stageSummary={stageSummary}
           dayMode={dayMode}
@@ -886,6 +900,7 @@ export default function RuntimeCenterPage() {
           morningReport={mapCockpitReportBlock(selectedCockpitAgent.morning_report)}
           eveningReport={mapCockpitReportBlock(selectedCockpitAgent.evening_report)}
           trend={mapCockpitTrend(selectedCockpitAgent.trend)}
+          trace={mapCockpitTrace(selectedCockpitAgent.trace)}
           dayMode={dayMode}
         />
       );
@@ -907,6 +922,7 @@ export default function RuntimeCenterPage() {
         morningReport={reports.morningReport}
         eveningReport={reports.eveningReport}
         trend={trend}
+        trace={[]}
         dayMode={dayMode}
       />
     );

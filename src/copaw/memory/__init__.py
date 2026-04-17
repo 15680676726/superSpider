@@ -23,6 +23,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "MemoryRebuildSummary": (".models", "MemoryRebuildSummary"),
     "MemoryReflectionSummary": (".models", "MemoryReflectionSummary"),
     "MemoryScopeSelector": (".models", "MemoryScopeSelector"),
+    "ContinuityDetailService": (".continuity_detail_service", "ContinuityDetailService"),
     "MemoryEntryPartition": (".precedence", "MemoryEntryPartition"),
     "MemoryPrecedenceService": (".precedence", "MemoryPrecedenceService"),
     "MemoryProfile": (".profile_service", "MemoryProfile"),
@@ -35,6 +36,8 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "MemorySleepInferenceService": (".sleep_inference_service", "MemorySleepInferenceService"),
     "MemorySleepService": (".sleep_service", "MemorySleepService"),
     "MemorySurfaceService": (".surface_service", "MemorySurfaceService"),
+    "StructureEnhancementService": (".structure_enhancement_service", "StructureEnhancementService"),
+    "StructureProposalExecutor": (".structure_proposal_executor", "StructureProposalExecutor"),
 }
 
 __all__ = list(_EXPORTS)

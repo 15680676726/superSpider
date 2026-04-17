@@ -2,11 +2,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import re
 
 from .derived_index_service import selector_matches_scope
 from .models import MemoryScopeSelector
 from .precedence import MemoryEntryPartition, MemoryPrecedenceService
 from ..state import MemoryFactIndexRecord
+
+_SPACE_RE = re.compile(r"\s+")
+_NOISE_TITLE_RE = re.compile(r"^noise(?:[-_\s:]*\d+)?", re.IGNORECASE)
 
 
 def _role_matches(entry: MemoryFactIndexRecord, role: str | None) -> bool:
@@ -14,6 +18,30 @@ def _role_matches(entry: MemoryFactIndexRecord, role: str | None) -> bool:
     if not normalized_role or not entry.role_bindings:
         return True
     return normalized_role in {item.lower() for item in entry.role_bindings}
+
+
+def _normalize_text(value: object | None) -> str:
+    return _SPACE_RE.sub(" ", str(value or "").strip())
+
+
+def _looks_like_noise_text(value: object | None) -> bool:
+    normalized = _normalize_text(value).lower()
+    return bool(normalized) and bool(_NOISE_TITLE_RE.match(normalized))
+
+
+def _is_low_signal_entry(entry: MemoryFactIndexRecord) -> bool:
+    metadata = dict(entry.metadata or {})
+    tags = {
+        str(item or "").strip().lower()
+        for item in [*list(entry.tags or []), *list(metadata.get("tags") or [])]
+        if str(item or "").strip()
+    }
+    if "noise" in tags:
+        return True
+    return any(
+        _looks_like_noise_text(value)
+        for value in (entry.title, entry.summary, entry.content_excerpt)
+    )
 
 
 @dataclass(slots=True)
@@ -161,6 +189,9 @@ class MemoryProfileService:
             if source_ref and source_ref not in seen_refs:
                 seen_refs.add(source_ref)
                 profile.source_refs.append(source_ref)
+
+            if _is_low_signal_entry(entry):
+                continue
 
             if entry.source_type == "strategy_memory":
                 mission = str(metadata.get("mission") or "").strip()

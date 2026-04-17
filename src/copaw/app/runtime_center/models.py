@@ -480,6 +480,7 @@ class RuntimeCenterAppStateView:
     prediction_service: Any = None
     governance_service: Any = None
     strategy_memory_service: Any = None
+    memory_sleep_service: Any = None
     routine_service: Any = None
     query_execution_service: Any = None
     buddy_projection_service: Any = None
@@ -534,6 +535,7 @@ class RuntimeCenterAppStateView:
             prediction_service=getattr(app_state, "prediction_service", None),
             governance_service=getattr(app_state, "governance_service", None),
             strategy_memory_service=getattr(app_state, "strategy_memory_service", None),
+            memory_sleep_service=getattr(app_state, "memory_sleep_service", None),
             routine_service=getattr(app_state, "routine_service", None),
             query_execution_service=getattr(app_state, "query_execution_service", None),
             buddy_projection_service=getattr(app_state, "buddy_projection_service", None),
@@ -774,6 +776,14 @@ class RuntimeHumanCockpitTrendPoint(BaseModel):
     quality: int = 0
 
 
+class RuntimeHumanCockpitTraceEntry(BaseModel):
+    """Short event line shown in the human cockpit trace list."""
+
+    timestamp: str
+    message: str
+    kind: str | None = None
+
+
 class RuntimeHumanCockpitApproval(BaseModel):
     """Pending approval item shown in the main-brain approval tab."""
 
@@ -805,6 +815,7 @@ class RuntimeHumanCockpitAgent(BaseModel):
     morning_report: RuntimeHumanCockpitReportBlock | None = None
     evening_report: RuntimeHumanCockpitReportBlock | None = None
     trend: list[RuntimeHumanCockpitTrendPoint] = Field(default_factory=list)
+    trace: list[RuntimeHumanCockpitTraceEntry] = Field(default_factory=list)
 
 
 class RuntimeHumanCockpitMainBrain(BaseModel):
@@ -820,6 +831,7 @@ class RuntimeHumanCockpitMainBrain(BaseModel):
     morning_report: RuntimeHumanCockpitReportBlock | None = None
     evening_report: RuntimeHumanCockpitReportBlock | None = None
     trend: list[RuntimeHumanCockpitTrendPoint] = Field(default_factory=list)
+    trace: list[RuntimeHumanCockpitTraceEntry] = Field(default_factory=list)
     approvals: list[RuntimeHumanCockpitApproval] = Field(default_factory=list)
     stage_summary: RuntimeHumanCockpitStageSummary | None = None
 

@@ -106,7 +106,7 @@ function normalizeCardStatus(status: string | undefined): RuntimeCardStatus {
   if (status === "state-service") {
     return "state-service";
   }
-  if (status === "fallback" || status === "hybrid" || status === "degraded") {
+  if (status === "fallback" || status === "degraded") {
     return "degraded";
   }
   return "unavailable";

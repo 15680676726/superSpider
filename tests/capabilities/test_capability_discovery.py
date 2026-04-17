@@ -3,12 +3,62 @@ import time
 
 import pytest
 
+from copaw.capabilities.service import CapabilityService
 from copaw.capabilities.capability_discovery import CapabilityDiscoveryService
 from copaw.capabilities.remote_skill_catalog import (
     CuratedSkillCatalogEntry,
     CuratedSkillCatalogSearchResponse,
 )
 from copaw.industry.models import IndustryProfile, IndustryRoleBlueprint
+
+
+def test_capability_service_forwards_environment_service_to_discovery_service() -> None:
+    initial_environment_service = object()
+    service = CapabilityService(environment_service=initial_environment_service)
+
+    assert (
+        service.get_discovery_service()._environment_service  # type: ignore[attr-defined]
+        is initial_environment_service
+    )
+
+    rebound_environment_service = object()
+    service.set_environment_service(rebound_environment_service)
+
+    assert (
+        service.get_discovery_service()._environment_service  # type: ignore[attr-defined]
+        is rebound_environment_service
+    )
+
+
+def test_capability_discovery_service_rebinds_environment_service_into_browser_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeBrowserRuntimeService:
+        def __init__(self, state_store) -> None:
+            captured["state_store"] = state_store
+            captured["instance"] = self
+            self.environment_service = None
+
+        def set_environment_service(self, environment_service) -> None:
+            self.environment_service = environment_service
+
+    monkeypatch.setattr(
+        "copaw.capabilities.capability_discovery.BrowserRuntimeService",
+        _FakeBrowserRuntimeService,
+    )
+
+    state_store = object()
+    environment_service = object()
+    service = CapabilityDiscoveryService(state_store=state_store)
+    service.set_environment_service(environment_service)
+
+    browser_runtime = service._get_browser_runtime_service()
+
+    assert captured["state_store"] is state_store
+    assert browser_runtime is captured["instance"]
+    assert browser_runtime.environment_service is environment_service
 
 
 def test_search_hub_skills_cached_times_out_fast(monkeypatch: pytest.MonkeyPatch) -> None:

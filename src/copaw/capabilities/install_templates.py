@@ -1843,7 +1843,7 @@ def _build_browser_companion_install_template(
             InstallTemplateLifecycleAction(
                 action="example-run",
                 label="Read browser companion runtime",
-                summary="Resolve a live browser companion snapshot from EnvironmentService and optionally include browser runtime state.",
+                summary="Resolve the browser companion runtime and auto-activate a canonical managed browser seat when recovery is possible.",
                 risk_level="guarded",
             ),
         ],
@@ -2582,6 +2582,223 @@ def _cooperative_browser_companion_support(
         "playwright_ready": bool(browser_support.get("playwright_ready")),
         "default_browser_kind": str(browser_support.get("default_browser_kind") or ""),
         "default_browser_path": str(browser_support.get("default_browser_path") or ""),
+    }
+
+
+def _browser_companion_snapshot_availability(
+    snapshot: dict[str, Any],
+    runtime_context: dict[str, Any],
+) -> tuple[bool, dict[str, Any]]:
+    companion = dict(snapshot.get("browser_companion") or {})
+    available = _bool_value(companion.get("available"))
+    if available is None:
+        projection_companion = dict(
+            ((runtime_context.get("projection") or {}).get("browser_companion") or {})
+        )
+        available = _bool_value(projection_companion.get("available"))
+    return bool(available), companion
+
+
+def _browser_companion_requested_session_id(config: dict[str, Any] | None) -> str:
+    return _string_value((config or {}).get("session_id")) or "managed-browser-companion-example"
+
+
+def _browser_companion_transport_ref(session_id: str) -> str:
+    return f"transport:browser-companion:managed:{session_id}"
+
+
+def _resolve_browser_companion_activation_target(
+    *,
+    environment_service: object | None,
+    runtime_context: dict[str, Any],
+    config: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    session_mount_id = _string_value(runtime_context.get("session_mount_id"))
+    environment_id = _string_value(runtime_context.get("environment_id"))
+    requested_session_id = _browser_companion_requested_session_id(config)
+
+    if session_mount_id is not None:
+        session = _safe_environment_call(environment_service, "get_session", session_mount_id)
+        if session is None:
+            return None
+        return {
+            "session_mount_id": session_mount_id,
+            "environment_id": (
+                _string_value(getattr(session, "environment_id", None)) or environment_id
+            ),
+            "session_id": (
+                _string_value(getattr(session, "session_id", None)) or requested_session_id
+            ),
+            "created_session": False,
+        }
+
+    if environment_id is not None:
+        linked_sessions = _safe_environment_call(
+            environment_service,
+            "list_sessions",
+            environment_id=environment_id,
+            limit=1,
+        )
+        if isinstance(linked_sessions, list) and linked_sessions:
+            linked_session = linked_sessions[0]
+            resolved_session_mount_id = _string_value(getattr(linked_session, "id", None))
+            if resolved_session_mount_id is not None:
+                return {
+                    "session_mount_id": resolved_session_mount_id,
+                    "environment_id": environment_id,
+                    "session_id": (
+                        _string_value(getattr(linked_session, "session_id", None))
+                        or requested_session_id
+                    ),
+                    "created_session": False,
+                }
+
+    acquire = getattr(environment_service, "acquire_session_lease", None)
+    if not callable(acquire):
+        return None
+    lease = acquire(
+        channel="browser",
+        session_id=requested_session_id,
+        owner="capability-market/browser-companion-example-run",
+        metadata={
+            "host_mode": "managed-browser-companion",
+            "lease_class": "exclusive-writer",
+            "access_mode": "writer",
+            "session_scope": "browser-user-session",
+            "activation_source": "install-template:browser-companion/example-run",
+        },
+    )
+    return {
+        "session_mount_id": _string_value(getattr(lease, "id", None)),
+        "environment_id": _string_value(getattr(lease, "environment_id", None)),
+        "session_id": _string_value(getattr(lease, "session_id", None))
+        or requested_session_id,
+        "created_session": True,
+    }
+
+
+async def _auto_activate_browser_companion_runtime(
+    *,
+    browser_runtime_service: BrowserRuntimeService | None,
+    environment_service: object | None,
+    runtime_context: dict[str, Any],
+    browser_support: dict[str, Any],
+    config: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    if environment_service is None or browser_runtime_service is None:
+        return None
+    if not browser_support.get("playwright_ready"):
+        return None
+
+    target = _resolve_browser_companion_activation_target(
+        environment_service=environment_service,
+        runtime_context=runtime_context,
+        config=config,
+    )
+    if target is None:
+        return None
+
+    session_mount_id = _string_value(target.get("session_mount_id"))
+    environment_id = _string_value(target.get("environment_id"))
+    session_id = _string_value(target.get("session_id"))
+    if session_mount_id is None or session_id is None:
+        return None
+
+    operations = [
+        "auto-activate-managed-browser-seat"
+        if bool(target.get("created_session"))
+        else "repair-mounted-browser-seat"
+    ]
+    try:
+        start_payload = await browser_runtime_service.start_session(
+            BrowserSessionStartOptions(
+                session_id=session_id,
+                session_mount_id=session_mount_id,
+                environment_id=environment_id,
+                profile_id=_string_value((config or {}).get("profile_id")),
+                headed=(
+                    _bool_value((config or {}).get("headed"))
+                    if "headed" in (config or {})
+                    else None
+                ),
+                reuse_running_session=(
+                    _bool_value((config or {}).get("reuse_running_session"))
+                    if "reuse_running_session" in (config or {})
+                    else None
+                ),
+                persist_login_state=(
+                    _bool_value((config or {}).get("persist_login_state"))
+                    if "persist_login_state" in (config or {})
+                    else None
+                ),
+            )
+        )
+        start_result = dict(start_payload.get("result") or {})
+        operations.append(
+            "attach-managed-browser-runtime"
+            if start_payload.get("status") == "attached"
+            else "start-managed-browser-runtime"
+        )
+        if not start_result.get("ok"):
+            return {
+                "ok": False,
+                "operations": operations,
+                "session_mount_id": session_mount_id,
+                "environment_id": environment_id,
+                "summary": "Managed browser runtime auto-activation failed",
+                "detail": str(
+                    start_result.get("error")
+                    or start_result.get("message")
+                    or "Browser runtime did not report success."
+                ),
+                "code": str(start_result.get("code") or "runtime-unavailable"),
+                "source": "browser-runtime",
+            }
+        transport_ref = _browser_companion_transport_ref(session_id)
+        browser_runtime_service.register_companion(
+            session_mount_id=session_mount_id,
+            environment_id=environment_id,
+            transport_ref=transport_ref,
+            status="attached",
+            available=True,
+            preferred_execution_path="cooperative-native-first",
+            ui_fallback_mode="ui-fallback-last",
+            adapter_gap_or_blocker=None,
+            provider_session_ref=session_id,
+        )
+        operations.append("register-browser-companion")
+        browser_runtime_service.register_attach_transport(
+            session_mount_id=session_mount_id,
+            transport_ref=transport_ref,
+            status="attached",
+            browser_session_ref=session_id,
+            browser_scope_ref=f"browser-scope:managed:{session_id}",
+            reconnect_token=f"reconnect:browser-companion:{session_mount_id}",
+            preferred_execution_path="cooperative-native-first",
+            ui_fallback_mode="ui-fallback-last",
+            adapter_gap_or_blocker=None,
+        )
+        operations.append("register-browser-attach-transport")
+    except Exception as exc:
+        return {
+            "ok": False,
+            "operations": operations or ["auto-activate-managed-browser-seat"],
+            "session_mount_id": session_mount_id,
+            "environment_id": environment_id,
+            "summary": "Managed browser runtime auto-activation failed",
+            "detail": str(exc),
+            "code": "runtime-exception",
+            "source": "browser-runtime",
+        }
+
+    return {
+        "ok": True,
+        "operations": operations,
+        "session_mount_id": session_mount_id,
+        "environment_id": environment_id,
+        "session_id": session_id,
+        "transport_ref": _browser_companion_transport_ref(session_id),
+        "auto_activated": True,
     }
 
 
@@ -4454,19 +4671,6 @@ async def _browser_companion_example_run(
                 "available"
             )
         )
-    if runtime_context["session_mount_id"] is None and runtime_context["environment_id"] is None:
-        return _install_template_error_record(
-            template_id="browser-companion",
-            started_at=started_at,
-            summary="No browser companion session is currently mounted",
-            operations=operations,
-            runtime=runtime,
-            support=support,
-            code="runtime-unavailable",
-            detail="Mount a browser environment/session through EnvironmentService before running this example.",
-            retryable=True,
-            source="environment-service",
-        )
     if not available:
         return _install_template_error_record(
             template_id="browser-companion",
@@ -4500,6 +4704,7 @@ async def _browser_companion_example_run(
             "environment_id": runtime_context["environment_id"],
             "transport_ref": companion.get("transport_ref"),
             "provider_session_ref": companion.get("provider_session_ref"),
+            "auto_activated": bool(activation.auto_heal_attempted),
         },
     )
 

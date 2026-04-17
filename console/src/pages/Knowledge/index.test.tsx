@@ -36,6 +36,560 @@ afterEach(() => {
   requestMock.mockReset();
 });
 
+it("renders slot preferences continuity anchors details and applied proposal truth from the memory sleep surface", async () => {
+  requestMock.mockImplementation((url: string) => {
+    if (url === "/runtime-center/strategy-memory?status=active&limit=20") {
+      return Promise.resolve([createStrategyPayload()]);
+    }
+    if (url === "/runtime-center/knowledge/documents") {
+      return Promise.resolve([]);
+    }
+    if (url === "/runtime-center/knowledge") {
+      return Promise.resolve([]);
+    }
+    if (url === "/runtime-center/knowledge/memory") {
+      return Promise.resolve([]);
+    }
+    if (url === "/runtime-center/agents?view=business") {
+      return Promise.resolve([createAgentProfile()]);
+    }
+    if (url === "/runtime-center/agents/agent-1") {
+      return Promise.resolve(createAgentDetail("agent-1", "Execution Agent"));
+    }
+    if (url.startsWith("/runtime-center/memory/index?")) {
+      return Promise.resolve([]);
+    }
+    if (url.startsWith("/runtime-center/memory/entities?")) {
+      return Promise.resolve([]);
+    }
+    if (url.startsWith("/runtime-center/memory/opinions?")) {
+      return Promise.resolve([]);
+    }
+    if (url.startsWith("/runtime-center/memory/reflections?")) {
+      return Promise.resolve([]);
+    }
+    if (url.startsWith("/runtime-center/memory/surface?")) {
+      return Promise.resolve(
+        createMemorySurfacePayload({
+          scope_type: "work_context",
+          scope_id: "ctx-anchors",
+          sleep: {
+            industry_profile: {
+              profile_id: "industry-profile:anchors:v2",
+              industry_instance_id: "industry-anchors",
+              headline: "Industry long-term memory",
+              summary: "Keep the story continuity stable across rounds.",
+              strategic_direction: "Protect continuity first.",
+              active_constraints: ["Never break character continuity."],
+              active_focuses: ["Protect continuity anchors."],
+              key_entities: ["hero"],
+              key_relations: ["hero follows oath"],
+              evidence_refs: [],
+              version: 2,
+              status: "active",
+              metadata: {
+                last_applied_proposal_id: "structure:accepted-1",
+                applied_proposal_ids: ["structure:accepted-1"],
+              },
+            },
+            work_context_overlay: {
+              overlay_id: "overlay:anchors:v3",
+              work_context_id: "ctx-anchors",
+              headline: "Current work memory",
+              summary: "This round should preserve the hero oath and timeline order.",
+              focus_summary: "Protect hero oath before the next scene.",
+              active_constraints: ["Hero oath stays active."],
+              active_focuses: ["Keep the next scene aligned."],
+              active_entities: ["hero"],
+              active_relations: ["hero -> oath"],
+              evidence_refs: [],
+              version: 3,
+              status: "active",
+              metadata: {
+                continuity_anchors: [
+                  "Hero oath cannot be broken before chapter ten.",
+                  "Timeline stays before the market opens.",
+                ],
+                last_applied_proposal_id: "structure:accepted-1",
+              },
+            },
+            slot_preferences: [
+              {
+                preference_id: "pref:character-state",
+                industry_instance_id: "industry-anchors",
+                slot_key: "character_state",
+                slot_label: "Character State",
+                promotion_count: 4,
+                status: "active",
+              },
+            ],
+            continuity_details: [
+              {
+                detail_id: "detail:hero-oath",
+                scope_type: "work_context",
+                scope_id: "ctx-anchors",
+                detail_key: "hero_oath",
+                detail_text: "Hero oath cannot be broken before chapter ten.",
+                source_kind: "manual",
+                pinned: true,
+                status: "active",
+              },
+            ],
+            structure_proposals: [
+              {
+                proposal_id: "structure:accepted-1",
+                title: "Promote continuity anchors",
+                summary: "Lift continuity anchors to the formal read surface.",
+                recommended_action: "Keep continuity anchors at the top.",
+                risk_level: "medium",
+                status: "accepted",
+              },
+            ],
+            soft_rules: [],
+            conflicts: [],
+          },
+        }),
+      );
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+
+  render(<KnowledgePage />);
+
+  fireEvent.click(screen.getAllByRole("tab")[2]);
+
+  expect(await screen.findByText("Industry long-term memory")).toBeTruthy();
+  expect(screen.getByText("Character State")).toBeTruthy();
+  expect(screen.getAllByText("Hero oath cannot be broken before chapter ten.").length).toBeGreaterThan(0);
+  expect(screen.getByText("Timeline stays before the market opens.")).toBeTruthy();
+  expect(screen.getAllByText("structure:accepted-1").length).toBeGreaterThan(0);
+});
+
+it("submits a manual pin from the memory sleep surface", async () => {
+  requestMock.mockImplementation((url: string, options?: RequestInit) => {
+    if (url === "/runtime-center/strategy-memory?status=active&limit=20") {
+      return Promise.resolve([createStrategyPayload()]);
+    }
+    if (url === "/runtime-center/knowledge/documents") {
+      return Promise.resolve([]);
+    }
+    if (url === "/runtime-center/knowledge") {
+      return Promise.resolve([]);
+    }
+    if (url === "/runtime-center/knowledge/memory") {
+      return Promise.resolve([]);
+    }
+    if (url === "/runtime-center/agents?view=business") {
+      return Promise.resolve([createAgentProfile()]);
+    }
+    if (url === "/runtime-center/agents/agent-1") {
+      return Promise.resolve(createAgentDetail("agent-1", "Execution Agent"));
+    }
+    if (url.startsWith("/runtime-center/memory/index?")) {
+      return Promise.resolve([]);
+    }
+    if (url.startsWith("/runtime-center/memory/entities?")) {
+      return Promise.resolve([]);
+    }
+    if (url.startsWith("/runtime-center/memory/opinions?")) {
+      return Promise.resolve([]);
+    }
+    if (url.startsWith("/runtime-center/memory/reflections?")) {
+      return Promise.resolve([]);
+    }
+    if (url.startsWith("/runtime-center/memory/surface?")) {
+      return Promise.resolve(
+        createMemorySurfacePayload({
+          scope_type: "work_context",
+          scope_id: "ctx-pin",
+          sleep: {
+            work_context_overlay: {
+              overlay_id: "overlay:ctx-pin:v1",
+              work_context_id: "ctx-pin",
+              headline: "Current work memory",
+              summary: "Keep the stop-loss rule stable.",
+              focus_summary: "Protect the risk boundary first.",
+              active_constraints: ["Do not break the stop-loss rule."],
+              active_focuses: ["Protect the risk boundary first."],
+              active_entities: [],
+              active_relations: [],
+              evidence_refs: [],
+              version: 1,
+              status: "active",
+              metadata: {},
+            },
+            structure_proposals: [],
+            soft_rules: [],
+            conflicts: [],
+            continuity_details: [],
+          },
+        }),
+      );
+    }
+    if (url === "/runtime-center/memory/continuity-details/pin") {
+      const body = options?.body ? JSON.parse(String(options.body)) : {};
+      return Promise.resolve({
+        detail_id: "continuity:work_context:ctx-pin:risk-boundary",
+        scope_type: "work_context",
+        scope_id: "ctx-pin",
+        detail_key: body.detail_key,
+        detail_text: body.detail_text,
+        source_kind: "manual",
+        pinned: true,
+        status: "active",
+      });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+
+  render(<KnowledgePage />);
+
+  fireEvent.click(screen.getAllByRole("tab")[2]);
+  fireEvent.change(await screen.findByLabelText("manual-pin-key"), {
+    target: { value: "risk-boundary" },
+  });
+  fireEvent.change(screen.getByLabelText("manual-pin-text"), {
+    target: { value: "Do not average down after stop-loss." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "保存手动钉住" }));
+
+  await waitFor(() =>
+    expect(requestMock).toHaveBeenCalledWith(
+      "/runtime-center/memory/continuity-details/pin",
+      expect.objectContaining({
+        method: "POST",
+      }),
+    ),
+  );
+}, 30000);
+
+  it("applies and rejects structure proposals from the memory sleep surface", async () => {
+    const surfacePayload = createMemorySurfacePayload({
+      scope_type: "work_context",
+      scope_id: "ctx-1",
+      sleep: {
+        structure_proposals: [
+          {
+            proposal_id: "structure:1",
+            title: "应用型提案",
+            summary: "应用这个结构提案。",
+            recommended_action: "提高 overlay 读取优先级。",
+            risk_level: "medium",
+            status: "pending",
+          },
+          {
+            proposal_id: "structure:2",
+            title: "驳回型提案",
+            summary: "驳回这个结构提案。",
+            recommended_action: "保持当前读层顺序。",
+            risk_level: "low",
+            status: "pending",
+          },
+        ],
+        soft_rules: [],
+        conflicts: [],
+      },
+    });
+
+    requestMock.mockImplementation((url: string, options?: RequestInit) => {
+      if (url === "/runtime-center/strategy-memory?status=active&limit=20") {
+        return Promise.resolve([createStrategyPayload()]);
+      }
+      if (url === "/runtime-center/knowledge/documents") {
+        return Promise.resolve([]);
+      }
+      if (url === "/runtime-center/knowledge") {
+        return Promise.resolve([]);
+      }
+      if (url === "/runtime-center/knowledge/memory") {
+        return Promise.resolve([]);
+      }
+      if (url === "/runtime-center/agents?view=business") {
+        return Promise.resolve([createAgentProfile()]);
+      }
+      if (url === "/runtime-center/agents/agent-1") {
+        return Promise.resolve(createAgentDetail("agent-1", "Execution Agent"));
+      }
+      if (url.startsWith("/runtime-center/memory/index?")) {
+        return Promise.resolve([]);
+      }
+      if (url.startsWith("/runtime-center/memory/entities?")) {
+        return Promise.resolve([]);
+      }
+      if (url.startsWith("/runtime-center/memory/opinions?")) {
+        return Promise.resolve([]);
+      }
+      if (url.startsWith("/runtime-center/memory/reflections?")) {
+        return Promise.resolve([]);
+      }
+      if (url.startsWith("/runtime-center/memory/surface?")) {
+        return Promise.resolve(surfacePayload);
+      }
+      if (
+        url === "/runtime-center/memory/sleep/structure-proposals/structure%3A1/apply" &&
+        options?.method === "POST"
+      ) {
+        (surfacePayload.sleep as Record<string, unknown>).structure_proposals = [
+          {
+            proposal_id: "structure:1",
+            title: "应用型提案",
+            summary: "应用这个结构提案。",
+            recommended_action: "提高 overlay 读取优先级。",
+            risk_level: "medium",
+            status: "accepted",
+          },
+          {
+            proposal_id: "structure:2",
+            title: "驳回型提案",
+            summary: "驳回这个结构提案。",
+            recommended_action: "保持当前读层顺序。",
+            risk_level: "low",
+            status: "pending",
+          },
+        ];
+        return Promise.resolve({ status: "accepted" });
+      }
+      if (
+        url === "/runtime-center/memory/sleep/structure-proposals/structure%3A2/reject" &&
+        options?.method === "POST"
+      ) {
+        (surfacePayload.sleep as Record<string, unknown>).structure_proposals = [
+          {
+            proposal_id: "structure:1",
+            title: "应用型提案",
+            summary: "应用这个结构提案。",
+            recommended_action: "提高 overlay 读取优先级。",
+            risk_level: "medium",
+            status: "accepted",
+          },
+          {
+            proposal_id: "structure:2",
+            title: "驳回型提案",
+            summary: "驳回这个结构提案。",
+            recommended_action: "保持当前读层顺序。",
+            risk_level: "low",
+            status: "rejected",
+          },
+        ];
+        return Promise.resolve({ status: "rejected" });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    render(<KnowledgePage />);
+
+    fireEvent.click(screen.getAllByRole("tab")[2]);
+
+    expect(await screen.findByText("应用型提案")).toBeTruthy();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "应用提案" })[0]);
+
+    await waitFor(() => {
+      expect(
+        requestMock.mock.calls.some(
+          ([url, options]) =>
+            url === "/runtime-center/memory/sleep/structure-proposals/structure%3A1/apply" &&
+            (options as RequestInit | undefined)?.method === "POST",
+        ),
+      ).toBe(true);
+    });
+
+    fireEvent.click(screen.getAllByRole("button", { name: "驳回提案" })[0]);
+
+    await waitFor(() => {
+      expect(
+        requestMock.mock.calls.some(
+          ([url, options]) =>
+            url === "/runtime-center/memory/sleep/structure-proposals/structure%3A2/reject" &&
+            (options as RequestInit | undefined)?.method === "POST",
+        ),
+      ).toBe(true);
+    });
+  }, 30000);
+
+  it("rebuilds sleep memory and exposes version diff rollback actions", async () => {
+    const surfacePayload = createMemorySurfacePayload({
+      scope_type: "work_context",
+      scope_id: "ctx-1",
+      sleep: {
+        industry_profile: {
+          profile_id: "industry-profile:1",
+          industry_instance_id: "industry-1",
+          headline: "行业长期记忆",
+          summary: "新行业摘要",
+          strategic_direction: "证据先行",
+          active_constraints: ["先审后动"],
+          active_focuses: ["收口行业规则"],
+          key_entities: [],
+          key_relations: [],
+          evidence_refs: [],
+          version: 3,
+          status: "active",
+        },
+        work_context_overlay: {
+          overlay_id: "overlay:1",
+          work_context_id: "ctx-1",
+          headline: "工作记忆 overlay",
+          summary: "当前工作上下文摘要",
+          focus_summary: "新聚焦",
+          active_constraints: ["当前约束"],
+          active_focuses: ["当前焦点"],
+          active_entities: [],
+          active_relations: [],
+          evidence_refs: [],
+          version: 4,
+          status: "active",
+        },
+        structure_proposals: [],
+        soft_rules: [],
+        conflicts: [],
+      },
+    });
+
+    requestMock.mockImplementation((url: string, options?: RequestInit) => {
+      if (url === "/runtime-center/strategy-memory?status=active&limit=20") {
+        return Promise.resolve([createStrategyPayload()]);
+      }
+      if (url === "/runtime-center/knowledge/documents") {
+        return Promise.resolve([]);
+      }
+      if (url === "/runtime-center/knowledge") {
+        return Promise.resolve([]);
+      }
+      if (url === "/runtime-center/knowledge/memory") {
+        return Promise.resolve([]);
+      }
+      if (url === "/runtime-center/agents?view=business") {
+        return Promise.resolve([createAgentProfile()]);
+      }
+      if (url === "/runtime-center/agents/agent-1") {
+        return Promise.resolve(createAgentDetail("agent-1", "Execution Agent"));
+      }
+      if (url.startsWith("/runtime-center/memory/index?")) {
+        return Promise.resolve([]);
+      }
+      if (url.startsWith("/runtime-center/memory/entities?")) {
+        return Promise.resolve([]);
+      }
+      if (url.startsWith("/runtime-center/memory/opinions?")) {
+        return Promise.resolve([]);
+      }
+      if (url.startsWith("/runtime-center/memory/reflections?")) {
+        return Promise.resolve([]);
+      }
+      if (url.startsWith("/runtime-center/memory/surface?")) {
+        return Promise.resolve(surfacePayload);
+      }
+      if (url === "/runtime-center/memory/sleep/rebuild" && options?.method === "POST") {
+        return Promise.resolve({
+          scope_type: "work_context",
+          scope_id: "ctx-1",
+          sleep_job: { status: "completed", trigger_kind: "manual" },
+        });
+      }
+      if (
+        url ===
+        "/runtime-center/memory/sleep/industry-profiles/industry-1/diff?from_version=2&to_version=3"
+      ) {
+        return Promise.resolve({
+          changes: [{ field: "summary", from: "旧行业摘要", to: "新行业摘要" }],
+          from_version: 2,
+          to_version: 3,
+        });
+      }
+      if (
+        url === "/runtime-center/memory/sleep/industry-profiles/industry-1/rollback" &&
+        options?.method === "POST"
+      ) {
+        const currentIndustryProfile =
+          ((surfacePayload.sleep as Record<string, unknown>).industry_profile as
+            | Record<string, unknown>
+            | undefined) || {};
+        (surfacePayload.sleep as Record<string, unknown>).industry_profile = {
+          ...currentIndustryProfile,
+          version: 4,
+          summary: "旧行业摘要",
+        };
+        return Promise.resolve({ status: "active", version: 4 });
+      }
+      if (
+        url ===
+        "/runtime-center/memory/sleep/work-context-overlays/ctx-1/diff?from_version=3&to_version=4"
+      ) {
+        return Promise.resolve({
+          changes: [{ field: "focus_summary", from: "旧聚焦", to: "新聚焦" }],
+          from_version: 3,
+          to_version: 4,
+        });
+      }
+      if (
+        url === "/runtime-center/memory/sleep/work-context-overlays/ctx-1/rollback" &&
+        options?.method === "POST"
+      ) {
+        const currentWorkContextOverlay =
+          ((surfacePayload.sleep as Record<string, unknown>).work_context_overlay as
+            | Record<string, unknown>
+            | undefined) || {};
+        (surfacePayload.sleep as Record<string, unknown>).work_context_overlay = {
+          ...currentWorkContextOverlay,
+          version: 5,
+          focus_summary: "旧聚焦",
+        };
+        return Promise.resolve({ status: "active", version: 5 });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    render(<KnowledgePage />);
+
+    fireEvent.click(screen.getAllByRole("tab")[2]);
+
+    expect(await screen.findByText("行业长期记忆")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "重建睡眠记忆" }));
+    fireEvent.click(screen.getByRole("button", { name: "查看行业差异" }));
+    fireEvent.click(screen.getByRole("button", { name: "回滚行业版本" }));
+    fireEvent.click(screen.getByRole("button", { name: "查看上下文差异" }));
+    fireEvent.click(screen.getByRole("button", { name: "回滚上下文版本" }));
+
+    await waitFor(() => {
+      expect(
+        requestMock.mock.calls.some(
+          ([url, options]) =>
+            url === "/runtime-center/memory/sleep/rebuild" &&
+            (options as RequestInit | undefined)?.method === "POST",
+        ),
+      ).toBe(true);
+      expect(
+        requestMock.mock.calls.some(
+          ([url]) =>
+            url ===
+            "/runtime-center/memory/sleep/industry-profiles/industry-1/diff?from_version=2&to_version=3",
+        ),
+      ).toBe(true);
+      expect(
+        requestMock.mock.calls.some(
+          ([url, options]) =>
+            url === "/runtime-center/memory/sleep/industry-profiles/industry-1/rollback" &&
+            (options as RequestInit | undefined)?.method === "POST",
+        ),
+      ).toBe(true);
+      expect(
+        requestMock.mock.calls.some(
+          ([url]) =>
+            url ===
+            "/runtime-center/memory/sleep/work-context-overlays/ctx-1/diff?from_version=3&to_version=4",
+        ),
+      ).toBe(true);
+      expect(
+        requestMock.mock.calls.some(
+          ([url, options]) =>
+            url === "/runtime-center/memory/sleep/work-context-overlays/ctx-1/rollback" &&
+            (options as RequestInit | undefined)?.method === "POST",
+        ),
+      ).toBe(true);
+    });
+  }, 30000);
 function createAgentProfile(overrides: Record<string, unknown> = {}) {
   return {
     agent_id: "agent-1",

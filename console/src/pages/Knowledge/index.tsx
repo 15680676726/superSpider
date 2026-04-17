@@ -274,11 +274,15 @@ type MemoryIndustryProfile = {
   key_entities: string[];
   key_relations: string[];
   evidence_refs: string[];
+  version?: number | null;
+  status?: string | null;
+  metadata?: Record<string, unknown>;
 };
 
 type MemoryWorkContextOverlay = {
   overlay_id: string;
   work_context_id: string;
+  industry_instance_id?: string | null;
   headline: string;
   summary: string;
   focus_summary: string;
@@ -287,6 +291,9 @@ type MemoryWorkContextOverlay = {
   active_entities: string[];
   active_relations: string[];
   evidence_refs: string[];
+  version?: number | null;
+  status?: string | null;
+  metadata?: Record<string, unknown>;
 };
 
 type MemoryStructureProposal = {
@@ -298,6 +305,27 @@ type MemoryStructureProposal = {
   status: string;
 };
 
+type MemorySlotPreference = {
+  preference_id: string;
+  industry_instance_id: string;
+  slot_key: string;
+  slot_label: string;
+  promotion_count: number;
+  status: string;
+};
+
+type MemoryContinuityDetail = {
+  detail_id: string;
+  scope_type: string;
+  scope_id: string;
+  detail_key: string;
+  detail_text: string;
+  detail_label: string;
+  source_kind: string;
+  pinned: boolean;
+  status: string;
+};
+
 type MemorySleepOverlay = {
   digest?: MemorySleepDigest | null;
   industry_profile?: MemoryIndustryProfile | null;
@@ -305,6 +333,8 @@ type MemorySleepOverlay = {
   structure_proposals: MemoryStructureProposal[];
   soft_rules: MemorySleepSoftRule[];
   conflicts: MemorySleepConflict[];
+  slot_preferences: MemorySlotPreference[];
+  continuity_details: MemoryContinuityDetail[];
 };
 
 type MemorySurfacePayload = {
@@ -316,6 +346,20 @@ type MemorySurfacePayload = {
   relation_count: number;
   relation_kind_counts: Record<string, number>;
   relations: MemoryRelationView[];
+};
+
+type MemorySleepVersionChange = {
+  field: string;
+  from: unknown;
+  to: unknown;
+};
+
+type MemorySleepVersionDiff = {
+  scope_type: string;
+  scope_id: string;
+  from_version: number;
+  to_version: number;
+  changes: MemorySleepVersionChange[];
 };
 
 type MemoryReflectionRun = {
@@ -418,6 +462,34 @@ function formatPercent(value?: number | null): string {
   return `${Math.round(value * 100)}%`;
 }
 
+function normalizeNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function describeMemoryDiffValue(value: unknown): string {
+  if (Array.isArray(value)) {
+    const items = value
+      .map((item) => String(item ?? "").trim())
+      .filter(Boolean);
+    return items.length > 0 ? items.join(" / ") : "空";
+  }
+  if (value === null || value === undefined || value === "") {
+    return "空";
+  }
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+  return String(value);
+}
+
 function formatDateTime(value?: string | null): string {
   if (!value) {
     return "n/a";
@@ -447,6 +519,13 @@ function normalizeTextList(value: unknown): string[] {
   return value
     .map((item) => String(item ?? "").trim())
     .filter(Boolean);
+}
+
+function normalizeRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  return value as Record<string, unknown>;
 }
 
 function normalizeMemorySleepDigest(value: unknown): MemorySleepDigest | null {
@@ -577,6 +656,9 @@ function normalizeMemoryIndustryProfile(value: unknown): MemoryIndustryProfile |
     key_entities: keyEntities,
     key_relations: keyRelations,
     evidence_refs: evidenceRefs,
+    version: normalizeNumber(payload.version),
+    status: String(payload.status || "").trim() || null,
+    metadata: normalizeRecord(payload.metadata),
   };
 }
 
@@ -615,6 +697,9 @@ function normalizeMemoryWorkContextOverlay(value: unknown): MemoryWorkContextOve
     active_entities: activeEntities,
     active_relations: activeRelations,
     evidence_refs: evidenceRefs,
+    version: normalizeNumber(payload.version),
+    status: String(payload.status || "").trim() || null,
+    metadata: normalizeRecord(payload.metadata),
   };
 }
 
@@ -646,6 +731,63 @@ function normalizeMemoryStructureProposals(value: unknown): MemoryStructurePropo
     .filter((item): item is MemoryStructureProposal => Boolean(item));
 }
 
+function normalizeMemorySlotPreferences(value: unknown): MemorySlotPreference[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item, index) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        return null;
+      }
+      const payload = item as Record<string, unknown>;
+      const slotKey = String(payload.slot_key || "").trim();
+      const slotLabel = String(payload.slot_label || "").trim();
+      if (!slotKey && !slotLabel) {
+        return null;
+      }
+      return {
+        preference_id: String(payload.preference_id || `slot-preference-${index + 1}`),
+        industry_instance_id: String(payload.industry_instance_id || "").trim(),
+        slot_key: slotKey,
+        slot_label: slotLabel,
+        promotion_count: Number(payload.promotion_count || 0),
+        status: String(payload.status || "active").trim() || "active",
+      };
+    })
+    .filter((item): item is MemorySlotPreference => Boolean(item));
+}
+
+function normalizeMemoryContinuityDetails(value: unknown): MemoryContinuityDetail[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item, index) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        return null;
+      }
+      const payload = item as Record<string, unknown>;
+      const detailText = String(payload.detail_text || "").trim();
+      const detailKey = String(payload.detail_key || "").trim();
+      if (!detailText && !detailKey) {
+        return null;
+      }
+      return {
+        detail_id: String(payload.detail_id || `continuity-detail-${index + 1}`),
+        scope_type: String(payload.scope_type || "").trim(),
+        scope_id: String(payload.scope_id || "").trim(),
+        detail_key: detailKey,
+        detail_text: detailText,
+        detail_label: String(payload.detail_label || "").trim(),
+        source_kind: String(payload.source_kind || "model").trim() || "model",
+        pinned: Boolean(payload.pinned),
+        status: String(payload.status || "active").trim() || "active",
+      };
+    })
+    .filter((item): item is MemoryContinuityDetail => Boolean(item));
+}
+
 function normalizeMemorySleepOverlay(value: unknown): MemorySleepOverlay | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
@@ -657,13 +799,17 @@ function normalizeMemorySleepOverlay(value: unknown): MemorySleepOverlay | null 
   const structureProposals = normalizeMemoryStructureProposals(payload.structure_proposals);
   const softRules = normalizeMemorySleepRules(payload.soft_rules);
   const conflicts = normalizeMemorySleepConflicts(payload.conflicts);
+  const slotPreferences = normalizeMemorySlotPreferences(payload.slot_preferences);
+  const continuityDetails = normalizeMemoryContinuityDetails(payload.continuity_details);
   if (
     !digest &&
     !industryProfile &&
     !workContextOverlay &&
     structureProposals.length === 0 &&
     softRules.length === 0 &&
-    conflicts.length === 0
+    conflicts.length === 0 &&
+    slotPreferences.length === 0 &&
+    continuityDetails.length === 0
   ) {
     return null;
   }
@@ -674,6 +820,41 @@ function normalizeMemorySleepOverlay(value: unknown): MemorySleepOverlay | null 
     structure_proposals: structureProposals,
     soft_rules: softRules,
     conflicts,
+    slot_preferences: slotPreferences,
+    continuity_details: continuityDetails,
+  };
+}
+
+function normalizeMemorySleepVersionDiff(value: unknown): MemorySleepVersionDiff | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const payload = value as Record<string, unknown>;
+  const changes = Array.isArray(payload.changes)
+    ? payload.changes
+        .map((item) => {
+          if (!item || typeof item !== "object" || Array.isArray(item)) {
+            return null;
+          }
+          const change = item as Record<string, unknown>;
+          const field = String(change.field || "").trim();
+          if (!field) {
+            return null;
+          }
+          return {
+            field,
+            from: change.from,
+            to: change.to,
+          };
+        })
+        .filter((item): item is MemorySleepVersionChange => Boolean(item))
+    : [];
+  return {
+    scope_type: String(payload.scope_type || "").trim(),
+    scope_id: String(payload.scope_id || "").trim(),
+    from_version: normalizeNumber(payload.from_version) || 0,
+    to_version: normalizeNumber(payload.to_version) || 0,
+    changes,
   };
 }
 
@@ -727,6 +908,11 @@ export default function KnowledgePage() {
   const [reflectionRuns, setReflectionRuns] = useState<MemoryReflectionRun[]>([]);
   const [lastRebuildSummary, setLastRebuildSummary] = useState<MemoryRebuildSummary | null>(null);
   const [lastReflectSummary, setLastReflectSummary] = useState<MemoryReflectionSummary | null>(null);
+  const [sleepActionBusyKey, setSleepActionBusyKey] = useState<string | null>(null);
+  const [industryVersionDiff, setIndustryVersionDiff] = useState<MemorySleepVersionDiff | null>(null);
+  const [workContextVersionDiff, setWorkContextVersionDiff] = useState<MemorySleepVersionDiff | null>(null);
+  const [manualPinKey, setManualPinKey] = useState("");
+  const [manualPinText, setManualPinText] = useState("");
   const detailRequestSeqRef = useRef(0);
 
   const selectedAgent =
@@ -734,6 +920,39 @@ export default function KnowledgePage() {
     agents.find((agent) => isExecutionCore(agent)) ||
     agents[0] ||
     null;
+  const sleepIndustryProfile = memorySurface?.sleep?.industry_profile ?? null;
+  const sleepWorkContextOverlay = memorySurface?.sleep?.work_context_overlay ?? null;
+  const activeSleepScopeType = (memorySurface?.scope_type || memoryScopeType) as MemoryScopeType;
+  const activeSleepScopeId = String(
+    memorySurface?.scope_id || buildMemoryScopeSearch(memoryScopeType, memoryScopeId).scopeId || "",
+  ).trim();
+  const previousIndustryVersion =
+    typeof sleepIndustryProfile?.version === "number" && sleepIndustryProfile.version > 1
+      ? sleepIndustryProfile.version - 1
+      : null;
+  const previousWorkContextVersion =
+    typeof sleepWorkContextOverlay?.version === "number" && sleepWorkContextOverlay.version > 1
+      ? sleepWorkContextOverlay.version - 1
+      : null;
+  const sleepSlotPreferences = memorySurface?.sleep?.slot_preferences || [];
+  const sleepContinuityDetails = memorySurface?.sleep?.continuity_details || [];
+  const sleepContinuityAnchors = normalizeTextList(
+    sleepWorkContextOverlay?.metadata?.continuity_anchors,
+  );
+  const sleepIndustryAppliedProposalIds = normalizeTextList(
+    sleepIndustryProfile?.metadata?.applied_proposal_ids,
+  );
+  const sleepOverlayAppliedProposalIds = normalizeTextList(
+    sleepWorkContextOverlay?.metadata?.applied_proposal_ids,
+  );
+  const sleepLastAppliedProposalIds = Array.from(
+    new Set(
+      normalizeTextList([
+        sleepIndustryProfile?.metadata?.last_applied_proposal_id,
+        sleepWorkContextOverlay?.metadata?.last_applied_proposal_id,
+      ]),
+    ),
+  );
 
   const loadPage = useCallback(async () => {
     setLoading(true);
@@ -999,7 +1218,7 @@ export default function KnowledgePage() {
         }),
       });
       setLastRebuildSummary(summary);
-      await loadMemoryWorkspace({ includeRecall: Boolean(recallQuery.trim()) });
+      void loadMemoryWorkspace({ includeRecall: Boolean(recallQuery.trim()) });
       message.success("派生记忆索引重建完成。");
     } catch (saveError) {
       message.error(saveError instanceof Error ? saveError.message : String(saveError));
@@ -1028,12 +1247,208 @@ export default function KnowledgePage() {
         }),
       });
       setLastReflectSummary(summary);
-      await loadMemoryWorkspace({ includeRecall: Boolean(recallQuery.trim()) });
+      void loadMemoryWorkspace({ includeRecall: Boolean(recallQuery.trim()) });
       message.success("记忆反思完成。");
     } catch (saveError) {
       message.error(saveError instanceof Error ? saveError.message : String(saveError));
     } finally {
       setMemoryBusy(false);
+    }
+  };
+
+  const handleSleepRebuild = async () => {
+    if (!activeSleepScopeId || !["industry", "work_context"].includes(activeSleepScopeType)) {
+      message.warning("睡眠记忆重建只支持行业或工作上下文作用域。");
+      return;
+    }
+    setMemoryBusy(true);
+    try {
+      await request("/runtime-center/memory/sleep/rebuild", {
+        method: "POST",
+        body: JSON.stringify({
+          scope_type: activeSleepScopeType,
+          scope_id: activeSleepScopeId,
+          trigger_kind: "rebuild",
+        }),
+      });
+      setIndustryVersionDiff(null);
+      setWorkContextVersionDiff(null);
+      void loadMemoryWorkspace({ includeRecall: Boolean(recallQuery.trim()) });
+      message.success("睡眠记忆重建完成。");
+    } catch (saveError) {
+      message.error(saveError instanceof Error ? saveError.message : String(saveError));
+    } finally {
+      setMemoryBusy(false);
+    }
+  };
+
+  const handleStructureProposalDecision = async (
+    proposalId: string,
+    action: "apply" | "reject",
+  ) => {
+    const normalizedProposalId = proposalId.trim();
+    if (!normalizedProposalId) {
+      return;
+    }
+    const busyKey = `${action}:${normalizedProposalId}`;
+    setSleepActionBusyKey(busyKey);
+    try {
+      await request(
+        `/runtime-center/memory/sleep/structure-proposals/${encodeURIComponent(normalizedProposalId)}/${action}`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            actor: "knowledge-page",
+            note:
+              action === "apply"
+                ? "前台确认采用该结构提案。"
+                : "前台明确驳回该结构提案。",
+          }),
+        },
+      );
+      void loadMemoryWorkspace({ includeRecall: Boolean(recallQuery.trim()) });
+      message.success(action === "apply" ? "结构提案已应用。" : "结构提案已驳回。");
+    } catch (saveError) {
+      message.error(saveError instanceof Error ? saveError.message : String(saveError));
+    } finally {
+      setSleepActionBusyKey(null);
+    }
+  };
+
+  const handleIndustryVersionDiff = async () => {
+    if (!sleepIndustryProfile?.industry_instance_id || previousIndustryVersion === null) {
+      return;
+    }
+    setSleepActionBusyKey("industry-diff");
+    try {
+      const payload = await request<MemorySleepVersionDiff>(
+        `/runtime-center/memory/sleep/industry-profiles/${encodeURIComponent(
+          sleepIndustryProfile.industry_instance_id,
+        )}/diff?from_version=${previousIndustryVersion}&to_version=${sleepIndustryProfile.version}`,
+      );
+      setIndustryVersionDiff(normalizeMemorySleepVersionDiff(payload));
+    } catch (saveError) {
+      message.error(saveError instanceof Error ? saveError.message : String(saveError));
+    } finally {
+      setSleepActionBusyKey(null);
+    }
+  };
+
+  const handleIndustryRollback = async () => {
+    if (!sleepIndustryProfile?.industry_instance_id || previousIndustryVersion === null) {
+      return;
+    }
+    setSleepActionBusyKey("industry-rollback");
+    try {
+      await request(
+        `/runtime-center/memory/sleep/industry-profiles/${encodeURIComponent(
+          sleepIndustryProfile.industry_instance_id,
+        )}/rollback`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            version: previousIndustryVersion,
+            actor: "knowledge-page",
+          }),
+        },
+      );
+      setIndustryVersionDiff(null);
+      void loadMemoryWorkspace({ includeRecall: Boolean(recallQuery.trim()) });
+      message.success(`行业记忆已回滚到 v${previousIndustryVersion}。`);
+    } catch (saveError) {
+      message.error(saveError instanceof Error ? saveError.message : String(saveError));
+    } finally {
+      setSleepActionBusyKey(null);
+    }
+  };
+
+  const handleWorkContextVersionDiff = async () => {
+    if (!sleepWorkContextOverlay?.work_context_id || previousWorkContextVersion === null) {
+      return;
+    }
+    setSleepActionBusyKey("work-context-diff");
+    try {
+      const payload = await request<MemorySleepVersionDiff>(
+        `/runtime-center/memory/sleep/work-context-overlays/${encodeURIComponent(
+          sleepWorkContextOverlay.work_context_id,
+        )}/diff?from_version=${previousWorkContextVersion}&to_version=${sleepWorkContextOverlay.version}`,
+      );
+      setWorkContextVersionDiff(normalizeMemorySleepVersionDiff(payload));
+    } catch (saveError) {
+      message.error(saveError instanceof Error ? saveError.message : String(saveError));
+    } finally {
+      setSleepActionBusyKey(null);
+    }
+  };
+
+  const handleWorkContextRollback = async () => {
+    if (!sleepWorkContextOverlay?.work_context_id || previousWorkContextVersion === null) {
+      return;
+    }
+    setSleepActionBusyKey("work-context-rollback");
+    try {
+      await request(
+        `/runtime-center/memory/sleep/work-context-overlays/${encodeURIComponent(
+          sleepWorkContextOverlay.work_context_id,
+        )}/rollback`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            version: previousWorkContextVersion,
+            actor: "knowledge-page",
+          }),
+        },
+      );
+      setWorkContextVersionDiff(null);
+      await loadMemoryWorkspace({ includeRecall: Boolean(recallQuery.trim()) });
+      message.success(`工作记忆已回滚到 v${previousWorkContextVersion}。`);
+    } catch (saveError) {
+      message.error(saveError instanceof Error ? saveError.message : String(saveError));
+    } finally {
+      setSleepActionBusyKey(null);
+    }
+  };
+
+  const handleManualPinSubmit = async () => {
+    const normalizedScopeType =
+      activeSleepScopeType === "industry" || activeSleepScopeType === "work_context"
+        ? activeSleepScopeType
+        : null;
+    if (!normalizedScopeType || !activeSleepScopeId) {
+      message.warning("当前记忆读面还没有可钉住的正式范围。");
+      return;
+    }
+    if (!manualPinKey.trim() || !manualPinText.trim()) {
+      message.warning("请先填写细节标识和细节内容。");
+      return;
+    }
+    setSleepActionBusyKey("manual-pin");
+    try {
+      await request("/runtime-center/memory/continuity-details/pin", {
+        method: "POST",
+        body: JSON.stringify({
+          scope_type: normalizedScopeType,
+          scope_id: activeSleepScopeId,
+          detail_key: manualPinKey.trim(),
+          detail_text: manualPinText.trim(),
+          industry_instance_id:
+            sleepWorkContextOverlay?.industry_instance_id ||
+            sleepIndustryProfile?.industry_instance_id ||
+            (normalizedScopeType === "industry" ? activeSleepScopeId : null),
+          work_context_id:
+            normalizedScopeType === "work_context"
+              ? activeSleepScopeId
+              : sleepWorkContextOverlay?.work_context_id || null,
+        }),
+      });
+      setManualPinKey("");
+      setManualPinText("");
+      await loadMemoryWorkspace({ includeRecall: Boolean(recallQuery.trim()) });
+      message.success("手动钉住已写入正式记忆。");
+    } catch (saveError) {
+      message.error(saveError instanceof Error ? saveError.message : String(saveError));
+    } finally {
+      setSleepActionBusyKey(null);
     }
   };
 
@@ -1431,6 +1846,15 @@ export default function KnowledgePage() {
                       className="baize-card"
                       title={`记忆整理 (${memorySurface?.sleep?.soft_rules.length ?? 0} 条规则 / ${memorySurface?.sleep?.structure_proposals.length ?? 0} 个结构提案 / ${memorySurface?.sleep?.conflicts.length ?? 0} 个待处理)`}
                       data-testid="memory-sleep-surface"
+                      extra={
+                        memorySurface?.sleep &&
+                        activeSleepScopeId &&
+                        ["industry", "work_context"].includes(activeSleepScopeType) ? (
+                          <Button loading={memoryBusy} onClick={() => void handleSleepRebuild()}>
+                            重建睡眠记忆
+                          </Button>
+                        ) : null
+                      }
                     >
                       {memorySurface?.sleep ? (
                         <Space direction="vertical" size={12} style={{ width: "100%" }}>
@@ -1452,6 +1876,12 @@ export default function KnowledgePage() {
                             </Descriptions.Item>
                             <Descriptions.Item label="待处理冲突">
                               {memorySurface.sleep.conflicts.length}
+                            </Descriptions.Item>
+                            <Descriptions.Item label="长期偏好">
+                              {memorySurface.sleep.slot_preferences.length}
+                            </Descriptions.Item>
+                            <Descriptions.Item label="强记细节">
+                              {memorySurface.sleep.continuity_details.length}
                             </Descriptions.Item>
                           </Descriptions>
 
@@ -1493,7 +1923,15 @@ export default function KnowledgePage() {
 
                           {memorySurface.sleep.industry_profile ? (
                             <Space direction="vertical" size={8} style={{ width: "100%" }}>
-                              <Text strong>{memorySurface.sleep.industry_profile.headline}</Text>
+                              <Space wrap>
+                                <Text strong>{memorySurface.sleep.industry_profile.headline}</Text>
+                                {typeof memorySurface.sleep.industry_profile.version === "number" ? (
+                                  <Tag color="green">{`v${memorySurface.sleep.industry_profile.version}`}</Tag>
+                                ) : null}
+                                {memorySurface.sleep.industry_profile.status ? (
+                                  <Tag>{memorySurface.sleep.industry_profile.status}</Tag>
+                                ) : null}
+                              </Space>
                               {memorySurface.sleep.industry_profile.summary ? (
                                 <Paragraph style={{ marginBottom: 0 }}>
                                   {compactText(memorySurface.sleep.industry_profile.summary, 280)}
@@ -1523,13 +1961,114 @@ export default function KnowledgePage() {
                                       {focus}
                                     </Tag>
                                   ))}
+                                {previousIndustryVersion !== null ? (
+                                  <Button
+                                    size="small"
+                                    loading={sleepActionBusyKey === "industry-diff"}
+                                    onClick={() => void handleIndustryVersionDiff()}
+                                  >
+                                    查看行业差异
+                                  </Button>
+                                ) : null}
+                                {previousIndustryVersion !== null ? (
+                                  <Button
+                                    size="small"
+                                    loading={sleepActionBusyKey === "industry-rollback"}
+                                    onClick={() => void handleIndustryRollback()}
+                                  >
+                                    回滚行业版本
+                                  </Button>
+                                ) : null}
                               </Space>
+                              {sleepIndustryAppliedProposalIds.length > 0 ||
+                              sleepLastAppliedProposalIds.length > 0 ? (
+                                <Space direction="vertical" size={4} style={{ width: "100%" }}>
+                                  <Text type="secondary">已应用提案</Text>
+                                  <Space wrap>
+                                    {sleepIndustryAppliedProposalIds.map((proposalId) => (
+                                      <Tag key={`industry-applied-${proposalId}`} color="green">
+                                        {proposalId}
+                                      </Tag>
+                                    ))}
+                                    {sleepLastAppliedProposalIds
+                                      .filter(
+                                        (proposalId) =>
+                                          !sleepIndustryAppliedProposalIds.includes(proposalId),
+                                      )
+                                      .map((proposalId) => (
+                                        <Tag key={`industry-latest-${proposalId}`} color="green">
+                                          {proposalId}
+                                        </Tag>
+                                      ))}
+                                  </Space>
+                                </Space>
+                              ) : null}
+                              {sleepSlotPreferences.length > 0 ? (
+                                <Space direction="vertical" size={4} style={{ width: "100%" }}>
+                                  <Text type="secondary">行业长期偏好</Text>
+                                  <Space wrap>
+                                    {sleepSlotPreferences.map((item) => (
+                                      <Tag key={item.preference_id} color="blue">
+                                        {item.slot_label || item.slot_key}
+                                      </Tag>
+                                    ))}
+                                  </Space>
+                                </Space>
+                              ) : null}
+                              {industryVersionDiff ? (
+                                <Space direction="vertical" size={6} style={{ width: "100%" }}>
+                                  <Text type="secondary">
+                                    {`行业版本差异 v${industryVersionDiff.from_version} -> v${industryVersionDiff.to_version}`}
+                                  </Text>
+                                  {industryVersionDiff.changes.length > 0 ? (
+                                    <List
+                                      size="small"
+                                      dataSource={industryVersionDiff.changes}
+                                      renderItem={(change) => (
+                                        <List.Item
+                                          key={`${change.field}-${describeMemoryDiffValue(change.to)}`}
+                                        >
+                                          <Space
+                                            direction="vertical"
+                                            size={2}
+                                            style={{ width: "100%" }}
+                                          >
+                                            <Text strong>{change.field}</Text>
+                                            <Text type="secondary">
+                                              {`旧值: ${compactText(
+                                                describeMemoryDiffValue(change.from),
+                                                200,
+                                              )}`}
+                                            </Text>
+                                            <Text type="secondary">
+                                              {`新值: ${compactText(
+                                                describeMemoryDiffValue(change.to),
+                                                200,
+                                              )}`}
+                                            </Text>
+                                          </Space>
+                                        </List.Item>
+                                      )}
+                                    />
+                                  ) : (
+                                    <Text type="secondary">当前行业版本没有字段变化。</Text>
+                                  )}
+                                </Space>
+                              ) : null}
                             </Space>
                           ) : null}
 
                           {memorySurface.sleep.work_context_overlay ? (
                             <Space direction="vertical" size={8} style={{ width: "100%" }}>
-                              <Text strong>{memorySurface.sleep.work_context_overlay.headline}</Text>
+                              <Space wrap>
+                                <Text strong>{memorySurface.sleep.work_context_overlay.headline}</Text>
+                                {typeof memorySurface.sleep.work_context_overlay.version === "number" ? (
+                                  <Tag color="green">{`v${memorySurface.sleep.work_context_overlay.version}`}</Tag>
+                                ) : null}
+                                {memorySurface.sleep.work_context_overlay.status ? (
+                                  <Tag>{memorySurface.sleep.work_context_overlay.status}</Tag>
+                                ) : null}
+                              </Space>
                               {memorySurface.sleep.work_context_overlay.focus_summary ? (
                                 <Paragraph style={{ marginBottom: 0 }}>
                                   {compactText(
@@ -1558,7 +2097,148 @@ export default function KnowledgePage() {
                                       {focus}
                                     </Tag>
                                   ))}
+                                {previousWorkContextVersion !== null ? (
+                                  <Button
+                                    size="small"
+                                    loading={sleepActionBusyKey === "work-context-diff"}
+                                    onClick={() => void handleWorkContextVersionDiff()}
+                                  >
+                                    查看上下文差异
+                                  </Button>
+                                ) : null}
+                                {previousWorkContextVersion !== null ? (
+                                  <Button
+                                    size="small"
+                                    loading={sleepActionBusyKey === "work-context-rollback"}
+                                    onClick={() => void handleWorkContextRollback()}
+                                  >
+                                    回滚上下文版本
+                                  </Button>
+                                ) : null}
                               </Space>
+                              {sleepOverlayAppliedProposalIds.length > 0 ||
+                              sleepLastAppliedProposalIds.length > 0 ? (
+                                <Space direction="vertical" size={4} style={{ width: "100%" }}>
+                                  <Text type="secondary">当前已应用提案</Text>
+                                  <Space wrap>
+                                    {sleepOverlayAppliedProposalIds.map((proposalId) => (
+                                      <Tag key={`overlay-applied-${proposalId}`} color="green">
+                                        {proposalId}
+                                      </Tag>
+                                    ))}
+                                    {sleepLastAppliedProposalIds
+                                      .filter(
+                                        (proposalId) =>
+                                          !sleepOverlayAppliedProposalIds.includes(proposalId),
+                                      )
+                                      .map((proposalId) => (
+                                        <Tag key={`overlay-latest-${proposalId}`} color="green">
+                                          {proposalId}
+                                        </Tag>
+                                      ))}
+                                  </Space>
+                                </Space>
+                              ) : null}
+                              {sleepContinuityAnchors.length > 0 ? (
+                                <Space direction="vertical" size={4} style={{ width: "100%" }}>
+                                  <Text type="secondary">连续性锚点</Text>
+                                  <List
+                                    size="small"
+                                    dataSource={sleepContinuityAnchors}
+                                    renderItem={(item) => <List.Item>{item}</List.Item>}
+                                  />
+                                </Space>
+                              ) : null}
+                              {activeSleepScopeType === "industry" ||
+                              activeSleepScopeType === "work_context" ? (
+                                <Space direction="vertical" size={8} style={{ width: "100%" }}>
+                                  <Text type="secondary">手动钉住</Text>
+                                  <Input
+                                    aria-label="manual-pin-key"
+                                    placeholder="细节标识，如 risk-boundary"
+                                    value={manualPinKey}
+                                    onChange={(event) => setManualPinKey(event.target.value)}
+                                  />
+                                  <TextArea
+                                    aria-label="manual-pin-text"
+                                    placeholder="写下必须长期记住的细节"
+                                    value={manualPinText}
+                                    onChange={(event) => setManualPinText(event.target.value)}
+                                    autoSize={{ minRows: 2, maxRows: 4 }}
+                                  />
+                                  <Space>
+                                    <Button
+                                      type="primary"
+                                      loading={sleepActionBusyKey === "manual-pin"}
+                                      onClick={() => void handleManualPinSubmit()}
+                                    >
+                                      保存手动钉住
+                                    </Button>
+                                  </Space>
+                                </Space>
+                              ) : null}
+                              {sleepContinuityDetails.length > 0 ? (
+                                <Space direction="vertical" size={4} style={{ width: "100%" }}>
+                                  <Text type="secondary">强记细节</Text>
+                                  <List
+                                    size="small"
+                                    dataSource={sleepContinuityDetails}
+                                    renderItem={(item) => (
+                                      <List.Item key={item.detail_id}>
+                                        <Space direction="vertical" size={2} style={{ width: "100%" }}>
+                                          <Space wrap>
+                                            <Tag color={item.pinned ? "gold" : "default"}>
+                                              {item.pinned ? "已钉住" : item.source_kind}
+                                            </Tag>
+                                            {item.detail_label ? <Tag>{item.detail_label}</Tag> : null}
+                                          </Space>
+                                          <Text>{item.detail_text}</Text>
+                                        </Space>
+                                      </List.Item>
+                                    )}
+                                  />
+                                </Space>
+                              ) : null}
+                              {workContextVersionDiff ? (
+                                <Space direction="vertical" size={6} style={{ width: "100%" }}>
+                                  <Text type="secondary">
+                                    {`上下文版本差异 v${workContextVersionDiff.from_version} -> v${workContextVersionDiff.to_version}`}
+                                  </Text>
+                                  {workContextVersionDiff.changes.length > 0 ? (
+                                    <List
+                                      size="small"
+                                      dataSource={workContextVersionDiff.changes}
+                                      renderItem={(change) => (
+                                        <List.Item
+                                          key={`${change.field}-${describeMemoryDiffValue(change.to)}`}
+                                        >
+                                          <Space
+                                            direction="vertical"
+                                            size={2}
+                                            style={{ width: "100%" }}
+                                          >
+                                            <Text strong>{change.field}</Text>
+                                            <Text type="secondary">
+                                              {`旧值: ${compactText(
+                                                describeMemoryDiffValue(change.from),
+                                                200,
+                                              )}`}
+                                            </Text>
+                                            <Text type="secondary">
+                                              {`新值: ${compactText(
+                                                describeMemoryDiffValue(change.to),
+                                                200,
+                                              )}`}
+                                            </Text>
+                                          </Space>
+                                        </List.Item>
+                                      )}
+                                    />
+                                  ) : (
+                                    <Text type="secondary">当前上下文版本没有字段变化。</Text>
+                                  )}
+                                </Space>
+                              ) : null}
                             </Space>
                           ) : null}
 
@@ -1582,7 +2262,7 @@ export default function KnowledgePage() {
                                 </List.Item>
                               )}
                             />
-                          ) : null}
+                              ) : null}
 
                           {memorySurface.sleep.conflicts.length > 0 ? (
                             <List
@@ -1603,14 +2283,14 @@ export default function KnowledgePage() {
                                     ) : null}
                                     {item.recommended_action ? (
                                       <Text type="secondary">
-                                        建议处理: {compactText(item.recommended_action, 160)}
+                                        {`建议处理: ${compactText(item.recommended_action, 160)}`}
                                       </Text>
                                     ) : null}
                                   </Space>
                                 </List.Item>
                               )}
                             />
-                              ) : null}
+                          ) : null}
 
                           {memorySurface.sleep.structure_proposals.length > 0 ? (
                             <List
@@ -1621,13 +2301,57 @@ export default function KnowledgePage() {
                                   <Space direction="vertical" size={6} style={{ width: "100%" }}>
                                     <Space wrap>
                                       <Text strong>{item.title}</Text>
-                                      <Tag color="blue">{item.status}</Tag>
+                                      <Tag
+                                        color={
+                                          item.status === "accepted"
+                                            ? "green"
+                                            : item.status === "rejected"
+                                              ? "red"
+                                              : "blue"
+                                        }
+                                      >
+                                        {item.status}
+                                      </Tag>
+                                      <Tag>{item.proposal_id}</Tag>
                                       <Tag>{`风险 ${item.risk_level}`}</Tag>
                                     </Space>
                                     {item.summary ? (
                                       <Paragraph style={{ marginBottom: 0 }}>
                                         {compactText(item.summary, 220)}
                                       </Paragraph>
+                                    ) : null}
+                                    {item.status === "pending" ? (
+                                      <Space wrap>
+                                        <Button
+                                          type="link"
+                                          loading={
+                                            sleepActionBusyKey === `apply:${item.proposal_id}`
+                                          }
+                                          onClick={() =>
+                                            void handleStructureProposalDecision(
+                                              item.proposal_id,
+                                              "apply",
+                                            )
+                                          }
+                                        >
+                                          应用提案
+                                        </Button>
+                                        <Button
+                                          type="link"
+                                          danger
+                                          loading={
+                                            sleepActionBusyKey === `reject:${item.proposal_id}`
+                                          }
+                                          onClick={() =>
+                                            void handleStructureProposalDecision(
+                                              item.proposal_id,
+                                              "reject",
+                                            )
+                                          }
+                                        >
+                                          驳回提案
+                                        </Button>
+                                      </Space>
                                     ) : null}
                                     {item.recommended_action ? (
                                       <Text type="secondary">

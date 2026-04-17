@@ -238,6 +238,84 @@ class _FakeMemoryActivationService:
         )
 
 
+class _OverlayAwarePromptRecallService:
+    def __init__(self) -> None:
+        now = datetime.now(UTC)
+        self.calls: list[dict[str, object]] = []
+        latest = MemoryFactIndexRecord(
+            id="memory-overlay-latest",
+            source_type="knowledge_chunk",
+            source_ref="chunk-overlay-latest",
+            scope_type="work_context",
+            scope_id="ctx-media-ops",
+            owner_agent_id="copaw-agent-runner",
+            title="Current governed checklist",
+            summary="Use the governed checklist before outbound approval.",
+            content_excerpt="Use the governed checklist before outbound approval.",
+            content_text="Use the governed checklist before outbound approval.",
+            updated_at=now,
+            created_at=now - timedelta(minutes=5),
+        )
+        history = MemoryFactIndexRecord(
+            id="memory-overlay-history",
+            source_type="knowledge_chunk",
+            source_ref="chunk-overlay-history",
+            scope_type="work_context",
+            scope_id="ctx-media-ops",
+            owner_agent_id="copaw-agent-runner",
+            title="Earlier governed follow-up",
+            summary="Previous cycle required evidence review before outbound release.",
+            content_excerpt="Previous cycle required evidence review before outbound release.",
+            content_text="Previous cycle required evidence review before outbound release.",
+            updated_at=now - timedelta(days=1),
+            created_at=now - timedelta(days=1, minutes=5),
+        )
+        self._profile_service = SimpleNamespace(
+            build_views=lambda **kwargs: SimpleNamespace(
+                profile=SimpleNamespace(
+                    scope_type=str(kwargs.get("scope_type") or "work_context"),
+                    scope_id=str(kwargs.get("scope_id") or "ctx-media-ops"),
+                    static_profile=["Industry baseline"],
+                    dynamic_profile=["Use the governed checklist before outbound approval."],
+                    active_preferences=[],
+                    active_constraints=["Evidence review stays mandatory before outbound approval."],
+                    current_focus_summary="Current governed checklist",
+                    current_operating_context=["Use the governed checklist before outbound approval."],
+                    source_refs=["chunk-overlay-latest"],
+                    read_layer="work_context_overlay",
+                    overlay_id="overlay:ctx-media-ops:v3",
+                    industry_profile_id="industry-profile:industry-1:v2",
+                ),
+                latest=[latest],
+                history=[history],
+            ),
+        )
+
+    def recall(self, **kwargs):
+        self.calls.append(dict(kwargs))
+        return MemoryRecallResponse(
+            query=str(kwargs.get("query") or ""),
+            backend_used="lexical",
+            hits=[
+                MemoryRecallHit(
+                    entry_id="memory-lexical-overlay-fallback",
+                    kind="knowledge_chunk",
+                    title="Lexical fallback reminder",
+                    summary="Lexical fallback should stay after overlay/profile injection.",
+                    content_excerpt="Lexical fallback should stay after overlay/profile injection.",
+                    source_type="knowledge_chunk",
+                    source_ref="chunk-lexical-fallback",
+                    scope_type="work_context",
+                    scope_id="ctx-media-ops",
+                    confidence=0.85,
+                    quality_score=0.8,
+                    score=1.0,
+                    backend="lexical",
+                ),
+            ],
+        )
+
+
 def test_goal_service_compiler_uses_memory_recall_hits() -> None:
     store = SQLiteStateStore(":memory:")
     service = GoalService(
@@ -377,6 +455,31 @@ def test_query_execution_prompt_uses_activation_result_before_recall_hits() -> N
     assert joined.index("# Activation Context") < joined.index(
         "# Truth-First Lexical Recall",
     )
+
+
+def test_query_execution_prompt_prefers_overlay_profile_surface_for_prompt_context() -> None:
+    recall_service = _OverlayAwarePromptRecallService()
+    service = KernelQueryExecutionService(
+        session_backend=object(),
+        memory_recall_service=recall_service,
+    )
+
+    lines = service._build_retrieved_knowledge_lines(
+        msgs=["Use the current governed checklist before outbound media approval"],
+        owner_agent_id="copaw-agent-runner",
+        industry_instance_id="industry-1",
+        industry_role_id="execution-core",
+        owner_scope="runtime",
+        work_context_id="ctx-media-ops",
+    )
+
+    joined = "\n".join(lines)
+    assert "# Truth-First Memory Profile" in joined
+    assert "Read layer: work_context_overlay" in joined
+    assert "Overlay: overlay:ctx-media-ops:v3" in joined
+    assert "Industry profile: industry-profile:industry-1:v2" in joined
+    assert "Current governed checklist" in joined
+    assert "# Truth-First Lexical Recall" in joined
 
 
 def test_query_execution_prompt_keeps_truth_first_scope_priority_with_activation() -> None:

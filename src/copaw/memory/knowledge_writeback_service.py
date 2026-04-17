@@ -78,6 +78,7 @@ class KnowledgeWritebackService:
         derived_index_service: object | None = None,
         relation_view_repository: object | None = None,
         reflection_service: object | None = None,
+        memory_sleep_service: object | None = None,
     ) -> None:
         self._knowledge_service = knowledge_service
         self._knowledge_repository = getattr(knowledge_service, "_repository", None)
@@ -98,6 +99,10 @@ class KnowledgeWritebackService:
             reflection_service
             or getattr(knowledge_service, "_reflection_service", None)
         )
+        self._memory_sleep_service = (
+            memory_sleep_service
+            or getattr(knowledge_service, "_memory_sleep_service", None)
+        )
 
     def apply_change(
         self,
@@ -117,6 +122,7 @@ class KnowledgeWritebackService:
         for relation_id in list(change.invalidate_relation_ids or []):
             self._invalidate_relation(relation_id=relation_id, now=now)
         self._reflect_scope(change.scope)
+        self._refresh_scope_projection(change.scope)
         return self.summarize_change(change)
 
     def build_report_writeback(
@@ -1188,6 +1194,19 @@ class KnowledgeWritebackService:
                 industry_instance_id=scope.industry_instance_id,
                 trigger_kind="knowledge-writeback",
                 create_learning_proposals=False,
+            )
+        except Exception:
+            return
+
+    def _refresh_scope_projection(self, scope: KnowledgeGraphScope) -> None:
+        refresh = getattr(self._memory_sleep_service, "refresh_scope_projection", None)
+        if not callable(refresh):
+            return
+        try:
+            refresh(
+                scope_type=scope.scope_type,
+                scope_id=scope.scope_id,
+                trigger_kind="knowledge-writeback",
             )
         except Exception:
             return

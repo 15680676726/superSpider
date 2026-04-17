@@ -294,6 +294,7 @@ class CapabilityDiscoveryService:
         self._capability_service = capability_service
         self._agent_profile_service = agent_profile_service
         self._state_store = state_store
+        self._environment_service: object | None = None
         self._fixed_sop_service: object | None = None
         self._browser_runtime_service: BrowserRuntimeService | None = None
         self._mcp_registry_catalog: object | None = None
@@ -311,6 +312,13 @@ class CapabilityDiscoveryService:
     def set_state_store(self, state_store: SQLiteStateStore | None) -> None:
         self._state_store = state_store
         self._browser_runtime_service = None
+
+    def set_environment_service(self, environment_service: object | None) -> None:
+        self._environment_service = environment_service
+        if self._browser_runtime_service is not None:
+            self._browser_runtime_service.set_environment_service(
+                environment_service,
+            )
 
     def set_fixed_sop_service(self, fixed_sop_service: object | None) -> None:
         self._fixed_sop_service = fixed_sop_service
@@ -448,6 +456,10 @@ class CapabilityDiscoveryService:
     def _get_browser_runtime_service(self) -> BrowserRuntimeService | None:
         if self._browser_runtime_service is None and self._state_store is not None:
             self._browser_runtime_service = BrowserRuntimeService(self._state_store)
+        if self._browser_runtime_service is not None:
+            self._browser_runtime_service.set_environment_service(
+                self._environment_service,
+            )
         return self._browser_runtime_service
 
     def _build_install_template_discovery_queries(

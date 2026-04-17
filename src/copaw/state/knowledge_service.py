@@ -297,6 +297,7 @@ class StateKnowledgeService:
                 pass
         self._mark_memory_sleep_dirty(stored.document_id, source_ref=stored.source_ref or stored.id)
         self._reflect_memory_scope(stored.document_id)
+        self._refresh_memory_sleep_projection(stored.document_id)
         return stored
 
     def delete_chunk(self, chunk_id: str) -> bool:
@@ -312,6 +313,7 @@ class StateKnowledgeService:
             if chunk is not None:
                 self._mark_memory_sleep_dirty(chunk.document_id, source_ref=chunk.source_ref or chunk.id)
                 self._reflect_memory_scope(chunk.document_id)
+                self._refresh_memory_sleep_projection(chunk.document_id)
         return deleted
 
     def import_document(
@@ -399,12 +401,32 @@ class StateKnowledgeService:
         marker = getattr(self._memory_sleep_service, "mark_scope_dirty", None)
         if scope is None or not callable(marker):
             return
+        industry_instance_id = None
+        if scope["scope_type"] == "industry":
+            industry_instance_id = scope["scope_id"]
+        elif scope["scope_type"] == "work_context":
+            industry_instance_id = _parse_industry_instance_id_from_source_ref(source_ref)
         try:
             marker(
                 scope_type=scope["scope_type"],
                 scope_id=scope["scope_id"],
+                industry_instance_id=industry_instance_id,
                 reason="knowledge-upsert",
                 source_ref=source_ref,
+            )
+        except Exception:
+            return
+
+    def _refresh_memory_sleep_projection(self, document_id: str) -> None:
+        scope = _parse_memory_document_id(document_id)
+        refresher = getattr(self._memory_sleep_service, "refresh_scope_projection", None)
+        if scope is None or not callable(refresher):
+            return
+        try:
+            refresher(
+                scope_type=scope["scope_type"],
+                scope_id=scope["scope_id"],
+                trigger_kind="knowledge-upsert",
             )
         except Exception:
             return
@@ -580,6 +602,17 @@ def _parse_memory_document_id(document_id: str) -> dict[str, str] | None:
         "scope_id": normalized_scope_id,
         "document_id": document_id,
     }
+
+
+def _parse_industry_instance_id_from_source_ref(source_ref: str | None) -> str | None:
+    text = str(source_ref or "").strip()
+    if not text.startswith("industry:"):
+        return None
+    remainder = text.split(":", 1)[1].strip()
+    if not remainder:
+        return None
+    industry_instance_id = remainder.split(":", 1)[0].strip()
+    return industry_instance_id or None
 
 
 def _select_memory_anchor(

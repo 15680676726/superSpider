@@ -18,6 +18,7 @@ import {
   type CockpitTrendPoint,
   type DayMode,
 } from "./AgentWorkPanel";
+import CockpitTraceSection, { type CockpitTraceLine } from "./CockpitTraceSection";
 import styles from "./index.module.less";
 
 export interface PendingApprovalItem {
@@ -44,6 +45,7 @@ export interface MainBrainCockpitPanelProps {
   morningReport?: CockpitReportBlock | null;
   eveningReport?: CockpitReportBlock | null;
   trend?: CockpitTrendPoint[];
+  trace?: CockpitTraceLine[];
   approvals: PendingApprovalItem[];
   stageSummary?: MainBrainStageSummary | null;
   dayMode: DayMode;
@@ -184,6 +186,7 @@ export default function MainBrainCockpitPanel({
   morningReport,
   eveningReport,
   trend,
+  trace,
   approvals,
   stageSummary,
   dayMode,
@@ -214,6 +217,15 @@ export default function MainBrainCockpitPanel({
         key: "stats",
         label: "统计",
         children: <CockpitTrendSection trend={trend} />,
+      },
+      {
+        key: "trace",
+        label: "追溯",
+        children: (
+          <CockpitTraceSection
+            trace={trace ?? []}
+          />
+        ),
       },
       {
         key: "stage-summary",
@@ -249,6 +261,7 @@ export default function MainBrainCockpitPanel({
       stageSummary,
       summaryFields,
       systemManagement,
+      trace,
       trend,
     ],
   );

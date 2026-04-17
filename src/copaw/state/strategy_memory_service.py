@@ -445,6 +445,7 @@ class StateStrategyMemoryService:
                 pass
         self._mark_memory_sleep_dirty(stored)
         self._reflect_scope(stored)
+        self._refresh_memory_sleep_projection(stored)
         return stored
 
     def delete_strategy(self, strategy_id: str) -> bool:
@@ -460,6 +461,7 @@ class StateStrategyMemoryService:
             if strategy is not None:
                 self._mark_memory_sleep_dirty(strategy)
                 self._reflect_scope(strategy)
+                self._refresh_memory_sleep_projection(strategy)
         return deleted
 
     def _reflect_scope(self, strategy: StrategyMemoryRecord) -> None:
@@ -498,6 +500,19 @@ class StateStrategyMemoryService:
                 industry_instance_id=(str(strategy.industry_instance_id).strip() if strategy.industry_instance_id else None),
                 reason="strategy-upsert",
                 source_ref=str(strategy.strategy_id).strip(),
+            )
+        except Exception:
+            return
+
+    def _refresh_memory_sleep_projection(self, strategy: StrategyMemoryRecord) -> None:
+        refresher = getattr(self._memory_sleep_service, "refresh_scope_projection", None)
+        if not callable(refresher):
+            return
+        try:
+            refresher(
+                scope_type=_normalize_scope_type(strategy.scope_type),
+                scope_id=str(strategy.scope_id).strip(),
+                trigger_kind="strategy-upsert",
             )
         except Exception:
             return

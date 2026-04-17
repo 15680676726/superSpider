@@ -34,6 +34,17 @@ def _is_failure_record(record: EvidenceRecord) -> bool:
     return "failed" in summary or "error" in summary
 
 
+def _is_strategy_actionable_failure_record(record: EvidenceRecord) -> bool:
+    if not _is_failure_record(record):
+        return False
+    capability_ref = str(record.capability_ref or "").strip().lower()
+    # Ignore learning's own derived bookkeeping failures here; those belong to
+    # acquisition/onboarding governance, not the generic capability strategy loop.
+    if capability_ref.startswith("learning:"):
+        return False
+    return True
+
+
 def _parse_strategy_metadata(diff_summary: str) -> dict[str, str]:
     metadata: dict[str, str] = {}
     for chunk in diff_summary.split(";"):
@@ -342,6 +353,7 @@ __all__ = [
     "_coerce_step_order",
     "_growth_matches",
     "_is_failure_record",
+    "_is_strategy_actionable_failure_record",
     "_list_like",
     "_maybe_await",
     "_mcp_trial_tool_entries",

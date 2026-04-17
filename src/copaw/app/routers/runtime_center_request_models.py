@@ -171,6 +171,33 @@ class MemorySleepRunRequest(BaseModel):
     trigger_kind: str = Field(default="manual", min_length=1)
 
 
+class MemorySleepRebuildRequest(BaseModel):
+    scope_type: Literal["industry", "work_context"]
+    scope_id: str = Field(min_length=1)
+    trigger_kind: str = Field(default="rebuild", min_length=1)
+
+
+class MemorySleepRollbackRequest(BaseModel):
+    version: int = Field(ge=1)
+    actor: str = Field(default="runtime-center", min_length=1)
+
+
+class MemoryStructureProposalDecisionRequest(BaseModel):
+    actor: str = Field(default="runtime-center", min_length=1)
+    note: str | None = Field(default=None)
+
+
+class MemoryContinuityDetailPinRequest(BaseModel):
+    scope_type: Literal["industry", "work_context"]
+    scope_id: str = Field(min_length=1)
+    detail_key: str = Field(min_length=1)
+    detail_text: str = Field(min_length=1)
+    industry_instance_id: str | None = Field(default=None)
+    work_context_id: str | None = Field(default=None)
+    pinned_until_phase: str | None = Field(default=None)
+    detail_label: str | None = Field(default=None)
+
+
 class TaskBatchActionRequest(BaseModel):
     task_ids: list[str] = Field(default_factory=list)
     action: Literal["cancel"] = "cancel"

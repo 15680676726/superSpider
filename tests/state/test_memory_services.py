@@ -505,6 +505,82 @@ def test_memory_retain_service_routes_report_outcome_to_work_context_memory(tmp_
     assert "closed the blocker" in work_context_chunks[0].content
 
 
+def test_memory_retain_service_daytime_refreshes_work_context_overlay(tmp_path) -> None:
+    _store, _knowledge, _strategy, retain, recall, _reflection, _derived, sleep = _build_memory_services_with_sleep(
+        tmp_path,
+    )
+
+    report = AgentReportRecord(
+        id="report-daytime-overlay-1",
+        industry_instance_id="industry-daytime-1",
+        work_context_id="ctx-daytime-overlay-1",
+        owner_agent_id="worker-1",
+        owner_role_id="researcher",
+        headline="白天进展同步",
+        summary="当前阻塞已经缩小到财务复核，下一步是补齐证据后继续推进。",
+        status="recorded",
+        result="completed",
+        evidence_ids=["evidence-1"],
+    )
+
+    retain.retain_agent_report(report)
+
+    overlay = sleep.get_active_work_context_overlay("ctx-daytime-overlay-1")
+    assert overlay is not None
+    assert overlay.work_context_id == "ctx-daytime-overlay-1"
+    assert "财务复核" in " ".join(
+        [
+            overlay.headline,
+            overlay.summary,
+            overlay.focus_summary,
+            *overlay.active_focuses,
+            *overlay.active_constraints,
+        ],
+    )
+
+    recalled = recall.recall(
+        query="财务复核",
+        scope_type="work_context",
+        scope_id="ctx-daytime-overlay-1",
+        limit=5,
+    )
+    assert recalled.hits
+    assert recalled.hits[0].metadata["read_layer"] == "work_context_overlay"
+
+
+def test_strategy_upsert_daytime_refreshes_industry_profile(tmp_path) -> None:
+    _store, _knowledge, strategy, _retain, _recall, _reflection, _derived, sleep = _build_memory_services_with_sleep(
+        tmp_path,
+    )
+
+    strategy.upsert_strategy(
+        StrategyMemoryRecord(
+            strategy_id="strategy:industry:industry-daytime-profile-1:main-brain",
+            scope_type="industry",
+            scope_id="industry-daytime-profile-1",
+            owner_agent_id="main-brain",
+            industry_instance_id="industry-daytime-profile-1",
+            title="白天行业主轴",
+            summary="行业主轴是先完成证据复核，再推进外呼审批。",
+            execution_constraints=["先完成证据复核，再推进外呼审批。"],
+            current_focuses=["收口证据复核，再继续外呼审批。"],
+        ),
+    )
+
+    profile = sleep.get_active_industry_profile("industry-daytime-profile-1")
+    assert profile is not None
+    assert profile.industry_instance_id == "industry-daytime-profile-1"
+    assert "证据复核" in " ".join(
+        [
+            profile.headline,
+            profile.summary,
+            profile.strategic_direction,
+            *profile.active_constraints,
+            *profile.active_focuses,
+        ],
+    )
+
+
 def test_memory_retain_service_keeps_shared_writeback_in_industry_scope_without_work_context(tmp_path) -> None:
     _store, knowledge, _strategy, retain, _recall, _reflection, _derived = _build_memory_services(tmp_path)
 

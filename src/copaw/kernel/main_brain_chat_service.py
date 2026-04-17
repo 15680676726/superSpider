@@ -744,7 +744,36 @@ def _format_truth_first_profile(
     scope_type: str,
     scope_id: str,
     entries: list[object],
+    profile: dict[str, Any] | None = None,
 ) -> str:
+    profile_payload = dict(profile or {})
+    if profile_payload:
+        current_focus = _first_non_empty(
+            profile_payload.get("current_focus_summary"),
+            *(profile_payload.get("active_constraints") or []),
+            *(profile_payload.get("dynamic_profile") or []),
+            *(profile_payload.get("static_profile") or []),
+            scope_id,
+        ) or scope_id
+        current_context = _first_non_empty(
+            *(profile_payload.get("current_operating_context") or []),
+            *(profile_payload.get("dynamic_profile") or []),
+            *(profile_payload.get("static_profile") or []),
+        ) or "No current operating context."
+        read_layer = _first_non_empty(profile_payload.get("read_layer"), "truth-first") or "truth-first"
+        lines = [
+            f"- Scope: {scope_type}/{scope_id}",
+            f"- Read layer: {read_layer}",
+            f"- Current focus: {_clip_text(current_focus, limit=120)}",
+            f"- Current operating context: {_clip_text(current_context, limit=160)}",
+        ]
+        overlay_id = _first_non_empty(profile_payload.get("overlay_id"))
+        if overlay_id is not None:
+            lines.append(f"- Overlay: {overlay_id}")
+        industry_profile_id = _first_non_empty(profile_payload.get("industry_profile_id"))
+        if industry_profile_id is not None:
+            lines.append(f"- Industry profile: {industry_profile_id}")
+        return "\n".join(lines)
     if not entries:
         return "- No truth-first profile available."
     latest = entries[0]
@@ -1884,9 +1913,10 @@ class MainBrainChatService:
         entries = list(snapshot.get("entries") or [])
         latest_entries = list(snapshot.get("latest_entries") or [])
         history_entries = list(snapshot.get("history_entries") or [])
+        profile = dict(snapshot.get("profile") or {})
         return "\n".join(
             [
-                f"## Truth-First Memory Profile\n{_format_truth_first_profile(scope_type=scope_type, scope_id=scope_id, entries=entries)}",
+                f"## Truth-First Memory Profile\n{_format_truth_first_profile(scope_type=scope_type, scope_id=scope_id, entries=entries, profile=profile)}",
                 f"## Truth-First Memory Latest Facts\n{_format_truth_first_entry_lines(latest_entries, limit=2)}",
                 f"## Truth-First Memory History\n{_format_truth_first_entry_lines(history_entries, limit=2)}",
             ],

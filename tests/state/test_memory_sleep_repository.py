@@ -4,6 +4,7 @@ from __future__ import annotations
 from copaw.state import (
     MemoryAliasMapRecord,
     MemoryConflictProposalRecord,
+    MemoryContinuityDetailRecord,
     MemoryMergeResultRecord,
     MemoryStructureProposalRecord,
     MemoryScopeDigestRecord,
@@ -11,6 +12,7 @@ from copaw.state import (
     MemorySleepScopeStateRecord,
     MemorySoftRuleRecord,
     IndustryMemoryProfileRecord,
+    IndustryMemorySlotPreferenceRecord,
     SQLiteStateStore,
     WorkContextMemoryOverlayRecord,
 )
@@ -317,3 +319,55 @@ def test_memory_sleep_repository_persists_profiles_overlays_and_structure_propos
         status="pending",
     )
     assert proposals == [pending_structure]
+
+
+def test_memory_sleep_repository_persists_slot_preferences_and_continuity_details(tmp_path) -> None:
+    store = SQLiteStateStore(tmp_path / "state.db")
+    repository = SqliteMemorySleepRepository(store)
+
+    slot_preference = repository.upsert_slot_preference(
+        IndustryMemorySlotPreferenceRecord(
+            preference_id="pref:industry-1:character-state",
+            industry_instance_id="industry-1",
+            slot_key="character_state",
+            slot_label="Character State",
+            scope_level="industry",
+            scope_id="industry-1",
+            source_kind="sleep",
+            promotion_count=2,
+            status="active",
+            metadata={"origin": "dynamic"},
+        )
+    )
+    continuity_detail = repository.upsert_continuity_detail(
+        MemoryContinuityDetailRecord(
+            detail_id="detail:ctx-1:hero-oath",
+            scope_type="work_context",
+            scope_id="ctx-1",
+            industry_instance_id="industry-1",
+            work_context_id="ctx-1",
+            detail_key="hero_oath",
+            detail_label="Hero Oath",
+            detail_text="The hero must keep the oath until chapter 10.",
+            source_kind="model",
+            source_ref="sleep-job-5",
+            pinned=True,
+            pinned_until_phase="chapter-10",
+            evidence_refs=["evidence:hero-oath"],
+            status="active",
+        )
+    )
+
+    slot_preferences = repository.list_slot_preferences(
+        industry_instance_id="industry-1",
+        status="active",
+    )
+    assert slot_preferences == [slot_preference]
+
+    continuity_details = repository.list_continuity_details(
+        scope_type="work_context",
+        scope_id="ctx-1",
+        status="active",
+        pinned_only=True,
+    )
+    assert continuity_details == [continuity_detail]

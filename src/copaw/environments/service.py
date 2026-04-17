@@ -160,6 +160,21 @@ class EnvironmentService:
             executor,
         )
 
+    def set_default_browser_companion_executor(
+        self,
+        executor: object | None,
+    ) -> None:
+        self._default_browser_companion_executor = executor
+
+    def resolve_default_browser_companion_executor(
+        self,
+        *,
+        transport_ref: str | None = None,
+        provider_session_ref: str | None = None,
+    ) -> object | None:
+        executor = getattr(self, "_default_browser_companion_executor", None)
+        return executor if callable(executor) else None
+
     def register_windows_app_executor(
         self,
         app_identity: str,

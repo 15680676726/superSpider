@@ -110,6 +110,7 @@ class CapabilityService:
             agent_profile_service=self._agent_profile_service,
             state_store=self._state_store,
         )
+        self._discovery_service.set_environment_service(self._environment_service)
         self._system_handler = SystemCapabilityHandler(
             get_capability_fn=self.get_capability,
             set_capability_enabled_fn=self.set_capability_enabled,
@@ -224,6 +225,7 @@ class CapabilityService:
 
     def set_environment_service(self, environment_service: object | None) -> None:
         self._environment_service = environment_service
+        self._discovery_service.set_environment_service(environment_service)
         self._system_handler.set_environment_service(environment_service)
         self._execution.set_environment_service(environment_service)
 

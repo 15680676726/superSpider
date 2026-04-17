@@ -12,28 +12,41 @@
 1. `AGENTS.md`
 2. `COPAW_CARRIER_UPGRADE_MASTERPLAN.md`
 3. 本文档 `TASK_STATUS.md`
-4. `docs/superpowers/specs/2026-03-27-intent-native-universal-carrier-and-symbiotic-host-runtime.md`（如任务涉及上位 carrier 目标 / symbiotic host runtime / seat runtime / workspace / host event）
-5. `implementation_plan.md`
-6. `V6_ROUTINE_MUSCLE_MEMORY_PLAN.md`
-7. `V7_MAIN_BRAIN_AUTONOMY_PLAN.md`
-8. `docs/superpowers/specs/2026-04-01-formal-planning-capability-gap-design.md`（如任务涉及短中长期 formal planner 缺口、Claude Code planning shell donor 边界、assignment/cycle/strategy planning 能力建设）
-9. `docs/superpowers/plans/2026-04-01-formal-planning-capability-gap-implementation-plan.md`（如任务涉及 formal planner 施工顺序、P-2/P-3/P-4/P-5 分阶段实现、planner file/test map）
-10. `MAIN_BRAIN_CHAT_ORCHESTRATION_SPLIT_PLAN.md`
-11. `CHAT_RUNTIME_ALIGNMENT_PLAN.md`
-12. `docs/superpowers/specs/2026-03-25-copaw-runtime-first-computer-control-alignment.md`（如任务涉及 runtime-first / computer-control / orchestrator / environment plane 视角）
-13. `docs/superpowers/specs/2026-03-26-agent-body-grid-computer-runtime.md`（如任务涉及 execution agent computer bodies / browser-desktop-document runtime / contention / recovery）
-14. `docs/superpowers/specs/2026-03-26-native-fixed-sop-kernel-and-n8n-retirement.md`（如任务涉及 fixed SOP / automation / `n8n` 退役 / runtime automation IA）
-15. `docs/superpowers/plans/2026-03-26-native-fixed-sop-kernel-and-n8n-retirement.md`（如任务涉及 fixed SOP kernel 施工顺序）
-16. `docs/superpowers/specs/2026-04-03-multi-seat-capability-autonomy-design.md`（如任务涉及 skill/MCP 自动安装、角色原型能力包、执行位实例能力快照、多执行位能力治理、升级替换与回滚）
-17. `docs/superpowers/plans/2026-04-03-multi-seat-capability-autonomy-implementation-plan.md`（如任务涉及多执行位能力自治的后端施工顺序、快/慢循环接线、seat 作用域 MCP 挂载与技能生命周期落地）
-18. `docs/superpowers/specs/2026-04-04-external-capability-assimilation-architecture.md`（如任务涉及 donor-first 能力吸纳、外部项目/skill/MCP/adapter/provider 供给面、source chain、opportunity radar、多源去重与能力组合治理）
-19. `docs/superpowers/plans/2026-04-04-external-capability-assimilation-implementation-plan.md`（如任务涉及 donor-first 外部能力吸纳的对象落地、discovery source chain、自主 scout、portfolio governance 与 Runtime Center 接线）
-20. `docs/superpowers/specs/2026-04-04-next-round-discipline-closure-spec.md`（如任务涉及下一轮 runtime/capability 纪律收口、熵控制、source chain、去重归一、写串行合同、child-run shell、MCP 生命周期、skill/package 元数据与 portfolio compaction）
-21. `docs/superpowers/plans/2026-04-04-donor-first-capability-evolution-priority-plan.md`（如任务涉及纠偏后的 capability evolution 下一轮施工顺序、donor-first 复用优先级、baseline import、MCP-native candidate、fallback-only local authored 边界）
-22. `docs/superpowers/specs/2026-04-06-universal-donor-execution-contract-design.md`（如任务涉及 donor formal provider injection、universal execution envelope、host compatibility contract、真实 donor “安装后不等于真正可用”的平台收口）
-23. 与当前任务直接相关的源码和测试
+4. `UNIFIED_ACCEPTANCE_STANDARD.md`（如任务涉及测试、验收、发布、完成声明、live smoke、long soak、真实运行结论）
+5. `docs/superpowers/specs/2026-03-27-intent-native-universal-carrier-and-symbiotic-host-runtime.md`（如任务涉及上位 carrier 目标 / symbiotic host runtime / seat runtime / workspace / host event）
+6. `implementation_plan.md`
+7. `V6_ROUTINE_MUSCLE_MEMORY_PLAN.md`
+8. `V7_MAIN_BRAIN_AUTONOMY_PLAN.md`
+9. `docs/superpowers/specs/2026-04-01-formal-planning-capability-gap-design.md`（如任务涉及短中长期 formal planner 缺口、Claude Code planning shell donor 边界、assignment/cycle/strategy planning 能力建设）
+10. `docs/superpowers/plans/2026-04-01-formal-planning-capability-gap-implementation-plan.md`（如任务涉及 formal planner 施工顺序、P-2/P-3/P-4/P-5 分阶段实现、planner file/test map）
+11. `MAIN_BRAIN_CHAT_ORCHESTRATION_SPLIT_PLAN.md`
+12. `CHAT_RUNTIME_ALIGNMENT_PLAN.md`
+13. `docs/superpowers/specs/2026-03-25-copaw-runtime-first-computer-control-alignment.md`（如任务涉及 runtime-first / computer-control / orchestrator / environment plane 视角）
+14. `docs/superpowers/specs/2026-03-26-agent-body-grid-computer-runtime.md`（如任务涉及 execution agent computer bodies / browser-desktop-document runtime / contention / recovery）
+15. `docs/superpowers/specs/2026-03-26-native-fixed-sop-kernel-and-n8n-retirement.md`（如任务涉及 fixed SOP / automation / `n8n` 退役 / runtime automation IA）
+16. `docs/superpowers/plans/2026-03-26-native-fixed-sop-kernel-and-n8n-retirement.md`（如任务涉及 fixed SOP kernel 施工顺序）
+17. `docs/superpowers/specs/2026-04-03-multi-seat-capability-autonomy-design.md`（如任务涉及 skill/MCP 自动安装、角色原型能力包、执行位实例能力快照、多执行位能力治理、升级替换与回滚）
+18. `docs/superpowers/plans/2026-04-03-multi-seat-capability-autonomy-implementation-plan.md`（如任务涉及多执行位能力自治的后端施工顺序、快/慢循环接线、seat 作用域 MCP 挂载与技能生命周期落地）
+19. `docs/superpowers/specs/2026-04-04-external-capability-assimilation-architecture.md`（如任务涉及 donor-first 能力吸纳、外部项目/skill/MCP/adapter/provider 供给面、source chain、opportunity radar、多源去重与能力组合治理）
+20. `docs/superpowers/plans/2026-04-04-external-capability-assimilation-implementation-plan.md`（如任务涉及 donor-first 外部能力吸纳的对象落地、discovery source chain、自主 scout、portfolio governance 与 Runtime Center 接线）
+21. `docs/superpowers/specs/2026-04-04-next-round-discipline-closure-spec.md`（如任务涉及下一轮 runtime/capability 纪律收口、熵控制、source chain、去重归一、写串行合同、child-run shell、MCP 生命周期、skill/package 元数据与 portfolio compaction）
+22. `docs/superpowers/plans/2026-04-04-donor-first-capability-evolution-priority-plan.md`（如任务涉及纠偏后的 capability evolution 下一轮施工顺序、donor-first 复用优先级、baseline import、MCP-native candidate、fallback-only local authored 边界）
+23. `docs/superpowers/specs/2026-04-06-universal-donor-execution-contract-design.md`（如任务涉及 donor formal provider injection、universal execution envelope、host compatibility contract、真实 donor “安装后不等于真正可用”的平台收口）
+24. 与当前任务直接相关的源码和测试
 
 ---
+
+## 1.0 `2026-04-16` 统一验收口径
+
+- 自今日起，`TASK_STATUS.md` 里所有“已完成 / 已通过 / 已闭环 / 可放行”记录，都必须显式标明对应的验收层级：
+  - `L1` 单元验证
+  - `L2` 集成 / 合同验证
+  - `L3` 真实运行 smoke
+  - `L4` 长链 soak
+- `default regression`、`focused regression`、`live smoke`、`long soak` 必须拆开写，不允许再混成一句“测试通过”。
+- 以后凡是只证明了代码基线、局部回归、仓库内默认回归通过，都不能直接写成“真实运行已完成”。
+- 如果 live 或 soak 没跑，必须明确写“没跑”和原因；不允许默认省略。
+- 统一口径以仓库根目录 `UNIFIED_ACCEPTANCE_STANDARD.md` 为准；本文件里的阶段状态记录以后都按该文档表达完成度。
 
 ## 1.1.1 `2026-04-07` Buddy 领域能力阶段收口补充
 
@@ -381,6 +394,71 @@
     - `overlay_id`
     - `industry_profile_id`
 
+### 1.3.1a `2026-04-16` 记忆 `B+` 真实性校正与剩余尾巴
+
+- 当前 `industry / work_context` 两类 `B+` 记忆主链应按“已闭环”理解，不再写成 `implementation pending`：
+  - 知识图谱 relation view / rebuild / recall 引用已纳入正式读链
+  - 睡眠层 `industry_profile / work_context_overlay / structure_proposal` 已纳入正式派生链
+  - `Runtime Center / profile / recall / surface` 已统一消费 overlay/profile 元数据
+- 本轮 fresh verification 已补到：
+  - `PYTHONPATH=src C:\Python312\python.exe -m pytest tests/state/test_memory_sleep_service.py tests/state/test_memory_services.py tests/kernel/test_memory_recall_integration.py tests/memory/test_knowledge_writeback_service.py tests/app/test_runtime_center_memory_api.py tests/app/test_cron_manager.py::test_cron_manager_runs_memory_sleep_jobs_after_heartbeat tests/app/test_runtime_bootstrap_helpers.py::test_warm_runtime_memory_services_runs_idle_sleep_catchup_when_available tests/kernel/test_main_brain_chat_service.py::test_main_brain_chat_service_prompt_prefers_truth_first_profile_before_lexical_recall tests/kernel/test_main_brain_chat_service.py::test_main_brain_chat_service_scope_snapshot_prefers_overlay_profile_surface -q` -> `72 passed`
+  - `cmd /c npm --prefix console test -- src/pages/Knowledge/index.test.tsx` -> `11 passed`
+  - `cmd /c npm --prefix console run build` -> 通过
+  - live HTTP smoke 结果：`tmp/live_memory_bplus_smoke/result.json`
+- 本轮真实修正：
+  - sleep 并发写入时，pending `MemoryStructureProposal` 现会自动对齐当前 active overlay/profile，避免提案挂到旧版本
+  - `/runtime-center/memory/surface` 在 `work_context_overlay` 已持有 `industry_instance_id` 时，现可自动解析并返回对应 `sleep.industry_profile`，不再依赖人工 scope 绑定
+- 当前剩余只保留 2 项，不再泛化成“整套 `B+` 没做完”：
+  - formal memory 当前仍以 selective ingestion 为正式写边界；高价值长期细节的更强稳定写入仍是下一轮功能重点
+  - 更长时长的 mixed long-run soak 仍未完成；当前虽已通过 live / restart / parallel / scheduled smoke，但还未达到发布级连续混跑门槛
+
+### 1.3.1c `2026-04-16` 记忆读面尾巴实收口
+
+- 这轮按代码真相补平了 3 条此前还没完全接上的尾巴：
+  - `POST /runtime-center/memory/continuity-details/pin` 已进入正式后端 API，不再是 service-only 暗能力；手动钉住会写入正式 continuity detail，并立即刷新对应 `industry / work_context` projection
+  - `Knowledge` 页已新增正式“手动钉住”入口，用户可以直接提交 `detail_key + detail_text`，不再只能靠后端脚本或内部调用
+  - `Runtime Center` 主脑驾驶舱已把记忆简化读面正式接回 `main_brain.cockpit.summary_fields`，当前至少包括：
+    - `最该记住`
+    - `关键约束`
+    - `待处理整理`
+    - `最近记忆整理`
+- 同轮顺手补平了一条驾驶舱旧合同断点：
+  - `main_brain.cockpit.trace` 与 `agents[].trace` 已重新进入正式 payload，不再出现“模型里没字段”的断点
+  - 但当前只收到了后端 payload 层；驾驶舱 `追溯` tab 前端读面仍未正式落地，已转入 `docs/superpowers/specs/2026-04-16-runtime-center-trace-tab-design.md` 与 `docs/superpowers/plans/2026-04-16-runtime-center-trace-tab.md` 继续施工
+- 本轮 fresh verification：
+  - backend：
+    - `C:\Python312\python.exe -m pytest tests/app/test_runtime_center_memory_api.py -q`
+    - 结果：`24 passed`
+    - `C:\Python312\python.exe -m pytest tests/app/runtime_center_api_parts/overview_governance.py -q`
+    - 结果：`97 passed`
+  - console：
+    - `cmd /c npm --prefix console test -- src/pages/Knowledge/index.test.tsx src/pages/RuntimeCenter/index.test.tsx src/pages/RuntimeCenter/MainBrainCockpitPanel.test.tsx`
+    - 结果：`23 passed`
+
+### 1.3.1b `2026-04-16` 行业记忆结构增强设计已批准
+
+- 已新增正式设计文档：
+  - `docs/superpowers/specs/2026-04-16-industry-memory-structure-enhancement-design.md`
+- 这轮口径已收死为“与当前 `B+` 同轮完整增强”，不是另开平行章节：
+  - 不新造第二套记忆系统
+  - 不重做知识图谱
+  - 不引入向量库主链
+  - 不把聊天压缩重新升级为共享正式记忆
+- 本轮新增正式目标：
+  - 让知识图谱成为睡眠层正式输入，而不是只停留在 relation read surface
+  - 在固定通用主槽位之上，引入按行业/阶段动态增强的槽位体系
+  - 允许多轮稳定有效的增强槽位升格为行业长期偏好，并支持失效降权
+  - 为高价值长期细节补齐“模型主判 + 规则兜底 + 人工钉住”的强写入链
+  - 把 `structure proposal apply` 从“改状态”升级为真正 materialize active profile/overlay 的执行动作
+  - 前台只收口 `Runtime Center + Knowledge` 两个正式读面；聊天页不承担这轮行业记忆结构展示
+- 这轮完成标准不按“多几个接口 / 多几个卡片”判断，而按闭环判断：
+  - 图谱真的喂给睡眠层
+  - 行业结构增强真的影响主读链
+  - 强写入真的进入正式主读面
+  - proposal apply 真执行
+  - `Runtime Center / Knowledge` 真能看见
+  - 长链验收跑通
+
 ---
 
 ## 1.3.2 `2026-04-15` Chat 结果可见化正式生产链补充
@@ -588,7 +666,7 @@
 - `2026-04-02` 补充：`/runtime-center/chat/run` 的单环主脑聊天口径已正式收口。普通聊天前台不再阻塞等待 frontend model precheck，`KernelTurnExecutor auto` 也不再为普通文本额外触发 intake 模型判定；只有显式 `requested_actions`、已挂载 intake contract、确认/恢复连续性这几类正式信号才会转入 orchestrate。
 - `2026-04-02` 补充：聊天流 contract 已锁成“同一控制线程、同一 SSE、先回复后 sidecar”。`/runtime-center/chat/run` 会先流出 reply tokens，再把 main-brain commit sidecar 挂回同一条正式主脑控制线程；前台不再引入第二聊天窗口、第二轮询路由，也不恢复 `task-chat:*`。`agent-chat:*` 如仍出现在后台绑定/执行 artifact 中，也不再属于前台可直接打开的正式聊天会话。
 - `2026-04-02` 补充：主脑 phase-2 commit 状态现已正式持久化进 session snapshot 的 `main_brain.phase2_commit`。`RuntimeConversationFacade` 会在同一控制线程重载时把它回填到 conversation `meta.main_brain_commit`，因此确认中/已提交状态不会因为刷新聊天页而丢失。
-- `2026-04-12` 补充：`Runtime Center` 主脑驾驶舱已新增正式 `main_brain.cockpit` 合同，并开始作为普通用户主读面优先来源。当前正式字段至少包括 `card / summary_fields / morning_report / evening_report / trend / approvals / stage_summary / agents[]`；前端在存在 `main_brain.cockpit` 时优先直读这些正式字段，缺失时才回退旧派生。与此同时，`KernelTurnExecutor auto` 与 `MainBrainOrchestrator` 对显式 `requested_actions` 已统一优先物化 request-scoped intake contract，不再因为测试桩或注入 resolver 返回 `None` 而意外跌回 chat writeback decision model。当前验证：`python -m pytest tests/app/runtime_center_api_parts/overview_governance.py -q` -> `91 passed`；`python -m pytest tests/kernel/test_main_brain_intake.py tests/kernel/test_main_brain_orchestrator.py tests/kernel/test_turn_executor.py -q` -> `71 passed`；cockpit 前端定向测试与 `console` build 已在本轮主脑驾驶舱收口时通过。
+- `2026-04-12` 补充：`Runtime Center` 主脑驾驶舱已新增正式 `main_brain.cockpit` 合同，并开始作为普通用户主读面优先来源。当前正式字段至少包括 `card / summary_fields / morning_report / evening_report / trend / trace / approvals / stage_summary / agents[]`；前端在存在 `main_brain.cockpit` 时优先直读这些正式字段，缺失时才回退旧派生。与此同时，`KernelTurnExecutor auto` 与 `MainBrainOrchestrator` 对显式 `requested_actions` 已统一优先物化 request-scoped intake contract，不再因为测试桩或注入 resolver 返回 `None` 而意外跌回 chat writeback decision model。当前验证已更新为：`C:\Python312\python.exe -m pytest tests/app/runtime_center_api_parts/overview_governance.py -q` -> `97 passed`；`python -m pytest tests/kernel/test_main_brain_intake.py tests/kernel/test_main_brain_orchestrator.py tests/kernel/test_turn_executor.py -q` -> `71 passed`；cockpit 前端定向测试与 `console` build 已在本轮主脑驾驶舱收口时通过。
 - `2026-04-04` 补充：六缺口收口在当前隔离 worktree 内继续完成第二轮真收口，不再只停在“typed facade 包一层”。`Runtime Center` 后端正式前门现只剩 `/runtime-center/surface`；旧 `/overview`、`/main-brain` 只在断层测试里保留 `404` 断言。前端 `Runtime Center` 事件刷新已按 `cards / main_brain` section 增量刷新，未知 topic 不再回退成整页 full reload；侧边栏里的 `agents` 顶层入口已物理删除，`/agents` 只作为 runtime-center drill-down route 保留。provider/runtime bootstrap 现显式装配 `runtime_provider + provider_admin_service`，formal runtime/kernel 链已不再调用无参 `get_runtime_provider_facade()`；`ProviderManager.get_instance()` 只剩 CLI/live-smoke compatibility 路径。与此同时，`Runtime Center` 自动化/恢复读面已改用正式 snapshot contract：`ActorSupervisor.snapshot()`、`AutomationTaskGroup.overview_snapshot()`、`RuntimeCenterAppStateView.resolve_recovery_summary()` 已成为 canonical read seam，`overview_cards.py` 不再读取 `_loop_task / _agent_tasks` 这类私有字段。`System` overview 也已去掉 recovery 事实对象重复展示，只保留维护路由与 `recovery_source`。本轮验证：`python -m pytest tests/providers/test_runtime_provider_facade.py tests/agents/test_model_factory.py tests/app/test_runtime_bootstrap_helpers.py tests/app/test_runtime_bootstrap_split.py tests/app/runtime_center_api_parts/overview_governance.py tests/kernel/test_actor_supervisor.py tests/app/test_local_models_api.py tests/app/test_models_api.py tests/app/test_ollama_models_api.py tests/app/test_phase2_read_surface_unification.py tests/app/test_runtime_center_api.py tests/app/test_system_api.py -q` -> `252 passed`；`python -m pytest tests/app/test_phase_next_autonomy_smoke.py tests/app/test_operator_runtime_e2e.py tests/app/test_runtime_canonical_flow_e2e.py tests/app/runtime_center_api_parts/detail_environment.py tests/app/test_runtime_projection_contracts.py tests/app/test_runtime_query_services.py -q -k "surface or host_twin_summary or runtime_center or overview or main_brain or provider or bootstrap or recovery"` -> `26 passed`；`npm --prefix console run build` -> 通过；`npm --prefix console run test -- src/pages/RuntimeCenter/useRuntimeCenter.test.ts src/routes/resolveSelectedKey.test.ts src/layouts/Sidebar.test.tsx src/pages/Settings/System/index.test.tsx` -> `16 passed`。
 - `2026-04-05` runtime 三项收口补充：第一，`/runtime-center/chat/run` 已有真实 canonical e2e，能从聊天前门一路闭到 `writeback -> backlog -> assignment -> real fixed-SOP -> evidence -> terminal report`，并把 `work_context_id` 沿同一控制线程写回；第二，`KernelTurnExecutor.handle_query(...)` 的 command/query 两条分支已收成同一套 admission + terminal closeout helper，`waiting-confirm` 不会误 complete，`asyncio.CancelledError` 与“取消语义 runtime error”现在都会统一写成 `cancelled`，不再出现前端显示取消、内核却记失败的分叉；第三，`cron / automation` 已补上共享 launch contract，新增 `runtime_launch_contract.py` 统一生成 durable coordinator 元数据，cron agent request/request_context 与 automation loop payload 现在都会带上同源 launch fields，workflow 既有 `workflow-run` coordinator 合同继续保留。focused 验证：`python -m pytest tests/kernel/test_turn_executor.py tests/app/test_runtime_lifecycle.py tests/app/test_cron_executor.py tests/kernel/test_main_brain_orchestrator_roles.py -q` -> `87 passed`；相邻主链验证：`python -m pytest tests/app/test_runtime_canonical_flow_e2e.py tests/app/test_workflow_templates_api.py::test_workflow_template_service_launch_materializes_run tests/fixed_sops/test_service.py::test_fixed_sop_service_records_host_snapshot_in_run_and_evidence -q` -> `6 passed`。
 - `2026-04-04` 设计补充：外部能力吸纳现已形成 donor-first 正式设计与落地计划，不再默认把“主脑自己写 skill”当成长主路线。新增 `docs/superpowers/specs/2026-04-04-external-capability-assimilation-architecture.md` 与 `docs/superpowers/plans/2026-04-04-external-capability-assimilation-implementation-plan.md`，正式收口了以下口径：1) CoPaw 自身只掌握 truth/runtime/risk/evidence/lifecycle，不再追求自写所有功能；2) 外部项目、skill、MCP、browser/desktop/document adapter、provider/runtime helper 都作为 donor 供给面进入同一 `discover -> evaluate -> candidate -> scoped trial -> evidence -> lifecycle decision` 主链；3) discovery 采取 `gap/performance/periodic/opportunity` 四模，且按 `primary -> mirror -> fallback` 的单次单活 source chain 执行，source 故障只允许降级 discovery，不允许拖垮 runtime；4) 多源发现必须先做 donor/package/lineage 去重再扩 candidate；5) `local_authored` 降级为 fallback-only/gap-closure-only，而不是主增长路线；6) donor 组合、trust memory、retirement 和 portfolio compaction 进入后续正式施工范围。
