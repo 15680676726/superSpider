@@ -12,13 +12,14 @@ import { normalizeDisplayChinese } from "../../text";
 import {
   CockpitReportSection,
   CockpitSummarySection,
+  CockpitTraceSection,
   CockpitTrendSection,
   type CockpitReportBlock,
   type CockpitSummaryField,
+  type CockpitTraceLine,
   type CockpitTrendPoint,
   type DayMode,
 } from "./AgentWorkPanel";
-import CockpitTraceSection, { type CockpitTraceLine } from "./CockpitTraceSection";
 import styles from "./index.module.less";
 
 export interface PendingApprovalItem {
@@ -221,11 +222,7 @@ export default function MainBrainCockpitPanel({
       {
         key: "trace",
         label: "追溯",
-        children: (
-          <CockpitTraceSection
-            trace={trace ?? []}
-          />
-        ),
+        children: <CockpitTraceSection trace={trace} />,
       },
       {
         key: "stage-summary",

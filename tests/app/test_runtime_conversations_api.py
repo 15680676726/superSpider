@@ -685,6 +685,8 @@ def test_runtime_conversation_detail_injects_waiting_confirm_kickoff_prompt() ->
     assert "当前待编排：goal" not in text
     assert "当前待编排：lane 2 / backlog 1 / cycle 1 / assignment 0 / report 0。" in text
     assert "当前 lane：增长获客、交付履约。" in text
+    assert "待主脑处理研究汇报 2" in text
+    assert "待处理信号" not in text
     assert history_reader.calls[0].session_id == thread_id
 
 

@@ -2,7 +2,6 @@ import { Button, Card, Empty, Progress, Tabs, Typography, type TabsProps } from 
 import { useMemo, useState, type ReactNode } from "react";
 
 import { normalizeDisplayChinese } from "../../text";
-import CockpitTraceSection, { type CockpitTraceLine } from "./CockpitTraceSection";
 import styles from "./index.module.less";
 
 const { Text } = Typography;
@@ -24,6 +23,13 @@ export interface CockpitTrendPoint {
   completed: number;
   completionRate: number;
   quality: number;
+}
+
+export interface CockpitTraceLine {
+  timestamp: string;
+  level?: "info" | "warn" | "error";
+  message: string;
+  route?: string | null;
 }
 
 export type DayMode = "day" | "night";
@@ -52,6 +58,11 @@ type CockpitReportSectionProps = {
 
 type CockpitTrendSectionProps = {
   trend?: CockpitTrendPoint[];
+  emptyText?: string;
+};
+
+type CockpitTraceSectionProps = {
+  trace?: CockpitTraceLine[];
   emptyText?: string;
 };
 
@@ -241,6 +252,44 @@ export function CockpitTrendSection({
   );
 }
 
+export function CockpitTraceSection({
+  trace,
+  emptyText = "今天还没有追溯日志。",
+}: CockpitTraceSectionProps) {
+  const items = trace ?? [];
+  if (items.length === 0) {
+    return (
+      <div className={styles.cockpitEmptyWrap}>
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={emptyText} />
+      </div>
+    );
+  }
+
+  return (
+    <div className={styles.cockpitTraceList}>
+      {items.map((item, index) => (
+        <div
+          key={`${item.timestamp}:${item.message}:${index}`}
+          className={`${styles.cockpitTraceLine} ${
+            item.level === "error"
+              ? styles.cockpitTraceLineError
+              : item.level === "warn"
+                ? styles.cockpitTraceLineWarn
+                : ""
+          }`}
+        >
+          <span className={styles.cockpitTraceTime}>
+            {normalizeDisplayChinese(item.timestamp)}
+          </span>
+          <span className={styles.cockpitTraceMessage}>
+            {normalizeDisplayChinese(item.message)}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function AgentWorkPanel({
   title,
   summaryFields,
@@ -276,11 +325,7 @@ export default function AgentWorkPanel({
       {
         key: "trace",
         label: "追溯",
-        children: (
-          <CockpitTraceSection
-            trace={trace ?? []}
-          />
-        ),
+        children: <CockpitTraceSection trace={trace} />,
       },
     ],
     [dayMode, eveningReport, morningReport, summaryFields, trace, trend],

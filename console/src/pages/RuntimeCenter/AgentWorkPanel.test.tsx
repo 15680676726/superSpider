@@ -23,13 +23,6 @@ describe("AgentWorkPanel", () => {
           { label: "周一", completed: 1, completionRate: 80, quality: 75 },
           { label: "周二", completed: 2, completionRate: 90, quality: 82 },
         ]}
-        trace={[
-          {
-            timestamp: "2026-04-16T09:00:00Z",
-            level: "info",
-            message: "接到新派工：整理交付说明",
-          },
-        ]}
         dayMode="day"
       />,
     );
@@ -60,14 +53,6 @@ describe("AgentWorkPanel", () => {
           { label: "周一", completed: 1, completionRate: 80, quality: 75 },
           { label: "周二", completed: 2, completionRate: 90, quality: 82 },
         ]}
-        trace={[
-          {
-            timestamp: "2026-04-16T18:20:00Z",
-            level: "info",
-            message: "已完成日报回传",
-            route: "/runtime-center/reports/report-1",
-          },
-        ]}
         dayMode="night"
       />,
     );
@@ -81,28 +66,21 @@ describe("AgentWorkPanel", () => {
 
     expect(screen.getByText("今天先整理交付说明。")).toBeInTheDocument();
   });
-
-  it("shows a dedicated trace tab for agent execution details", () => {
+  it("renders trace lines inside the dedicated trace tab", () => {
     render(
       <AgentWorkPanel
-        title="小运营"
-        summaryFields={[
-          { label: "职责", value: "负责整理交付内容" },
-          { label: "主要负责工作", value: "整理交付说明并回传进度" },
-        ]}
-        morningReport={{
-          title: "早报",
-          items: ["今天先整理交付说明。"],
-        }}
-        trend={[
-          { label: "周一", completed: 1, completionRate: 80, quality: 75 },
-        ]}
+        title="测试执行位"
+        summaryFields={[{ label: "职责", value: "负责回传执行结果" }]}
         trace={[
           {
-            timestamp: "2026-04-16T09:00:00Z",
+            timestamp: "2026-04-16 09:00:00",
             level: "info",
-            message: "接到新派工：整理交付说明",
-            route: "/runtime-center/assignments/assignment-1",
+            message: "接到任务：整理交付证据",
+          },
+          {
+            timestamp: "2026-04-16 09:10:00",
+            level: "warn",
+            message: "等待确认：补齐截图",
           },
         ]}
         dayMode="day"
@@ -111,6 +89,8 @@ describe("AgentWorkPanel", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "追溯" }));
 
-    expect(screen.getByText("接到新派工：整理交付说明")).toBeInTheDocument();
+    expect(screen.getByText("2026-04-16 09:00:00")).toBeInTheDocument();
+    expect(screen.getByText("接到任务：整理交付证据")).toBeInTheDocument();
+    expect(screen.getByText("等待确认：补齐截图")).toBeInTheDocument();
   });
 });

@@ -16,6 +16,7 @@ from copaw.capabilities import CapabilityService
 from copaw.app.startup_recovery import StartupRecoverySummary
 from copaw.environments.models import SessionMount
 from copaw.evidence import EvidenceLedger
+from copaw.evidence.models import EvidenceRecord
 from copaw.industry import IndustryService
 from copaw.kernel import (
     KernelDispatcher,
@@ -839,91 +840,97 @@ def test_runtime_center_main_brain_route_exposes_human_cockpit_surface():
     assert cockpit["agents"][0]["morning_report"]["title"] == "早报"
 
 
-def test_runtime_center_main_brain_route_exposes_memory_summary_fields():
-    class _MemorySleepService:
-        def resolve_scope_overlay(self, *, scope_type: str, scope_id: str):
-            if scope_type == "work_context" and scope_id == "ctx-memory-1":
-                return {
-                    "digest": {
-                        "headline": "Sleep digest ready",
-                        "summary": "Keep the approval boundary and follow the next evidence step.",
-                        "current_constraints": ["Approval boundary stays active."],
-                    },
-                    "work_context_overlay": {
-                        "focus_summary": "Protect the approval boundary first.",
-                        "active_constraints": ["Approval boundary stays active."],
-                        "metadata": {
-                            "continuity_anchors": [
-                                "Approval boundary stays active until evidence review finishes.",
-                            ],
-                        },
-                    },
-                    "structure_proposals": [{"proposal_id": "proposal-1", "status": "pending"}],
-                    "conflicts": [{"proposal_id": "conflict-1", "status": "pending"}],
-                }
-            if scope_type == "industry" and scope_id == "industry-v1-ops":
-                return {
-                    "digest": {
-                        "headline": "Industry digest",
-                        "summary": "Protect continuity first.",
-                    },
-                    "industry_profile": {
-                        "active_constraints": ["Protect continuity first."],
-                        "active_focuses": ["Protect continuity first."],
-                    },
-                    "structure_proposals": [],
-                    "conflicts": [],
-                }
-            return {}
-
-    class _MemoryIndustryService(FakeIndustryService):
-        def get_instance_detail(self, instance_id: str):
-            detail = super().get_instance_detail(instance_id)
-            payload = detail.model_dump(mode="json")
-            payload["assignments"] = [
-                {
-                    "assignment_id": "assignment-memory-1",
-                    "title": "Guard approval boundary",
-                    "summary": "Keep the approval boundary stable.",
-                    "status": "active",
-                    "owner_agent_id": "ops-agent",
-                    "work_context_id": "ctx-memory-1",
-                    "updated_at": "2026-03-09T10:00:00+00:00",
-                },
-            ]
-            return type(
-                "IndustryDetail",
-                (),
-                {
-                    "model_dump": lambda self, mode="json": payload,
-                },
-            )()
-
+def test_runtime_center_main_brain_route_exposes_human_cockpit_trace_contract():
     app = build_runtime_center_app()
     app.state.state_query_service = FakeStateQueryService()
     app.state.evidence_query_service = FakeEvidenceQueryService()
     app.state.capability_service = FakeCapabilityService()
     app.state.learning_service = FakeLearningService()
     app.state.agent_profile_service = FakeAgentProfileService()
-    app.state.industry_service = _MemoryIndustryService()
+    app.state.industry_service = FakeIndustryService()
     app.state.governance_service = FakeGovernanceService()
     app.state.routine_service = FakeRoutineService()
     app.state.strategy_memory_service = FakeStrategyMemoryService()
-    app.state.memory_sleep_service = _MemorySleepService()
 
     client = TestClient(app)
     response = client.get("/runtime-center/surface?sections=main_brain")
 
     assert response.status_code == 200
-    summary_fields = response.json()["main_brain"]["cockpit"]["main_brain"]["summary_fields"]
-    labels = [item["label"] for item in summary_fields]
-    values_by_label = {item["label"]: item["value"] for item in summary_fields}
+    cockpit = response.json()["main_brain"]["cockpit"]
 
-    assert "最该记住" in labels
-    assert "关键约束" in labels
-    assert "待处理整理" in labels
-    assert "最近记忆整理" in labels
-    assert values_by_label["最该记住"] == "Approval boundary stays active until evidence review finishes."
+    assert "trace" in cockpit["main_brain"]
+    assert cockpit["main_brain"]["trace"][0]["timestamp"]
+    assert cockpit["main_brain"]["trace"][0]["message"]
+    assert "trace" in cockpit["agents"][0]
+    assert cockpit["agents"][0]["trace"][0]["timestamp"]
+    assert cockpit["agents"][0]["trace"][0]["message"]
+
+
+def test_runtime_center_human_cockpit_trace_is_chronological_and_replays_key_events():
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = FakeIndustryService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/surface?sections=main_brain")
+
+    assert response.status_code == 200
+    cockpit = response.json()["main_brain"]["cockpit"]
+    main_trace = cockpit["main_brain"]["trace"]
+    agent_trace = cockpit["agents"][0]["trace"]
+
+    assert [item["timestamp"] for item in main_trace] == sorted(
+        item["timestamp"] for item in main_trace
+    )
+    assert [item["timestamp"] for item in agent_trace] == sorted(
+        item["timestamp"] for item in agent_trace
+    )
+    assert any("Opened dashboard snapshot" in item["message"] for item in main_trace)
+    assert any("Enable richer shell evidence" in item["message"] for item in main_trace)
+    assert any("Applied capability patch for shell evidence." in item["message"] for item in agent_trace)
+
+
+def test_runtime_center_human_cockpit_trace_accepts_dataclass_evidence_records():
+    class _ObjectEvidenceQueryService(FakeEvidenceQueryService):
+        async def list_recent_records(self, limit: int = 5):
+            assert limit == 5
+            return [
+                EvidenceRecord(
+                    task_id="task-1",
+                    actor_ref="ops-agent",
+                    risk_level="auto",
+                    action_summary="Opened dashboard snapshot",
+                    result_summary="Snapshot stored for later replay",
+                    created_at=datetime(2026, 3, 9, 8, 1, tzinfo=timezone.utc),
+                )
+            ]
+
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = _ObjectEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = FakeIndustryService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/surface?sections=main_brain")
+
+    assert response.status_code == 200
+    cockpit = response.json()["main_brain"]["cockpit"]
+    agent_trace = cockpit["agents"][0]["trace"]
+    assert any("Opened dashboard snapshot" in item["message"] for item in agent_trace)
+
 
 def test_runtime_center_human_cockpit_prefers_latest_reports_and_chinese_fallbacks():
     class _MultiAgentProfileService(FakeAgentProfileService):

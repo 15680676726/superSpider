@@ -409,6 +409,42 @@ describe("runtimeCenter viewHelpers", () => {
     expect(screen.getByText("synthesize-before-reassign")).toBeTruthy();
   });
 
+  it("labels pending researcher followups as main-brain review items", () => {
+    render(
+      renderIndustryExecutionFocusSection(
+        {
+          ...baseDetail,
+          staffing: {
+            pending_proposals: [],
+            temporary_seats: [],
+            researcher: {
+              role_id: "researcher",
+              role_name: "Researcher",
+              agent_id: "industry-researcher-demo",
+              status: "waiting-review",
+              pending_signal_count: 2,
+              waiting_for_main_brain: true,
+              current_assignment: {
+                assignment_id: "assignment-researcher",
+                title: "Weekly signal scan",
+                status: "active",
+              },
+              latest_report: {
+                report_id: "report-researcher",
+                headline: "Signal summary ready",
+                status: "recorded",
+              },
+            },
+          },
+        },
+        vi.fn(),
+      ) as React.ReactElement,
+    );
+
+    expect(screen.getByText("待主脑处理研究汇报 2")).toBeTruthy();
+    expect(screen.queryByText("待处理信号 2")).toBeNull();
+  });
+
   it("prefers the dedicated main-brain overview card when building cockpit signals", () => {
     const payload = {
       generated_at: "2026-03-29T09:00:00Z",

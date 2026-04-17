@@ -27,10 +27,14 @@ function createProps(): MainBrainCockpitPanelProps {
     ],
     trace: [
       {
-        timestamp: "2026-04-16T09:20:00Z",
+        timestamp: "2026-04-16 09:00:00",
+        level: "info",
+        message: "派出任务：整理交付证据",
+      },
+      {
+        timestamp: "2026-04-16 09:10:00",
         level: "warn",
-        message: "需要你决定：是否现在发送给用户",
-        route: "/runtime-center/decisions/decision-1",
+        message: "等待决定：是否现在发给用户",
       },
     ],
     approvals: [
@@ -61,7 +65,6 @@ describe("MainBrainCockpitPanel", () => {
     expect(screen.getByRole("tab", { name: "简介" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "日报" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "统计" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "追溯" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "阶段总结" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "审批" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "系统管理" })).toBeInTheDocument();
@@ -83,12 +86,13 @@ describe("MainBrainCockpitPanel", () => {
 
     expect(screen.getByText("自动化管理区")).toBeInTheDocument();
   });
-
-  it("shows a dedicated trace tab for main brain trace lines", () => {
+  it("renders trace lines inside the trace tab", () => {
     render(<MainBrainCockpitPanel {...createProps()} />);
 
     fireEvent.click(screen.getByRole("tab", { name: "追溯" }));
 
-    expect(screen.getByText("需要你决定：是否现在发送给用户")).toBeInTheDocument();
+    expect(screen.getByText("2026-04-16 09:00:00")).toBeInTheDocument();
+    expect(screen.getByText("派出任务：整理交付证据")).toBeInTheDocument();
+    expect(screen.getByText("等待决定：是否现在发给用户")).toBeInTheDocument();
   });
 });
