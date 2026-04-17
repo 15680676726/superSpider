@@ -483,6 +483,7 @@ class RuntimeCenterAppStateView:
     routine_service: Any = None
     query_execution_service: Any = None
     buddy_projection_service: Any = None
+    runtime_provider: Any = None
     agent_report_repository: Any = None
     cron_manager: Any = None
     automation_overview: list[dict[str, Any]] = field(default_factory=list)
@@ -537,6 +538,7 @@ class RuntimeCenterAppStateView:
             routine_service=getattr(app_state, "routine_service", None),
             query_execution_service=getattr(app_state, "query_execution_service", None),
             buddy_projection_service=getattr(app_state, "buddy_projection_service", None),
+            runtime_provider=getattr(app_state, "runtime_provider", None),
             agent_report_repository=getattr(app_state, "agent_report_repository", None),
             cron_manager=getattr(app_state, "cron_manager", None),
             automation_overview=_normalize_automation_overview_payload(
@@ -757,12 +759,41 @@ class RuntimeHumanCockpitSummaryField(BaseModel):
     hint: str | None = None
 
 
+class RuntimeHumanCockpitReportSection(BaseModel):
+    """One fixed daily-report section rendered inside the cockpit UI."""
+
+    key: str
+    label: str
+    content: str
+
+
+class RuntimeHumanCockpitReportError(BaseModel):
+    """Structured daily-report error payload."""
+
+    code: str
+    message: str
+
+
+class RuntimeHumanCockpitModelStatus(BaseModel):
+    """Shared runtime-model health status projected into the cockpit UI."""
+
+    level: Literal["ok", "error"] = "ok"
+    code: str | None = None
+    message: str | None = None
+    consecutive_failures: int = 0
+    last_success_at: str | None = None
+    last_failure_at: str | None = None
+
+
 class RuntimeHumanCockpitReportBlock(BaseModel):
     """Structured morning/evening report block for the cockpit UI."""
 
+    kind: Literal["morning", "evening"]
     title: str
-    items: list[str] = Field(default_factory=list)
+    status: Literal["ready", "error"] = "ready"
+    sections: list[RuntimeHumanCockpitReportSection] = Field(default_factory=list)
     generated_at: str | None = None
+    error: RuntimeHumanCockpitReportError | None = None
 
 
 class RuntimeHumanCockpitTrendPoint(BaseModel):
@@ -838,6 +869,9 @@ class RuntimeHumanCockpitMainBrain(BaseModel):
 class RuntimeHumanCockpitPayload(BaseModel):
     """Dedicated human-readable cockpit contract for the Runtime Center page."""
 
+    model_status: RuntimeHumanCockpitModelStatus = Field(
+        default_factory=RuntimeHumanCockpitModelStatus,
+    )
     main_brain: RuntimeHumanCockpitMainBrain = Field(default_factory=RuntimeHumanCockpitMainBrain)
     agents: list[RuntimeHumanCockpitAgent] = Field(default_factory=list)
 

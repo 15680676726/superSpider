@@ -70,8 +70,8 @@ class RuntimeCenterMainBrainAssembly:
         if not entries:
             return self._unavailable_card(
                 "main-brain",
-                "Main Brain",
-                "Main-brain cockpit is not connected yet.",
+                "主脑",
+                "主脑驾驶舱暂未接入。",
             )
         total = len(entries)
         source_values: list[str] = []
@@ -82,7 +82,7 @@ class RuntimeCenterMainBrainAssembly:
         combined_source = ",".join(dict.fromkeys(source_values)) or "unavailable"
         return RuntimeOverviewCard(
             key="main-brain",
-            title="Main Brain",
+            title="主脑",
             source=combined_source,
             status="state-service",
             count=total,
@@ -292,7 +292,7 @@ class RuntimeCenterMainBrainAssembly:
         signals = {
             "carrier": {
                 "key": "carrier",
-                "value": self._string(entry_meta.get("carrier_label")) or self._string(first_entry.owner) or "Main Brain Carrier",
+                "value": self._string(entry_meta.get("carrier_label")) or self._string(first_entry.owner) or "主脑载体",
                 "detail": self._string(first_entry.owner) or first_entry.summary,
                 "route": industry_route or first_entry.route,
                 "status": self._string(entry_meta.get("carrier_status")) or first_entry.status,
@@ -301,13 +301,13 @@ class RuntimeCenterMainBrainAssembly:
             "lanes": {
                 "key": "lanes",
                 "count": lane_count,
-                "detail": f"{lane_count} lane(s) currently visible in the operating cockpit.",
+                "detail": f"当前运行驾驶舱里可见 {lane_count} 条车道。",
                 "route": industry_route,
             },
             "backlog": {
                 "key": "backlog",
                 "count": backlog_count,
-                "detail": f"{backlog_count} backlog item(s) pending cycle scheduling.",
+                "detail": f"当前有 {backlog_count} 条待办正在等待排入执行周期。",
                 "route": industry_route,
             },
             "current_cycle": {
@@ -317,44 +317,45 @@ class RuntimeCenterMainBrainAssembly:
                 "status": cycle_status,
                 "focus_count": cycle_focus_count if cycle_focus_count > 0 else None,
                 "next_cycle_due_at": next_cycle_due_at,
-                "detail": f"{cycle_count} cycle(s) linked." + (f" Current cycle: {cycle_title}." if cycle_title else ""),
+                "detail": f"当前关联 {cycle_count} 个周期。"
+                + (f"当前周期：{cycle_title}。" if cycle_title else ""),
                 "route": industry_route,
             },
             "assignments": {
                 "key": "assignments",
                 "count": assignment_count,
-                "detail": f"{assignment_count} assignment(s) currently in the runtime envelope.",
+                "detail": f"当前有 {assignment_count} 条派工正在运行包络内推进。",
                 "route": industry_route,
             },
             "agent_reports": {
                 "key": "agent_reports",
                 "count": report_count,
                 "unconsumed_count": unconsumed_report_count,
-                "detail": f"{report_count} report(s) available."
-                + (f" {unconsumed_report_count} report(s) still unconsumed." if unconsumed_report_count > 0 else ""),
+                "detail": f"当前可见 {report_count} 条汇报"
+                + (f"，其中 {unconsumed_report_count} 条尚未消化。" if unconsumed_report_count > 0 else "。"),
                 "route": industry_route,
             },
             "environment": {
                 "key": "environment",
-                "summary": "Open governance host-twin and environment continuity surface.",
+                "summary": "打开治理宿主镜像与环境连续性读面。",
                 "route": "/api/runtime-center/governance/status",
             },
             "evidence": {
                 "key": "evidence",
                 "count": evidence_count,
-                "detail": f"{evidence_count} evidence record(s) available for runtime replay.",
+                "detail": f"当前有 {evidence_count} 条证据可用于回放运行链路。",
                 "route": "/api/runtime-center/evidence",
             },
             "decisions": {
                 "key": "decisions",
                 "count": decision_count,
-                "detail": f"{decision_count} governance decision(s) pending or recorded.",
+                "detail": f"当前有 {decision_count} 条治理决策待处理或已记录。",
                 "route": "/api/runtime-center/decisions",
             },
             "patches": {
                 "key": "patches",
                 "count": patch_count,
-                "detail": f"{patch_count} learning patch(es) tracked in runtime center.",
+                "detail": f"当前运行中心已跟踪 {patch_count} 条学习补丁。",
                 "route": "/api/runtime-center/learning/patches",
             },
         }
@@ -417,10 +418,10 @@ class RuntimeCenterMainBrainAssembly:
         decision_count = self._int(meta.get("decision_count"), 0)
         patch_count = self._int(meta.get("patch_count"), 0)
         summary = (
-            "Main-brain cockpit tracks "
-            f"{lane_count} lane(s), {backlog_count} backlog item(s), {assignment_count} assignment(s), "
-            f"{report_count} report(s), {evidence_count} evidence record(s), "
-            f"{decision_count} decision(s), and {patch_count} patch(es)."
+            "主脑驾驶舱当前跟踪 "
+            f"{lane_count} 条车道、{backlog_count} 条待办、{assignment_count} 条派工、"
+            f"{report_count} 条汇报、{evidence_count} 条证据、"
+            f"{decision_count} 条决策与 {patch_count} 条补丁。"
         )
         exception_absorption = self._mapping(meta.get("exception_absorption")) or {}
         case_count = self._int(exception_absorption.get("case_count"), 0)
@@ -537,8 +538,8 @@ class RuntimeCenterMainBrainAssembly:
     ) -> dict[str, Any]:
         return {
             **dict(payload),
-            "title": self._string(payload.get("title")) or "Report conflict",
-            "summary": self._string(payload.get("summary")) or "Reports conflict.",
+            "title": self._string(payload.get("title")) or "汇报冲突",
+            "summary": self._string(payload.get("summary")) or "多条汇报之间仍存在冲突。",
             "route": self._string(payload.get("route"))
             or self.build_main_brain_industry_route(industry_instance_id),
         }
@@ -558,8 +559,8 @@ class RuntimeCenterMainBrainAssembly:
         return {
             **dict(payload),
             "title": self._string(payload.get("title"))
-            or ("Follow-up gap" if kind == "followup-needed" else "Report gap"),
-            "summary": self._string(payload.get("summary")) or "A report gap remains unresolved.",
+            or ("跟进缺口" if kind == "followup-needed" else "汇报缺口"),
+            "summary": self._string(payload.get("summary")) or "当前仍有一条汇报缺口尚未补齐。",
             "route": self._string(payload.get("route"))
             or self.build_main_brain_report_route(
                 industry_instance_id=industry_instance_id,

@@ -11,6 +11,7 @@ from typing import Any
 from ...config import get_heartbeat_config
 from ...industry.models import IndustrySeatCapabilityLayers
 from ...kernel.runtime_outcome import build_execution_diagnostics
+from .daily_report_generation import RuntimeDailyReportGenerationService
 from .overview_capability_governance import build_capability_governance_projection
 from .overview_entry_builders import _RuntimeCenterOverviewEntryBuildersMixin
 from .overview_helpers import build_runtime_surface
@@ -31,6 +32,7 @@ from .models import (
     RuntimeHumanCockpitMainBrain,
     RuntimeHumanCockpitPayload,
     RuntimeHumanCockpitReportBlock,
+    RuntimeHumanCockpitReportSection,
     RuntimeHumanCockpitStageSummary,
     RuntimeHumanCockpitSummaryField,
     RuntimeHumanCockpitTraceLine,
@@ -1291,27 +1293,61 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
         app_state: RuntimeCenterAppStateView,
         payload: RuntimeMainBrainResponse,
     ) -> RuntimeHumanCockpitPayload:
+        report_service = self._resolve_daily_report_generation_service(app_state)
         approvals = self._build_human_cockpit_approvals(payload)
         main_brain = RuntimeHumanCockpitMainBrain(
             card=self._build_main_brain_human_card(payload, approvals),
             summary_fields=self._build_main_brain_human_summary_fields(payload, approvals),
-            morning_report=self._build_main_brain_human_morning_report(payload),
-            evening_report=self._build_main_brain_human_evening_report(payload),
+            morning_report=await self._generate_main_brain_human_morning_report(
+                payload,
+                report_service=report_service,
+            ),
+            evening_report=await self._generate_main_brain_human_evening_report(
+                payload,
+                report_service=report_service,
+            ),
             trend=self._build_main_brain_human_trend(payload, approvals),
             trace=await self._build_main_brain_human_trace(app_state, payload, approvals),
             approvals=approvals,
             stage_summary=self._build_main_brain_human_stage_summary(payload),
         )
-        agents = await self._build_human_cockpit_agents(app_state, payload)
+        agents = await self._build_human_cockpit_agents(
+            app_state,
+            payload,
+            report_service=report_service,
+        )
         return RuntimeHumanCockpitPayload(
+            model_status=report_service.snapshot_model_status(),
             main_brain=main_brain,
             agents=agents,
+        )
+
+    def _resolve_daily_report_generation_service(
+        self,
+        app_state: RuntimeCenterAppStateView,
+    ) -> RuntimeDailyReportGenerationService:
+        runtime_provider = getattr(app_state, "runtime_provider", None)
+        model_call_service = None
+        if runtime_provider is not None:
+            getter = getattr(runtime_provider, "get_model_call_service", None)
+            if callable(getter):
+                try:
+                    model_call_service = getter()
+                except Exception:
+                    logger.debug(
+                        "runtime_center daily report model service unavailable",
+                        exc_info=True,
+                    )
+        return RuntimeDailyReportGenerationService(
+            model_call_service=model_call_service,
         )
 
     async def _build_human_cockpit_agents(
         self,
         app_state: RuntimeCenterAppStateView,
         payload: RuntimeMainBrainResponse,
+        *,
+        report_service: RuntimeDailyReportGenerationService,
     ) -> list[RuntimeHumanCockpitAgent]:
         industry_instance_id = self._string(payload.meta.get("industry_instance_id"))
         agent_items = await self._list_human_cockpit_agents(
@@ -1347,12 +1383,16 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
                         related_assignments=related_assignments,
                         related_reports=related_reports,
                     ),
-                    morning_report=self._build_agent_human_morning_report(
+                    morning_report=await self._generate_agent_human_morning_report(
                         agent,
                         related_assignments=related_assignments,
+                        report_service=report_service,
                     ),
-                    evening_report=self._build_agent_human_evening_report(
+                    evening_report=await self._generate_agent_human_evening_report(
                         related_reports=related_reports,
+                        related_assignments=related_assignments,
+                        agent=agent,
+                        report_service=report_service,
                     ),
                     trend=self._build_agent_human_trend(
                         agent,
@@ -1496,9 +1536,11 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             ),
         ]
 
-    def _build_main_brain_human_morning_report(
+    async def _build_main_brain_human_morning_report(
         self,
         payload: RuntimeMainBrainResponse,
+        *,
+        report_service: RuntimeDailyReportGenerationService | None = None,
     ) -> RuntimeHumanCockpitReportBlock | None:
         current_cycle = self._mapping(payload.current_cycle) or {}
         report_cognition = self._mapping(payload.report_cognition) or {}
@@ -1512,9 +1554,11 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             ],
         )
 
-    def _build_main_brain_human_evening_report(
+    async def _build_main_brain_human_evening_report(
         self,
         payload: RuntimeMainBrainResponse,
+        *,
+        report_service: RuntimeDailyReportGenerationService | None = None,
     ) -> RuntimeHumanCockpitReportBlock | None:
         latest_report = self._latest_human_cockpit_record(payload.reports)
         return self._build_human_cockpit_report_block(
@@ -1561,6 +1605,87 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
                 approval_pressure,
             ),
         ]
+
+    async def _generate_main_brain_human_morning_report(
+        self,
+        payload: RuntimeMainBrainResponse,
+        *,
+        report_service: RuntimeDailyReportGenerationService,
+    ) -> RuntimeHumanCockpitReportBlock:
+        current_cycle = self._mapping(payload.current_cycle) or {}
+        report_cognition = self._mapping(payload.report_cognition) or {}
+        next_action = self._mapping(report_cognition.get("next_action")) or {}
+        judgment = self._mapping(report_cognition.get("judgment")) or {}
+        return await report_service.generate_report(
+            report_kind="morning",
+            facts={
+                "what_today": (
+                    self._first_human_cockpit_text(
+                        current_cycle.get("summary"),
+                        current_cycle.get("title"),
+                    )
+                    or "今天先围绕当前周期推进正式执行与结果回流。"
+                ),
+                "priority_first": (
+                    self._first_human_cockpit_text(
+                        next_action.get("summary"),
+                        next_action.get("title"),
+                    )
+                    or "先把当前最明确的下一步动作推进落地。"
+                ),
+                "risk_note": (
+                    self._first_human_cockpit_text(
+                        judgment.get("summary"),
+                        report_cognition.get("replan_reasons"),
+                    )
+                    or "当前没有明确的新阻塞，可以继续推进本轮周期。"
+                ),
+            },
+            generated_at=self._first_human_cockpit_text(
+                next_action.get("updated_at"),
+                current_cycle.get("updated_at"),
+                current_cycle.get("created_at"),
+            ),
+        )
+
+    async def _generate_main_brain_human_evening_report(
+        self,
+        payload: RuntimeMainBrainResponse,
+        *,
+        report_service: RuntimeDailyReportGenerationService,
+    ) -> RuntimeHumanCockpitReportBlock:
+        latest_report = self._latest_human_cockpit_record(payload.reports)
+        report_cognition = self._mapping(payload.report_cognition) or {}
+        next_action = self._mapping(report_cognition.get("next_action")) or {}
+        judgment = self._mapping(report_cognition.get("judgment")) or {}
+        return await report_service.generate_report(
+            report_kind="evening",
+            facts={
+                "done_today": (
+                    self._first_human_cockpit_text(
+                        latest_report.get("headline"),
+                        latest_report.get("summary"),
+                    )
+                    or "今天已经完成当前阶段的关键汇报整理。"
+                ),
+                "produced_result": (
+                    self._first_human_cockpit_text(
+                        latest_report.get("result"),
+                        latest_report.get("summary"),
+                    )
+                    or "已经形成可以继续推进的阶段结果。"
+                ),
+                "next_step": (
+                    self._first_human_cockpit_text(
+                        next_action.get("summary"),
+                        next_action.get("title"),
+                        judgment.get("summary"),
+                    )
+                    or "明天继续围绕当前周期把下一步动作推进到底。"
+                ),
+            },
+            generated_at=self._first_human_cockpit_text(latest_report.get("updated_at")),
+        )
 
     async def _build_main_brain_human_trace(
         self,
@@ -2185,11 +2310,12 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             ),
         ]
 
-    def _build_agent_human_morning_report(
+    async def _build_agent_human_morning_report(
         self,
         agent: dict[str, Any],
         *,
         related_assignments: list[dict[str, Any]],
+        report_service: RuntimeDailyReportGenerationService | None = None,
     ) -> RuntimeHumanCockpitReportBlock | None:
         related_assignment = self._latest_human_cockpit_record(related_assignments)
         role_summary = self._human_cockpit_role_summary_text(agent, fallback=False)
@@ -2205,10 +2331,13 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             ],
         )
 
-    def _build_agent_human_evening_report(
+    async def _build_agent_human_evening_report(
         self,
         *,
         related_reports: list[dict[str, Any]],
+        related_assignments: list[dict[str, Any]] | None = None,
+        agent: dict[str, Any] | None = None,
+        report_service: RuntimeDailyReportGenerationService | None = None,
     ) -> RuntimeHumanCockpitReportBlock | None:
         related_report = self._latest_human_cockpit_record(related_reports)
         return self._build_human_cockpit_report_block(
@@ -2290,10 +2419,98 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
         lines = self._human_cockpit_text_list(*items)[:3]
         if not lines:
             return None
+        kind = "morning" if title == "早报" else "evening"
         return RuntimeHumanCockpitReportBlock(
+            kind=kind,
             title=title,
-            items=lines,
+            sections=[
+                RuntimeHumanCockpitReportSection(
+                    key=f"line_{index}",
+                    label=f"第 {index} 项",
+                    content=line,
+                )
+                for index, line in enumerate(lines, start=1)
+            ],
             generated_at=generated_at,
+        )
+
+    async def _generate_agent_human_morning_report(
+        self,
+        agent: dict[str, Any],
+        *,
+        related_assignments: list[dict[str, Any]],
+        report_service: RuntimeDailyReportGenerationService,
+    ) -> RuntimeHumanCockpitReportBlock:
+        related_assignment = self._latest_human_cockpit_record(related_assignments)
+        role_summary = self._human_cockpit_role_summary_text(agent, fallback=False)
+        return await report_service.generate_report(
+            report_kind="morning",
+            facts={
+                "what_today": (
+                    self._first_human_cockpit_text(
+                        agent.get("current_focus"),
+                        related_assignment.get("summary"),
+                        related_assignment.get("title"),
+                    )
+                    or "今天继续推进当前负责的执行事项。"
+                ),
+                "priority_first": (
+                    self._first_human_cockpit_text(
+                        related_assignment.get("summary"),
+                        related_assignment.get("title"),
+                        agent.get("current_focus"),
+                    )
+                    or "先把当前最明确的执行动作推进到底。"
+                ),
+                "risk_note": (
+                    f"今天继续推进：{role_summary}"
+                    if role_summary
+                    else "当前没有新的明确阻塞，继续按照既定节奏推进。"
+                ),
+            },
+            generated_at=self._first_human_cockpit_text(
+                related_assignment.get("updated_at"),
+                related_assignment.get("created_at"),
+            ),
+        )
+
+    async def _generate_agent_human_evening_report(
+        self,
+        *,
+        agent: dict[str, Any],
+        related_assignments: list[dict[str, Any]],
+        related_reports: list[dict[str, Any]],
+        report_service: RuntimeDailyReportGenerationService,
+    ) -> RuntimeHumanCockpitReportBlock:
+        related_report = self._latest_human_cockpit_record(related_reports)
+        related_assignment = self._latest_human_cockpit_record(related_assignments)
+        return await report_service.generate_report(
+            report_kind="evening",
+            facts={
+                "done_today": (
+                    self._first_human_cockpit_text(
+                        related_report.get("headline"),
+                        related_report.get("summary"),
+                    )
+                    or "今天已经完成当前阶段的执行回传。"
+                ),
+                "produced_result": (
+                    self._first_human_cockpit_text(
+                        related_report.get("result"),
+                        related_report.get("summary"),
+                    )
+                    or "已经形成当前阶段的执行结果。"
+                ),
+                "next_step": (
+                    self._first_human_cockpit_text(
+                        related_assignment.get("summary"),
+                        related_assignment.get("title"),
+                        agent.get("current_focus"),
+                    )
+                    or "明天继续把当前执行事项收口。"
+                ),
+            },
+            generated_at=self._first_human_cockpit_text(related_report.get("updated_at")),
         )
 
     def _build_human_cockpit_trend_point(
