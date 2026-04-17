@@ -65,6 +65,7 @@ class _FakeBrowserRunner:
         self.evaluate_results = list(evaluate_results)
         self.snapshot_results = list(snapshot_results or [])
         self.calls: list[dict[str, object]] = []
+        self.opened_pages: set[tuple[str, str]] = set()
 
     def __call__(self, **payload):
         self.calls.append(dict(payload))
@@ -72,6 +73,12 @@ class _FakeBrowserRunner:
         if action == "start":
             return {"ok": True, "session_id": payload.get("session_id", "research-browser")}
         if action == "open":
+            self.opened_pages.add(
+                (
+                    str(payload.get("session_id") or "").strip(),
+                    str(payload.get("page_id") or "").strip(),
+                )
+            )
             return {"ok": True, "url": payload.get("url")}
         if action == "wait_for":
             return {"ok": True, "message": f"Waited {payload.get('wait_time')}s"}
@@ -79,6 +86,12 @@ class _FakeBrowserRunner:
             if self.snapshot_results:
                 result = self.snapshot_results.pop(0)
             else:
+                page_key = (
+                    str(payload.get("session_id") or "").strip(),
+                    str(payload.get("page_id") or "").strip(),
+                )
+                if page_key not in self.opened_pages:
+                    return {"ok": False, "error": f"Page '{page_key[1]}' not found"}
                 result = {
                     "ok": True,
                     "snapshot": '- textbox "Chat input" [ref=e1]',
@@ -119,6 +132,38 @@ def test_research_service_creates_session_and_first_round() -> None:
     assert result.session.goal == "梳理电商平台入门知识结构"
     assert len(result.rounds) == 1
     assert result.rounds[0].round_index == 1
+
+
+def test_research_service_promotes_brief_metadata_into_formal_session_projection() -> None:
+    repository = _FakeResearchRepository()
+    service = BaiduPageResearchService(
+        research_session_repository=repository,
+        browser_action_runner=_FakeBrowserRunner(
+            evaluate_results=["<main><div class='answer'>占位答案</div></main>"],
+        ),
+    )
+
+    result = service.start_session(
+        goal="梳理电商平台入门知识结构",
+        trigger_source="user-direct",
+        owner_agent_id="industry-researcher-demo",
+        metadata={
+            "brief": {
+                "goal": "补齐竞品定价和能力差异",
+                "question": "继续核对官网定价和核心能力页",
+                "why_needed": "主脑要决定下一步策略。",
+                "done_when": "至少拿到两条官方来源。",
+                "requested_sources": ["search", "web_page"],
+                "collection_mode_hint": "heavy",
+            }
+        },
+    )
+
+    stored_session = repository.get_research_session(result.session.id)
+
+    assert stored_session is not None
+    assert stored_session.brief["question"] == "继续核对官网定价和核心能力页"
+    assert result.rounds[0].question == "继续核对官网定价和核心能力页"
 
 
 def test_research_service_marks_waiting_login_when_baidu_not_logged_in() -> None:
@@ -249,6 +294,16 @@ def test_research_service_queries_baidu_with_round_question_and_extracts_body_te
                 Validate the birth time assumption.
                 """,
             },
+            {
+                "html": "<main><a href='https://example.com/guide-3'>Guide 3</a></main>",
+                "bodyText": """
+                Continue researching
+                Guide 3 - example.com
+
+                The most important misconception is treating one star as the whole reading.
+                Always cross-check the palace structure before drawing conclusions.
+                """,
+            },
         ],
     )
     service = _build_service(browser_runner=browser_runner)
@@ -267,7 +322,7 @@ def test_research_service_queries_baidu_with_round_question_and_extracts_body_te
     assert len(type_calls) == 2
     assert type_calls[0]["page_id"] == type_calls[1]["page_id"]
     assert result.session.status == "completed"
-    assert result.stop_reason in {"followup-complete", "completed"}
+    assert result.stop_reason == "followup-complete"
     assert len(result.rounds) == 2
     assert "traditional Chinese astrology system" in result.session.stable_findings[0]
 
@@ -332,6 +387,66 @@ def test_research_service_runs_followup_round_after_first_answer() -> None:
     assert any("Learn the twelve palaces" in item for item in result.session.stable_findings)
 
 
+def test_research_service_persists_provider_sources_into_round_projection() -> None:
+    browser_runner = _FakeBrowserRunner(
+        evaluate_results=[
+            {
+                "html": "<main><a href='https://example.com/source-1'>Source 1</a></main>",
+                "bodyText": """
+                开启新对话
+                知识库
+                对话历史
+                What is Zi Wei Dou Shu? Give 3 beginner points.
+                全球搜检索32篇资料
+                1.
+                Source 1 - example.com
+
+                Zi Wei Dou Shu is a traditional Chinese astrology system used to read life patterns.
+                内容由AI生成，仅供参考查看使用规则
+                """,
+                "href": "https://chat.baidu.com/search",
+                "title": "Baidu Chat",
+            },
+            {
+                "html": "<main><a href='https://example.com/source-2'>Source 2</a></main>",
+                "bodyText": """
+                开启新对话
+                知识库
+                对话历史
+                Follow up
+                全球搜检索16篇资料
+                1.
+                Source 2 - example.com
+
+                Learn the twelve palaces first.
+                Study the main stars.
+                内容由AI生成，仅供参考查看使用规则
+                """,
+                "href": "https://chat.baidu.com/search",
+                "title": "Baidu Chat",
+            },
+        ],
+    )
+    repository = _FakeResearchRepository()
+    service = BaiduPageResearchService(
+        research_session_repository=repository,
+        browser_action_runner=browser_runner,
+        report_repository=_FakeReportRepository(),
+    )
+    start_result = service.start_session(
+        goal="What is Zi Wei Dou Shu? Give 3 beginner points.",
+        trigger_source="user-direct",
+        owner_agent_id="industry-researcher-demo",
+    )
+
+    result = service.run_session(start_result.session.id)
+
+    first_round = result.rounds[0]
+    assert first_round.sources
+    assert first_round.sources[0]["source_ref"] == "https://example.com/source-1"
+    assert first_round.metadata["findings"][0]["summary"].startswith("Zi Wei Dou Shu is")
+
+
 def test_research_service_exposes_provider_facing_round_collection_entry() -> None:
     service = _build_service(
         browser_runner=_FakeBrowserRunner(
@@ -358,3 +473,260 @@ def test_research_service_exposes_provider_facing_round_collection_entry() -> No
     assert result.adapter_result.collection_action == "interact"
     assert result.adapter_result.status == "succeeded"
     assert result.adapter_result.findings[0].summary.startswith("Zi Wei Dou Shu is")
+
+
+def test_research_service_can_continue_initial_brief_beyond_two_rounds() -> None:
+    browser_runner = _FakeBrowserRunner(
+        evaluate_results=[
+            {
+                "html": "<main><a href='https://example.com/source-1'>Source 1</a></main>",
+                "bodyText": """
+                What is Zi Wei Dou Shu?
+                Zi Wei Dou Shu is a traditional Chinese astrology system.
+                """,
+                "href": "https://chat.baidu.com/search",
+                "title": "Baidu Chat",
+            },
+            {
+                "html": "<main><a href='https://example.com/source-2'>Source 2</a></main>",
+                "bodyText": """
+                Follow up
+                Learn the twelve palaces first.
+                """,
+                "href": "https://chat.baidu.com/search",
+                "title": "Baidu Chat",
+            },
+            {
+                "html": "<main><a href='https://example.com/source-3'>Source 3</a></main>",
+                "bodyText": """
+                Continue researching
+                Study the main stars and four transformations.
+                """,
+                "href": "https://chat.baidu.com/search",
+                "title": "Baidu Chat",
+            },
+        ],
+    )
+    service = _build_service(browser_runner=browser_runner)
+    start_result = service.start_session(
+        goal="What is Zi Wei Dou Shu?",
+        trigger_source="user-direct",
+        owner_agent_id="industry-researcher-demo",
+    )
+
+    result = service.run_session(start_result.session.id)
+
+    assert result.session.status == "completed"
+    assert len(result.rounds) >= 3
+    assert result.stop_reason == "followup-complete"
+
+
+def test_research_service_reuses_existing_chat_page_when_running_same_session_again() -> None:
+    browser_runner = _FakeBrowserRunner(
+        evaluate_results=[
+            {
+                "html": "<main><a href='https://example.com/source-1'>Source 1</a></main>",
+                "bodyText": """
+                What is Zi Wei Dou Shu?
+                Zi Wei Dou Shu is a traditional Chinese astrology system.
+                """,
+                "href": "https://chat.baidu.com/search",
+                "title": "Baidu Chat",
+            },
+            {
+                "html": "<main><a href='https://example.com/source-2'>Source 2</a></main>",
+                "bodyText": """
+                Follow up
+                Learn the twelve palaces first.
+                """,
+                "href": "https://chat.baidu.com/search",
+                "title": "Baidu Chat",
+            },
+            {
+                "html": "<main><a href='https://example.com/source-3'>Source 3</a></main>",
+                "bodyText": """
+                Resume the same thread
+                Study the main stars.
+                """,
+                "href": "https://chat.baidu.com/search",
+                "title": "Baidu Chat",
+            },
+            {
+                "html": "<main><a href='https://example.com/source-4'>Source 4</a></main>",
+                "bodyText": """
+                Resume the same thread again
+                Clarify the four transformations.
+                """,
+                "href": "https://chat.baidu.com/search",
+                "title": "Baidu Chat",
+            },
+        ],
+        snapshot_results=[
+            {"ok": False, "error": "Page 'missing' not found"},
+        ],
+    )
+    service = _build_service(browser_runner=browser_runner)
+    start_result = service.start_session(
+        goal="What is Zi Wei Dou Shu?",
+        trigger_source="user-direct",
+        owner_agent_id="industry-researcher-demo",
+    )
+
+    service.run_session(start_result.session.id)
+    service.run_session(start_result.session.id)
+
+    open_calls = [call for call in browser_runner.calls if call["action"] == "open"]
+    assert len(open_calls) == 1
+
+
+def test_research_service_does_not_stop_resume_followup_on_repeated_old_answer() -> None:
+    browser_runner = _FakeBrowserRunner(
+        evaluate_results=[
+            {
+                "html": "<main><a href='https://example.com/source-1'>Source 1</a></main>",
+                "bodyText": """
+                What is Zi Wei Dou Shu?
+                Zi Wei Dou Shu is a traditional Chinese astrology system used to read life patterns.
+                """,
+                "href": "https://chat.baidu.com/search",
+                "title": "Baidu Chat",
+            },
+            {
+                "html": "<main><a href='https://example.com/source-2'>Source 2</a></main>",
+                "bodyText": """
+                Follow up
+                Learn the twelve palaces first.
+                Study the main stars.
+                Use an accurate birth time.
+                """,
+                "href": "https://chat.baidu.com/search",
+                "title": "Baidu Chat",
+            },
+            {
+                "html": "<main><a href='https://example.com/source-3'>Source 3</a></main>",
+                "bodyText": """
+                Resume same thread
+                Zi Wei Dou Shu is a traditional Chinese astrology system used to read life patterns.
+                """,
+                "href": "https://chat.baidu.com/search",
+                "title": "Baidu Chat",
+            },
+            {
+                "html": "<main><a href='https://example.com/source-4'>Source 4</a></main>",
+                "bodyText": """
+                Continue same thread
+                The four transformations are Hua Lu, Hua Quan, Hua Ke, and Hua Ji.
+                They mark gain, authority, reputation, and obstruction in the chart.
+                """,
+                "href": "https://chat.baidu.com/search",
+                "title": "Baidu Chat",
+            },
+        ],
+    )
+    service = _build_service(browser_runner=browser_runner)
+    start_result = service.start_session(
+        goal="What is Zi Wei Dou Shu?",
+        trigger_source="user-direct",
+        owner_agent_id="industry-researcher-demo",
+    )
+
+    service.run_session(start_result.session.id)
+    service.resume_session(
+        session_id=start_result.session.id,
+        question="Clarify the four transformations in Zi Wei Dou Shu.",
+    )
+    result = service.run_session(start_result.session.id)
+
+    type_calls = [call for call in browser_runner.calls if call["action"] == "type"]
+    assert result.stop_reason == "followup-complete"
+    assert len(result.rounds) == 4
+    assert len(type_calls) == 4
+    assert "four transformations" in result.rounds[-1].question.lower()
+    assert any("four transformations" in item.lower() for item in result.session.stable_findings)
+
+
+def test_research_service_allows_later_resume_followups_after_total_round_count_grows() -> None:
+    browser_runner = _FakeBrowserRunner(
+        evaluate_results=[
+            {
+                "html": "<main><a href='https://example.com/source-1'>Source 1</a></main>",
+                "bodyText": """
+                What is Zi Wei Dou Shu?
+                Zi Wei Dou Shu is a traditional Chinese astrology system used to read life patterns.
+                """,
+                "href": "https://chat.baidu.com/search",
+                "title": "Baidu Chat",
+            },
+            {
+                "html": "<main><a href='https://example.com/source-2'>Source 2</a></main>",
+                "bodyText": """
+                Follow up
+                Learn the twelve palaces first.
+                Study the main stars.
+                Use an accurate birth time.
+                """,
+                "href": "https://chat.baidu.com/search",
+                "title": "Baidu Chat",
+            },
+            {
+                "html": "<main><a href='https://example.com/source-3'>Source 3</a></main>",
+                "bodyText": """
+                Resume same thread
+                Zi Wei Dou Shu is a traditional Chinese astrology system used to read life patterns.
+                """,
+                "href": "https://chat.baidu.com/search",
+                "title": "Baidu Chat",
+            },
+            {
+                "html": "<main><a href='https://example.com/source-4'>Source 4</a></main>",
+                "bodyText": """
+                Continue same thread
+                The four transformations are Hua Lu, Hua Quan, Hua Ke, and Hua Ji.
+                They mark gain, authority, reputation, and obstruction in the chart.
+                """,
+                "href": "https://chat.baidu.com/search",
+                "title": "Baidu Chat",
+            },
+            {
+                "html": "<main><a href='https://example.com/source-5'>Source 5</a></main>",
+                "bodyText": """
+                Retry
+                """,
+                "href": "https://chat.baidu.com/search",
+                "title": "Baidu Chat",
+            },
+            {
+                "html": "<main><a href='https://example.com/source-6'>Source 6</a></main>",
+                "bodyText": """
+                Continue same thread again
+                Accurate birth time changes the rising palace and can shift key palace-star placements.
+                Beginners should verify the legal birth certificate time and ask family for correction notes.
+                """,
+                "href": "https://chat.baidu.com/search",
+                "title": "Baidu Chat",
+            },
+        ],
+    )
+    service = _build_service(browser_runner=browser_runner)
+    start_result = service.start_session(
+        goal="What is Zi Wei Dou Shu?",
+        trigger_source="user-direct",
+        owner_agent_id="industry-researcher-demo",
+    )
+
+    service.run_session(start_result.session.id)
+    service.resume_session(
+        session_id=start_result.session.id,
+        question="Clarify the four transformations in Zi Wei Dou Shu.",
+    )
+    service.run_session(start_result.session.id)
+    service.resume_session(
+        session_id=start_result.session.id,
+        question="Explain why accurate birth time matters and how a beginner should verify it.",
+    )
+    result = service.run_session(start_result.session.id)
+
+    assert result.stop_reason == "followup-complete"
+    assert len(result.rounds) == 6
+    assert "birth time" in result.rounds[-1].question.lower()
+    assert any("accurate birth time" in item.lower() for item in result.session.stable_findings)

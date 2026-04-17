@@ -4,6 +4,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from copaw.research import BaiduPageResearchService
+from copaw.state import IndustryInstanceRecord, SQLiteStateStore
+from copaw.state.repositories import (
+    SqliteAgentReportRepository,
+    SqliteIndustryInstanceRepository,
+    SqliteResearchSessionRepository,
+)
 
 
 @dataclass
@@ -61,6 +67,13 @@ class _FakeBrowserRunner:
               </div>
             </main>
             """,
+            """
+            <main>
+              <div class="answer">
+                Validate the segmentation against acquisition, conversion, and retention metrics.
+              </div>
+            </main>
+            """,
         ]
 
     def __call__(self, **payload):
@@ -84,6 +97,23 @@ class _FakeBrowserRunner:
         raise AssertionError(payload["action"])
 
 
+def _build_sqlite_repositories(tmp_path, *, create_industry: bool):
+    store = SQLiteStateStore(tmp_path / "research-report-writeback.sqlite3")
+    research_repo = SqliteResearchSessionRepository(store)
+    report_repo = SqliteAgentReportRepository(store)
+    if create_industry:
+        industry_repo = SqliteIndustryInstanceRepository(store)
+        industry_repo.upsert_instance(
+            IndustryInstanceRecord(
+                instance_id="industry-v1-demo",
+                label="Demo industry",
+                owner_scope="runtime-center",
+                status="active",
+            ),
+        )
+    return research_repo, report_repo
+
+
 def test_completed_research_session_generates_researcher_report() -> None:
     report_repo = _FakeReportRepository()
     service = BaiduPageResearchService(
@@ -95,6 +125,7 @@ def test_completed_research_session_generates_researcher_report() -> None:
         goal="Organize an ecommerce research scaffold",
         trigger_source="user-direct",
         owner_agent_id="industry-researcher-demo",
+        industry_instance_id="industry-v1-demo",
     )
     service.run_session(start_result.session.id)
 
@@ -115,6 +146,7 @@ def test_research_report_includes_question_excerpt_links_and_provider() -> None:
         goal="Organize an ecommerce research scaffold",
         trigger_source="user-direct",
         owner_agent_id="industry-researcher-demo",
+        industry_instance_id="industry-v1-demo",
     )
     service.run_session(start_result.session.id)
 
@@ -125,3 +157,53 @@ def test_research_report_includes_question_excerpt_links_and_provider() -> None:
     assert report.metadata["provider"] == "baidu-page"
     assert report.metadata["citations"]
     assert report.metadata["question_excerpt"].startswith("Organize an ecommerce")
+
+
+def test_real_sqlite_report_repository_skips_report_writeback_without_industry_instance(
+    tmp_path,
+) -> None:
+    research_repo, report_repo = _build_sqlite_repositories(tmp_path, create_industry=False)
+    service = BaiduPageResearchService(
+        research_session_repository=research_repo,
+        browser_action_runner=_FakeBrowserRunner(),
+        report_repository=report_repo,
+    )
+    start_result = service.start_session(
+        goal="Organize an ecommerce research scaffold",
+        trigger_source="user-direct",
+        owner_agent_id="industry-researcher-demo",
+        work_context_id="ctx-report-soak-1",
+    )
+    service.run_session(start_result.session.id)
+
+    result = service.summarize_session(start_result.session.id)
+    stored_session = research_repo.get_research_session(start_result.session.id)
+
+    assert result.final_report_id is None
+    assert stored_session is not None
+    assert stored_session.final_report_id is None
+
+
+def test_real_sqlite_report_repository_persists_report_with_valid_industry_instance(
+    tmp_path,
+) -> None:
+    research_repo, report_repo = _build_sqlite_repositories(tmp_path, create_industry=True)
+    service = BaiduPageResearchService(
+        research_session_repository=research_repo,
+        browser_action_runner=_FakeBrowserRunner(),
+        report_repository=report_repo,
+    )
+    start_result = service.start_session(
+        goal="Organize an ecommerce research scaffold",
+        trigger_source="user-direct",
+        owner_agent_id="industry-researcher-demo",
+        industry_instance_id="industry-v1-demo",
+        work_context_id="ctx-report-soak-2",
+    )
+    service.run_session(start_result.session.id)
+
+    result = service.summarize_session(start_result.session.id)
+    report = report_repo.get_report(result.final_report_id)
+
+    assert result.final_report_id is not None
+    assert report is not None

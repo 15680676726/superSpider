@@ -835,6 +835,7 @@
   - 当前未完成：
     - 当前主线已拿到“已登录状态下返回真实答案”的联网 `PASS`；剩余尾巴主要是答案/链接抽取策略还能继续做得更精细，但不再是主链断点
     - 这条链已具备正式对象、触发、执行、汇报、读面、登录态持久化与真实联网问答；仍不能外推成“所有百度页面变体都零维护”
+    - `2026-04-18` continuity 收口补充：此前 heavy 前门仍是“每次 follow-up 都新建 session”，research service 也仍有“默认首问 + 一次 follow-up 就收工”的旧停机语义；现已收正为“跟进问题优先复用同一 matching reusable `ResearchSession`、同一 reusable session 优先复用同一 chat page/thread、停止以当前问题是否问清为主，`MAX_BAIDU_ROUNDS / MAX_DEEP_LINKS / MAX_DOWNLOADS` 只保留为安全上限”；其中 `MAX_BAIDU_ROUNDS` 现已按单次 `run_session(...)` 安全切片收口，不再错误限制整个可复用研究线程的生命周期
   - 当前验收口径：
     - `L1/L2`：
       - `python -m pytest tests/state/test_research_repositories.py tests/state/test_state_store_migration.py tests/state/test_models_module_exports.py tests/research/test_baidu_page_contract.py tests/research/test_baidu_page_research_service.py tests/research/test_baidu_deepening_flow.py tests/research/test_research_report_writeback.py tests/research/test_research_knowledge_ingestion.py tests/agents/test_browser_tool_evidence.py tests/app/test_research_schedule_trigger.py tests/app/test_research_session_api.py tests/app/test_runtime_center_router_split.py tests/app/test_cron_executor.py tests/app/test_runtime_manager_stack.py tests/kernel/test_main_brain_research_followup.py tests/app/test_research_session_live_contract.py -q` -> `81 passed, 1 skipped`
@@ -843,10 +844,15 @@
       - `PYTHONPATH=src python -m pytest tests/research/test_baidu_page_contract.py tests/research/test_baidu_page_research_service.py tests/app/test_research_session_live_contract.py tests/kernel/test_main_brain_research_followup.py -q` -> `15 passed, 1 skipped`
       - `PYTHONPATH=src python -m pytest tests/research/test_source_collection_contracts.py tests/research/test_source_collection_routing.py tests/research/test_source_collection_synthesis.py tests/research/test_source_collection_service.py tests/research/test_source_collection_adapters.py tests/research/test_baidu_page_contract.py tests/research/test_baidu_page_research_service.py tests/research/test_baidu_deepening_flow.py tests/research/test_research_report_writeback.py tests/research/test_research_knowledge_ingestion.py tests/research/test_research_writeback_flow.py tests/kernel/test_main_brain_research_followup.py tests/kernel/test_source_collection_agent_entry.py tests/app/test_research_session_live_contract.py tests/app/test_runtime_center_research_surface.py -q` -> `49 passed, 1 skipped`
       - `npm --prefix console run test -- src/pages/RuntimeCenter/useRuntimeCenter.test.ts src/pages/RuntimeCenter/MainBrainCockpitPanel.test.tsx` -> `20 passed`
+      - `PYTHONPATH=src python -m pytest tests/research/test_baidu_page_research_service.py tests/app/test_source_collection_frontdoor_service.py tests/app/test_research_session_live_contract.py tests/kernel/test_main_brain_research_followup.py tests/research/test_research_report_writeback.py tests/research/test_research_knowledge_ingestion.py -q` -> `30 passed, 1 skipped`
     - `L3`：已跑 opt-in live smoke 合同；`COPAW_RUN_BAIDU_RESEARCH_LIVE_SMOKE=1 PYTHONPATH=src python -m pytest tests/app/test_research_session_live_contract.py -q -rs` -> `2 passed`
+      - `2026-04-18` 真实连续追问补充：已在当前机器登录态下真实跑通 `start -> run -> resume -> run -> resume -> run`，结果为同一 `research session`、同一 `browser session`、`baidu_chat_open_count=1`，第三次追问也已收口到 `followup-complete`，不再掉回 `max-rounds`
       - 当前真实结果：浏览器 runtime 已能正常启动并打开百度页；在当前机器登录百度后，真实 research session 已能拿到问答结果
-    - `L4`：未跑
-  - 下一步验证顺序应固定为：在现有登录态回放基础上，再补更长的多轮/跨重启 soak，并继续收答案/链接抽取质量
+    - `L4`：已跑选定范围 live soak
+      - `2026-04-18` 真实 soak：通过 inline python live soak harness 连续跑 `3` 个 cycle；每个 cycle 都走正式 `SourceCollectionFrontdoorService`，并在每一步重新构建 `SqliteResearchSessionRepository / BaiduPageResearchService / SourceCollectionFrontdoorService` 模拟重进
+      - 每个 cycle 的真实结果一致：`session_ids` 全程同一条、`stop_reasons = ["followup-complete", "followup-complete", "followup-complete"]`、`round_count = 6`、`chat_open_count = 1`
+      - 当前因此可以诚实声明：research continuity / source-collection heavy path 这条链已过 `L1 + L2 + L3 + 选定范围的 live L4`；但这仍不等于“所有百度页面变体”或“整仓 full-repo soak”都已完成
+  - 下一步验证顺序应固定为：继续收答案/链接抽取质量，以及更广范围的 external-provider / full-repo soak，而不是再回退到“新 session + 固定轮次”的旧语义
   - `2026-04-17` source collection foundation 已落地：
     - typed contracts：`ResearchBrief / CollectedSource / ResearchFinding / ResearchAdapterResult`
     - routing / synthesis / orchestration：`route_collection_mode(...) / synthesize_collection_results(...) / SourceCollectionService`

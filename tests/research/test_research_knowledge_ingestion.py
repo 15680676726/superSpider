@@ -78,6 +78,13 @@ class _FakeBrowserRunner:
               </div>
             </main>
             """,
+            """
+            <main>
+              <div class="answer">
+                Verify the taxonomy against acquisition, conversion, and repeat-purchase evidence before rollout.
+              </div>
+            </main>
+            """,
         ]
 
     def __call__(self, **payload):
@@ -204,3 +211,52 @@ def test_research_repository_round_trips_session_brief_and_round_sources(tmp_pat
     assert restored_rounds[0].sources[0]["source_ref"] == "https://example.com/guide"
     assert restored_rounds[0].sources[0]["metadata"]["evidence_id"] == "evidence-1"
     assert restored_rounds[0].metadata["adapter_kind"] == "baidu-page"
+
+
+def test_research_repository_hydrates_legacy_metadata_brief_and_collected_sources(tmp_path) -> None:
+    store = SQLiteStateStore(tmp_path / "state.db")
+    repository = SqliteResearchSessionRepository(store)
+
+    session = ResearchSessionRecord(
+        id="research-session-legacy-meta",
+        provider="baidu-page",
+        owner_agent_id="industry-researcher-demo",
+        supervisor_agent_id="main-brain",
+        trigger_source="user-direct",
+        goal="Map the ecommerce onboarding operating model",
+        metadata={
+            "brief": {
+                "question": "What should the first operator playbook include?",
+                "why_needed": "Need a reusable onboarding baseline.",
+                "done_when": "We have the first reusable research summary.",
+            }
+        },
+    )
+    round_record = ResearchSessionRoundRecord(
+        id="research-session-legacy-meta:round:1",
+        session_id=session.id,
+        round_index=1,
+        question="What are the key onboarding steps?",
+        metadata={
+            "collected_sources": [
+                {
+                    "source_id": "source-legacy-1",
+                    "source_kind": "link",
+                    "collection_action": "read",
+                    "source_ref": "https://example.com/guide",
+                    "normalized_ref": "https://example.com/guide",
+                    "title": "Example onboarding guide",
+                }
+            ]
+        },
+    )
+
+    repository.upsert_research_session(session)
+    repository.upsert_research_round(round_record)
+
+    restored_session = repository.get_research_session(session.id)
+    restored_round = repository.list_research_rounds(session_id=session.id)[0]
+
+    assert restored_session is not None
+    assert restored_session.brief["question"] == "What should the first operator playbook include?"
+    assert restored_round.sources[0]["source_ref"] == "https://example.com/guide"

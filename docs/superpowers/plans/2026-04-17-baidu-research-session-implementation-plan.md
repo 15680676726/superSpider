@@ -4,7 +4,7 @@
 
 **Goal:** 为 researcher 增加正式的百度多轮研究会话能力，让手动触发、主脑追问、监控任务触发三类入口都能走同一条“多轮问答 + 网页深挖 + 文档下载 + 主脑汇报 + 分层沉淀”主链。
 
-**Architecture:** 新增 `ResearchSessionRecord / ResearchSessionRoundRecord` 两个正式对象，并以集中式 `BaiduPageResearchService` 作为唯一 owner。聊天、主脑追问和监控任务只负责创建研究会话；真正的浏览器执行、轮次决策、链接/文档深挖、report 产出与结果分流全部由 research service 收口，继续复用现有 `tool:browser_use / AgentReport / knowledge / memory / evidence` 主链，不引入第二真相源。
+**Architecture:** 新增 `ResearchSessionRecord / ResearchSessionRoundRecord` 两个正式对象，并以集中式 `BaiduPageResearchService` 作为唯一 owner。聊天、主脑追问和监控任务只负责创建或复用同一条研究会话；真正的浏览器执行、轮次决策、链接/文档深挖、report 产出与结果分流全部由 research service 收口，继续复用现有 `tool:browser_use / AgentReport / knowledge / memory / evidence` 主链，不引入第二真相源。
 
 **Tech Stack:** Python 3.12, FastAPI, SQLite state store, pytest, React + TypeScript + Ant Design + Vitest
 
@@ -256,10 +256,10 @@ def test_research_service_marks_waiting_login_when_baidu_not_logged_in(tmp_path)
 ```
 
 ```python
-def test_research_service_stops_after_two_rounds_without_new_findings(tmp_path):
+def test_research_service_stops_when_followup_gap_is_clarified(tmp_path):
     result = service.run_session("research-session-1")
     assert result.session.status == "completed"
-    assert result.stop_reason == "no-new-findings"
+    assert result.stop_reason in {"followup-complete", "enough-findings"}
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -273,18 +273,25 @@ Expected: FAIL with missing service
 class BaiduPageResearchService:
     def start_session(self, *, goal: str, trigger_source: str, owner_agent_id: str, ...): ...
     def run_session(self, session_id: str): ...
-    def continue_session(self, session_id: str): ...
+    def resume_session(self, *, session_id: str, question: str, metadata: dict[str, Any] | None = None): ...
     def summarize_session(self, session_id: str): ...
 ```
 
 - [ ] **Step 4: Add round loop and stop-condition logic**
 
 ```python
-MAX_BAIDU_ROUNDS = 5
+MAX_BAIDU_ROUNDS = 5  # per run_session invocation, not per lifetime session
 MAX_DEEP_LINKS = 3
 MAX_DOWNLOADS = 2
 MAX_NO_NEW_FINDINGS_STREAK = 2
 ```
+
+Implementation rule:
+
+- `MAX_*` values are safety caps only, and `MAX_BAIDU_ROUNDS` applies to one `run_session(...)` slice instead of the whole lifetime session
+- primary stop logic must be “the current research question is sufficiently clarified”
+- follow-up requests must reuse the latest matching reusable `ResearchSession` when possible
+- a reused `ResearchSession` must prefer the same chat page / thread instead of opening a new Baidu conversation
 
 - [ ] **Step 5: Run service tests**
 
@@ -615,7 +622,7 @@ git commit -m "docs: add baidu research session architecture and status"
 - Create: `tests/app/test_research_session_live_contract.py`
 - Modify: `TASK_STATUS.md`
 
-- [ ] **Step 1: Write the bounded live smoke contract**
+- [ ] **Step 1: Write the live smoke contract for same-thread multi-round research**
 
 ```python
 def test_live_baidu_research_session_round_trip(...):
@@ -651,6 +658,7 @@ git commit -m "test: validate baidu research session acceptance flow"
 
 - Do not bypass the formal `AgentReport` chain. Every completed session must end in a report to the main brain.
 - Do not write Baidu raw answers directly into long-term truth.
-- Keep `BaiduPageResearchService` as the only owner of multi-round loop state. Chat, schedules, and main-brain followups are triggers only.
+- Keep `BaiduPageResearchService` as the only owner of multi-round loop state. Chat, schedules, and main-brain followups are triggers only, but followups must create-or-resume the same matching reusable session rather than blindly starting a fresh one.
 - Reuse existing browser truth and evidence surfaces instead of inventing a parallel browser runtime.
 - Fail closed on `waiting-login`, page contract drift, and repeated no-new-findings streak.
+- Do not use fixed round count as the primary stop rule. “question clarified” is primary; `MAX_BAIDU_ROUNDS` is only the hard safety ceiling.

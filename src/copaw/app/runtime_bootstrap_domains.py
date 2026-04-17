@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import re
 from typing import Any
 from uuid import uuid4
 
@@ -112,6 +113,89 @@ def _mapping(value: object | None) -> dict[str, Any]:
     return {}
 
 
+def _signature(value: object | None) -> str:
+    return " ".join(str(value or "").strip().casefold().split())
+
+
+def _looks_like_followup_question(value: object | None) -> bool:
+    normalized = _signature(value)
+    if not normalized:
+        return False
+    markers = (
+        "follow up",
+        "follow-up",
+        "continue",
+        "add ",
+        "clarify",
+        "expand",
+        "more",
+        "next",
+        "resume",
+        "再",
+        "继续",
+        "补充",
+        "还有",
+        "顺便",
+        "进一步",
+        "接着",
+        "然后",
+        "上面",
+        "刚才",
+    )
+    return any(marker in normalized for marker in markers)
+
+
+def _research_overlap_tokens(*values: object | None) -> set[str]:
+    tokens: set[str] = set()
+    for value in values:
+        normalized = _string(value)
+        if normalized is None:
+            continue
+        for token in re.findall(r"[0-9A-Za-z\u4e00-\u9fff]+", normalized.casefold()):
+            if len(token) >= 2:
+                tokens.add(token)
+    return tokens
+
+
+def _research_session_match_score(
+    *,
+    brief: ResearchBrief,
+    candidate: ResearchSessionRecord,
+) -> int:
+    candidate_brief = _mapping(getattr(candidate, "brief", None))
+    brief_values = [brief.goal, brief.question, brief.why_needed]
+    candidate_values = [
+        _string(getattr(candidate, "goal", None)),
+        _string(candidate_brief.get("goal")),
+        _string(candidate_brief.get("question")),
+    ]
+    score = 0
+    for left in brief_values:
+        left_text = _string(left)
+        if left_text is None:
+            continue
+        for right in candidate_values:
+            right_text = _string(right)
+            if right_text is None:
+                continue
+            if left_text == right_text:
+                score = max(score, 100)
+            elif left_text in right_text or right_text in left_text:
+                score = max(score, 60)
+    overlap = _research_overlap_tokens(*brief_values) & _research_overlap_tokens(
+        *candidate_values,
+    )
+    return score + len(overlap) * 5
+
+
+def _allow_strong_overlap_reuse(
+    *,
+    brief: ResearchBrief,
+    candidate: ResearchSessionRecord,
+) -> bool:
+    return _research_session_match_score(brief=brief, candidate=candidate) >= 60
+
+
 class SourceCollectionFrontdoorService:
     def __init__(
         self,
@@ -219,21 +303,34 @@ class SourceCollectionFrontdoorService:
     ) -> SourceCollectionFrontdoorResult:
         service = self._heavy_research_service
         starter = getattr(service, "start_session", None)
+        resumer = getattr(service, "resume_session", None)
         if not callable(starter):
             raise RuntimeError("Heavy research service is missing start_session")
-        session_result = starter(
-            goal=brief.goal,
-            trigger_source=trigger_source,
-            owner_agent_id=str(route_payload.get("execution_agent_id") or brief.owner_agent_id),
-            industry_instance_id=brief.industry_instance_id,
-            work_context_id=brief.work_context_id,
-            supervisor_agent_id=brief.supervisor_agent_id,
-            metadata=metadata,
+        reusable_session = self._find_reusable_heavy_session(
+            brief=brief,
+            execution_agent_id=str(route_payload.get("execution_agent_id") or brief.owner_agent_id),
         )
+        if reusable_session is not None and callable(resumer):
+            session_result = resumer(
+                session_id=reusable_session.id,
+                question=brief.question,
+                metadata=metadata,
+            )
+        else:
+            session_result = starter(
+                goal=brief.goal,
+                trigger_source=trigger_source,
+                owner_agent_id=str(route_payload.get("execution_agent_id") or brief.owner_agent_id),
+                industry_instance_id=brief.industry_instance_id,
+                work_context_id=brief.work_context_id,
+                supervisor_agent_id=brief.supervisor_agent_id,
+                metadata=metadata,
+            )
         session_id = _string(
-            _mapping(_mapping(session_result).get("session")).get("id")
+            getattr(session_result, "session_id", None)
+            or (reusable_session.id if reusable_session is not None else None)
+            or _mapping(_mapping(session_result).get("session")).get("id")
             or getattr(getattr(session_result, "session", None), "id", None)
-            or getattr(session_result, "session_id", None)
         )
         status = _string(
             getattr(getattr(session_result, "session", None), "status", None)
@@ -273,6 +370,53 @@ class SourceCollectionFrontdoorService:
             final_report_id=final_report_id,
         )
 
+    def _find_reusable_heavy_session(
+        self,
+        *,
+        brief: ResearchBrief,
+        execution_agent_id: str,
+    ) -> ResearchSessionRecord | None:
+        followup_like = _looks_like_followup_question(brief.question)
+        lister = getattr(self.research_session_repository, "list_research_sessions", None)
+        if not callable(lister):
+            return None
+        candidates = list(
+            lister(
+                provider="baidu-page",
+                owner_agent_id=execution_agent_id,
+                industry_instance_id=brief.industry_instance_id,
+                work_context_id=brief.work_context_id,
+                limit=12,
+            )
+            or []
+        )
+        reusable_candidates = [
+            candidate
+            for candidate in candidates
+            if candidate is not None
+            and str(getattr(candidate, "status", "") or "").strip()
+            not in {"failed", "cancelled"}
+        ]
+        if not reusable_candidates:
+            return None
+        if len(reusable_candidates) == 1:
+            candidate = reusable_candidates[0]
+            if followup_like or _allow_strong_overlap_reuse(brief=brief, candidate=candidate):
+                return candidate
+            return None
+        best_candidate: ResearchSessionRecord | None = None
+        best_score = 0
+        for candidate in reusable_candidates:
+            score = _research_session_match_score(brief=brief, candidate=candidate)
+            if score > best_score:
+                best_score = score
+                best_candidate = candidate
+        if best_candidate is None:
+            return None
+        if followup_like and best_score > 0:
+            return best_candidate
+        return best_candidate if best_score >= 60 else None
+
     def _run_light_path(
         self,
         *,
@@ -287,6 +431,15 @@ class SourceCollectionFrontdoorService:
             owner_agent_id=brief.owner_agent_id,
             requested_sources=requested_sources,
         )
+        brief_payload = {
+            "goal": brief.goal,
+            "question": brief.question,
+            "why_needed": brief.why_needed,
+            "done_when": brief.done_when,
+            "collection_mode_hint": brief.collection_mode_hint,
+            "requested_sources": requested_sources,
+            "writeback_target": _mapping(getattr(brief, "writeback_target", None)) or None,
+        }
         findings_payload = [
             finding.model_dump(mode="json")
             for finding in list(collection.findings or [])
@@ -314,6 +467,7 @@ class SourceCollectionFrontdoorService:
                 if str(item.get("summary") or "").strip()
             ],
             open_questions=list(collection.gaps or []),
+            brief=brief_payload,
             metadata={
                 **metadata,
                 "conflicts": list(collection.conflicts or []),
@@ -349,6 +503,7 @@ class SourceCollectionFrontdoorService:
                 for item in findings_payload
                 if str(item.get("summary") or "").strip()
             ],
+            sources=sources_payload,
             remaining_gaps=list(collection.gaps or []),
             decision="stop",
             metadata={

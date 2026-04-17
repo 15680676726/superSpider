@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from hashlib import sha1
+import logging
 from pathlib import Path
 import re
 from typing import Any, Mapping
@@ -12,6 +13,49 @@ from ..constant import WORKING_DIR
 from ..state import AgentReportRecord, ResearchSessionRecord, ResearchSessionRoundRecord
 from .baidu_page_contract import extract_answer_contract
 from .models import ResearchLink, ResearchSessionRunResult
+
+logger = logging.getLogger(__name__)
+_LATIN_TOKEN_RE = re.compile(r"[a-z0-9]{3,}", re.IGNORECASE)
+_CJK_TOKEN_RE = re.compile(r"[\u4e00-\u9fff]{2,}")
+_SEMANTIC_STOPWORDS = {
+    "about",
+    "answer",
+    "answers",
+    "clarify",
+    "common",
+    "continue",
+    "current",
+    "detail",
+    "details",
+    "evidence",
+    "follow",
+    "goal",
+    "give",
+    "hint",
+    "hints",
+    "important",
+    "into",
+    "misunderstanding",
+    "more",
+    "most",
+    "need",
+    "please",
+    "question",
+    "research",
+    "researching",
+    "source",
+    "sources",
+    "that",
+    "these",
+    "this",
+    "those",
+    "what",
+    "when",
+    "where",
+    "which",
+    "with",
+    "your",
+}
 
 
 def _utc_now() -> datetime:
@@ -25,6 +69,10 @@ def _text(value: object | None) -> str:
 def _mapping(value: object | None) -> dict[str, Any]:
     if isinstance(value, dict):
         return dict(value)
+    if value is not None and is_dataclass(value):
+        payload = asdict(value)
+        if isinstance(payload, dict):
+            return dict(payload)
     model_dump = getattr(value, "model_dump", None)
     if callable(model_dump):
         payload = model_dump(mode="json")
@@ -34,6 +82,21 @@ def _mapping(value: object | None) -> dict[str, Any]:
     if isinstance(namespace, dict):
         return dict(namespace)
     return {}
+
+
+def _mapping_list(value: object | None) -> list[dict[str, Any]]:
+    if isinstance(value, list):
+        items = value
+    elif value is None:
+        items = []
+    else:
+        items = [value]
+    normalized: list[dict[str, Any]] = []
+    for item in items:
+        mapping = _mapping(item)
+        if mapping:
+            normalized.append(mapping)
+    return normalized
 
 
 def _optional_bool(value: object | None) -> bool | None:
@@ -148,6 +211,72 @@ def _contains_cjk(text: str) -> bool:
     return any("\u4e00" <= character <= "\u9fff" for character in text)
 
 
+def _question_signature(value: object | None) -> str:
+    normalized = _text(value).casefold()
+    if not normalized:
+        return ""
+    return re.sub(r"\s+", " ", normalized)
+
+
+def _semantic_tokens(text: object | None) -> set[str]:
+    normalized = _text(text)
+    if not normalized:
+        return set()
+    latin_tokens = {
+        token
+        for token in _LATIN_TOKEN_RE.findall(normalized.casefold())
+        if token not in _SEMANTIC_STOPWORDS
+    }
+    cjk_tokens: set[str] = set()
+    for chunk in _CJK_TOKEN_RE.findall(normalized):
+        if len(chunk) <= 4:
+            cjk_tokens.add(chunk)
+            continue
+        cjk_tokens.update(chunk[index : index + 2] for index in range(len(chunk) - 1))
+    return {token for token in [*latin_tokens, *cjk_tokens] if token}
+
+
+def _token_overlap_ratio(left: object | None, right: object | None) -> float:
+    left_tokens = _semantic_tokens(left)
+    right_tokens = _semantic_tokens(right)
+    if not left_tokens or not right_tokens:
+        return 0.0
+    return len(left_tokens & right_tokens) / max(len(left_tokens), len(right_tokens))
+
+
+def _is_semantic_duplicate(candidate: object | None, existing_values: list[str]) -> bool:
+    candidate_signature = _question_signature(candidate)
+    if not candidate_signature:
+        return False
+    for existing in existing_values:
+        existing_signature = _question_signature(existing)
+        if not existing_signature:
+            continue
+        if (
+            candidate_signature == existing_signature
+            or candidate_signature in existing_signature
+            or existing_signature in candidate_signature
+        ):
+            return True
+        if _token_overlap_ratio(candidate_signature, existing_signature) >= 0.8:
+            return True
+    return False
+
+
+def _meaningful_new_findings(findings: list[str], existing_values: list[str]) -> list[str]:
+    meaningful: list[str] = []
+    baseline = list(existing_values)
+    for item in findings:
+        normalized = _text(item)
+        if not normalized:
+            continue
+        if _is_semantic_duplicate(normalized, baseline):
+            continue
+        meaningful.append(normalized)
+        baseline.append(normalized)
+    return meaningful
+
+
 def _tail_lines(previous_text: object | None, current_text: object | None) -> str:
     previous_lines = [line for line in (_text(item) for item in str(previous_text or "").splitlines()) if line]
     current_lines = [line for line in (_text(item) for item in str(current_text or "").splitlines()) if line]
@@ -158,6 +287,25 @@ def _tail_lines(previous_text: object | None, current_text: object | None) -> st
     if index >= len(current_lines):
         return str(current_text or "")
     return "\n".join(current_lines[index:])
+
+
+def _strip_continuation_prefix(question: object | None) -> str:
+    normalized = _text(question)
+    if not normalized:
+        return ""
+    prefixes = (
+        "continue researching this question:",
+        "continue researching:",
+        "continue this research question:",
+        "继续把这个问题问清楚：",
+        "继续研究这个问题：",
+        "继续研究：",
+    )
+    lowered = normalized.casefold()
+    for prefix in prefixes:
+        if lowered.startswith(prefix.casefold()):
+            return normalized[len(prefix) :].strip()
+    return normalized
 
 
 class BaiduPageResearchService:
@@ -197,6 +345,9 @@ class BaiduPageResearchService:
         metadata: dict[str, Any] | None = None,
     ) -> ResearchSessionRunResult:
         now = _utc_now()
+        normalized_metadata = dict(metadata or {})
+        brief_payload = _mapping(normalized_metadata.get("brief"))
+        initial_question = _text(brief_payload.get("question")) or goal
         session = ResearchSessionRecord(
             id=_stable_id("research-session", owner_agent_id, goal, now.isoformat()),
             provider="baidu-page",
@@ -208,7 +359,8 @@ class BaiduPageResearchService:
             goal=goal,
             status="queued",
             round_count=1,
-            metadata=dict(metadata or {}),
+            brief=brief_payload,
+            metadata=normalized_metadata,
             created_at=now,
             updated_at=now,
         )
@@ -216,7 +368,7 @@ class BaiduPageResearchService:
             id=self._round_id(session.id, 1),
             session_id=session.id,
             round_index=1,
-            question=goal,
+            question=initial_question,
             generated_prompt=self._build_round_prompt(goal=goal, round_index=1),
             created_at=now,
             updated_at=now,
@@ -224,6 +376,51 @@ class BaiduPageResearchService:
         self._upsert_session(session)
         self._upsert_round(first_round)
         return ResearchSessionRunResult(session=session, rounds=[first_round])
+
+    def resume_session(
+        self,
+        *,
+        session_id: str,
+        question: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> ResearchSessionRunResult:
+        session = self._get_session(session_id)
+        if session is None:
+            raise KeyError(f"Unknown research session: {session_id}")
+        rounds = _unique_rounds(_repo_list_rounds(self._research_session_repository, session_id=session.id))
+        next_round_index = (rounds[-1].round_index if rounds else 0) + 1
+        now = _utc_now()
+        next_round = ResearchSessionRoundRecord(
+            id=self._round_id(session.id, next_round_index),
+            session_id=session.id,
+            round_index=next_round_index,
+            question=_text(question) or session.goal,
+            generated_prompt=self._build_round_prompt(goal=session.goal, round_index=next_round_index),
+            metadata={
+                "entry_mode": "resume-followup",
+                **dict(metadata or {}),
+            },
+            created_at=now,
+            updated_at=now,
+        )
+        updated_brief = dict(session.brief)
+        if _text(question):
+            updated_brief["question"] = _text(question)
+        updated_session = session.model_copy(
+            update={
+                "status": "queued",
+                "round_count": max(session.round_count, next_round_index),
+                "brief": updated_brief,
+                "updated_at": now,
+                "completed_at": None,
+            },
+        )
+        self._upsert_session(updated_session)
+        appended_round = self._upsert_round(next_round)
+        return ResearchSessionRunResult(
+            session=updated_session,
+            rounds=[*rounds, appended_round],
+        )
 
     def run_session(self, session_id: str) -> ResearchSessionRunResult:
         session = self._get_session(session_id)
@@ -250,21 +447,21 @@ class BaiduPageResearchService:
         stop_reason: str | None = None
         current_url = self.BAIDU_CHAT_URL
         chat_page_id = f"{session.id}:chat"
-        chat_page_opened = False
+        chat_page_ready = False
         last_chat_snapshot: dict[str, Any] | None = None
+        rounds_processed = 0
 
-        while len(rounds) <= self.MAX_ROUNDS:
+        while rounds_processed < self.MAX_ROUNDS:
             current_round = rounds[-1]
+            rounds_processed += 1
             is_chat_round = _text(current_url) in {"", self.BAIDU_CHAT_URL}
             if is_chat_round:
-                if not chat_page_opened:
-                    self._browser_call(
-                        action="open",
+                if not chat_page_ready:
+                    self._ensure_chat_page(
                         session_id=browser_session_id,
                         page_id=chat_page_id,
-                        url=self.BAIDU_CHAT_URL,
                     )
-                    chat_page_opened = True
+                    chat_page_ready = True
                 self._submit_chat_question(
                     session_id=browser_session_id,
                     page_id=chat_page_id,
@@ -348,11 +545,17 @@ class BaiduPageResearchService:
                 )
 
             findings = _dedupe_texts(_split_sentences(contract.answer_text))
-            new_findings = [
-                item
-                for item in findings
-                if item.casefold() not in {value.casefold() for value in session.stable_findings}
-            ]
+            adapter_payload = _mapping(getattr(contract, "adapter_result", None))
+            source_payloads = _mapping_list(adapter_payload.get("collected_sources"))
+            finding_payloads = _mapping_list(adapter_payload.get("findings"))
+            adapter_gaps = _dedupe_texts(
+                [str(item).strip() for item in list(adapter_payload.get("gaps") or []) if str(item).strip()],
+            )
+            adapter_metadata = _mapping(adapter_payload.get("metadata"))
+            adapter_conflicts = _dedupe_texts(
+                [str(item).strip() for item in list(adapter_metadata.get("conflicts") or []) if str(item).strip()],
+            )
+            new_findings = _meaningful_new_findings(findings, session.stable_findings)
             if new_findings:
                 stable_findings = _dedupe_texts([*session.stable_findings, *new_findings])
                 consecutive_no_new_findings = 0
@@ -382,8 +585,20 @@ class BaiduPageResearchService:
                     "selected_links": selected_links,
                     "downloaded_artifacts": round_downloads,
                     "new_findings": new_findings,
-                    "remaining_gaps": [] if new_findings else [f"Need more evidence for: {session.goal}"],
+                    "sources": source_payloads,
+                    "remaining_gaps": (
+                        []
+                        if new_findings and not adapter_gaps
+                        else adapter_gaps or [f"Need more evidence for: {session.goal}"]
+                    ),
                     "decision": "continue",
+                    "metadata": {
+                        **current_round.metadata,
+                        "findings": finding_payloads,
+                        "collected_sources": source_payloads,
+                        "gaps": adapter_gaps,
+                        "conflicts": adapter_conflicts,
+                    },
                     "updated_at": _utc_now(),
                 },
             )
@@ -435,6 +650,15 @@ class BaiduPageResearchService:
                 current_url = link_url
                 continue
 
+            is_resume_followup_round = (
+                _text(_mapping(updated_round.metadata).get("entry_mode")) == "resume-followup"
+            )
+            is_coverage_followup_round = (
+                _text(_mapping(updated_round.metadata).get("entry_mode")) == "coverage-followup"
+            )
+            is_generic_continue_round = (
+                _text(_mapping(updated_round.metadata).get("entry_mode")) == "generic-continue"
+            )
             if (
                 has_structured_answer
                 and not should_deepen
@@ -444,6 +668,7 @@ class BaiduPageResearchService:
                     session=session,
                     round_index=updated_round.round_index + 1,
                     question=self._build_followup_question(session=session, round_record=updated_round),
+                    metadata={"entry_mode": "coverage-followup"},
                 )
                 rounds.append(self._upsert_round(next_round))
                 current_url = self.BAIDU_CHAT_URL
@@ -452,7 +677,29 @@ class BaiduPageResearchService:
             if (
                 has_structured_answer
                 and not should_deepen
-                and updated_round.round_index >= 2
+                and is_resume_followup_round
+                and not adapter_gaps
+                and len(new_findings) >= 1
+            ):
+                stop_reason = "followup-complete"
+                break
+
+            if (
+                has_structured_answer
+                and not should_deepen
+                and is_coverage_followup_round
+                and not adapter_gaps
+                and len(new_findings) >= 2
+            ):
+                stop_reason = "followup-complete"
+                break
+
+            if (
+                has_structured_answer
+                and not should_deepen
+                and is_generic_continue_round
+                and not adapter_gaps
+                and len(new_findings) >= 1
             ):
                 stop_reason = "followup-complete"
                 break
@@ -474,14 +721,14 @@ class BaiduPageResearchService:
                 stop_reason = "deepened-link-closed"
                 break
 
-            if updated_round.round_index >= 3:
-                stop_reason = "completed"
-                break
-
             next_round = self._build_next_round(
                 session=session,
                 round_index=updated_round.round_index + 1,
-                question=f"Continue researching: {session.goal}",
+                question=self._build_continuation_question(
+                    session=session,
+                    round_record=updated_round,
+                ),
+                metadata={"entry_mode": "generic-continue"},
             )
             rounds.append(self._upsert_round(next_round))
             current_url = self.BAIDU_CHAT_URL
@@ -518,9 +765,10 @@ class BaiduPageResearchService:
         )
         summary_text = "\n".join(summary_lines) if summary_lines else session.goal
         report_id: str | None = None
-        if self._report_repository is not None:
+        industry_instance_id = _text(session.industry_instance_id)
+        if self._report_repository is not None and industry_instance_id:
             report = AgentReportRecord(
-                industry_instance_id=session.industry_instance_id or "research-runtime",
+                industry_instance_id=industry_instance_id,
                 work_context_id=session.work_context_id,
                 owner_agent_id=session.owner_agent_id,
                 owner_role_id="researcher",
@@ -542,8 +790,20 @@ class BaiduPageResearchService:
             )
             upsert_report = getattr(self._report_repository, "upsert_report", None)
             if callable(upsert_report):
-                stored_report = upsert_report(report)
-                report_id = _text(getattr(stored_report, "id", None) or report.id)
+                try:
+                    stored_report = upsert_report(report)
+                except Exception:
+                    logger.exception(
+                        "Failed to persist research session report writeback",
+                        extra={"research_session_id": session.id},
+                    )
+                else:
+                    report_id = _text(getattr(stored_report, "id", None) or report.id)
+        elif self._report_repository is not None:
+            logger.warning(
+                "Skip research session report writeback because industry_instance_id is missing",
+                extra={"research_session_id": session.id},
+            )
 
         work_context_chunk_ids: list[str] = []
         industry_document_id: str | None = None
@@ -725,6 +985,7 @@ class BaiduPageResearchService:
         session: ResearchSessionRecord,
         round_index: int,
         question: str,
+        metadata: dict[str, Any] | None = None,
     ) -> ResearchSessionRoundRecord:
         now = _utc_now()
         return ResearchSessionRoundRecord(
@@ -733,6 +994,7 @@ class BaiduPageResearchService:
             round_index=round_index,
             question=question,
             generated_prompt=self._build_round_prompt(goal=session.goal, round_index=round_index),
+            metadata=dict(metadata or {}),
             created_at=now,
             updated_at=now,
         )
@@ -755,6 +1017,45 @@ class BaiduPageResearchService:
             f"Current answer: {summary}. "
             "Fill the most important missing details, the best sources to verify next, "
             "and one common misunderstanding."
+        )
+
+    def _build_continuation_question(
+        self,
+        *,
+        session: ResearchSessionRecord,
+        round_record: ResearchSessionRoundRecord,
+    ) -> str:
+        focus_question = (
+            _strip_continuation_prefix(round_record.question)
+            or _strip_continuation_prefix(_mapping(session.brief).get("question"))
+            or session.goal
+        )
+        if _contains_cjk(f"{session.goal} {focus_question}"):
+            return f"继续把这个问题问清楚：{focus_question}"
+        return f"Continue researching this question: {focus_question}"
+
+    def _ensure_chat_page(
+        self,
+        *,
+        session_id: str,
+        page_id: str,
+    ) -> None:
+        probe = self._browser_call(
+            action="snapshot",
+            session_id=session_id,
+            page_id=page_id,
+        )
+        if bool(probe.get("ok")) and (
+            _text(probe.get("snapshot"))
+            or _text(probe.get("url"))
+            or not _text(probe.get("error"))
+        ):
+            return
+        self._browser_call(
+            action="open",
+            session_id=session_id,
+            page_id=page_id,
+            url=self.BAIDU_CHAT_URL,
         )
 
     def _submit_chat_question(

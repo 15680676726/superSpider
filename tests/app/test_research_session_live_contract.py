@@ -298,7 +298,6 @@ def test_baidu_research_session_live_contract(tmp_path: Path) -> None:
     assert stored_session.completed_at is not None
     assert result.stop_reason in {
         "followup-complete",
-        "initial-brief-complete",
         "enough-findings",
         "no-new-findings",
         "deepened-link-closed",

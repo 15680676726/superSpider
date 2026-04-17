@@ -4,9 +4,22 @@
 
 **Goal:** 落地一条所有职业 agent 都能调用的“通用外部信息收集底座”，让主脑可规划、普通职业可轻查、`researcher` 可承接重研究，并把结果正式回写到 research/evidence/work truth。
 
-**Architecture:** 在现有 `ResearchSessionRecord / ResearchSessionRoundRecord / EvidenceRecord / EnvironmentMount / SessionMount` 主链上新增一层 `source_collection` 编排层。稳定模型收口为 `discover / read / interact / capture` 四类 collection action；`search / web_page / github / artifact` 只作为 phase-1 adapters 落地。现有 `BaiduPageResearchService` 不删除，但从“整个研究系统 owner”降为 provider adapter 的一部分，由新的通用 orchestration service 统一调度、归并、写证据和写回。
+**Target architecture:** 在现有 `ResearchSessionRecord / ResearchSessionRoundRecord / EvidenceRecord / EnvironmentMount / SessionMount` 主链上新增一层 `source_collection` 编排层。稳定模型收口为 `discover / read / interact / capture` 四类 collection action；`search / web_page / github / artifact` 只作为 phase-1 adapters 落地。现有 `BaiduPageResearchService` 不删除，但目标是从“整个研究系统 owner”降为 provider adapter 的一部分，由新的通用 orchestration service 统一调度、归并、写证据和写回。
 
 **Tech Stack:** Python 3.12, FastAPI, SQLite state store, pytest, React + TypeScript + Vitest
+
+## Reality Sync (2026-04-17 audit)
+
+- `source_collection` contracts / routing / synthesis / orchestration / phase-1 adapters / frontdoor / Runtime Center read surface are already on mainline
+- `ResearchSessionRecord.brief` and `ResearchSessionRoundRecord.sources` are now the formal persisted projections used by the Runtime Center
+- `findings / gaps / conflicts` currently still surface from `stable_findings / open_questions / metadata`, not dedicated top-level persisted projections
+- heavy `BaiduPageResearchService.summarize_session()` is the current live owner for report + knowledge-summary writeback
+- `StateKnowledgeService.ingest_research_session(...)` and `KnowledgeWritebackService.build_research_session_writeback(...)` already exist as reusable builders
+- heavy-path demotion is only partial today: `BaiduPageResearchService` is behind the unified frontdoor, but it is not yet a true `ResearchAdapterResult`-shaped provider adapter
+- phase-1 `search / web_page / github / artifact` adapters are live, but current light adapters are still metadata-backed shapers rather than full browser/network collectors
+- light inline collection does **not** yet emit a dedicated `EvidenceRecord` on the live frontdoor
+- light inline collection does **not** yet auto-apply report / knowledge / graph writeback on the live frontdoor
+- this plan originally mentioned a dedicated `src/copaw/research/source_collection/writeback.py`, but current mainline did not materialize that file
 
 ---
 
@@ -18,7 +31,6 @@
 - Create: `src/copaw/research/source_collection/contracts.py`
 - Create: `src/copaw/research/source_collection/routing.py`
 - Create: `src/copaw/research/source_collection/synthesis.py`
-- Create: `src/copaw/research/source_collection/writeback.py`
 - Create: `src/copaw/research/source_collection/service.py`
 - Create: `src/copaw/research/source_collection/adapters/__init__.py`
 - Create: `src/copaw/research/source_collection/adapters/search.py`
@@ -45,7 +57,6 @@
 - Modify: `src/copaw/state/repositories/base.py`
 - Modify: `src/copaw/state/repositories/sqlite_research.py`
 - Modify: `src/copaw/state/knowledge_service.py`
-- Modify: `src/copaw/memory/retain_service.py`
 - Modify: `src/copaw/memory/knowledge_writeback_service.py`
 - Create: `tests/research/test_research_writeback_flow.py`
 - Create: `tests/research/test_research_knowledge_ingestion.py`
@@ -434,14 +445,13 @@ git commit -m "feat: add phase-one source collection adapters"
 
 ---
 
-## Task 6: Extend Research Session Persistence And Writeback Payloads
+## Task 6: Extend Research Session Persistence And Reusable Writeback Builders
 
 **Files:**
 - Modify: `src/copaw/state/models_research.py`
 - Modify: `src/copaw/state/repositories/base.py`
 - Modify: `src/copaw/state/repositories/sqlite_research.py`
 - Modify: `src/copaw/state/knowledge_service.py`
-- Modify: `src/copaw/memory/retain_service.py`
 - Modify: `src/copaw/memory/knowledge_writeback_service.py`
 - Create: `tests/research/test_research_writeback_flow.py`
 - Create: `tests/research/test_research_knowledge_ingestion.py`
@@ -449,32 +459,33 @@ git commit -m "feat: add phase-one source collection adapters"
 - [ ] **Step 1: Write the failing persistence/writeback tests**
 
 ```python
-def test_research_session_persists_brief_and_findings():
+def test_research_session_persists_formal_brief_and_round_sources():
     session = repo.get_research_session("session-1")
-    assert session.metadata["brief"]["goal"] == "..."
+    round_record = repo.list_research_rounds(session_id="session-1")[0]
+    assert session.brief["goal"] == "..."
+    assert round_record.sources[0]["source_ref"] == "..."
 ```
 
 ```python
-def test_research_findings_write_back_into_knowledge_and_work_context():
-    result = service.collect(...)
-    assert result.writeback["knowledge"] == "applied"
+def test_research_writeback_builders_project_knowledge_and_graph():
+    change = writeback.build_research_session_writeback(...)
+    assert change.upsert_nodes
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `PYTHONPATH=src python -m pytest tests/research/test_research_writeback_flow.py tests/research/test_research_knowledge_ingestion.py -q`
 
-Expected: FAIL with missing payload fields / missing writeback
+Expected: FAIL with missing formal projections / missing reusable writeback builder inputs
 
 - [ ] **Step 3: Extend the research records and writeback logic**
 
-Add formal payload slots for:
+Add formal payload slots and builder inputs for:
 
 - brief
 - collected sources
-- findings
-- conflicts/gaps summary
-- writeback status
+- findings/conflicts/gaps summary
+- reusable knowledge/report/graph projection inputs
 
 Do not introduce a second repository unless strictly needed.
 
@@ -597,11 +608,12 @@ Expected: FAIL because the read surface still reflects the old provider-shaped m
 Expose at least:
 
 - current brief
-- current owner
 - current sources
 - current findings
 - current conflicts/gaps
 - writeback state
+
+Note: phase-1 Runtime Center does not yet project a dedicated research owner field; that remains a later visibility enhancement rather than part of the current landed contract.
 
 - [ ] **Step 4: Run read-surface tests**
 
