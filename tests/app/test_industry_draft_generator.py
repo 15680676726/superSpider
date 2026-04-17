@@ -9,6 +9,7 @@ from copaw.industry import (
     IndustryPreviewRequest,
     normalize_industry_profile,
 )
+from copaw.industry.draft_generator import _GeneratedDraft
 
 
 class _StreamingStructuredModel:
@@ -30,6 +31,24 @@ class _MessageCaptureStructuredModel:
     async def __call__(self, **kwargs):
         self.last_messages = kwargs.get("messages")
         return SimpleNamespace(metadata=self._payload, content=[])
+
+
+class _RecordingDraftModelCallService:
+    def __init__(self, payload: dict) -> None:
+        self._payload = payload
+        self.calls: list[dict[str, object]] = []
+
+    async def invoke_structured(self, *, messages, policy, feature, model=None, model_kwargs=None):
+        self.calls.append(
+            {
+                "messages": messages,
+                "policy": policy,
+                "feature": feature,
+                "model": model,
+                "model_kwargs": model_kwargs,
+            }
+        )
+        return _GeneratedDraft.model_validate(self._payload)
 
 
 def test_industry_draft_generator_consumes_streamed_structured_response() -> None:
@@ -367,3 +386,89 @@ def test_industry_draft_generator_synthesizes_fallback_goals_when_model_omits_th
     assert all(goal.plan_steps for goal in draft.goals)
     assert any(goal.owner_agent_id == "copaw-agent-runner" for goal in draft.goals)
     assert any(goal.owner_agent_id == "solution-lead" for goal in draft.goals)
+
+
+def test_industry_draft_generator_prefers_unified_model_call_service() -> None:
+    payload = {
+        "team": {
+            "label": "Northwind Robotics AI Draft",
+            "summary": "Editable AI-generated team draft.",
+            "topology": "solo",
+            "agents": [
+                {
+                    "role_id": "execution-core",
+                    "name": "白泽执行中枢",
+                    "role_name": "白泽执行中枢",
+                    "role_summary": "Owns the operating brief.",
+                    "mission": "Choose the next move.",
+                    "goal_kind": "execution-core",
+                    "agent_class": "business",
+                    "activation_mode": "persistent",
+                    "suspendable": False,
+                    "risk_level": "guarded",
+                },
+                {
+                    "role_id": "solution-lead",
+                    "name": "Northwind Solution Lead",
+                    "role_name": "Solution Lead",
+                    "role_summary": "Shapes the rollout plan.",
+                    "mission": "Turn the brief into a rollout-ready solution.",
+                    "goal_kind": "solution",
+                    "agent_class": "business",
+                    "activation_mode": "persistent",
+                    "suspendable": False,
+                    "reports_to": "execution-core",
+                    "risk_level": "guarded",
+                }
+            ],
+        },
+        "goals": [
+            {
+                "goal_id": "execution-core-goal",
+                "kind": "execution-core",
+                "owner_agent_id": "copaw-agent-runner",
+                "title": "Operate Northwind Robotics",
+                "summary": "Create the next operating brief.",
+                "plan_steps": ["Review the brief", "Choose the next move"],
+            },
+            {
+                "goal_id": "solution-goal",
+                "kind": "solution",
+                "owner_agent_id": "solution-lead",
+                "title": "Shape the rollout",
+                "summary": "Define the rollout path.",
+                "plan_steps": ["Clarify the offer", "List dependencies"],
+            }
+        ],
+        "schedules": [],
+        "generation_summary": "AI draft response.",
+    }
+    service = _RecordingDraftModelCallService(payload)
+    runtime_provider = SimpleNamespace(
+        get_active_chat_model=lambda: object(),
+        get_model_call_service=lambda: service,
+        get_active_model=lambda: SimpleNamespace(
+            provider_id="openai",
+            model="gpt-5.2",
+        ),
+    )
+    generator = IndustryDraftGenerator(provider_runtime=runtime_provider)
+    profile = normalize_industry_profile(
+        IndustryPreviewRequest(
+            industry="Industrial Equipment",
+            company_name="Northwind Robotics",
+            product="factory monitoring copilots",
+            goals=["launch two pilot deployments"],
+        ),
+    )
+
+    draft = asyncio.run(
+        generator.generate(
+            profile=profile,
+            owner_scope="industry-v1-northwind-robotics",
+        ),
+    )
+
+    assert draft.team.label == "Northwind Robotics AI Draft"
+    assert service.calls[0]["feature"] == "industry_draft_generation"
+    assert service.calls[0]["policy"].timeout_seconds == 120

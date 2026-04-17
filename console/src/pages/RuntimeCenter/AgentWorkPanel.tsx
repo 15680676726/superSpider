@@ -1,4 +1,4 @@
-import { Button, Card, Empty, Progress, Tabs, Typography, type TabsProps } from "antd";
+import { Alert, Button, Card, Empty, Progress, Tabs, Typography, type TabsProps } from "antd";
 import { useMemo, useState, type ReactNode } from "react";
 
 import { normalizeDisplayChinese } from "../../text";
@@ -12,10 +12,24 @@ export interface CockpitSummaryField {
   hint?: ReactNode;
 }
 
+export interface CockpitReportSectionItem {
+  key: string;
+  label: string;
+  content: string;
+}
+
+export interface CockpitReportError {
+  code: string;
+  message: string;
+}
+
 export interface CockpitReportBlock {
+  kind?: "morning" | "evening";
   title: string;
-  items: string[];
+  status?: "ready" | "error";
+  sections: CockpitReportSectionItem[];
   generatedAt?: string | null;
+  error?: CockpitReportError | null;
 }
 
 export interface CockpitTrendPoint {
@@ -97,17 +111,30 @@ function ReportBlockCard({
         <div className={styles.cockpitReportTitle}>
           {normalizeDisplayChinese(block.title)}
         </div>
-        <span className={styles.cockpitReportBadge}>
-          {tone === "done" ? "完成情况" : "今日安排"}
-        </span>
       </div>
-      <ul className={styles.cockpitReportList}>
-        {block.items.map((item) => (
-          <li key={`${block.title}:${item}`} className={styles.cockpitReportItem}>
-            {normalizeDisplayChinese(item)}
-          </li>
-        ))}
-      </ul>
+      {block.status === "error" ? (
+        <Alert
+          showIcon
+          type="error"
+          message={normalizeDisplayChinese(
+            block.error?.message || `${block.title}生成失败，请稍后再试。`,
+          )}
+          className={styles.cockpitReportError}
+        />
+      ) : (
+        <div className={styles.cockpitReportList}>
+          {block.sections.map((section) => (
+            <div key={`${block.title}:${section.key}`} className={styles.cockpitReportItem}>
+              <div className={styles.cockpitReportItemLabel}>
+                {normalizeDisplayChinese(section.label)}
+              </div>
+              <div className={styles.cockpitReportItemContent}>
+                {normalizeDisplayChinese(section.content)}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
       {block.generatedAt ? (
         <div className={styles.cockpitReportMeta}>
           {normalizeDisplayChinese(block.generatedAt)}
@@ -153,6 +180,7 @@ export function CockpitReportSection({
   emptyText = "今天还没有生成日报。",
 }: CockpitReportSectionProps) {
   const [showMorningAtNight, setShowMorningAtNight] = useState(false);
+  const [showEveningAtDay, setShowEveningAtDay] = useState(false);
 
   if (!morningReport && !eveningReport) {
     return (
@@ -167,27 +195,14 @@ export function CockpitReportSection({
       <div className={styles.cockpitReportStack}>
         {eveningReport ? <ReportBlockCard block={eveningReport} tone="done" /> : null}
         {morningReport ? (
-          <div className={styles.cockpitFoldCard}>
-            <div className={styles.cockpitFoldHeader}>
-              <div>
-                <div className={styles.cockpitFoldTitle}>早报</div>
-                <div className={styles.cockpitFoldHint}>
-                  晚上默认先看完成情况，早上的计划默认收起。
-                </div>
-              </div>
-              <Button
-                size="small"
-                onClick={() => setShowMorningAtNight((value) => !value)}
-              >
-                {showMorningAtNight ? "收起早报" : "展开早报"}
-              </Button>
-            </div>
-            {showMorningAtNight ? (
-              <div style={{ marginTop: 12 }}>
-                <ReportBlockCard block={morningReport} tone="plan" />
-              </div>
-            ) : null}
-          </div>
+          <FoldedReportCard
+            title="早报"
+            hint="晚上默认先看今天的完成回顾，早上的计划默认收起。"
+            expanded={showMorningAtNight}
+            onToggle={() => setShowMorningAtNight((value) => !value)}
+            block={morningReport}
+            tone="plan"
+          />
         ) : null}
       </div>
     );
@@ -196,6 +211,16 @@ export function CockpitReportSection({
   return (
     <div className={styles.cockpitReportStack}>
       {morningReport ? <ReportBlockCard block={morningReport} tone="plan" /> : null}
+      {eveningReport ? (
+        <FoldedReportCard
+          title="晚报"
+          hint="白天默认先看今天的计划，晚上的完成回顾默认收起。"
+          expanded={showEveningAtDay}
+          onToggle={() => setShowEveningAtDay((value) => !value)}
+          block={eveningReport}
+          tone="done"
+        />
+      ) : null}
     </div>
   );
 }
@@ -286,6 +311,43 @@ export function CockpitTraceSection({
           </span>
         </div>
       ))}
+    </div>
+  );
+}
+
+function FoldedReportCard({
+  title,
+  hint,
+  expanded,
+  onToggle,
+  block,
+  tone,
+}: {
+  title: string;
+  hint: string;
+  expanded: boolean;
+  onToggle: () => void;
+  block: CockpitReportBlock;
+  tone: "plan" | "done";
+}) {
+  return (
+    <div className={styles.cockpitFoldCard}>
+      <div className={styles.cockpitFoldHeader}>
+        <div>
+          <div className={styles.cockpitFoldTitle}>{normalizeDisplayChinese(title)}</div>
+          <div className={styles.cockpitFoldHint}>{normalizeDisplayChinese(hint)}</div>
+        </div>
+        <Button size="small" onClick={onToggle}>
+          {expanded
+            ? normalizeDisplayChinese(`收起${title}`)
+            : normalizeDisplayChinese(`展开${title}`)}
+        </Button>
+      </div>
+      {expanded ? (
+        <div style={{ marginTop: 12 }}>
+          <ReportBlockCard block={block} tone={tone} />
+        </div>
+      ) : null}
     </div>
   );
 }

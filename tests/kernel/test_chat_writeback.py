@@ -10,6 +10,7 @@ from copaw.kernel import query_execution_writeback as writeback_module
 from copaw.kernel.query_execution_shared import (
     _build_chat_writeback_plan_from_model_decision,
 )
+from copaw.kernel.query_execution_writeback import _RawChatWritebackModelDecision
 
 
 def test_chat_writeback_decision_cache_evicts_least_recently_used_entry() -> None:
@@ -239,8 +240,57 @@ class _SlowStructuredDecisionModel:
         return SimpleNamespace(metadata={})
 
 
-def test_chat_writeback_model_timeout_default_is_300_seconds() -> None:
-    assert writeback_module._CHAT_WRITEBACK_MODEL_TIMEOUT_SECONDS == 300.0
+class _RecordingStructuredDecisionService:
+    def __init__(self, *, payload: dict[str, object]) -> None:
+        self._payload = payload
+        self.calls: list[dict[str, object]] = []
+
+    async def invoke_structured(self, *, messages, policy, feature, model=None, model_kwargs=None):
+        self.calls.append(
+            {
+                "messages": messages,
+                "policy": policy,
+                "feature": feature,
+                "model": model,
+                "model_kwargs": model_kwargs,
+            }
+        )
+        return _RawChatWritebackModelDecision.model_validate(self._payload)
+
+
+def test_chat_writeback_model_timeout_default_is_120_seconds() -> None:
+    assert writeback_module._CHAT_WRITEBACK_MODEL_TIMEOUT_SECONDS == 120.0
+
+
+def test_chat_writeback_decision_prefers_unified_model_call_service_when_available(
+    monkeypatch,
+) -> None:
+    writeback_module.clear_chat_writeback_decision_cache()
+    service = _RecordingStructuredDecisionService(
+        payload={
+            "intent_kind": "execute-task",
+            "approved_targets": ["backlog"],
+            "should_writeback": True,
+            "kickoff_allowed": True,
+        }
+    )
+    monkeypatch.setattr(
+        writeback_module,
+        "_CHAT_WRITEBACK_DECISION_MODEL_CALL_SERVICE_FACTORY",
+        lambda: service,
+        raising=False,
+    )
+
+    decision = asyncio.run(
+        writeback_module.resolve_chat_writeback_model_decision(
+            text="现在去写一篇短篇小说，保存成实际文件，完成后主动告诉我结果。",
+        ),
+    )
+
+    assert decision is not None
+    assert decision.intent_kind == "execute-task"
+    assert service.calls[0]["feature"] == "chat_writeback_decision"
+    assert service.calls[0]["policy"].timeout_seconds == 120.0
 
 
 def test_direct_browser_execution_request_falls_back_to_heuristic_when_model_is_conservative(

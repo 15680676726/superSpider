@@ -4,6 +4,8 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 from .shared import *  # noqa: F401,F403
 
@@ -43,6 +45,10 @@ from copaw.app.runtime_center.models import (
     RuntimeOverviewResponse,
     RuntimePlanningShell,
     RuntimeQueryRuntimeEntropyPayload,
+)
+from copaw.providers.runtime_model_call import (
+    RuntimeModelCallService,
+    RuntimeModelHealthTracker,
 )
 from copaw.app.runtime_center.service import RuntimeCenterQueryService
 from copaw.app.routers.runtime_center_shared import _encode_sse_event
@@ -99,6 +105,85 @@ class _InMemoryMediaAnalysisRepository(BaseMediaAnalysisRepository):
 
     def delete_analysis(self, analysis_id: str) -> bool:
         return self._records.pop(analysis_id, None) is not None
+
+
+class _FakeDailyReportModel:
+    def __init__(self, *, fail: bool = False, english: bool = False) -> None:
+        self._fail = fail
+        self._english = english
+
+    async def __call__(self, *, messages, structured_model=None, **kwargs):
+        _ = kwargs
+        if self._fail:
+            raise TimeoutError("timed out")
+        payload = json.loads(messages[-1]["content"])
+        facts = payload.get("facts", {})
+        if structured_model is None:
+            return SimpleNamespace(metadata={}, content="")
+        if "Morning" in structured_model.__name__:
+            if self._english:
+                return SimpleNamespace(
+                    metadata={
+                        "what_today": "Work on today's priorities.",
+                        "priority_first": "Finish the top task first.",
+                        "risk_note": "Watch for the blocked dependency.",
+                    },
+                    content="",
+                )
+            return SimpleNamespace(
+                metadata={
+                    "what_today": facts.get("what_today", ""),
+                    "priority_first": facts.get("priority_first", ""),
+                    "risk_note": facts.get("risk_note", ""),
+                },
+                content="",
+            )
+        if self._english:
+            return SimpleNamespace(
+                metadata={
+                    "done_today": "Completed the current report pass.",
+                    "produced_result": "Prepared the next handoff artifact.",
+                    "next_step": "Continue with the next operating cycle.",
+                },
+                content="",
+            )
+        return SimpleNamespace(
+            metadata={
+                "done_today": facts.get("done_today", ""),
+                "produced_result": facts.get("produced_result", ""),
+                "next_step": facts.get("next_step", ""),
+            },
+            content="",
+        )
+
+
+class _FakeDailyRuntimeProvider:
+    def __init__(
+        self,
+        *,
+        fail: bool = False,
+        system_level: bool = False,
+        english: bool = False,
+    ) -> None:
+        tracker = RuntimeModelHealthTracker()
+        if system_level:
+            anchor = datetime.now(timezone.utc) - timedelta(minutes=20)
+            tracker.record_success(at=anchor)
+            tracker.record_failure(error_code="MODEL_TIMEOUT", at=anchor + timedelta(minutes=1))
+            tracker.record_failure(error_code="MODEL_TIMEOUT", at=anchor + timedelta(minutes=2))
+            tracker.record_failure(error_code="MODEL_TIMEOUT", at=anchor + timedelta(minutes=3))
+        self._service = RuntimeModelCallService(
+            model_factory=lambda: _FakeDailyReportModel(fail=fail, english=english),
+            health_tracker=tracker,
+        )
+        self._english = english
+        self._fail = fail
+
+    def get_model_call_service(self):
+        return self._service
+
+    def get_active_chat_model(self):
+        return _FakeDailyReportModel(fail=self._fail, english=self._english)
 
 
 class _BrokenModelDumpEvent:
@@ -880,6 +965,7 @@ def test_runtime_center_main_brain_route_exposes_human_cockpit_surface():
     app.state.governance_service = FakeGovernanceService()
     app.state.routine_service = FakeRoutineService()
     app.state.strategy_memory_service = FakeStrategyMemoryService()
+    app.state.runtime_provider = _FakeDailyRuntimeProvider()
 
     client = TestClient(app)
     response = client.get("/runtime-center/surface?sections=main_brain")
@@ -899,6 +985,62 @@ def test_runtime_center_main_brain_route_exposes_human_cockpit_surface():
     assert cockpit["agents"][0]["card"]["role"] == "操作执行"
     assert cockpit["agents"][0]["summary_fields"][0]["label"] == "职业"
     assert cockpit["agents"][0]["morning_report"]["title"] == "早报"
+
+
+def test_runtime_center_human_cockpit_surfaces_structured_report_errors_and_model_status():
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = FakeIndustryService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+    app.state.runtime_provider = _FakeDailyRuntimeProvider(fail=True, system_level=True)
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/surface?sections=main_brain")
+
+    assert response.status_code == 200
+    cockpit = response.json()["main_brain"]["cockpit"]
+
+    assert cockpit["model_status"]["level"] == "error"
+    assert cockpit["main_brain"]["morning_report"]["status"] == "error"
+    assert cockpit["main_brain"]["morning_report"]["error"]["code"] in {
+        "MODEL_TIMEOUT",
+        "MODEL_SYSTEM_UNAVAILABLE",
+    }
+    assert cockpit["main_brain"]["morning_report"]["sections"] == []
+
+
+def test_runtime_center_human_cockpit_rejects_non_chinese_daily_report_output():
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = FakeIndustryService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+    app.state.runtime_provider = _FakeDailyRuntimeProvider(english=True)
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/surface?sections=main_brain")
+
+    assert response.status_code == 200
+    cockpit = response.json()["main_brain"]["cockpit"]
+
+    assert cockpit["main_brain"]["morning_report"]["status"] == "error"
+    assert cockpit["main_brain"]["morning_report"]["error"]["code"] in {
+        "MODEL_CHINESE_VALIDATION_FAILED",
+        "MODEL_SYSTEM_UNAVAILABLE",
+    }
+    assert cockpit["main_brain"]["morning_report"]["sections"] == []
+    assert cockpit["model_status"]["level"] == "error"
 
 
 def test_runtime_center_main_brain_route_exposes_human_cockpit_trace_contract():
@@ -1009,7 +1151,7 @@ def test_runtime_center_human_cockpit_prefers_latest_reports_and_chinese_fallbac
                     "status": "running",
                     "role_name": "Operations",
                     "role_summary": "Push execution tasks and return results.",
-                    "current_focus": "Follow up key leads and close blockers",
+                    "current_focus": "跟进高优先线索并清掉关键阻塞",
                     "industry_instance_id": "industry-v1-ops",
                 },
                 {
@@ -1018,7 +1160,7 @@ def test_runtime_center_human_cockpit_prefers_latest_reports_and_chinese_fallbac
                     "status": "completed",
                     "role_name": "Research",
                     "role_summary": "Collect intel and summarize decisions.",
-                    "current_focus": "Summarize competitor changes",
+                    "current_focus": "整理竞品变化并输出判断",
                     "industry_instance_id": "industry-v1-ops",
                 },
             ]
@@ -1034,16 +1176,16 @@ def test_runtime_center_human_cockpit_prefers_latest_reports_and_chinese_fallbac
             payload["assignments"] = [
                 {
                     "assignment_id": "assignment-1",
-                    "title": "Follow up key leads",
-                    "summary": "Get responses from high-priority leads and confirm the next step.",
+                    "title": "跟进高优先线索",
+                    "summary": "跟进高优先线索的回复，并确认下一步动作。",
                     "status": "active",
                     "owner_agent_id": "ops-agent",
                     "updated_at": "2026-03-09T10:00:00+00:00",
                 },
                 {
                     "assignment_id": "assignment-2",
-                    "title": "Summarize competitor changes",
-                    "summary": "Review pricing, campaigns, and risk deltas.",
+                    "title": "整理竞品变化",
+                    "summary": "复盘定价、活动和风险变化。",
                     "status": "completed",
                     "owner_agent_id": "research-agent",
                     "updated_at": "2026-03-09T11:00:00+00:00",
@@ -1054,7 +1196,7 @@ def test_runtime_center_human_cockpit_prefers_latest_reports_and_chinese_fallbac
                     "report_id": "report-ops-older",
                     "report_kind": "status",
                     "headline": "Ops older report",
-                    "summary": "Older ops progress summary.",
+                    "summary": "更早的一版运营进展汇报。",
                     "status": "recorded",
                     "result": "older-result",
                     "processed": True,
@@ -1065,10 +1207,10 @@ def test_runtime_center_human_cockpit_prefers_latest_reports_and_chinese_fallbac
                 {
                     "report_id": "report-research-latest",
                     "report_kind": "status",
-                    "headline": "Research latest report",
-                    "summary": "Latest global report should appear in main brain evening report.",
+                    "headline": "研究最新汇报",
+                    "summary": "主脑晚报应优先展示最新的研究汇报。",
                     "status": "completed",
-                    "result": "research-result",
+                    "result": "已形成最新研究结论",
                     "processed": True,
                     "needs_followup": False,
                     "owner_agent_id": "research-agent",
@@ -1077,10 +1219,10 @@ def test_runtime_center_human_cockpit_prefers_latest_reports_and_chinese_fallbac
                 {
                     "report_id": "report-ops-latest",
                     "report_kind": "status",
-                    "headline": "Ops latest report",
-                    "summary": "Latest ops report should appear in ops evening report.",
+                    "headline": "运营最新汇报",
+                    "summary": "运营位晚报应优先展示最新的运营汇报。",
                     "status": "completed",
-                    "result": "ops-result",
+                    "result": "已形成最新运营结果",
                     "processed": True,
                     "needs_followup": False,
                     "owner_agent_id": "ops-agent",
@@ -1105,6 +1247,7 @@ def test_runtime_center_human_cockpit_prefers_latest_reports_and_chinese_fallbac
     app.state.governance_service = FakeGovernanceService()
     app.state.routine_service = FakeRoutineService()
     app.state.strategy_memory_service = FakeStrategyMemoryService()
+    app.state.runtime_provider = _FakeDailyRuntimeProvider()
 
     client = TestClient(app)
     response = client.get("/runtime-center/surface?sections=main_brain")
@@ -1123,14 +1266,14 @@ def test_runtime_center_human_cockpit_prefers_latest_reports_and_chinese_fallbac
         "\u5f53\u524d\u6ca1\u6709\u660e\u786e\u7684\u91cd\u6392\u538b\u529b\u3002"
     )
 
-    assert main_brain["evening_report"]["items"][0] == "Research latest report"
-    assert main_brain["morning_report"]["items"][1] == clear_next_action
+    assert main_brain["evening_report"]["sections"][0]["content"] == "研究最新汇报"
+    assert main_brain["morning_report"]["sections"][1]["content"] == clear_next_action
     assert (
         main_brain["stage_summary"]["bullets"][-1]
         == clear_judgment
     )
-    assert agents["ops-agent"]["evening_report"]["items"][0] == "Ops latest report"
-    assert agents["research-agent"]["evening_report"]["items"][0] == "Research latest report"
+    assert agents["ops-agent"]["evening_report"]["sections"][0]["content"] == "运营最新汇报"
+    assert agents["research-agent"]["evening_report"]["sections"][0]["content"] == "研究最新汇报"
 
     ops_summary_fields = {item["label"]: item["value"] for item in agents["ops-agent"]["summary_fields"]}
     research_summary_fields = {
@@ -1231,7 +1374,7 @@ def test_runtime_center_human_cockpit_prefers_latest_assignment_for_agent_focus_
                 {
                     "assignment_id": "assignment-older",
                     "title": "Older assignment",
-                    "summary": "Older assignment summary.",
+                    "summary": "更早的一版任务摘要。",
                     "status": "active",
                     "owner_agent_id": "ops-agent",
                     "updated_at": "2026-03-09T08:00:00+00:00",
@@ -1239,7 +1382,7 @@ def test_runtime_center_human_cockpit_prefers_latest_assignment_for_agent_focus_
                 {
                     "assignment_id": "assignment-latest",
                     "title": "Latest assignment",
-                    "summary": "Newest assignment summary.",
+                    "summary": "最新任务摘要。",
                     "status": "active",
                     "owner_agent_id": "ops-agent",
                     "updated_at": "2026-03-09T10:30:00+00:00",
@@ -1264,6 +1407,7 @@ def test_runtime_center_human_cockpit_prefers_latest_assignment_for_agent_focus_
     app.state.governance_service = FakeGovernanceService()
     app.state.routine_service = FakeRoutineService()
     app.state.strategy_memory_service = FakeStrategyMemoryService()
+    app.state.runtime_provider = _FakeDailyRuntimeProvider()
 
     client = TestClient(app)
     response = client.get("/runtime-center/surface?sections=main_brain")
@@ -1273,8 +1417,8 @@ def test_runtime_center_human_cockpit_prefers_latest_assignment_for_agent_focus_
     agent = cockpit["agents"][0]
     summary_fields = {item["label"]: item["value"] for item in agent["summary_fields"]}
 
-    assert summary_fields["主要负责工作"] == "Newest assignment summary."
-    assert agent["morning_report"]["items"][0] == "Newest assignment summary."
+    assert summary_fields["主要负责工作"] == "最新任务摘要。"
+    assert agent["morning_report"]["sections"][0]["content"] == "最新任务摘要。"
 
 
 def test_runtime_center_main_brain_route_exposes_report_cognition_surface():

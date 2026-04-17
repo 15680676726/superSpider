@@ -11,6 +11,11 @@ from agentscope.message import Msg, TextBlock
 from pydantic import BaseModel, Field
 
 from ..industry.chat_writeback import ChatWritebackPlan, build_chat_writeback_plan_from_payload
+from ..providers.runtime_model_call import (
+    RuntimeModelCallError,
+    RuntimeModelCallPolicy,
+    RuntimeModelCallService,
+)
 from ..utils.model_response import materialize_model_response
 from ..utils.cache import BoundedLRUCache
 from .query_execution_intent_policy import (
@@ -72,7 +77,8 @@ _CHAT_WRITEBACK_MODEL_CACHE = BoundedLRUCache[str, "_ChatWritebackModelDecision"
     max_entries=_CHAT_WRITEBACK_MODEL_CACHE_MAX,
 )
 _CHAT_WRITEBACK_DECISION_MODEL_FACTORY = None
-_CHAT_WRITEBACK_MODEL_TIMEOUT_SECONDS = 300.0
+_CHAT_WRITEBACK_DECISION_MODEL_CALL_SERVICE_FACTORY = None
+_CHAT_WRITEBACK_MODEL_TIMEOUT_SECONDS = 120.0
 _CHAT_WRITEBACK_MODEL_PLANNER_PROMPT = """
 You are the governed execution-core chat frontdoor for CoPaw.
 
@@ -626,30 +632,67 @@ def _resolve_chat_writeback_decision_model() -> object | None:
         return None
 
 
+def _resolve_chat_writeback_model_call_service() -> RuntimeModelCallService | None:
+    service_factory = _CHAT_WRITEBACK_DECISION_MODEL_CALL_SERVICE_FACTORY
+    if callable(service_factory):
+        try:
+            return service_factory()
+        except Exception:
+            logger.debug("Chat writeback decision model call service is unavailable.", exc_info=True)
+    model_factory = _CHAT_WRITEBACK_DECISION_MODEL_FACTORY
+    if callable(model_factory):
+        return RuntimeModelCallService(model_factory=model_factory)
+    try:
+        from ..providers.runtime_provider_facade import build_compat_runtime_provider_facade
+
+        runtime = build_compat_runtime_provider_facade()
+        service_getter = getattr(runtime, "get_model_call_service", None)
+        if callable(service_getter):
+            return service_getter()
+        return RuntimeModelCallService(model_factory=runtime.get_active_chat_model)
+    except Exception:
+        logger.debug("Chat writeback decision model call service is unavailable.", exc_info=True)
+        return None
+
+
 async def _resolve_model_chat_writeback_decision(
     text: str,
 ) -> _ChatWritebackModelDecision | None:
-    model = _resolve_chat_writeback_decision_model()
-    if model is None:
+    service = _resolve_chat_writeback_model_call_service()
+    if service is None:
         raise ChatWritebackDecisionModelUnavailableError(
             "Chat writeback decision model is unavailable.",
         )
     try:
-        response = await asyncio.wait_for(
-            model(
-                messages=_decision_messages(text),
-                structured_model=_RawChatWritebackModelDecision,
+        response = await service.invoke_structured(
+            messages=_decision_messages(text),
+            policy=RuntimeModelCallPolicy(
+                timeout_seconds=_CHAT_WRITEBACK_MODEL_TIMEOUT_SECONDS,
+                structured_schema=_RawChatWritebackModelDecision,
             ),
-            timeout=_CHAT_WRITEBACK_MODEL_TIMEOUT_SECONDS,
-        )
-        response = await asyncio.wait_for(
-            _materialize_response(response),
-            timeout=_CHAT_WRITEBACK_MODEL_TIMEOUT_SECONDS,
+            feature="chat_writeback_decision",
         )
         payload = _sanitize_chat_writeback_model_payload(
-            _response_to_payload(response),
+            response.model_dump(mode="json")
+            if isinstance(response, BaseModel)
+            else _response_to_payload(response),
         )
         return _ChatWritebackModelDecision.model_validate(payload)
+    except RuntimeModelCallError as exc:
+        if exc.code == "MODEL_TIMEOUT":
+            logger.warning("Chat writeback decision model timed out.", exc_info=True)
+            raise ChatWritebackDecisionModelTimeoutError(
+                "Chat writeback decision model timed out.",
+            ) from None
+        if exc.code == "MODEL_UPSTREAM_ERROR":
+            logger.debug("Chat writeback decision model is unavailable.", exc_info=True)
+            raise ChatWritebackDecisionModelUnavailableError(
+                "Chat writeback decision model is unavailable.",
+            ) from None
+        logger.debug("Chat writeback decision model failed.", exc_info=True)
+        raise ChatWritebackDecisionModelUnavailableError(
+            "Chat writeback decision model failed.",
+        ) from exc
     except TimeoutError:
         logger.warning("Chat writeback decision model timed out.", exc_info=True)
         raise ChatWritebackDecisionModelTimeoutError(

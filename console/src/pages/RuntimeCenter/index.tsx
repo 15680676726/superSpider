@@ -150,17 +150,6 @@ function progressFromStatus(status?: string | null): number {
   return 48;
 }
 
-function reportBlock(title: string, items: Array<string | null | undefined>): CockpitReportBlock | null {
-  const lines = buildList(...items).slice(0, 3);
-  if (lines.length === 0) {
-    return null;
-  }
-  return {
-    title,
-    items: lines,
-  };
-}
-
 function metricPoint(
   label: string,
   completed: number,
@@ -296,35 +285,6 @@ function buildMainBrainSummaryFields(
           : "当前没有必须你立刻决定的事项。",
     },
   ];
-}
-
-function buildMainBrainReports(
-  mainBrainData: RuntimeMainBrainResponse | null,
-): { morningReport: CockpitReportBlock | null; eveningReport: CockpitReportBlock | null } {
-  if (!mainBrainData) {
-    return { morningReport: null, eveningReport: null };
-  }
-
-  const morningReport = reportBlock("早报", [
-    firstText(mainBrainData.current_cycle?.summary, mainBrainData.current_cycle?.title),
-    firstText(
-      mainBrainData.report_cognition?.next_action?.summary,
-      mainBrainData.report_cognition?.next_action?.title,
-    ),
-    `今天主脑需要盯住 ${mainBrainData.assignments.length} 项执行任务。`,
-  ]);
-
-  const latestReport = pickLatestRecord(mainBrainData.reports);
-  const eveningReport = reportBlock("晚报", [
-    firstText(latestReport?.headline, latestReport?.summary),
-    `今天共收到 ${mainBrainData.reports.length} 份汇报。`,
-    `今天新增 ${mainBrainData.evidence.count} 条证据。`,
-    mainBrainData.decisions.count > 0
-      ? `还有 ${mainBrainData.decisions.count} 项待你确认。`
-      : null,
-  ]);
-
-  return { morningReport, eveningReport };
 }
 
 function buildMainBrainTrend(
@@ -522,34 +482,6 @@ function buildAgentSummaryFields(
   ];
 }
 
-function buildAgentReports(
-  agent: RuntimeCenterAgentSummary,
-  mainBrainData: RuntimeMainBrainResponse | null,
-): { morningReport: CockpitReportBlock | null; eveningReport: CockpitReportBlock | null } {
-  const relatedAssignment = pickLatestRecord(
-    mainBrainData?.assignments.filter((record) => matchesAgent(record, agent.agent_id)),
-  );
-  const relatedReport = pickLatestRecord(
-    mainBrainData?.reports.filter((record) => matchesAgent(record, agent.agent_id)),
-  );
-
-  const morningReport = reportBlock("早报", [
-    firstText(agent.current_focus),
-    firstText(relatedAssignment?.summary, relatedAssignment?.title),
-    agent.role_summary ? `今天继续推进：${agent.role_summary}` : null,
-  ]);
-
-  const eveningReport = reportBlock("晚报", [
-    firstText(relatedReport?.headline, relatedReport?.summary),
-    relatedReport ? `当前结果状态：${firstText(relatedReport.result, relatedReport.status) || "推进中"}` : null,
-    relatedReport && firstText(relatedReport.updated_at)
-      ? `最后回传时间：${firstText(relatedReport.updated_at)}`
-      : null,
-  ]);
-
-  return { morningReport, eveningReport };
-}
-
 function buildAgentTrend(
   agent: RuntimeCenterAgentSummary,
   mainBrainData: RuntimeMainBrainResponse | null,
@@ -602,9 +534,21 @@ function mapCockpitReportBlock(
     return null;
   }
   return {
+    kind: block.kind,
     title: block.title,
-    items: block.items,
+    status: block.status ?? "ready",
+    sections: (block.sections ?? []).map((section) => ({
+      key: section.key,
+      label: section.label,
+      content: section.content,
+    })),
     generatedAt: block.generated_at ?? undefined,
+    error: block.error
+      ? {
+          code: block.error.code,
+          message: block.error.message,
+        }
+      : undefined,
   };
 }
 
@@ -686,6 +630,7 @@ export default function RuntimeCenterPage() {
   const dayMode = useMemo(() => resolveDayMode(), []);
 
   const cockpit = mainBrainData?.cockpit ?? null;
+  const cockpitModelStatus = cockpit?.model_status ?? null;
   const cockpitMainBrain = cockpit?.main_brain ?? null;
   const cockpitAgents = cockpit?.agents ?? [];
 
@@ -779,8 +724,8 @@ export default function RuntimeCenterPage() {
             morningReport: mapCockpitReportBlock(cockpitMainBrain.morning_report),
             eveningReport: mapCockpitReportBlock(cockpitMainBrain.evening_report),
           }
-        : buildMainBrainReports(mainBrainData),
-    [cockpitMainBrain, mainBrainData],
+        : { morningReport: null, eveningReport: null },
+    [cockpitMainBrain],
   );
   const mainBrainTrend = useMemo(
     () =>
@@ -916,15 +861,14 @@ export default function RuntimeCenterPage() {
     }
 
     const summaryFields = buildAgentSummaryFields(legacyAgent, mainBrainData);
-    const reports = buildAgentReports(legacyAgent, mainBrainData);
     const trend = buildAgentTrend(legacyAgent, mainBrainData);
 
     return (
       <AgentWorkPanel
         title={presentExecutionActorName(legacyAgent.agent_id, legacyAgent.name)}
         summaryFields={summaryFields}
-        morningReport={reports.morningReport}
-        eveningReport={reports.eveningReport}
+        morningReport={null}
+        eveningReport={null}
         trend={trend}
         trace={[]}
         dayMode={dayMode}
@@ -965,6 +909,15 @@ export default function RuntimeCenterPage() {
 
       {!data && error ? <Alert showIcon type="error" message={error} /> : null}
       {mainBrainError ? <Alert showIcon type="warning" message={mainBrainError} /> : null}
+      {cockpitModelStatus?.level === "error" ? (
+        <Alert
+          showIcon
+          type="warning"
+          message={normalizeDisplayChinese(
+            cockpitModelStatus.message || "系统当前无法继续运行：全局模型调用持续失败，请先恢复模型服务。",
+          )}
+        />
+      ) : null}
 
       <Card className="baize-card">
         <div className={styles.panelHeader}>

@@ -14,12 +14,24 @@ function createProps(): MainBrainCockpitPanelProps {
       { label: "当前重点", value: "先处理待确认事项。" },
     ],
     morningReport: {
+      kind: "morning",
       title: "早报",
-      items: ["今天先收口待确认事项。", "先看运营位回传。", "注意今天还有一个确认项。"],
+      status: "ready",
+      sections: [
+        { key: "what_today", label: "今天要做什么", content: "今天先收口待确认事项。" },
+        { key: "priority_first", label: "重点先做什么", content: "先看运营位回传。" },
+        { key: "risk_note", label: "风险提醒", content: "注意今天还有一个确认项。" },
+      ],
     },
     eveningReport: {
+      kind: "evening",
       title: "晚报",
-      items: ["今天已收回 1 份汇报。", "新增 2 条证据。", "明天继续推进交付说明。"],
+      status: "ready",
+      sections: [
+        { key: "done_today", label: "今天完成了什么", content: "今天已收回 1 份汇报。" },
+        { key: "produced_result", label: "产出了什么结果", content: "新增 2 条证据。" },
+        { key: "next_step", label: "明天继续什么", content: "明天继续推进交付说明。" },
+      ],
     },
     trend: [
       { label: "周一", completed: 1, completionRate: 80, quality: 78 },

@@ -107,9 +107,7 @@ class RuntimeDailyReportGenerationService:
                 policy=RuntimeModelCallPolicy(
                     timeout_seconds=120,
                     max_retries=3,
-                    # Structured daily reports may legitimately preserve
-                    # source-language headlines or result labels from live data.
-                    require_chinese=False,
+                    require_chinese=True,
                     structured_schema=schema,
                 ),
                 feature=f"runtime_daily_report_{report_kind}",

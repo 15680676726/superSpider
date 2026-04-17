@@ -415,10 +415,33 @@ export interface RuntimeHumanCockpitSummaryField {
   hint?: string | null;
 }
 
+export interface RuntimeHumanCockpitReportSection {
+  key: string;
+  label: string;
+  content: string;
+}
+
+export interface RuntimeHumanCockpitReportError {
+  code: string;
+  message: string;
+}
+
+export interface RuntimeHumanCockpitModelStatus {
+  level: "ok" | "error";
+  code?: string | null;
+  message?: string | null;
+  consecutive_failures?: number;
+  last_success_at?: string | null;
+  last_failure_at?: string | null;
+}
+
 export interface RuntimeHumanCockpitReportBlock {
+  kind: "morning" | "evening";
   title: string;
-  items: string[];
+  status?: "ready" | "error";
+  sections: RuntimeHumanCockpitReportSection[];
   generated_at?: string | null;
+  error?: RuntimeHumanCockpitReportError | null;
 }
 
 export interface RuntimeHumanCockpitTrendPoint {
@@ -475,6 +498,7 @@ export interface RuntimeHumanCockpitMainBrain {
 }
 
 export interface RuntimeHumanCockpitPayload {
+  model_status: RuntimeHumanCockpitModelStatus;
   main_brain: RuntimeHumanCockpitMainBrain;
   agents: RuntimeHumanCockpitAgent[];
 }

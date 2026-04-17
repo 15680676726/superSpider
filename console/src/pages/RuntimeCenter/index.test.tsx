@@ -325,6 +325,12 @@ describe("RuntimeCenterPage", () => {
   it("prefers backend cockpit content when the formal cockpit payload is present", () => {
     const state: any = createRuntimeCenterState();
     state.mainBrainData.cockpit = {
+      model_status: {
+        level: "ok",
+        code: null,
+        message: null,
+        consecutive_failures: 0,
+      },
       main_brain: {
         card: {
           id: "main-brain",
@@ -337,8 +343,16 @@ describe("RuntimeCenterPage", () => {
         },
         summary_fields: [{ label: "职责", value: "后端正式主脑摘要" }],
         morning_report: {
+          kind: "morning",
           title: "早报",
-          items: ["后端正式主脑早报"],
+          status: "ready",
+          sections: [
+            {
+              key: "what_today",
+              label: "今天要做什么",
+              content: "后端正式主脑早报",
+            },
+          ],
         },
         evening_report: null,
         trend: [],
@@ -366,8 +380,16 @@ describe("RuntimeCenterPage", () => {
           },
           summary_fields: [{ label: "职责", value: "后端正式运营摘要" }],
           morning_report: {
+            kind: "morning",
             title: "早报",
-            items: ["后端正式运营早报"],
+            status: "ready",
+            sections: [
+              {
+                key: "what_today",
+                label: "今天要做什么",
+                content: "后端正式运营早报",
+              },
+            ],
           },
           evening_report: null,
           trend: [],
@@ -396,7 +418,7 @@ describe("RuntimeCenterPage", () => {
     expect(screen.getByText("后端正式运营追溯")).toBeInTheDocument();
   });
 
-  it("uses the latest legacy agent assignment in summary and morning report when cockpit payload is absent", () => {
+  it("does not synthesize legacy agent reports when cockpit payload is absent", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-12T10:00:00Z"));
     try {
@@ -429,13 +451,13 @@ describe("RuntimeCenterPage", () => {
       expect(screen.getByText("最新派工摘要")).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole("tab", { name: "日报" }));
-      expect(screen.getByText("最新派工摘要")).toBeInTheDocument();
+      expect(screen.getByText("今天还没有生成日报。")).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("uses the latest legacy main-brain report in the evening report when cockpit payload is absent", () => {
+  it("does not synthesize legacy main-brain reports when cockpit payload is absent", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-12T20:00:00Z"));
     try {
@@ -463,10 +485,57 @@ describe("RuntimeCenterPage", () => {
       render(<RuntimeCenterPage />);
 
       fireEvent.click(screen.getByRole("tab", { name: "日报" }));
-      expect(screen.getByText("最新汇报")).toBeInTheDocument();
+      expect(screen.getByText("今天还没有生成日报。")).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("surfaces backend model-status warnings from the cockpit payload", () => {
+    const state: any = createRuntimeCenterState();
+    state.mainBrainData.cockpit = {
+      model_status: {
+        level: "error",
+        code: "MODEL_SYSTEM_UNAVAILABLE",
+        message: "系统当前无法继续运行：全局模型调用持续失败，请先恢复模型服务。",
+        consecutive_failures: 3,
+      },
+      main_brain: {
+        card: {
+          id: "main-brain",
+          name: "伙伴",
+          role: "主脑",
+          status: "blocked",
+          progress: 40,
+          needs_attention: true,
+          is_main_brain: true,
+        },
+        summary_fields: [{ label: "职责", value: "后端正式主脑摘要" }],
+        morning_report: {
+          kind: "morning",
+          title: "早报",
+          status: "error",
+          sections: [],
+          error: {
+            code: "MODEL_TIMEOUT",
+            message: "早报生成失败：模型在 120 秒内未返回有效结果，已重试 3 次。",
+          },
+        },
+        evening_report: null,
+        trend: [],
+        trace: [],
+        approvals: [],
+        stage_summary: null,
+      },
+      agents: [],
+    };
+    useRuntimeCenterMock.mockReturnValue(state);
+
+    render(<RuntimeCenterPage />);
+
+    expect(
+      screen.getByText("系统当前无法继续运行：全局模型调用持续失败，请先恢复模型服务。"),
+    ).toBeInTheDocument();
   });
 
   it("shows the channel runtime tab with the weixin ilink runtime summary", () => {

@@ -1333,16 +1333,32 @@
 
 .cockpitReportList {
   margin: 0;
-  padding-left: 18px;
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
 .cockpitReportItem {
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.42);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.cockpitReportItemLabel {
+  font-size: 12px;
+  color: var(--baize-text-dim);
+  margin-bottom: 6px;
+}
+
+.cockpitReportItemContent {
   color: var(--baize-text-main);
   font-size: 14px;
   line-height: 1.7;
+}
+
+.cockpitReportError {
+  border-radius: 14px;
 }
 
 .cockpitReportMeta {

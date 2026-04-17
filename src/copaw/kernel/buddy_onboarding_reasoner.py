@@ -10,6 +10,11 @@ from typing import Any, Callable, Protocol
 
 from pydantic import BaseModel, Field
 
+from ..providers.runtime_model_call import (
+    RuntimeModelCallError,
+    RuntimeModelCallPolicy,
+    RuntimeModelCallService,
+)
 from ..providers.runtime_provider_facade import (
     ProviderRuntimeSurface,
     build_compat_runtime_provider_facade,
@@ -18,7 +23,7 @@ from ..state import HumanProfile
 from ..utils.model_response import materialize_model_response
 
 logger = logging.getLogger(__name__)
-_DEFAULT_REASONING_TIMEOUT_SECONDS = 45.0
+_DEFAULT_REASONING_TIMEOUT_SECONDS = 120.0
 
 _BUDDY_ONBOARDING_REASONER_PROMPT = """
 你负责 CoPaw Buddy onboarding 的协作合同编译。
@@ -105,6 +110,21 @@ class _ReasonerResponse(BaseModel):
     backlog_items: list[BuddyOnboardingBacklogSeed] = Field(default_factory=list)
 
 
+class _RawReasonerResponse(BaseModel):
+    candidate_directions: list[str] = Field(default_factory=list)
+    direction_candidates: list[str] = Field(default_factory=list)
+    recommended_direction: str = ""
+    real_main_direction: str = ""
+    primary_direction: str = ""
+    direction: str = ""
+    final_goal: str = ""
+    why_it_matters: str = ""
+    why: str = ""
+    reason: str = ""
+    backlog_items: list[dict[str, Any]] = Field(default_factory=list)
+    backlog: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class BuddyOnboardingReasonerTimeoutError(TimeoutError):
     """Raised when Buddy onboarding waits too long for the active chat model."""
 
@@ -174,6 +194,8 @@ def _normalize_reasoner_payload(payload: dict[str, Any]) -> dict[str, Any]:
         normalized["why_it_matters"] = why_it_matters
     backlog_items = normalized.get("backlog_items")
     if not isinstance(backlog_items, list):
+        backlog_items = normalized.get("backlog")
+    if not isinstance(backlog_items, list) or not backlog_items:
         backlog_items = normalized.get("backlog")
     if not isinstance(backlog_items, list):
         backlog_items = []
@@ -251,6 +273,18 @@ class ModelDrivenBuddyOnboardingReasoner:
         )
         self._provider_runtime = resolved_runtime or build_compat_runtime_provider_facade()
         self._model_factory = model_factory or self._provider_runtime.get_active_chat_model
+        if model_factory is not None:
+            self._model_call_service = RuntimeModelCallService(
+                model_factory=self._model_factory,
+            )
+        else:
+            service_getter = getattr(self._provider_runtime, "get_model_call_service", None)
+            if callable(service_getter):
+                self._model_call_service = service_getter()
+            else:
+                self._model_call_service = RuntimeModelCallService(
+                    model_factory=self._model_factory,
+                )
         self._reasoning_timeout_seconds = max(1.0, float(reasoning_timeout_seconds))
 
     def compile_contract(
@@ -259,13 +293,6 @@ class ModelDrivenBuddyOnboardingReasoner:
         profile: HumanProfile,
         collaboration_contract: BuddyCollaborationContract,
     ) -> BuddyOnboardingContractCompileResult | None:
-        try:
-            model = self._model_factory()
-        except Exception:
-            logger.debug("伙伴建档编译器无法获取可用聊天模型。", exc_info=True)
-            raise BuddyOnboardingReasonerUnavailableError(
-                "伙伴建档模型暂不可用。",
-            ) from None
         request_payload = {
             "profile": profile.model_dump(mode="json"),
             "collaboration_contract": collaboration_contract.model_dump(mode="json"),
@@ -281,20 +308,36 @@ class ModelDrivenBuddyOnboardingReasoner:
             },
         ]
         try:
-            response = _run_async_blocking(
-                model(messages=messages, structured_model=_ReasonerResponse),
-                timeout_seconds=self._reasoning_timeout_seconds,
-            )
-            response = _run_async_blocking(
-                _materialize_response(response),
-                timeout_seconds=self._reasoning_timeout_seconds,
+            payload = _run_async_blocking(
+                self._model_call_service.invoke_structured(
+                    messages=messages,
+                    policy=RuntimeModelCallPolicy(
+                        timeout_seconds=self._reasoning_timeout_seconds,
+                        structured_schema=_RawReasonerResponse,
+                    ),
+                    feature="buddy_onboarding_contract_compile",
+                ),
             )
             payload = _ReasonerResponse.model_validate(
-                _normalize_reasoner_payload(_response_to_payload(response)),
+                _normalize_reasoner_payload(
+                    payload.model_dump(mode="json")
+                    if isinstance(payload, BaseModel)
+                    else _response_to_payload(payload)
+                ),
             )
         except BuddyOnboardingReasonerTimeoutError:
             logger.warning("伙伴建档协作合同编译超时。", exc_info=True)
             raise
+        except RuntimeModelCallError as exc:
+            if exc.code == "MODEL_TIMEOUT":
+                logger.warning("伙伴建档协作合同编译超时。", exc_info=True)
+                raise BuddyOnboardingReasonerTimeoutError(
+                    f"伙伴建档模型在 {self._reasoning_timeout_seconds:g} 秒内未返回结果。",
+                ) from None
+            logger.warning("伙伴建档协作合同编译失败。", exc_info=True)
+            raise BuddyOnboardingReasonerUnavailableError(
+                "伙伴建档模型未返回有效结果。",
+            ) from None
         except Exception:
             logger.warning("伙伴建档协作合同编译失败。", exc_info=True)
             raise BuddyOnboardingReasonerUnavailableError(

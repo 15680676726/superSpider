@@ -6,6 +6,11 @@ from typing import Any, Callable
 
 from pydantic import BaseModel, Field
 
+from ..providers.runtime_model_call import (
+    RuntimeModelCallError,
+    RuntimeModelCallPolicy,
+    RuntimeModelCallService,
+)
 from .identity import EXECUTION_CORE_ROLE_ID, is_execution_core_role_id
 from ..providers.runtime_provider_facade import (
     ProviderRuntimeSurface,
@@ -217,6 +222,18 @@ class IndustryDraftGenerator:
             or build_compat_runtime_provider_facade()
         )
         self._model_factory = model_factory or self._provider_runtime.get_active_chat_model
+        if model_factory is not None:
+            self._model_call_service = RuntimeModelCallService(
+                model_factory=self._model_factory,
+            )
+        else:
+            service_getter = getattr(self._provider_runtime, "get_model_call_service", None)
+            if callable(service_getter):
+                self._model_call_service = service_getter()
+            else:
+                self._model_call_service = RuntimeModelCallService(
+                    model_factory=self._model_factory,
+                )
 
     async def generate(
         self,
@@ -225,38 +242,46 @@ class IndustryDraftGenerator:
         owner_scope: str,
         media_context: str | None = None,
     ) -> IndustryDraftPlan:
-        try:
-            model = self._model_factory()
-        except Exception as exc:
-            detail = str(exc).strip()
-            message = (
-                "Industry draft preview requires an available active chat model. "
-                "Configure Settings > Models first and try again."
-            )
-            if detail:
-                message = f"{message} ({detail})"
-            raise IndustryDraftGenerationError(
-                message,
-                status_code=503,
-            ) from exc
         messages = self._build_messages(profile, media_context=media_context)
         try:
-            response = await model(messages=messages, structured_model=_GeneratedDraft)
-            response = await _materialize_response(response)
-        except Exception as exc:
+            payload = await self._model_call_service.invoke_structured(
+                messages=messages,
+                policy=RuntimeModelCallPolicy(
+                    timeout_seconds=120,
+                    structured_schema=_GeneratedDraft,
+                ),
+                feature="industry_draft_generation",
+            )
+        except RuntimeModelCallError as exc:
             detail = str(exc).strip()
             message = (
                 "Industry draft preview could not complete because the active chat model call failed. "
                 "Check the provider or model configuration and retry."
             )
+            status_code = 503
+            if exc.code == "MODEL_UPSTREAM_ERROR":
+                message = (
+                    "Industry draft preview requires an available active chat model. "
+                    "Configure Settings > Models first and try again."
+                )
+            elif exc.code == "MODEL_STRUCTURED_VALIDATION_FAILED":
+                message = (
+                    "Industry draft preview received an invalid structured response from the active chat model. "
+                    "Retry the preview or switch to a more stable model."
+                )
+                status_code = 502
             if detail:
                 message = f"{message} ({detail})"
             raise IndustryDraftGenerationError(
                 message,
-                status_code=503,
+                status_code=status_code,
             ) from exc
         try:
-            payload = _GeneratedDraft.model_validate(_response_to_payload(response))
+            payload = _GeneratedDraft.model_validate(
+                payload.model_dump(mode="json")
+                if isinstance(payload, BaseModel)
+                else _response_to_payload(payload)
+            )
         except ValueError as exc:
             detail = str(exc).strip()
             message = (

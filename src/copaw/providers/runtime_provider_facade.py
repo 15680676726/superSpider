@@ -12,6 +12,10 @@ from .provider_chat_model_factory import build_active_chat_model
 from .provider_fallback_service import ModelSlotConfig, ProviderFallbackConfig
 from .provider_resolution_service import ActiveModelsInfo
 from .provider import ProviderInfo
+from .runtime_model_call import (
+    RuntimeModelCallService,
+    build_instrumented_chat_model,
+)
 
 if TYPE_CHECKING:
     from .provider_manager import ProviderManager
@@ -47,6 +51,8 @@ class ProviderRuntimeSurface(Protocol):
 
     def get_active_chat_model(self) -> ChatModelBase: ...
 
+    def get_model_call_service(self) -> RuntimeModelCallService: ...
+
     def resolve_runtime_provider_contract(self) -> dict[str, Any]: ...
 
 
@@ -56,6 +62,11 @@ class ProviderRuntimeFacade:
     def __init__(self, provider_manager: "ProviderManager") -> None:
         self._provider_manager = provider_manager
         self._active_chat_model_cache: tuple[tuple[str, str] | None, ChatModelBase] | None = None
+        self._active_chat_model_raw_cache: tuple[
+            tuple[str, str] | None,
+            ChatModelBase,
+        ] | None = None
+        self._model_call_service: RuntimeModelCallService | None = None
 
     @property
     def provider_manager(self) -> "ProviderManager":
@@ -101,6 +112,30 @@ class ProviderRuntimeFacade:
     def get_preferred_chat_model_class(self) -> type[ChatModelBase]:
         return self._provider_manager.get_preferred_chat_model_class()
 
+    def _resolve_active_chat_model_raw(self) -> ChatModelBase:
+        slot_getter = getattr(self._provider_manager, "get_active_model", None)
+        slot = slot_getter() if callable(slot_getter) else None
+        cache_key = None
+        if slot is not None:
+            cache_key = (slot.provider_id, slot.model)
+        cached = self._active_chat_model_raw_cache
+        if cached is not None and cached[0] == cache_key:
+            return cached[1]
+        factory = getattr(self._provider_manager, "_chat_model_factory", None)
+        if factory is not None and hasattr(factory, "get_active_chat_model"):
+            model = factory.get_active_chat_model()
+        else:
+            model = build_active_chat_model(self._provider_manager)
+        self._active_chat_model_raw_cache = (cache_key, model)
+        return model
+
+    def get_model_call_service(self) -> RuntimeModelCallService:
+        if self._model_call_service is None:
+            self._model_call_service = RuntimeModelCallService(
+                model_factory=self._resolve_active_chat_model_raw,
+            )
+        return self._model_call_service
+
     def get_active_chat_model(self) -> ChatModelBase:
         slot_getter = getattr(self._provider_manager, "get_active_model", None)
         slot = slot_getter() if callable(slot_getter) else None
@@ -110,11 +145,16 @@ class ProviderRuntimeFacade:
         cached = self._active_chat_model_cache
         if cached is not None and cached[0] == cache_key:
             return cached[1]
-        factory = getattr(self._provider_manager, "_chat_model_factory", None)
-        if factory is not None and hasattr(factory, "get_active_chat_model"):
-            model = factory.get_active_chat_model()
-        else:
-            model = build_active_chat_model(self._provider_manager)
+        raw_model = self._resolve_active_chat_model_raw()
+        model = (
+            build_instrumented_chat_model(
+                raw_model,
+                call_service=self.get_model_call_service(),
+                feature="runtime_chat",
+            )
+            if callable(raw_model)
+            else raw_model
+        )
         self._active_chat_model_cache = (cache_key, model)
         return model
 

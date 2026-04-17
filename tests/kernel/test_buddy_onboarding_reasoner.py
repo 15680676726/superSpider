@@ -5,6 +5,7 @@ import pytest
 
 from copaw.kernel.buddy_onboarding_reasoner import (
     _BUDDY_ONBOARDING_REASONER_PROMPT,
+    _RawReasonerResponse,
     BuddyCollaborationContract,
     BuddyOnboardingReasonerUnavailableError,
     ModelDrivenBuddyOnboardingReasoner,
@@ -38,6 +39,24 @@ class _FakeChatModel:
         return _FakeChatResponse(metadata=self._metadata)
 
 
+class _RecordingModelCallService:
+    def __init__(self, *, metadata: dict[str, object]) -> None:
+        self._metadata = metadata
+        self.calls: list[dict[str, object]] = []
+
+    async def invoke_structured(self, *, messages, policy, feature, model=None, model_kwargs=None):
+        self.calls.append(
+            {
+                "messages": messages,
+                "policy": policy,
+                "feature": feature,
+                "model": model,
+                "model_kwargs": model_kwargs,
+            }
+        )
+        return _RawReasonerResponse.model_validate(self._metadata)
+
+
 def _profile() -> HumanProfile:
     return HumanProfile(
         display_name="Kai",
@@ -66,7 +85,7 @@ def test_model_driven_reasoner_defaults_to_live_safe_timeout() -> None:
         provider_runtime=_StubProviderRuntime(),
     )
 
-    assert reasoner._reasoning_timeout_seconds == 45.0  # pylint: disable=protected-access
+    assert reasoner._reasoning_timeout_seconds == 120.0  # pylint: disable=protected-access
 
 
 def test_model_driven_reasoner_keeps_explicit_timeout_override() -> None:
@@ -140,3 +159,41 @@ def test_model_driven_reasoner_rejects_incomplete_contract_compile_payload() -> 
             profile=_profile(),
             collaboration_contract=_contract(),
         )
+
+
+def test_model_driven_reasoner_prefers_unified_model_call_service_when_available() -> None:
+    service = _RecordingModelCallService(
+        metadata={
+            "candidate_directions": ["Build a disciplined stock trading path."],
+            "recommended_direction": "Build a disciplined stock trading path.",
+            "final_goal": "Build a disciplined stock trading system with visible review evidence.",
+            "why_it_matters": "Turn trading into a durable operating path instead of emotional reactions.",
+            "backlog_items": [
+                {
+                    "lane_hint": "growth-focus",
+                    "title": "Define the first-cycle risk boundary",
+                    "summary": "Lock the market scope, risk cap, and stop-loss rule for the first cycle.",
+                    "priority": 3,
+                    "source_key": "trading-boundary",
+                }
+            ],
+        }
+    )
+    runtime = type(
+        "_Runtime",
+        (),
+        {
+            "get_active_chat_model": lambda self: object(),
+            "get_model_call_service": lambda self: service,
+        },
+    )()
+    reasoner = ModelDrivenBuddyOnboardingReasoner(provider_runtime=runtime)
+
+    result = reasoner.compile_contract(
+        profile=_profile(),
+        collaboration_contract=_contract(),
+    )
+
+    assert result is not None
+    assert service.calls[0]["feature"] == "buddy_onboarding_contract_compile"
+    assert service.calls[0]["policy"].timeout_seconds == 120.0
