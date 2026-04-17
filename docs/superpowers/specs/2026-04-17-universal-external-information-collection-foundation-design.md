@@ -36,9 +36,16 @@ Build one formal, profession-agnostic external-information collection foundation
 - can be planned and governed by the main brain
 - can route simple information collection directly to the requesting agent
 - can route heavy multi-round research to the `researcher` seat by default
-- can unify source selection, source collection, finding synthesis, evidence writing, and writeback
+- can unify collection-action selection, source collection, finding synthesis, evidence writing, and writeback
 
-The foundation must support at least these formal source families:
+The foundation must use stable collection action models:
+
+- `discover`
+- `read`
+- `interact`
+- `capture`
+
+Phase 1 should additionally land four first-class adapters:
 
 - `search`
 - `web_page`
@@ -257,8 +264,16 @@ Represents one collected source item.
 
 Required fields:
 
-- `source_type`
-  - `search | web_page | github | artifact`
+- `source_kind`
+  - open source taxonomy, for example:
+  - `page`
+  - `repo`
+  - `artifact`
+  - `api`
+  - `forum`
+  - `document`
+- `collection_action`
+  - `discover | read | interact | capture`
 - `source_ref`
   - url, repo ref, artifact path, or equivalent source identity
 - `title`
@@ -301,6 +316,7 @@ Represents the output of one source adapter execution.
 Required fields:
 
 - `adapter_kind`
+- `collection_action`
 - `status`
   - `succeeded | partial | blocked | failed`
 - `collected_sources`
@@ -310,21 +326,66 @@ Required fields:
 - `blockers`
 - `continuation_hint`
 
-## 8. Formal Source Families
+## 8. Formal Collection Action Models
 
-Phase 1 should fix the first formal source families as:
+The stable top-level model should not be a closed source taxonomy.
 
-### 8.1 `search`
+If CoPaw hardcodes a small list of source families as the permanent ontology, the list will keep expanding forever.
+
+The stable layer should instead be the collection action model.
+
+Phase 1 should fix these action models:
+
+### 8.1 `discover`
 
 Role:
 
 - discover candidate sources
-- generate search hit lists
+- search indexes or search engines
+- browse source entry points
+- identify possible next probes
+
+### 8.2 `read`
+
+Role:
+
+- read one source directly
+- extract content from a page, repo surface, issue, doc page, or equivalent source
+- return structured evidence-backed content
+
+### 8.3 `interact`
+
+Role:
+
+- continue through a source when passive reading is not enough
+- click, navigate, expand, paginate, ask follow-up questions, or otherwise interact to get the needed information
+- later reuse the universal surface execution foundation when browser interaction is required
+
+### 8.4 `capture`
+
+Role:
+
+- capture downloadable or structured outputs into the formal chain
+- record artifact identity and provenance
+- persist snippets, downloads, extracted outputs, or equivalent collected results
+
+This keeps the stable architecture on "how collection happens", not "what the world contains".
+
+## 9. Phase 1 Adapters
+
+The phase-1 adapter set should still be explicit, but it should be understood as the first adapter batch, not the permanent ontology.
+
+### 9.1 `search`
+
+Role:
+
+- discover candidate sources
+- generate hit lists
 - provide entry points for deeper collection
 
-This family should not be treated as the final answer by default.
+This adapter should not be treated as the final answer by default.
 
-### 8.2 `web_page`
+### 9.2 `web_page`
 
 Role:
 
@@ -332,9 +393,9 @@ Role:
 - extract key page content
 - continue through relevant next links where needed
 
-This family should later reuse the universal surface execution foundation for page interaction.
+This adapter should later reuse the universal surface execution foundation for page interaction.
 
-### 8.3 `github`
+### 9.3 `github`
 
 Role:
 
@@ -342,9 +403,9 @@ Role:
 - read README/docs/release notes/issues/PR pages
 - extract repo-structured findings
 
-GitHub should not be treated as just another generic web page forever, because its source shape and value are often different.
+GitHub is intentionally an adapter here because it is a high-value recurring source shape in CoPaw's likely workflows, not because it should become the permanent top-level ontology.
 
-### 8.4 `artifact`
+### 9.4 `artifact`
 
 Role:
 
@@ -354,14 +415,14 @@ Role:
 
 Artifacts are outputs or evidence sources. They are not just another search hit.
 
-## 9. Formal Routing
+## 10. Formal Routing
 
 The universal collection chain should route requests through one decision:
 
 - `light collection`
 - `heavy research`
 
-### 9.1 Light Collection
+### 10.1 Light Collection
 
 Light collection should be used when the request is:
 
@@ -378,7 +439,7 @@ Examples:
 - verify one platform rule page
 - read one official pricing/spec page
 
-### 9.2 Heavy Research
+### 10.2 Heavy Research
 
 Heavy research should be used when the request is:
 
@@ -396,7 +457,7 @@ This preserves the boundary:
 - all agents can invoke
 - `researcher` remains the default heavy research executor
 
-## 10. Formal Data Flow
+## 11. Formal Data Flow
 
 The target collection chain should be:
 
@@ -414,9 +475,9 @@ The system should therefore preserve both:
 - raw source provenance
 - synthesized, operator-usable findings
 
-## 11. Integration Boundaries
+## 12. Integration Boundaries
 
-### 11.1 Main Brain
+### 12.1 Main Brain
 
 The main brain is responsible for:
 
@@ -427,7 +488,7 @@ The main brain is responsible for:
 
 The main brain is not the low-level collector.
 
-### 11.2 Researcher
+### 12.2 Researcher
 
 The `researcher` seat is responsible for:
 
@@ -438,7 +499,7 @@ The `researcher` seat is responsible for:
 
 The `researcher` seat is a default heavy executor, not an exclusive gate.
 
-### 11.3 Profession Agents
+### 12.3 Profession Agents
 
 Ordinary profession agents may:
 
@@ -449,7 +510,7 @@ Ordinary profession agents may:
 
 This ensures the system does not force every information need through one specialist seat.
 
-## 12. Writeback Requirements
+## 13. Writeback Requirements
 
 Collection results must not stop at chat text.
 
@@ -462,7 +523,7 @@ At minimum, phase 1 must write back into:
 
 The foundation is incomplete if it can collect but cannot formally feed the system's truth chain.
 
-## 13. Runtime Center Visibility
+## 14. Runtime Center Visibility
 
 The Runtime Center should eventually show at least:
 
@@ -476,7 +537,7 @@ The Runtime Center should eventually show at least:
 
 Important results must not remain trapped in logs or provider-specific traces.
 
-## 14. Phase 1 Construction Order
+## 15. Phase 1 Construction Order
 
 1. Write this formal spec
 2. Write an implementation plan
@@ -495,7 +556,7 @@ Important results must not remain trapped in logs or provider-specific traces.
 7. Connect main-brain trigger and profession-agent trigger through the same universal front-door
 8. Expose the result in Runtime Center read surfaces
 
-## 15. Completion Criteria
+## 16. Completion Criteria
 
 This round is complete only when all of the following are true:
 
@@ -503,22 +564,27 @@ This round is complete only when all of the following are true:
 2. the main brain can form or approve a formal `ResearchBrief`
 3. the system can route `light` vs `heavy` collection correctly
 4. the `researcher` seat can execute heavy research as the default heavy path
-5. the first formal source families are all connected:
+5. the stable collection action model is formalized:
+   - `discover`
+   - `read`
+   - `interact`
+   - `capture`
+6. the first phase-1 adapters are all connected:
    - `search`
    - `web_page`
    - `github`
    - `artifact`
-6. results formally write back into:
+7. results formally write back into:
    - research session truth
    - evidence truth
    - downstream work/report/context truth where relevant
-7. Runtime Center can show collection truth
-8. multi-round collection can continue without breaking the session chain
-9. the system no longer treats one provider-specific service as the universal collection model
+8. Runtime Center can show collection truth
+9. multi-round collection can continue without breaking the session chain
+10. the system no longer treats one provider-specific service as the universal collection model
 
 If any of these are missing, the collection foundation is not formally complete.
 
-## 16. Deletion / Demotion Intent
+## 17. Deletion / Demotion Intent
 
 This round should not delete the current Baidu research chain.
 
