@@ -29,6 +29,8 @@
 | `accept-013` | `I` | Long-run autonomy smoke automated regression sweep | `2026-04-12` | `main (dirty worktree after 247f329)` | `passed` | `yes` | Phase-next long-run smoke stayed on one formal chain |
 | `accept-014` | `D/J-live-partial` | Live remote skill optimization loop | `2026-04-12` | `main (dirty worktree after 247f329)` | `passed` | `yes` | Real live optimization smoke passed through planning writeback |
 | `accept-015` | `B/C/F-live-partial` | Live browser action through chat front door | `2026-04-12` | `main (dirty worktree after 247f329)` | `passed` | `yes` | Real browser execution through chat front door produced task and evidence |
+| `accept-016` | `I/L3-expanded` | Broader phase-next smoke and adjacent runtime regression sweep | `2026-04-18` | `main (dirty worktree after 3ba6890)` | `passed` | `yes` | Full `phase-next` smoke and adjacent canonical/operator suites passed after localized governance assertion alignment |
+| `accept-017` | `I/L4-automated` | Selected phase-next long soak repeated automated sweep | `2026-04-18` | `main (dirty worktree after 3ba6890)` | `passed` | `yes` | Three sequential rounds of the fixed phase-next/runtime matrix stayed green |
 
 ---
 
@@ -663,3 +665,129 @@
 
 - This is real live evidence that chat front door -> professional seat -> browser capability -> task/evidence chain can complete honestly.
 - It materially strengthens Track B / C / F, but does not by itself replace the full multi-surface live reconciliation required for final sign-off.
+
+---
+
+## Run ID: accept-016
+
+**Track:** `I/L3-expanded`  
+**Scenario:** Broader phase-next smoke and adjacent runtime regression sweep  
+**Date:** `2026-04-18`  
+**Commit:** `main (dirty worktree after 3ba6890)`  
+**Operator:** Codex automated acceptance run  
+**Environment:** local repo test environment
+
+### A. Preconditions
+
+- `phase-next autonomy smoke`, `runtime canonical flow e2e`, and `operator runtime e2e` suites available
+- runtime chat front door and Runtime Center read surfaces already wired into the current mainline
+- localized governance strings aligned with current runtime contracts instead of retired English copy
+
+### B. Trigger Path
+
+- Real front door: automated regression
+- User/operator action: run the broader `phase-next` smoke file and adjacent runtime-chain suites
+- Expected formal chain: chat front door -> main-brain/runtime chain -> governance / handoff / replan / evidence / writeback -> Runtime Center and adjacent read surfaces remain consistent
+
+### C. Formal Truth IDs
+
+- `industry_instance_id`: covered by suite assertions
+- `control_thread_id`: covered by suite assertions
+- `assignment_id`: covered by suite assertions
+- `task_id`: covered by suite assertions
+- `decision_request_id`: covered by suite assertions
+- `evidence_id`: covered by suite assertions
+- `agent_report_id`: covered by suite assertions
+
+### D. API / Read-Model Proof
+
+- Commands:
+  - `python -m pytest tests/app/test_phase_next_autonomy_smoke.py -q`
+  - `python -m pytest tests/app/test_phase_next_autonomy_smoke.py::test_phase_next_industry_long_run_smoke_keeps_followup_focus_and_replan_truth_contract tests/app/test_phase_next_autonomy_smoke.py::test_phase_next_industry_long_run_smoke_keeps_handoff_human_assist_and_replan_on_one_control_thread_contract tests/app/test_phase_next_autonomy_smoke.py::test_phase_next_long_run_harness_smoke_covers_runtime_chain_and_multi_surface_continuity_contract -q`
+  - `python -m pytest tests/app/test_phase_next_autonomy_smoke.py tests/app/test_runtime_canonical_flow_e2e.py tests/app/test_operator_runtime_e2e.py -q`
+- Result:
+  - `11 passed`
+  - `3 passed`
+  - `27 passed`
+
+### E. Frontend-Visible Proof
+
+- Runtime Center cockpit / overview / human-assist / governance continuity are covered by the smoke assertions
+- No separate live/manual screenshot bundle recorded for this run
+
+### F. Refresh / Re-entry Proof
+
+- long-run harness assertions kept the same control-thread and replan truth
+- adjacent canonical/operator suites stayed consistent after the smoke file widened back to full scope
+
+### G. Result
+
+- Final result: `passed`
+
+### H. Notes
+
+- The only blocker found before this run was a stale English handoff assertion in the long-run harness; the runtime chain itself was already returning the current localized governance reason.
+- This run upgrades the acceptance evidence from selected-slice `L3` to a broader `phase-next` `L3`, but it is still not `L4` by itself.
+
+---
+
+## Run ID: accept-017
+
+**Track:** `I/L4-automated`  
+**Scenario:** Selected phase-next long soak repeated automated sweep  
+**Date:** `2026-04-18`  
+**Commit:** `main (dirty worktree after 3ba6890)`  
+**Operator:** Codex automated soak run  
+**Environment:** local repo test environment
+
+### A. Preconditions
+
+- broader `phase-next` smoke already green on the current worktree
+- fixed soak matrix defined as:
+  - `tests/app/test_phase_next_autonomy_smoke.py`
+  - `tests/app/test_runtime_canonical_flow_e2e.py`
+  - `tests/app/test_operator_runtime_e2e.py`
+
+### B. Trigger Path
+
+- Real front door: automated soak
+- User/operator action: run the same `phase-next/runtime` matrix for 3 sequential rounds
+- Expected formal chain: repeated rounds keep governance, handoff, replan, writeback, Runtime Center, and operator/runtime continuity stable without stale cache or state drift
+
+### C. Formal Truth IDs
+
+- `industry_instance_id`: covered by repeated suite assertions
+- `control_thread_id`: covered by repeated suite assertions
+- `assignment_id`: covered by repeated suite assertions
+- `task_id`: covered by repeated suite assertions
+- `decision_request_id`: covered by repeated suite assertions
+- `evidence_id`: covered by repeated suite assertions
+- `agent_report_id`: covered by repeated suite assertions
+
+### D. API / Read-Model Proof
+
+- Command:
+  - `1..3 | ForEach-Object { python -m pytest tests/app/test_phase_next_autonomy_smoke.py tests/app/test_runtime_canonical_flow_e2e.py tests/app/test_operator_runtime_e2e.py -q }`
+- Result:
+  - round 1 -> `27 passed in 207.05s` (`209.93s` wall time)
+  - round 2 -> `27 passed in 221.28s` (`224.32s` wall time)
+  - round 3 -> `27 passed in 193.21s` (`196.10s` wall time)
+
+### E. Frontend-Visible Proof
+
+- Runtime Center, chat/runtime, human-assist, and governance read surfaces remained covered by the same suite set in every round
+- No separate manual/live UI bundle recorded for this automated soak
+
+### F. Refresh / Re-entry Proof
+
+- each later round passed after the prior round had already exercised the same surfaces
+- no intermittent failure, stale governance copy, or read-surface divergence appeared between rounds
+
+### G. Result
+
+- Final result: `passed`
+
+### H. Notes
+
+- This is valid automated `L4` evidence for the selected `phase-next/runtime-center` slice.
+- It does not yet prove full-repository `L4`, live external-provider soak, or final manual/live sign-off.

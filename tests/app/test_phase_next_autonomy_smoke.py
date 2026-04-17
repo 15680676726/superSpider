@@ -1871,7 +1871,8 @@ def test_phase_next_long_run_harness_smoke_covers_runtime_chain_and_multi_surfac
         ),
     )
     assert reason is not None
-    assert "Runtime handoff is active" in reason
+    assert "当前存在运行时交接" in reason
+    assert "必须等待人工交接返回后才能继续分派" in reason
 
     current_task_response = client.get(
         "/runtime-center/human-assist-tasks/current",
