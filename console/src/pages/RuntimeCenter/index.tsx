@@ -673,6 +673,7 @@ export default function RuntimeCenterPage() {
     mainBrainLoading,
     mainBrainUnavailable,
     businessAgents,
+    channelRuntimes,
     detail,
     detailLoading,
     detailError,
@@ -863,6 +864,7 @@ export default function RuntimeCenterPage() {
           systemManagement={
             <MainBrainSystemManagement
               refreshSignal={data?.generated_at ?? null}
+              channelRuntimes={channelRuntimes}
               onOpenDetail={(route, title) => {
                 void openSurfaceRoute(route, title);
               }}

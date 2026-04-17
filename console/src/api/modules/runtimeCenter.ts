@@ -569,6 +569,25 @@ export interface RuntimeCenterSurfaceResponse {
   main_brain: RuntimeMainBrainResponse | null;
 }
 
+export interface RuntimeChannelRuntimeRecord {
+  channel: string;
+  login_status: string;
+  polling_status: string;
+  token_source?: string;
+  last_qr_issued_at?: string | null;
+  last_update_id?: string | number | null;
+  last_receive_at?: string | null;
+  last_send_at?: string | null;
+  last_error?: string;
+  qrcode?: string;
+  qrcode_img_content?: string;
+  bot_token?: string;
+  base_url?: string;
+  ilink_bot_id?: string;
+  ilink_user_id?: string;
+  route: string;
+}
+
 export const runtimeCenterApi = {
   getRuntimeTaskDetail: (taskId: string) =>
     request<RuntimeTaskDetail>(
@@ -628,6 +647,14 @@ export const runtimeCenterApi = {
 
   getRuntimeResearch: () =>
     request<RuntimeCenterResearchResponse>("/runtime-center/research"),
+
+  listRuntimeChannelRuntimes: () =>
+    request<RuntimeChannelRuntimeRecord[]>("/runtime-center/channel-runtimes"),
+
+  getRuntimeChannelRuntimeDetail: (channel: string) =>
+    request<RuntimeChannelRuntimeRecord>(
+      `/runtime-center/channel-runtimes/${encodeURIComponent(channel)}`,
+    ),
 
   updateRuntimeHeartbeat: (body: RuntimeHeartbeatConfig) =>
     request<RuntimeHeartbeatMutationResult>("/runtime-center/heartbeat", {

@@ -32,6 +32,7 @@ export function useChannels() {
   const builtinOrder = useMemo(
     () => [
       "console",
+      "weixin_ilink",
       "dingtalk",
       "feishu",
       "imessage",

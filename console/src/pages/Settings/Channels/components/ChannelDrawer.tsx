@@ -1,74 +1,51 @@
 import {
   Alert,
+  Button,
   Drawer,
   Form,
   Input,
   InputNumber,
-  Switch,
-  Button,
   Select,
+  Switch,
 } from "@/ui";
 import { LinkOutlined } from "@ant-design/icons";
 import type { FormInstance } from "antd";
+import type { WeixinILinkLoginRuntimeState } from "../../../../api/types";
 import { getChannelLabel, type ChannelKey } from "./constants";
 import styles from "../index.module.less";
 
-const CHANNEL_TEXT: Record<string, string> = {
-  "channels.appId": "应用 ID",
-  "channels.appSecret": "应用密钥",
-  "channels.blankToDisablePlaceholder": "留空则不启用",
-  "channels.botToken": "机器人令牌",
-  "channels.cleanSession": "清理会话",
-  "channels.clientId": "客户端编号",
-  "channels.clientSecret": "客户端密钥",
-  "channels.customFields": "自定义字段",
-  "channels.dbPath": "数据库路径",
-  "channels.encryptKey": "加密密钥",
-  "channels.encryptKeyPlaceholder": "请输入加密密钥",
-  "channels.guide": "指南",
-  "channels.httpProxy": "HTTP 代理",
-  "channels.httpProxyAuth": "HTTP 代理认证",
-  "channels.mediaDir": "媒体目录",
-  "channels.mediaDirPlaceholder": "请输入媒体目录",
-  "channels.mqttHost": "MQTT 主机",
-  "channels.mqttPassword": "MQTT 密码",
-  "channels.mqttPort": "MQTT 端口",
-  "channels.mqttUsername": "MQTT 用户名",
-  "channels.optionalPlaceholder": "选填",
-  "channels.pollIntervalSeconds": "轮询间隔（秒）",
-  "channels.portRangeMessage": "端口范围应在 1 到 65535 之间",
-  "channels.publishTopic": "发布主题",
-  "channels.qos": "QoS",
-  "channels.qos0": "QoS 0",
-  "channels.qos1": "QoS 1",
-  "channels.qos2": "QoS 2",
-  "channels.showTyping": "显示输入中状态",
-  "channels.subscribeTopic": "订阅主题",
-  "channels.telegramBotToken": "请输入 Telegram 机器人令牌",
-  "channels.tlsCaCerts": "TLS CA 证书",
-  "channels.tlsCaCertsPlaceholder": "请输入 CA 证书路径",
-  "channels.tlsCertfile": "TLS 证书",
-  "channels.tlsCertfilePlaceholder": "请输入 TLS 证书路径",
-  "channels.tlsEnabled": "启用 TLS",
-  "channels.tlsKeyfile": "TLS 私钥",
-  "channels.tlsKeyfilePlaceholder": "请输入 TLS 私钥路径",
-  "channels.transport": "传输协议",
-  "channels.transportTcp": "TCP",
-  "channels.transportWebsockets": "WebSocket",
-  "channels.verificationToken": "验证令牌",
+const CHANNEL_DOC_URLS: Partial<Record<ChannelKey, string>> = {
+  dingtalk: "https://copaw.agentscope.io/docs/channels",
+  feishu: "https://copaw.agentscope.io/docs/channels",
+  imessage: "https://copaw.agentscope.io/docs/channels",
+  discord: "https://copaw.agentscope.io/docs/channels",
+  qq: "https://copaw.agentscope.io/docs/channels",
+  telegram: "https://copaw.agentscope.io/docs/channels",
+  weixin_ilink: "https://copaw.agentscope.io/docs/channels",
+  mqtt: "https://copaw.agentscope.io/docs/channels",
 };
-
-function zh(key: string) {
-  return CHANNEL_TEXT[key] || key;
-}
-
 
 const CHANNELS_WITH_ACCESS_CONTROL: ChannelKey[] = [
   "telegram",
   "dingtalk",
   "discord",
   "feishu",
+  "weixin_ilink",
 ];
+
+const twilioConsoleUrl = "https://console.twilio.com";
+
+const LOGIN_STATUS_LABELS: Record<string, string> = {
+  unconfigured: "未配置",
+  waiting_scan: "等待扫码",
+  authorized_pending_save: "已授权，待保存",
+  auth_expired: "授权失效",
+};
+
+const POLLING_STATUS_LABELS: Record<string, string> = {
+  stopped: "未运行",
+  running: "运行中",
+};
 
 interface ChannelDrawerProps {
   open: boolean;
@@ -78,20 +55,22 @@ interface ChannelDrawerProps {
   saving: boolean;
   initialValues: Record<string, unknown> | undefined;
   isBuiltin: boolean;
+  loginRuntime?: WeixinILinkLoginRuntimeState | null;
+  loginActionLoading?: "qr" | "status" | "rebind" | null;
   onClose: () => void;
   onSubmit: (values: Record<string, unknown>) => void;
+  onFetchWeixinLoginQr?: () => void;
+  onRefreshWeixinLoginStatus?: () => void;
+  onRebindWeixinLogin?: () => void;
 }
 
-const CHANNEL_DOC_URLS: Partial<Record<ChannelKey, string>> = {
-  dingtalk: "https://copaw.agentscope.io/docs/channels",
-  feishu: "https://copaw.agentscope.io/docs/channels",
-  imessage: "https://copaw.agentscope.io/docs/channels",
-  discord: "https://copaw.agentscope.io/docs/channels",
-  qq: "https://copaw.agentscope.io/docs/channels",
-  telegram: "https://copaw.agentscope.io/docs/channels",
-  mqtt: "https://copaw.agentscope.io/docs/channels",
-};
-const twilioConsoleUrl = "https://console.twilio.com";
+function labelForLoginStatus(status?: string) {
+  return LOGIN_STATUS_LABELS[status ?? ""] ?? status ?? "未配置";
+}
+
+function labelForPollingStatus(status?: string) {
+  return POLLING_STATUS_LABELS[status ?? ""] ?? status ?? "未运行";
+}
 
 export function ChannelDrawer({
   open,
@@ -101,8 +80,13 @@ export function ChannelDrawer({
   saving,
   initialValues,
   isBuiltin,
+  loginRuntime,
+  loginActionLoading = null,
   onClose,
   onSubmit,
+  onFetchWeixinLoginQr,
+  onRefreshWeixinLoginStatus,
+  onRebindWeixinLogin,
 }: ChannelDrawerProps) {
   const label = activeKey ? getChannelLabel(activeKey) : activeLabel;
 
@@ -110,8 +94,8 @@ export function ChannelDrawer({
     <>
       <Form.Item
         name="dm_policy"
-        label={"私聊策略"}
-        tooltip={"控制谁可以通过私聊与机器人交互。开放：所有人；白名单：仅限授权用户"}
+        label="私聊策略"
+        tooltip="控制谁可以通过私聊与主脑交互。开放表示所有联系人都可进入；白名单表示仅允许已授权对象。"
         initialValue="open"
       >
         <Select
@@ -123,8 +107,8 @@ export function ChannelDrawer({
       </Form.Item>
       <Form.Item
         name="group_policy"
-        label={"群聊策略"}
-        tooltip={"控制谁可以在群聊中与机器人交互。开放：所有人；白名单：仅限授权用户"}
+        label="群聊策略"
+        tooltip="控制群聊消息是否有资格进入主脑前门。开放表示允许群内消息触发；白名单表示只有授权群或授权用户可触发。"
         initialValue="open"
       >
         <Select
@@ -136,18 +120,88 @@ export function ChannelDrawer({
       </Form.Item>
       <Form.Item
         name="allow_from"
-        label={"白名单用户"}
-        tooltip={"允许与机器人交互的用户编号列表（格式：昵称#后4位，如 张三#1234）"}
+        label="白名单对象"
+        tooltip="允许与主脑交互的对象列表。可填写用户、联系人或其他渠道侧的标识。"
         initialValue={[]}
       >
         <Select
           mode="tags"
-          placeholder={"输入用户编号后按回车添加"}
+          placeholder="输入标识后按回车添加"
           tokenSeparators={[","]}
         />
       </Form.Item>
     </>
   );
+
+  const renderWeixinILinkRuntimeCard = () => {
+    if (activeKey !== "weixin_ilink") {
+      return null;
+    }
+
+    const runtime = loginRuntime ?? {
+      login_status: "unconfigured",
+      polling_status: "stopped",
+      token_source: "",
+      last_qr_issued_at: null,
+      last_update_id: null,
+      last_receive_at: null,
+      last_send_at: null,
+      last_error: "",
+      qrcode: "",
+      qrcode_img_content: "",
+      bot_token: "",
+      base_url: "",
+      ilink_bot_id: "",
+      ilink_user_id: "",
+    };
+
+    return (
+      <Alert
+        type={runtime.last_error ? "warning" : "info"}
+        showIcon
+        style={{ marginBottom: 24 }}
+        message="iLink 登录与运行状态"
+        description={
+          <div style={{ display: "grid", gap: 8 }}>
+            <div>登录状态：{labelForLoginStatus(runtime.login_status)}</div>
+            <div>轮询状态：{labelForPollingStatus(runtime.polling_status)}</div>
+            <div>Token 来源：{runtime.token_source || "未获取"}</div>
+            {runtime.qrcode ? <div>当前二维码：{runtime.qrcode}</div> : null}
+            {runtime.qrcode_img_content ? (
+              <div>二维码地址：{runtime.qrcode_img_content}</div>
+            ) : null}
+            {runtime.last_qr_issued_at ? (
+              <div>最近发码时间：{runtime.last_qr_issued_at}</div>
+            ) : null}
+            {runtime.last_error ? <div>最近错误：{runtime.last_error}</div> : null}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <Button
+                type="default"
+                loading={loginActionLoading === "qr"}
+                onClick={onFetchWeixinLoginQr}
+              >
+                获取登录二维码
+              </Button>
+              <Button
+                type="default"
+                loading={loginActionLoading === "status"}
+                onClick={onRefreshWeixinLoginStatus}
+              >
+                检查登录状态
+              </Button>
+              <Button
+                danger
+                loading={loginActionLoading === "rebind"}
+                onClick={onRebindWeixinLogin}
+              >
+                重新扫码授权
+              </Button>
+            </div>
+          </div>
+        }
+      />
+    );
+  };
 
   const renderBuiltinExtraFields = (key: ChannelKey) => {
     switch (key) {
@@ -156,17 +210,15 @@ export function ChannelDrawer({
           <>
             <Form.Item
               name="db_path"
-              label={zh("channels.dbPath")}
+              label="数据库路径"
               rules={[{ required: true, message: "请输入数据库路径" }]}
             >
-              <Input placeholder={"~/Library/Messages/chat.db"} />
+              <Input placeholder="~/Library/Messages/chat.db" />
             </Form.Item>
             <Form.Item
               name="poll_sec"
-              label={zh("channels.pollIntervalSeconds")}
-              rules={[
-                { required: true, message: "请输入轮询间隔" },
-              ]}
+              label="轮询间隔（秒）"
+              rules={[{ required: true, message: "请输入轮询间隔" }]}
             >
               <InputNumber min={0.1} step={0.1} style={{ width: "100%" }} />
             </Form.Item>
@@ -175,24 +227,24 @@ export function ChannelDrawer({
       case "discord":
         return (
           <>
-            <Form.Item name="bot_token" label={zh("channels.botToken")}>
-              <Input.Password placeholder={"Discord机器人令牌"} />
+            <Form.Item name="bot_token" label="Bot Token">
+              <Input.Password placeholder="Discord Bot Token" />
             </Form.Item>
-            <Form.Item name="http_proxy" label={zh("channels.httpProxy")}>
-              <Input placeholder={"http://127.0.0.1:18118"} />
+            <Form.Item name="http_proxy" label="HTTP 代理">
+              <Input placeholder="http://127.0.0.1:18118" />
             </Form.Item>
-            <Form.Item name="http_proxy_auth" label={zh("channels.httpProxyAuth")}>
-              <Input placeholder={"用户名:密码"} />
+            <Form.Item name="http_proxy_auth" label="HTTP 代理认证">
+              <Input placeholder="用户名:密码" />
             </Form.Item>
           </>
         );
       case "dingtalk":
         return (
           <>
-            <Form.Item name="client_id" label={zh("channels.clientId")}>
+            <Form.Item name="client_id" label="应用 ID">
               <Input />
             </Form.Item>
-            <Form.Item name="client_secret" label={zh("channels.clientSecret")}>
+            <Form.Item name="client_secret" label="应用密钥">
               <Input.Password />
             </Form.Item>
           </>
@@ -200,41 +252,34 @@ export function ChannelDrawer({
       case "feishu":
         return (
           <>
-            <Form.Item
-              name="app_id"
-              label={zh("channels.appId")}
-              rules={[{ required: true }]}
-            >
+            <Form.Item name="app_id" label="应用 ID" rules={[{ required: true }]}>
               <Input placeholder="cli_xxx" />
             </Form.Item>
             <Form.Item
               name="app_secret"
-              label={zh("channels.appSecret")}
+              label="应用密钥"
               rules={[{ required: true }]}
             >
-              <Input.Password placeholder={zh("channels.appSecret")} />
+              <Input.Password placeholder="请输入应用密钥" />
             </Form.Item>
-            <Form.Item name="encrypt_key" label={zh("channels.encryptKey")}>
-              <Input placeholder={zh("channels.encryptKeyPlaceholder")} />
+            <Form.Item name="encrypt_key" label="加密密钥">
+              <Input placeholder="请输入加密密钥" />
             </Form.Item>
-            <Form.Item
-              name="verification_token"
-              label={zh("channels.verificationToken")}
-            >
-              <Input placeholder={zh("channels.optionalPlaceholder")} />
+            <Form.Item name="verification_token" label="验证令牌">
+              <Input placeholder="选填" />
             </Form.Item>
-            <Form.Item name="media_dir" label={zh("channels.mediaDir")}>
-              <Input placeholder={zh("channels.mediaDirPlaceholder")} />
+            <Form.Item name="media_dir" label="媒体目录">
+              <Input placeholder="请输入媒体目录" />
             </Form.Item>
           </>
         );
       case "qq":
         return (
           <>
-            <Form.Item name="app_id" label={zh("channels.appId")}>
+            <Form.Item name="app_id" label="应用 ID">
               <Input />
             </Form.Item>
-            <Form.Item name="client_secret" label={zh("channels.clientSecret")}>
+            <Form.Item name="client_secret" label="应用密钥">
               <Input.Password />
             </Form.Item>
           </>
@@ -242,44 +287,86 @@ export function ChannelDrawer({
       case "telegram":
         return (
           <>
-            <Form.Item name="bot_token" label={zh("channels.botToken")}>
-              <Input.Password placeholder={zh("channels.telegramBotToken")} />
+            <Form.Item name="bot_token" label="Bot Token">
+              <Input.Password placeholder="请输入 Telegram Bot Token" />
             </Form.Item>
-            <Form.Item name="http_proxy" label={zh("channels.httpProxy")}>
-              <Input placeholder={"http://127.0.0.1:18118"} />
+            <Form.Item name="http_proxy" label="HTTP 代理">
+              <Input placeholder="http://127.0.0.1:18118" />
             </Form.Item>
-            <Form.Item name="http_proxy_auth" label={zh("channels.httpProxyAuth")}>
-              <Input placeholder={"用户名:密码"} />
+            <Form.Item name="http_proxy_auth" label="HTTP 代理认证">
+              <Input placeholder="用户名:密码" />
             </Form.Item>
             <Form.Item
               name="show_typing"
-              label={zh("channels.showTyping")}
+              label="显示输入中状态"
               valuePropName="checked"
             >
               <Switch />
             </Form.Item>
           </>
         );
-      case "mqtt":
+      case "weixin_ilink":
         return (
           <>
             <Form.Item
-              name="host"
-              label={zh("channels.mqttHost")}
-              rules={[{ required: true }]}
+              name="bot_token"
+              label="Bot Token"
+              tooltip="扫码成功后会自动回填，也可以手工粘贴已有 token。"
             >
+              <Input.Password placeholder="扫码后自动回填或手工输入" />
+            </Form.Item>
+            <Form.Item name="bot_token_file" label="Bot Token 文件">
+              <Input placeholder="~/.qwenpaw/weixin_bot_token" />
+            </Form.Item>
+            <Form.Item name="base_url" label="iLink API 地址">
+              <Input placeholder="留空使用官方默认地址" />
+            </Form.Item>
+            <Form.Item name="media_dir" label="媒体目录">
+              <Input placeholder="~/.qwenpaw/media" />
+            </Form.Item>
+            <Form.Item name="group_reply_mode" label="群回复模式">
+              <Select
+                options={[
+                  { value: "mention_or_prefix", label: "@主脑或前缀才回复" },
+                  {
+                    value: "whitelist_full_open",
+                    label: "白名单群可全量响应",
+                  },
+                ]}
+              />
+            </Form.Item>
+            <Form.Item name="group_allowlist" label="群白名单">
+              <Select
+                mode="tags"
+                placeholder="输入群标识后按回车添加"
+                tokenSeparators={[","]}
+              />
+            </Form.Item>
+            <Form.Item name="proactive_targets" label="主动汇报目标">
+              <Select
+                mode="tags"
+                placeholder="例如 dm:user-alpha 或 group:group-alpha"
+                tokenSeparators={[","]}
+              />
+            </Form.Item>
+          </>
+        );
+      case "mqtt":
+        return (
+          <>
+            <Form.Item name="host" label="MQTT 主机" rules={[{ required: true }]}>
               <Input placeholder="127.0.0.1" />
             </Form.Item>
             <Form.Item
               name="port"
-              label={zh("channels.mqttPort")}
+              label="MQTT 端口"
               rules={[
                 { required: true },
                 {
                   type: "number",
                   min: 1,
                   max: 65535,
-                  message: zh("channels.portRangeMessage"),
+                  message: "端口范围应在 1 到 65535 之间",
                 },
               ]}
             >
@@ -292,73 +379,73 @@ export function ChannelDrawer({
             </Form.Item>
             <Form.Item
               name="transport"
-              label={zh("channels.transport")}
+              label="传输协议"
               initialValue="tcp"
               rules={[{ required: true }]}
             >
-              <Select>
-                <Select.Option value="tcp">
-                  {zh("channels.transportTcp")}
-                </Select.Option>
-                <Select.Option value="websockets">
-                  {zh("channels.transportWebsockets")}
-                </Select.Option>
-              </Select>
+              <Select
+                options={[
+                  { value: "tcp", label: "TCP" },
+                  { value: "websockets", label: "WebSocket" },
+                ]}
+              />
             </Form.Item>
             <Form.Item
               name="clean_session"
-              label={zh("channels.cleanSession")}
+              label="清理会话"
               valuePropName="checked"
             >
               <Switch defaultChecked />
             </Form.Item>
             <Form.Item
               name="qos"
-              label={zh("channels.qos")}
+              label="QoS"
               initialValue="2"
               rules={[{ required: true }]}
             >
-              <Select>
-                <Select.Option value="0">{zh("channels.qos0")}</Select.Option>
-                <Select.Option value="1">{zh("channels.qos1")}</Select.Option>
-                <Select.Option value="2">{zh("channels.qos2")}</Select.Option>
-              </Select>
+              <Select
+                options={[
+                  { value: "0", label: "QoS 0" },
+                  { value: "1", label: "QoS 1" },
+                  { value: "2", label: "QoS 2" },
+                ]}
+              />
             </Form.Item>
-            <Form.Item name="username" label={zh("channels.mqttUsername")}>
-              <Input placeholder={zh("channels.blankToDisablePlaceholder")} />
+            <Form.Item name="username" label="MQTT 用户名">
+              <Input placeholder="留空则不启用" />
             </Form.Item>
-            <Form.Item name="password" label={zh("channels.mqttPassword")}>
-              <Input.Password placeholder={zh("channels.blankToDisablePlaceholder")} />
+            <Form.Item name="password" label="MQTT 密码">
+              <Input.Password placeholder="留空则不启用" />
             </Form.Item>
             <Form.Item
               name="subscribe_topic"
-              label={zh("channels.subscribeTopic")}
+              label="订阅主题"
               rules={[{ required: true }]}
             >
               <Input placeholder="server/+/up" />
             </Form.Item>
             <Form.Item
               name="publish_topic"
-              label={zh("channels.publishTopic")}
+              label="发布主题"
               rules={[{ required: true }]}
             >
               <Input placeholder="client/{client_id}/down" />
             </Form.Item>
             <Form.Item
               name="tls_enabled"
-              label={zh("channels.tlsEnabled")}
+              label="启用 TLS"
               valuePropName="checked"
             >
               <Switch />
             </Form.Item>
-            <Form.Item name="tls_ca_certs" label={zh("channels.tlsCaCerts")}>
-              <Input placeholder={zh("channels.tlsCaCertsPlaceholder")} />
+            <Form.Item name="tls_ca_certs" label="TLS CA 证书">
+              <Input placeholder="请输入 CA 证书路径" />
             </Form.Item>
-            <Form.Item name="tls_certfile" label={zh("channels.tlsCertfile")}>
-              <Input placeholder={zh("channels.tlsCertfilePlaceholder")} />
+            <Form.Item name="tls_certfile" label="TLS 证书">
+              <Input placeholder="请输入 TLS 证书路径" />
             </Form.Item>
-            <Form.Item name="tls_keyfile" label={zh("channels.tlsKeyfile")}>
-              <Input placeholder={zh("channels.tlsKeyfilePlaceholder")} />
+            <Form.Item name="tls_keyfile" label="TLS 私钥">
+              <Input placeholder="请输入 TLS 私钥路径" />
             </Form.Item>
           </>
         );
@@ -368,47 +455,38 @@ export function ChannelDrawer({
             <Alert
               type="info"
               showIcon
-              message={"请先注册 Twilio 账户并购买电话号码，然后在下方填写凭据。账户编号和认证令牌可在 Twilio 控制台首页找到，号码编号可在电话号码列表中查看。"}
+              message="请先注册 Twilio 账号并购买电话号码，然后在下方填写凭据。账户编号和认证令牌可在 Twilio 控制台首页找到，号码 SID 可在电话号码列表中查看。"
               style={{ marginBottom: 32 }}
             />
-            <Form.Item
-              name="twilio_account_sid"
-              label={"Twilio 账户编号"}
-            >
+            <Form.Item name="twilio_account_sid" label="Twilio 账户 SID">
               <Input placeholder="ACxxxxxxxx" />
             </Form.Item>
-            <Form.Item
-              name="twilio_auth_token"
-              label={"Twilio 认证令牌"}
-            >
+            <Form.Item name="twilio_auth_token" label="Twilio 认证令牌">
               <Input.Password />
             </Form.Item>
-            <Form.Item name="phone_number" label={"电话号码"}>
+            <Form.Item name="phone_number" label="电话号码">
               <Input placeholder="+15551234567" />
             </Form.Item>
             <Form.Item
               name="phone_number_sid"
-              label={"电话号码编号"}
-              tooltip={"可在 Twilio 控制台的电话号码列表中找到。"}
+              label="电话号码 SID"
+              tooltip="可在 Twilio 控制台的电话号码列表中找到。"
             >
               <Input placeholder="PNxxxxxxxx" />
             </Form.Item>
-            <Form.Item name="tts_provider" label={"语音合成提供方"}>
+            <Form.Item name="tts_provider" label="语音合成提供方">
               <Input placeholder="google" />
             </Form.Item>
-            <Form.Item name="tts_voice" label={"语音合成音色"}>
+            <Form.Item name="tts_voice" label="语音合成音色">
               <Input placeholder="en-US-Journey-D" />
             </Form.Item>
-            <Form.Item name="stt_provider" label={"语音识别提供方"}>
+            <Form.Item name="stt_provider" label="语音识别提供方">
               <Input placeholder="deepgram" />
             </Form.Item>
-            <Form.Item name="language" label={"语言"}>
+            <Form.Item name="language" label="语言">
               <Input placeholder="en-US" />
             </Form.Item>
-            <Form.Item
-              name="welcome_greeting"
-              label={"欢迎语"}
-            >
+            <Form.Item name="welcome_greeting" label="欢迎语">
               <Input.TextArea rows={2} />
             </Form.Item>
           </>
@@ -419,9 +497,11 @@ export function ChannelDrawer({
   };
 
   const renderCustomExtraFields = (
-    initialValues: Record<string, unknown> | undefined,
+    customInitialValues: Record<string, unknown> | undefined,
   ) => {
-    if (!initialValues) return null;
+    if (!customInitialValues) {
+      return null;
+    }
 
     const baseFields = [
       "enabled",
@@ -430,19 +510,19 @@ export function ChannelDrawer({
       "filter_thinking",
       "isBuiltin",
     ];
-    const extraKeys = Object.keys(initialValues).filter(
-      (k) => !baseFields.includes(k),
+    const extraKeys = Object.keys(customInitialValues).filter(
+      (key) => !baseFields.includes(key),
     );
 
-    if (extraKeys.length === 0) return null;
+    if (extraKeys.length === 0) {
+      return null;
+    }
 
     return (
       <>
-        <div style={{ marginBottom: 8, fontWeight: 500 }}>
-          {zh("channels.customFields")}
-        </div>
+        <div style={{ marginBottom: 8, fontWeight: 500 }}>自定义字段</div>
         {extraKeys.map((fieldKey) => {
-          const value = initialValues[fieldKey];
+          const value = customInitialValues[fieldKey];
           const isBoolean = typeof value === "boolean";
           const isNumber = typeof value === "number";
 
@@ -468,12 +548,8 @@ export function ChannelDrawer({
       placement="right"
       title={
         <div className={styles.drawerTitle}>
-          <span>
-            {label
-              ? `${label} ${"设置"}`
-              : "频道设置"}
-          </span>
-          {activeKey && CHANNEL_DOC_URLS[activeKey] && (
+          <span>{label ? `${label} 设置` : "频道设置"}</span>
+          {activeKey && CHANNEL_DOC_URLS[activeKey] ? (
             <Button
               type="text"
               size="small"
@@ -481,10 +557,10 @@ export function ChannelDrawer({
               onClick={() => window.open(CHANNEL_DOC_URLS[activeKey], "_blank")}
               className={styles.dingtalkDocBtn}
             >
-              {label} {zh("channels.guide")}
+              {label} 指南
             </Button>
-          )}
-          {activeKey === "voice" && (
+          ) : null}
+          {activeKey === "voice" ? (
             <Button
               type="text"
               size="small"
@@ -494,74 +570,73 @@ export function ChannelDrawer({
               }
               className={styles.dingtalkDocBtn}
             >
-              {"打开 Twilio 控制台"}
+              打开 Twilio 控制台
             </Button>
-          )}
+          ) : null}
         </div>
       }
       open={open}
       onClose={onClose}
       destroyOnClose
     >
-      {activeKey && (
+      {activeKey ? (
         <Form
           form={form}
           layout="vertical"
           initialValues={initialValues}
           onFinish={onSubmit}
         >
-          <Form.Item
-            name="enabled"
-            label={"已启用"}
-            valuePropName="checked"
-          >
+          {renderWeixinILinkRuntimeCard()}
+
+          <Form.Item name="enabled" label="已启用" valuePropName="checked">
             <Switch />
           </Form.Item>
 
-          {activeKey !== "voice" && (
-            <Form.Item name="bot_prefix" label={"机器人前缀"}>
-              <Input placeholder={"@bot"} />
+          {activeKey !== "voice" ? (
+            <Form.Item name="bot_prefix" label="机器人前缀">
+              <Input placeholder="@bot" />
             </Form.Item>
-          )}
+          ) : null}
 
-          {activeKey !== "console" && (
+          {activeKey !== "console" ? (
             <>
               <Form.Item
                 name="filter_tool_messages"
-                label={"显示工具消息"}
+                label="显示工具消息"
                 valuePropName="checked"
-                tooltip={"向用户显示工具调用和输出消息（关闭则隐藏）"}
+                tooltip="向用户显示工具调用与工具输出消息；关闭后将隐藏。"
               >
                 <Switch />
               </Form.Item>
               <Form.Item
                 name="filter_thinking"
-                label={"显示思考过程"}
+                label="显示思考过程"
                 valuePropName="checked"
-                tooltip={"向用户显示模型的思考/推理内容（关闭则隐藏）"}
+                tooltip="向用户显示模型的思考与推理内容；关闭后将隐藏。"
               >
                 <Switch />
               </Form.Item>
             </>
-          )}
+          ) : null}
 
           {isBuiltin
             ? renderBuiltinExtraFields(activeKey)
             : renderCustomExtraFields(initialValues)}
 
-          {CHANNELS_WITH_ACCESS_CONTROL.includes(activeKey) &&
-            renderAccessControlFields()}
+          {CHANNELS_WITH_ACCESS_CONTROL.includes(activeKey)
+            ? renderAccessControlFields()
+            : null}
 
           <Form.Item>
             <div className={styles.formActions}>
-              <Button onClick={onClose}>{"取消"}</Button>
+              <Button onClick={onClose}>取消</Button>
               <Button type="primary" htmlType="submit" loading={saving}>
-                {"保存"}
+                保存
               </Button>
             </div>
           </Form.Item>
         </Form>
-      )}
+      ) : null}
     </Drawer>
   );
 }

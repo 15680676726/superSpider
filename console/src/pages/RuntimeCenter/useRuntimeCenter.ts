@@ -9,6 +9,7 @@ import { message } from "antd";
 import { request } from "../../api";
 import { subscribe } from "../../runtime/eventBus";
 import type {
+  RuntimeChannelRuntimeRecord,
   RuntimeCenterResearchResponse,
   RuntimeCenterSurfaceResponse,
   RuntimeMainBrainBuddySummary,
@@ -35,6 +36,7 @@ let runtimeCenterSurfaceCache: RuntimeCenterSurfaceResponse | null = null;
 let runtimeCenterBuddySummaryCache: RuntimeMainBrainBuddySummary | null = null;
 let runtimeCenterMainBrainHydratedCache = false;
 let runtimeCenterResearchCache: ResearchSessionSummary | null = null;
+let runtimeCenterChannelRuntimesCache: RuntimeChannelRuntimeRecord[] = [];
 
 export type RuntimeCardStatus = "state-service" | "degraded" | "unavailable";
 
@@ -235,6 +237,8 @@ export function useRuntimeCenter() {
     useState<RuntimeMainBrainBuddySummary | null>(() => runtimeCenterBuddySummaryCache);
   const [researchSummary, setResearchSummary] =
     useState<ResearchSessionSummary | null>(() => runtimeCenterResearchCache);
+  const [channelRuntimes, setChannelRuntimes] =
+    useState<RuntimeChannelRuntimeRecord[]>(() => runtimeCenterChannelRuntimesCache);
   const [loading, setLoading] = useState(() => runtimeCenterSurfaceCache == null);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -298,6 +302,19 @@ export function useRuntimeCenter() {
       }
       if (runtimeCenterResearchCache == null) {
         setResearchSummary(null);
+      }
+    }
+  }, []);
+
+  const loadChannelRuntimes = useCallback(async () => {
+    try {
+      const payload = await runtimeCenterApi.listRuntimeChannelRuntimes();
+      const nextRuntimes = Array.isArray(payload) ? payload : [];
+      setChannelRuntimes(nextRuntimes);
+      runtimeCenterChannelRuntimesCache = nextRuntimes;
+    } catch {
+      if (runtimeCenterChannelRuntimesCache.length === 0) {
+        setChannelRuntimes([]);
       }
     }
   }, []);
@@ -450,7 +467,8 @@ export function useRuntimeCenter() {
   useEffect(() => {
     void loadSurface("initial", { sections: ["cards"] });
     void loadResearch();
-  }, [loadResearch, loadSurface]);
+    void loadChannelRuntimes();
+  }, [loadChannelRuntimes, loadResearch, loadSurface]);
 
   // Subscribe to the global event bus instead of opening a dedicated SSE
   // connection. The global bus (started in main.tsx) already connects to
@@ -517,7 +535,7 @@ export function useRuntimeCenter() {
         surfaceReloadTimerRef.current = null;
       }
     };
-  }, [loadSurface]);
+  }, [loadResearch, loadSurface]);
 
   const invokeAction = useCallback(
     async (
@@ -629,7 +647,8 @@ export function useRuntimeCenter() {
     detailLoading,
     detailError,
     researchSummary,
-    reload: () => Promise.all([loadSurface(), loadResearch()]),
+    channelRuntimes,
+    reload: () => Promise.all([loadSurface(), loadResearch(), loadChannelRuntimes()]),
     invokeAction,
     openDetail,
     closeDetail,
@@ -641,4 +660,5 @@ export function resetRuntimeCenterSurfaceCache(): void {
   runtimeCenterBuddySummaryCache = null;
   runtimeCenterMainBrainHydratedCache = false;
   runtimeCenterResearchCache = null;
+  runtimeCenterChannelRuntimesCache = [];
 }

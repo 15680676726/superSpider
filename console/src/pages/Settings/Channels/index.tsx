@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Form, message } from "@/ui";
 
 import api from "../../../api";
+import type { WeixinILinkLoginRuntimeState } from "../../../api/types";
 import {
   ChannelCard,
   ChannelDrawer,
@@ -22,6 +23,11 @@ function ChannelsPage() {
   const [hoverKey, setHoverKey] = useState<ChannelKey | null>(null);
   const [activeKey, setActiveKey] = useState<ChannelKey | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [weixinLoginRuntime, setWeixinLoginRuntime] =
+    useState<WeixinILinkLoginRuntimeState | null>(null);
+  const [weixinLoginActionLoading, setWeixinLoginActionLoading] = useState<
+    "qr" | "status" | "rebind" | null
+  >(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [form] = Form.useForm<any>();
 
@@ -48,6 +54,53 @@ function ChannelsPage() {
     return [...enabledCards, ...disabledCards];
   }, [channels, orderedKeys, filter, isBuiltin]);
 
+  const applyWeixinLoginRuntime = (runtime: WeixinILinkLoginRuntimeState) => {
+    setWeixinLoginRuntime(runtime);
+    form.setFieldsValue({
+      bot_token: runtime.bot_token || form.getFieldValue("bot_token"),
+      base_url: runtime.base_url || form.getFieldValue("base_url"),
+    });
+  };
+
+  const runWeixinLoginAction = async (
+    action: "qr" | "status" | "rebind",
+    request: () => Promise<WeixinILinkLoginRuntimeState>,
+    successMessage: string,
+  ) => {
+    setWeixinLoginActionLoading(action);
+    try {
+      const runtime = await request();
+      applyWeixinLoginRuntime(runtime);
+      message.success(successMessage);
+    } catch (error) {
+      console.error(`Failed to run weixin iLink ${action}:`, error);
+      message.error("微信个人（iLink）操作失败");
+    } finally {
+      setWeixinLoginActionLoading(null);
+    }
+  };
+
+  const handleFetchWeixinLoginQr = async () =>
+    runWeixinLoginAction(
+      "qr",
+      () => api.createWeixinILinkLoginQr(),
+      "登录二维码已生成",
+    );
+
+  const handleRefreshWeixinLoginStatus = async () =>
+    runWeixinLoginAction(
+      "status",
+      () => api.getWeixinILinkLoginStatus(),
+      "已刷新登录状态",
+    );
+
+  const handleRebindWeixinLogin = async () =>
+    runWeixinLoginAction(
+      "rebind",
+      () => api.rebindWeixinILinkLogin(),
+      "已标记为重新扫码授权",
+    );
+
   const handleCardClick = (key: ChannelKey) => {
     setActiveKey(key);
     setDrawerOpen(true);
@@ -57,11 +110,17 @@ function ChannelsPage() {
       filter_tool_messages: !channelConfig.filter_tool_messages,
       filter_thinking: !channelConfig.filter_thinking,
     });
+    if (key === "weixin_ilink") {
+      void handleRefreshWeixinLoginStatus();
+    } else {
+      setWeixinLoginRuntime(null);
+    }
   };
 
   const handleDrawerClose = () => {
     setDrawerOpen(false);
     setActiveKey(null);
+    setWeixinLoginActionLoading(null);
   };
 
   const handleSubmit = async (values: Record<string, unknown>) => {
@@ -162,8 +221,19 @@ function ChannelsPage() {
         saving={saving}
         initialValues={activeKey ? channels[activeKey] : undefined}
         isBuiltin={activeKey ? isBuiltin(activeKey) : true}
+        loginRuntime={weixinLoginRuntime}
+        loginActionLoading={weixinLoginActionLoading}
         onClose={handleDrawerClose}
         onSubmit={handleSubmit}
+        onFetchWeixinLoginQr={() => {
+          void handleFetchWeixinLoginQr();
+        }}
+        onRefreshWeixinLoginStatus={() => {
+          void handleRefreshWeixinLoginStatus();
+        }}
+        onRebindWeixinLogin={() => {
+          void handleRebindWeixinLogin();
+        }}
       />
     </div>
   );

@@ -1,5 +1,9 @@
 import { request } from "../request";
-import type { ChannelConfig, SingleChannelConfig } from "../types";
+import type {
+  ChannelConfig,
+  SingleChannelConfig,
+  WeixinILinkLoginRuntimeState,
+} from "../types";
 
 export const channelApi = {
   listChannelTypes: () => request<string[]>("/config/channels/types"),
@@ -23,6 +27,24 @@ export const channelApi = {
       {
         method: "PUT",
         body: JSON.stringify(body),
+      },
+    ),
+
+  createWeixinILinkLoginQr: () =>
+    request<WeixinILinkLoginRuntimeState>("/config/channels/weixin_ilink/login/qr", {
+      method: "POST",
+    }),
+
+  getWeixinILinkLoginStatus: () =>
+    request<WeixinILinkLoginRuntimeState>(
+      "/config/channels/weixin_ilink/login/status",
+    ),
+
+  rebindWeixinILinkLogin: () =>
+    request<WeixinILinkLoginRuntimeState>(
+      "/config/channels/weixin_ilink/login/rebind",
+      {
+        method: "POST",
       },
     ),
 };

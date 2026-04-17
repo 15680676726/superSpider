@@ -14,6 +14,7 @@ import { RefreshCw, RotateCcw, ShieldAlert, ShieldCheck } from "lucide-react";
 import {
   api,
   type GovernanceStatus,
+  type RuntimeChannelRuntimeRecord,
   type StartupRecoverySummary,
   type SystemSelfCheck,
 } from "../../api";
@@ -23,11 +24,16 @@ import { runtimeStatusColor } from "../../runtime/tagSemantics";
 import AutomationTab from "./AutomationTab";
 import styles from "./index.module.less";
 
-type SystemManagementTabKey = "automation" | "governance" | "recovery";
+type SystemManagementTabKey =
+  | "automation"
+  | "governance"
+  | "channels"
+  | "recovery";
 
 export interface MainBrainSystemManagementProps {
   focusScope?: string | null;
   refreshSignal?: string | null;
+  channelRuntimes?: RuntimeChannelRuntimeRecord[];
   onOpenDetail: (route: string, title: string) => void;
   onRuntimeChanged?: () => void;
 }
@@ -46,6 +52,32 @@ function textValue(value: unknown, fallback = "暂无"): string {
     return String(value);
   }
   return fallback;
+}
+
+function channelLabel(channel: string): string {
+  if (channel === "weixin_ilink") {
+    return "微信个人（iLink）";
+  }
+  return normalizeDisplayChinese(channel || "未知渠道");
+}
+
+function channelRuntimeStatusLabel(status?: string): string {
+  switch ((status || "").trim()) {
+    case "waiting_scan":
+      return "等待扫码";
+    case "authorized_pending_save":
+      return "已授权，待保存";
+    case "auth_expired":
+      return "授权失效";
+    case "running":
+      return "运行中";
+    case "stopped":
+      return "未运行";
+    case "unconfigured":
+      return "未配置";
+    default:
+      return normalizeDisplayChinese(status || "未知");
+  }
 }
 
 function recoveryMetricItems(summary: StartupRecoverySummary | null) {
@@ -73,15 +105,19 @@ function recoveryMetricItems(summary: StartupRecoverySummary | null) {
 export default function MainBrainSystemManagement({
   focusScope,
   refreshSignal,
+  channelRuntimes = [],
   onOpenDetail,
   onRuntimeChanged,
 }: MainBrainSystemManagementProps) {
   const [activeTab, setActiveTab] = useState<SystemManagementTabKey>("automation");
-  const [governanceStatus, setGovernanceStatus] = useState<GovernanceStatus | null>(null);
+  const [governanceStatus, setGovernanceStatus] = useState<GovernanceStatus | null>(
+    null,
+  );
   const [governanceLoading, setGovernanceLoading] = useState(false);
   const [governanceError, setGovernanceError] = useState<string | null>(null);
   const [governanceBusyKey, setGovernanceBusyKey] = useState<string | null>(null);
-  const [recoverySummary, setRecoverySummary] = useState<StartupRecoverySummary | null>(null);
+  const [recoverySummary, setRecoverySummary] =
+    useState<StartupRecoverySummary | null>(null);
   const [selfCheck, setSelfCheck] = useState<SystemSelfCheck | null>(null);
   const [recoveryLoading, setRecoveryLoading] = useState(false);
   const [recoveryBusyKey, setRecoveryBusyKey] = useState<string | null>(null);
@@ -95,7 +131,9 @@ export default function MainBrainSystemManagement({
       setGovernanceError(null);
     } catch (error) {
       setGovernanceError(
-        normalizeDisplayChinese(error instanceof Error ? error.message : String(error)),
+        normalizeDisplayChinese(
+          error instanceof Error ? error.message : String(error),
+        ),
       );
     } finally {
       setGovernanceLoading(false);
@@ -114,7 +152,9 @@ export default function MainBrainSystemManagement({
       setRecoveryError(null);
     } catch (error) {
       setRecoveryError(
-        normalizeDisplayChinese(error instanceof Error ? error.message : String(error)),
+        normalizeDisplayChinese(
+          error instanceof Error ? error.message : String(error),
+        ),
       );
     } finally {
       setRecoveryLoading(false);
@@ -137,13 +177,13 @@ export default function MainBrainSystemManagement({
         if (key === "emergency-stop") {
           await api.emergencyStopRuntime({
             actor: DEFAULT_ACTOR,
-            reason: "驾驶舱手动暂停运行",
+            reason: "运行中心手动暂停运行",
           });
           message.success("已提交紧急暂停");
         } else {
           await api.resumeGovernedRuntime({
             actor: DEFAULT_ACTOR,
-            reason: "驾驶舱手动恢复运行",
+            reason: "运行中心手动恢复运行",
           });
           message.success("已提交恢复运行");
         }
@@ -151,7 +191,9 @@ export default function MainBrainSystemManagement({
         onRuntimeChanged?.();
       } catch (error) {
         message.error(
-          normalizeDisplayChinese(error instanceof Error ? error.message : String(error)),
+          normalizeDisplayChinese(
+            error instanceof Error ? error.message : String(error),
+          ),
         );
       } finally {
         setGovernanceBusyKey(null);
@@ -168,7 +210,9 @@ export default function MainBrainSystemManagement({
       message.success("系统自检已完成");
     } catch (error) {
       message.error(
-        normalizeDisplayChinese(error instanceof Error ? error.message : String(error)),
+        normalizeDisplayChinese(
+          error instanceof Error ? error.message : String(error),
+        ),
       );
     } finally {
       setRecoveryBusyKey(null);
@@ -188,6 +232,7 @@ export default function MainBrainSystemManagement({
         items={[
           { key: "automation", label: "自动化" },
           { key: "governance", label: "治理" },
+          { key: "channels", label: "渠道" },
           { key: "recovery", label: "恢复" },
         ]}
       />
@@ -257,7 +302,9 @@ export default function MainBrainSystemManagement({
             <div className={styles.panelHeader}>
               <div>
                 <h3 className={styles.cardTitle}>治理控制</h3>
-                <p className={styles.cardSummary}>这里只放真正需要人工处理的系统级控制项。</p>
+                <p className={styles.cardSummary}>
+                  这里只保留需要人工拍板的系统级控制项。
+                </p>
               </div>
               <Space size={8}>
                 <Tag color={governanceStatus?.emergency_stop_active ? "error" : "success"}>
@@ -332,6 +379,86 @@ export default function MainBrainSystemManagement({
         </div>
       ) : null}
 
+      {activeTab === "channels" ? (
+        <div className={styles.systemPanelStack}>
+          <Card className="baize-card">
+            <div className={styles.panelHeader}>
+              <div>
+                <h3 className={styles.cardTitle}>渠道运行态</h3>
+                <p className={styles.cardSummary}>
+                  把正式消息通道的登录态和轮询态纳入运行中心，不再只藏在设置页。
+                </p>
+              </div>
+              <Space size={8}>
+                <Button
+                  size="small"
+                  icon={<RefreshCw size={14} />}
+                  onClick={() => {
+                    onRuntimeChanged?.();
+                  }}
+                >
+                  刷新
+                </Button>
+              </Space>
+            </div>
+
+            {channelRuntimes.length === 0 ? (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description="暂无渠道运行态"
+              />
+            ) : (
+              <div className={styles.systemCheckList}>
+                {channelRuntimes.map((runtime) => (
+                  <div
+                    key={`${runtime.channel}:${runtime.route}`}
+                    className={styles.systemCheckItem}
+                  >
+                    <div>
+                      <div className={styles.systemCheckName}>
+                        {channelLabel(runtime.channel)}
+                      </div>
+                      <div className={styles.systemCheckSummary}>
+                        {`登录 ${channelRuntimeStatusLabel(runtime.login_status)} | 轮询 ${channelRuntimeStatusLabel(runtime.polling_status)}`}
+                      </div>
+                      {runtime.qrcode ? (
+                        <div className={styles.systemCheckSummary}>
+                          {`当前二维码：${runtime.qrcode}`}
+                        </div>
+                      ) : null}
+                      {runtime.last_error ? (
+                        <div className={styles.systemCheckSummary}>
+                          {`最近错误：${normalizeDisplayChinese(runtime.last_error)}`}
+                        </div>
+                      ) : null}
+                    </div>
+                    <Space size={8}>
+                      <Tag color={runtimeStatusColor(runtime.polling_status || "unknown")}>
+                        {channelRuntimeStatusLabel(runtime.polling_status)}
+                      </Tag>
+                      <Tag color={runtimeStatusColor(runtime.login_status || "unknown")}>
+                        {channelRuntimeStatusLabel(runtime.login_status)}
+                      </Tag>
+                      <Button
+                        size="small"
+                        onClick={() => {
+                          onOpenDetail(
+                            runtime.route,
+                            `${channelLabel(runtime.channel)} 运行态`,
+                          );
+                        }}
+                      >
+                        查看详情
+                      </Button>
+                    </Space>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        </div>
+      ) : null}
+
       {activeTab === "recovery" ? (
         <div className={styles.systemPanelStack}>
           {recoveryError ? <Alert showIcon type="error" message={recoveryError} /> : null}
@@ -356,7 +483,9 @@ export default function MainBrainSystemManagement({
             <div className={styles.panelHeader}>
               <div>
                 <h3 className={styles.cardTitle}>恢复与自检</h3>
-                <p className={styles.cardSummary}>看系统是否恢复稳定，以及当前自检有没有异常。</p>
+                <p className={styles.cardSummary}>
+                  看系统是否恢复稳定，以及当前自检有没有异常。
+                </p>
               </div>
               <Space size={8}>
                 <Button
@@ -390,7 +519,7 @@ export default function MainBrainSystemManagement({
             </div>
 
             {recoveryLoading && !recoverySummary && !selfCheck ? (
-              <div className={styles.cockpitEmptyWrap}>正在加载恢复状态…</div>
+              <div className={styles.cockpitEmptyWrap}>正在加载恢复状态...</div>
             ) : null}
 
             {selfCheck ? (
@@ -421,7 +550,10 @@ export default function MainBrainSystemManagement({
                     </div>
                   ))
                 ) : (
-                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无自检结果" />
+                  <Empty
+                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                    description="暂无自检结果"
+                  />
                 )}
               </div>
             ) : null}

@@ -102,6 +102,7 @@ const requestRuntimeBusinessAgentsMock = vi.fn();
 const requestRuntimeRecordMock = vi.fn();
 const readBuddyProfileIdMock = vi.fn();
 const getRuntimeResearchMock = vi.fn();
+const listRuntimeChannelRuntimesMock = vi.fn();
 let runtimeEventHandler:
   | ((event: { event_name: string; payload: Record<string, unknown> }) => void)
   | null = null;
@@ -135,6 +136,8 @@ vi.mock("../../api/modules/runtimeCenter", async (importOriginal) => {
     runtimeCenterApi: {
       ...actual.runtimeCenterApi,
       getRuntimeResearch: (...args: unknown[]) => getRuntimeResearchMock(...args),
+      listRuntimeChannelRuntimes: (...args: unknown[]) =>
+        listRuntimeChannelRuntimesMock(...args),
     },
   };
 });
@@ -161,6 +164,7 @@ describe("useRuntimeCenter", () => {
       session: null,
       latest_round: null,
     } satisfies RuntimeCenterResearchResponse);
+    listRuntimeChannelRuntimesMock.mockResolvedValue([]);
   });
 
   it("loads cards first and hydrates main-brain in a follow-up request", async () => {
@@ -292,6 +296,35 @@ describe("useRuntimeCenter", () => {
         latestStatus: "正在比对第二轮抓到的竞品页面。",
       }),
     );
+  });
+
+  it("loads channel runtime projections alongside the runtime center surface", async () => {
+    listRuntimeChannelRuntimesMock.mockResolvedValue([
+      {
+        channel: "weixin_ilink",
+        login_status: "waiting_scan",
+        polling_status: "stopped",
+        token_source: "qr",
+        last_error: "",
+        qrcode: "qr-1",
+        route: "/api/runtime-center/channel-runtimes/weixin_ilink",
+      },
+    ]);
+
+    const { result } = renderHook(() => useRuntimeCenter());
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    expect(listRuntimeChannelRuntimesMock).toHaveBeenCalledTimes(1);
+    expect((result.current as Record<string, unknown>).channelRuntimes).toEqual([
+      expect.objectContaining({
+        channel: "weixin_ilink",
+        login_status: "waiting_scan",
+        route: "/api/runtime-center/channel-runtimes/weixin_ilink",
+      }),
+    ]);
   });
 
   it("marks main-brain surface unavailable when canonical surface omits it", async () => {

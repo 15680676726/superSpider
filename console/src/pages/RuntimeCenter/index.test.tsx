@@ -204,6 +204,7 @@ function createRuntimeCenterState() {
     ],
     businessAgentsLoading: false,
     businessAgentsError: null,
+    channelRuntimes: [],
     busyActionId: null,
     detail: null,
     detailLoading: false,
@@ -466,5 +467,30 @@ describe("RuntimeCenterPage", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("shows the channel runtime tab with the weixin ilink runtime summary", () => {
+    const state: any = createRuntimeCenterState();
+    state.channelRuntimes = [
+      {
+        channel: "weixin_ilink",
+        login_status: "waiting_scan",
+        polling_status: "stopped",
+        token_source: "qr",
+        last_error: "",
+        qrcode: "qr-1",
+        route: "/api/runtime-center/channel-runtimes/weixin_ilink",
+      },
+    ];
+    useRuntimeCenterMock.mockReturnValue(state);
+
+    render(<RuntimeCenterPage />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "系统管理" }));
+    fireEvent.click(screen.getByRole("tab", { name: "渠道" }));
+
+    expect(screen.getByText("微信个人（iLink）")).toBeInTheDocument();
+    expect(screen.getByText("等待扫码")).toBeInTheDocument();
+    expect(screen.getByText("当前二维码：qr-1")).toBeInTheDocument();
   });
 });

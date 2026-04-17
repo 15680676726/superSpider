@@ -44,6 +44,16 @@ export interface TelegramConfig extends BaseChannelConfig {
   show_typing?: boolean;
 }
 
+export interface WeixinILinkConfig extends BaseChannelConfig {
+  bot_token: string;
+  bot_token_file: string;
+  base_url: string;
+  media_dir: string;
+  group_reply_mode: "mention_or_prefix" | "whitelist_full_open";
+  group_allowlist: string[];
+  proactive_targets: string[];
+}
+
 export interface MQTTConfig extends BaseChannelConfig {
   host: string;
   port: number;
@@ -81,9 +91,27 @@ export interface ChannelConfig {
   feishu: FeishuConfig;
   qq: QQConfig;
   telegram: TelegramConfig;
+  weixin_ilink: WeixinILinkConfig;
   mqtt: MQTTConfig;
   console: ConsoleConfig;
   voice: VoiceChannelConfig;
+}
+
+export interface WeixinILinkLoginRuntimeState {
+  login_status: string;
+  polling_status: string;
+  token_source: string;
+  last_qr_issued_at: string | null;
+  last_update_id: string | number | null;
+  last_receive_at: string | null;
+  last_send_at: string | null;
+  last_error: string;
+  qrcode: string;
+  qrcode_img_content: string;
+  bot_token: string;
+  base_url: string;
+  ilink_bot_id: string;
+  ilink_user_id: string;
 }
 
 export type SingleChannelConfig =
@@ -94,5 +122,6 @@ export type SingleChannelConfig =
   | QQConfig
   | ConsoleConfig
   | TelegramConfig
+  | WeixinILinkConfig
   | MQTTConfig
   | VoiceChannelConfig;

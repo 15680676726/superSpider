@@ -7,6 +7,7 @@ export const CHANNEL_LABELS: Record<string, string> = {
   feishu: "Feishu",
   qq: "QQ",
   telegram: "Telegram",
+  weixin_ilink: "微信个人（iLink）",
   mqtt: "MQTT",
   console: "Console",
   voice: "Twilio",
