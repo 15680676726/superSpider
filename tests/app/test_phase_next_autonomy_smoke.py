@@ -172,8 +172,8 @@ def test_phase_next_runtime_center_overview_surfaces_routine_degradation_contrac
     cards = {card["key"]: card for card in response.json()["cards"]}
     routines = cards["routines"]
     assert routines["meta"]["failure_source"] == "sidecar-memory"
-    assert "canonical state only" in routines["meta"]["remediation_summary"]
-    assert "Restore the compaction sidecar" in routines["meta"]["blocked_next_step"]
+    assert "仅依赖规范状态继续运行" in routines["meta"]["remediation_summary"]
+    assert "compaction sidecar" in routines["meta"]["blocked_next_step"]
 
 
 def test_phase_next_industry_long_run_smoke_keeps_followup_focus_and_replan_truth_contract(
@@ -574,7 +574,8 @@ def test_phase_next_industry_long_run_smoke_keeps_handoff_human_assist_and_repla
         ),
     )
     assert reason is not None
-    assert "Runtime handoff is active" in reason
+    assert "当前存在运行时交接" in reason
+    assert "必须等待人工交接返回后才能继续分派" in reason
     blocked_host_detail = environment_service.get_session_detail(environment_ref)
     assert blocked_host_detail["host_twin"]["host_twin_summary"]["seat_count"] == 2
     assert sorted(
