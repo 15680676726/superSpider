@@ -69,6 +69,19 @@ class TelegramConfig(BaseChannelConfig):
     show_typing: Optional[bool] = None
 
 
+class WeixinILinkConfig(BaseChannelConfig):
+    bot_token: str = ""
+    bot_token_file: str = "~/.qwenpaw/weixin_bot_token"
+    base_url: str = ""
+    media_dir: str = "~/.qwenpaw/media"
+    group_reply_mode: Literal[
+        "mention_or_prefix",
+        "whitelist_full_open",
+    ] = "mention_or_prefix"
+    group_allowlist: List[str] = Field(default_factory=list)
+    proactive_targets: List[str] = Field(default_factory=list)
+
+
 class MQTTConfig(BaseChannelConfig):
     host: str = ""
     port: Optional[int] = None
@@ -116,6 +129,7 @@ class ChannelConfig(BaseModel):
     feishu: FeishuConfig = FeishuConfig()
     qq: QQConfig = QQConfig()
     telegram: TelegramConfig = TelegramConfig()
+    weixin_ilink: WeixinILinkConfig = WeixinILinkConfig()
     mqtt: MQTTConfig = MQTTConfig()
     console: ConsoleConfig = ConsoleConfig()
     voice: VoiceChannelConfig = VoiceChannelConfig()
@@ -415,6 +429,7 @@ ChannelConfigUnion = Union[
     FeishuConfig,
     QQConfig,
     TelegramConfig,
+    WeixinILinkConfig,
     MQTTConfig,
     ConsoleConfig,
     VoiceChannelConfig,
