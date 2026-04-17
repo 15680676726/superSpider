@@ -129,6 +129,64 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             "truncated": total > len(items),
         }
 
+    async def _resolve_channel_runtime_summary(
+        self,
+        app_state: RuntimeCenterAppStateView,
+    ) -> dict[str, Any]:
+        state_query_service = getattr(app_state, "state_query_service", None)
+        items = await self._call_list_method(state_query_service, "list_channel_runtimes")
+        if items is self._missing_sentinel:
+            return {}
+        for item in list(items or []):
+            payload = self._mapping(item)
+            if (self._string(payload.get("channel")) or "").lower() != "weixin_ilink":
+                continue
+            return self._build_channel_runtime_summary(payload)
+        return {}
+
+    def _build_channel_runtime_summary(
+        self,
+        payload: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        channel = (self._string(payload.get("channel")) or "weixin_ilink").lower()
+        title = "微信个人（iLink）" if channel == "weixin_ilink" else self._string(payload.get("title")) or channel
+        login_status = self._string(payload.get("login_status")) or "unknown"
+        polling_status = self._string(payload.get("polling_status")) or "unknown"
+        last_error = self._string(payload.get("last_error"))
+        parts = [
+            f"{title}{self._channel_runtime_status_label(login_status)}",
+            f"轮询{self._channel_runtime_status_label(polling_status)}",
+        ]
+        if last_error:
+            parts.append(f"最近错误：{last_error}")
+        return {
+            "channel": channel,
+            "title": title,
+            "login_status": login_status,
+            "polling_status": polling_status,
+            "last_error": last_error,
+            "route": self._string(payload.get("route")),
+            "summary": "；".join(parts) + "。",
+        }
+
+    def _channel_runtime_status_label(self, status: str | None) -> str:
+        normalized = (status or "").strip().lower()
+        if normalized == "waiting_scan":
+            return "等待扫码"
+        if normalized == "authorized_pending_save":
+            return "已授权，待保存"
+        if normalized == "auth_expired":
+            return "授权失效"
+        if normalized == "running":
+            return "运行中"
+        if normalized == "stopped":
+            return "未运行"
+        if normalized == "unconfigured":
+            return "未配置"
+        if normalized == "idle":
+            return "空闲"
+        return self._string(status) or "未知"
+
     async def _build_tasks_card(self, app_state: RuntimeCenterAppStateView) -> RuntimeOverviewCard:
         return await self._state_card(
             app_state=app_state,
@@ -347,6 +405,7 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             or host_twin_blocked
         )
         query_runtime_entropy = self._resolve_query_runtime_entropy(app_state)
+        channel_runtime_summary = await self._resolve_channel_runtime_summary(app_state)
         sidecar_memory = self._resolve_governance_sidecar_memory(
             query_runtime_entropy=query_runtime_entropy,
             app_state=app_state,
@@ -443,6 +502,9 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             default_remediation_summary=default_summary,
         )
         summary = diagnostics["remediation_summary"] or default_summary
+        channel_runtime_text = self._string(channel_runtime_summary.get("summary"))
+        if channel_runtime_text and channel_runtime_text not in summary:
+            summary = f"{summary} {channel_runtime_text}"
         entry = RuntimeOverviewEntry(
             id=str(payload.get("control_id") or "runtime"),
             title="运行治理",
@@ -462,6 +524,7 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
                 "host_twin_summary": host_twin_summary_payload,
                 "query_runtime_entropy": query_runtime_entropy_payload,
                 "sidecar_memory": sidecar_memory,
+                "channel_runtime_summary": channel_runtime_summary,
                 "handoff": handoff,
                 "staffing": staffing,
                 "human_assist": human_assist,
@@ -483,6 +546,7 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
                 "host_twin_summary": host_twin_summary_payload,
                 "query_runtime_entropy": query_runtime_entropy_payload,
                 "sidecar_memory": sidecar_memory,
+                "channel_runtime_summary": channel_runtime_summary,
                 "failure_source": diagnostics["failure_source"],
                 "blocked_next_step": diagnostics["blocked_next_step"],
                 "remediation_summary": diagnostics["remediation_summary"],

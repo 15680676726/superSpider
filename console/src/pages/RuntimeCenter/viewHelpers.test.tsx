@@ -617,4 +617,69 @@ describe("runtimeCenter viewHelpers", () => {
     expect(environmentSignal?.detail).toBe("还没有可验证的环境连续性或宿主绑定信息。");
     expect(environmentSignal?.tone).toBe("warning");
   });
+  it("renders human-readable weixin ilink runtime status instead of raw internal keys", () => {
+    const payload = {
+      generated_at: "2026-04-17T09:00:00Z",
+      surface: {
+        version: "runtime-center-v1",
+        mode: "operator-surface",
+        status: "state-service",
+        read_only: true,
+        source: "state_query_service,governance_service",
+        note: "Shared runtime surface",
+        services: ["state_query_service", "governance_service"],
+      },
+      cards: [
+        {
+          key: "main-brain",
+          title: "Main-Brain",
+          source: "state_query_service",
+          status: "state-service",
+          count: 1,
+          summary: "Main brain cockpit",
+          entries: [],
+          meta: {
+            carrier: {
+              status: "state-service",
+              summary: "Carrier ready",
+              route: "/api/runtime-center/governance/status",
+            },
+            environment: {
+              summary: "Host twin ready",
+              detail: "Workspace bound",
+              route: "/api/runtime-center/governance/status",
+            },
+          },
+        },
+        {
+          key: "governance",
+          title: "Governance",
+          source: "governance_service",
+          status: "state-service",
+          count: 1,
+          summary: "Runtime is accepting new work.",
+          entries: [],
+          meta: {
+            channel_runtime_summary: {
+              channel: "weixin_ilink",
+              title: "微信个人（iLink）",
+              login_status: "waiting_scan",
+              polling_status: "stopped",
+              summary: "微信个人（iLink）等待扫码；轮询未运行。",
+              route: "/api/runtime-center/channel-runtimes/weixin_ilink",
+            },
+          },
+        },
+      ],
+    } as RuntimeCenterOverviewPayload;
+
+    const environmentSignal = buildRuntimeEnvironmentCockpitSignals(payload).find(
+      (signal) => signal.key === "environment",
+    );
+
+    expect(environmentSignal?.detail).toContain("微信个人（iLink）等待扫码");
+    expect(environmentSignal?.detail).toContain("轮询未运行");
+    expect(environmentSignal?.detail).not.toContain("waiting_scan");
+    expect(environmentSignal?.detail).not.toContain("stopped");
+  });
 });

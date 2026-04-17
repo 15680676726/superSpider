@@ -99,6 +99,49 @@ function routeText(value: unknown): string | null {
   return textValue(record.route);
 }
 
+function channelRuntimeStatusLabel(value: unknown): string | null {
+  const normalized = stringValue(value)?.toLowerCase() ?? "";
+  switch (normalized) {
+    case "waiting_scan":
+      return "等待扫码";
+    case "authorized_pending_save":
+      return "已授权，待保存";
+    case "auth_expired":
+      return "授权失效";
+    case "running":
+      return "运行中";
+    case "stopped":
+      return "未运行";
+    case "unconfigured":
+      return "未配置";
+    case "idle":
+      return "空闲";
+    default:
+      return textValue(value);
+  }
+}
+
+function summarizeChannelRuntime(value: unknown): string | null {
+  const record = signalRecordValue(value);
+  if (!record) {
+    return null;
+  }
+  const explicitSummary = firstTextValue(record.summary, record.detail);
+  if (explicitSummary) {
+    return explicitSummary;
+  }
+  const title = firstTextValue(record.title, record.label, record.channel) ?? "渠道";
+  const loginStatus = channelRuntimeStatusLabel(record.login_status);
+  const pollingStatus = channelRuntimeStatusLabel(record.polling_status);
+  const lastError = firstTextValue(record.last_error);
+  const parts = [
+    loginStatus ? `${title}${loginStatus}` : title,
+    pollingStatus ? `轮询${pollingStatus}` : null,
+    lastError ? `最近错误：${lastError}` : null,
+  ].filter(Boolean);
+  return parts.length > 0 ? parts.join("；") + "。" : null;
+}
+
 function buildSignal(
   key: string,
   value: string,
@@ -128,6 +171,7 @@ export function buildRuntimeEnvironmentCockpitSignals(
   const governanceMeta = signalRecordValue(governanceCard?.meta) ?? {};
   const governanceEntry = governanceCard?.entries?.[0] ?? null;
   const surface = payload?.surface ?? null;
+  const channelRuntimeSummary = governanceMeta.channel_runtime_summary;
 
   const carrierSource = mainBrainMeta.carrier ?? surface?.status ?? "unavailable";
   const environmentSource =
@@ -140,12 +184,26 @@ export function buildRuntimeEnvironmentCockpitSignals(
   const environmentStatus =
     mainBrainMeta.environment == null &&
     governanceMeta.host_twin_summary == null &&
+    channelRuntimeSummary == null &&
     governanceCard?.summary == null
       ? "degraded"
       : governanceCard?.status;
 
   const carrierRoute = routeText(carrierSource) || textValue(governanceEntry?.route);
-  const environmentRoute = routeText(environmentSource) || textValue(governanceEntry?.route);
+  const environmentRoute =
+    routeText(environmentSource) ||
+    routeText(channelRuntimeSummary) ||
+    textValue(governanceEntry?.route);
+  const environmentPrimaryDetail =
+    detailText(environmentSource) ||
+    summarizeHostTwin(governanceMeta.host_twin_summary);
+  const environmentDetails = [
+    environmentPrimaryDetail,
+    summarizeChannelRuntime(channelRuntimeSummary),
+  ].filter(
+    (value, index, items): value is string =>
+      Boolean(value) && items.indexOf(value) === index,
+  );
 
   const carrierTone =
     surface?.status === "state-service"
@@ -169,9 +227,9 @@ export function buildRuntimeEnvironmentCockpitSignals(
       firstTextValue(environmentSource) ||
         firstTextValue(governanceCard?.summary) ||
         "环境已就绪",
-      detailText(environmentSource) ||
-        summarizeHostTwin(governanceMeta.host_twin_summary) ||
-        firstTextValue(surface?.note),
+      environmentDetails.length > 0
+        ? environmentDetails.join(" · ")
+        : firstTextValue(surface?.note),
       environmentRoute || governanceEntry?.route || null,
       environmentStatus === "state-service"
         ? "success"

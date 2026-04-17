@@ -484,6 +484,7 @@ export function useRuntimeCenter() {
           const pendingSections = Array.from(pendingSectionsRef.current);
           pendingSectionsRef.current.clear();
           void loadSurface("refresh", { sections: pendingSections });
+          void loadChannelRuntimes();
           if (pendingSections.includes("main_brain")) {
             void loadResearch();
           }
@@ -535,7 +536,7 @@ export function useRuntimeCenter() {
         surfaceReloadTimerRef.current = null;
       }
     };
-  }, [loadResearch, loadSurface]);
+  }, [loadChannelRuntimes, loadResearch, loadSurface]);
 
   const invokeAction = useCallback(
     async (

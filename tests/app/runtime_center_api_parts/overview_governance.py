@@ -581,6 +581,18 @@ class _PausedScheduleStateQueryService(FakeStateQueryService):
         return payload[:limit] if isinstance(limit, int) else payload
 
 
+class _ChannelRuntimeStateQueryService(FakeStateQueryService):
+    async def list_channel_runtimes(self):
+        return [
+            {
+                "channel": "weixin_ilink",
+                "login_status": "waiting_scan",
+                "polling_status": "stopped",
+                "route": "/api/runtime-center/channel-runtimes/weixin_ilink",
+            },
+        ]
+
+
 def test_runtime_center_overview_uses_state_and_evidence_services():
     app = build_runtime_center_app()
     app.state.state_query_service = FakeStateQueryService()
@@ -707,6 +719,24 @@ def test_runtime_center_overview_uses_state_and_evidence_services():
         cards["patches"]["entries"][0]["actions"]["apply"]
         == "/api/runtime-center/learning/patches/patch-1/apply"
     )
+
+
+def test_runtime_center_overview_governance_surfaces_weixin_ilink_runtime_summary() -> None:
+    app = build_runtime_center_app()
+    app.state.state_query_service = _ChannelRuntimeStateQueryService()
+    app.state.governance_service = FakeGovernanceService()
+
+    client = TestClient(app)
+
+    response = client.get("/runtime-center/surface")
+
+    assert response.status_code == 200
+    cards = {card["key"]: card for card in response.json()["cards"]}
+    summary = cards["governance"]["meta"]["channel_runtime_summary"]
+    assert summary["channel"] == "weixin_ilink"
+    assert summary["route"] == "/api/runtime-center/channel-runtimes/weixin_ilink"
+    assert summary["summary"] == "微信个人（iLink）等待扫码；轮询未运行。"
+    assert cards["governance"]["summary"].endswith("微信个人（iLink）等待扫码；轮询未运行。")
 
 
 def test_runtime_center_surface_route_uses_one_canonical_surface_contract():

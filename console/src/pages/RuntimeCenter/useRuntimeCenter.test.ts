@@ -509,6 +509,7 @@ describe("useRuntimeCenter", () => {
     expect(requestRuntimeSurfaceMock).toHaveBeenLastCalledWith({
       sections: ["main_brain"],
     });
+    expect(listRuntimeChannelRuntimesMock).toHaveBeenCalledTimes(2);
     vi.useRealTimers();
   });
 
