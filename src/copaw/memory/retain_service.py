@@ -217,6 +217,18 @@ class MemoryRetainService:
         self._derived_index_service.upsert_evidence(evidence)
         return evidence
 
+    def retain_research_session(
+        self,
+        *,
+        session: object,
+        rounds: list[object] | None = None,
+    ) -> object | None:
+        service = self._knowledge_service
+        ingest = getattr(service, "ingest_research_session", None)
+        if not callable(ingest):
+            return None
+        return ingest(session=session, rounds=list(rounds or []))
+
     def _upsert_memory_chunk(
         self,
         *,

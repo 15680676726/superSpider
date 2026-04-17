@@ -354,6 +354,98 @@ class StateKnowledgeService:
             "chunks": [chunk.model_dump(mode="json") for chunk in stored_chunks],
         }
 
+    def ingest_research_session(
+        self,
+        *,
+        session: object,
+        rounds: list[object] | None = None,
+    ) -> dict[str, Any]:
+        rounds = list(rounds or [])
+        session_id = str(getattr(session, "id", "") or "").strip()
+        goal = str(getattr(session, "goal", "") or "").strip()
+        brief = _research_mapping(getattr(session, "brief", None))
+        stable_findings = _research_text_lines(getattr(session, "stable_findings", None))
+        stable_lookup = {item.casefold() for item in stable_findings}
+        working_findings = _normalize_strings(
+            [
+                finding
+                for round_record in rounds
+                for finding in _research_text_lines(getattr(round_record, "new_findings", None))
+                if finding.casefold() not in stable_lookup
+            ],
+        )
+        sources = _dedupe_source_rows(
+            [
+                source
+                for round_record in rounds
+                for source in _research_mapping_list(getattr(round_record, "sources", None))
+            ],
+        )
+        content = _build_research_memory_content(
+            goal=goal,
+            brief=brief,
+            stable_findings=stable_findings,
+            working_findings=working_findings,
+            sources=sources,
+        )
+        if not content:
+            return {
+                "research_session_id": session_id or None,
+                "work_context_chunk_ids": [],
+                "industry_document_id": None,
+                "source_refs": [],
+            }
+
+        source_ref = f"research-session:{session_id}" if session_id else None
+        tags = _normalize_strings(
+            [
+                "research",
+                "research-session",
+                "summary",
+                "source-collection" if sources else "",
+            ],
+        )
+        result = {
+            "research_session_id": session_id or None,
+            "work_context_chunk_ids": [],
+            "industry_document_id": None,
+            "source_refs": _normalize_strings(
+                [
+                    source.get("source_ref")
+                    or source.get("normalized_ref")
+                    or source.get("source_id")
+                    for source in sources
+                ],
+            ),
+        }
+
+        work_context_id = str(getattr(session, "work_context_id", "") or "").strip()
+        if work_context_id:
+            chunk = self.remember_fact(
+                title=goal or f"Research session {session_id or 'summary'}",
+                content=content,
+                scope_type="work_context",
+                scope_id=work_context_id,
+                source_ref=source_ref,
+                tags=tags,
+            )
+            result["work_context_chunk_ids"] = [chunk.id]
+
+        industry_instance_id = str(
+            getattr(session, "industry_instance_id", "") or "",
+        ).strip()
+        if industry_instance_id:
+            chunk = self.remember_fact(
+                title=goal or f"Research session {session_id or 'summary'}",
+                content=content,
+                scope_type="industry",
+                scope_id=industry_instance_id,
+                source_ref=source_ref,
+                tags=tags,
+            )
+            result["industry_document_id"] = chunk.document_id
+        return result
+
     def _filter_and_rank(
         self,
         chunks: list[KnowledgeChunkRecord],
@@ -565,6 +657,115 @@ def _merge_strings(groups: Any) -> list[str]:
             seen.add(lowered)
             merged.append(item)
     return merged
+
+
+def _research_mapping(value: object | None) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        payload = model_dump(mode="json")
+        if isinstance(payload, dict):
+            return dict(payload)
+    return {}
+
+
+def _research_mapping_list(value: object | None) -> list[dict[str, Any]]:
+    if isinstance(value, list):
+        items = value
+    elif value is None:
+        items = []
+    else:
+        items = [value]
+    normalized: list[dict[str, Any]] = []
+    for item in items:
+        mapping = _research_mapping(item)
+        if mapping:
+            normalized.append(mapping)
+    return normalized
+
+
+def _research_text_lines(value: object) -> list[str]:
+    if isinstance(value, str):
+        items = [value]
+    elif isinstance(value, (list, tuple, set, frozenset)):
+        items = list(value)
+    else:
+        items = []
+    return _normalize_strings([str(item or "").strip() for item in items])
+
+
+def _dedupe_source_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in rows:
+        key = str(
+            row.get("normalized_ref")
+            or row.get("source_ref")
+            or row.get("source_id")
+            or row.get("title")
+            or "",
+        ).strip()
+        if not key:
+            key = str(row)
+        lowered = key.casefold()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        deduped.append(dict(row))
+    return deduped
+
+
+def _source_display_text(source: dict[str, Any]) -> str | None:
+    title = str(source.get("title") or "").strip()
+    ref = str(
+        source.get("source_ref")
+        or source.get("normalized_ref")
+        or source.get("source_id")
+        or "",
+    ).strip()
+    snippet = str(source.get("snippet") or "").strip()
+    parts = [part for part in (title, ref, snippet) if part]
+    if not parts:
+        return None
+    return " | ".join(parts)
+
+
+def _build_research_memory_content(
+    *,
+    goal: str,
+    brief: dict[str, Any],
+    stable_findings: list[str],
+    working_findings: list[str],
+    sources: list[dict[str, Any]],
+) -> str:
+    lines: list[str] = []
+    if goal:
+        lines.append(f"Goal: {goal}")
+    question = str(brief.get("question") or "").strip()
+    why_needed = str(brief.get("why_needed") or "").strip()
+    done_when = str(brief.get("done_when") or "").strip()
+    if question:
+        lines.append(f"Question: {question}")
+    if why_needed:
+        lines.append(f"Why needed: {why_needed}")
+    if done_when:
+        lines.append(f"Done when: {done_when}")
+    if stable_findings:
+        lines.append("Stable findings:")
+        lines.extend(f"- {item}" for item in stable_findings)
+    if working_findings:
+        lines.append("Working findings:")
+        lines.extend(f"- {item}" for item in working_findings)
+    rendered_sources = [
+        rendered
+        for rendered in (_source_display_text(source) for source in sources)
+        if rendered is not None
+    ]
+    if rendered_sources:
+        lines.append("Sources:")
+        lines.extend(f"- {item}" for item in rendered_sources)
+    return "\n".join(lines).strip()
 
 
 def _normalize_memory_scope_type(scope_type: str) -> str:

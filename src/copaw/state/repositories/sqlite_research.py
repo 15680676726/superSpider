@@ -9,6 +9,8 @@ from ..models_research import ResearchSessionRecord, ResearchSessionRoundRecord
 from ..store import SQLiteStateStore
 from .base import BaseResearchSessionRepository
 
+_RESEARCH_METADATA_KEY = "__copaw_research"
+
 
 def _decode_json_mapping_list(value: str | None) -> list[dict[str, Any]]:
     raw_text = str(value or "").strip()
@@ -21,6 +23,25 @@ def _decode_json_mapping_list(value: str | None) -> list[dict[str, Any]]:
     if not isinstance(payload, list):
         return []
     return [dict(item) for item in payload if isinstance(item, dict)]
+
+
+def _encode_research_metadata(
+    metadata: dict[str, Any] | None,
+    *,
+    brief: dict[str, Any] | None = None,
+    sources: list[dict[str, Any]] | None = None,
+) -> str:
+    payload = dict(metadata or {})
+    reserved: dict[str, Any] = {}
+    if brief:
+        reserved["brief"] = dict(brief)
+    if sources:
+        reserved["sources"] = [dict(item) for item in sources if isinstance(item, dict)]
+    if reserved:
+        payload[_RESEARCH_METADATA_KEY] = reserved
+    else:
+        payload.pop(_RESEARCH_METADATA_KEY, None)
+    return _encode_json(payload)
 
 
 def _research_session_from_row(row: sqlite3.Row | None) -> ResearchSessionRecord | None:
@@ -115,7 +136,10 @@ class SqliteResearchSessionRepository(BaseResearchSessionRepository):
         payload = _payload(session)
         payload["stable_findings_json"] = _encode_json(session.stable_findings)
         payload["open_questions_json"] = _encode_json(session.open_questions)
-        payload["metadata_json"] = _encode_json(session.metadata)
+        payload["metadata_json"] = _encode_research_metadata(
+            session.metadata,
+            brief=session.brief,
+        )
         with self._store.connection() as conn:
             conn.execute(
                 """
@@ -248,7 +272,10 @@ class SqliteResearchSessionRepository(BaseResearchSessionRepository):
         payload["new_findings_json"] = _encode_json(round_record.new_findings)
         payload["remaining_gaps_json"] = _encode_json(round_record.remaining_gaps)
         payload["evidence_ids_json"] = _encode_json(round_record.evidence_ids)
-        payload["metadata_json"] = _encode_json(round_record.metadata)
+        payload["metadata_json"] = _encode_research_metadata(
+            round_record.metadata,
+            sources=round_record.sources,
+        )
         with self._store.connection() as conn:
             conn.execute(
                 """

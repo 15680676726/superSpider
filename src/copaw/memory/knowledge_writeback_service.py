@@ -820,6 +820,231 @@ class KnowledgeWritebackService:
             },
         )
 
+    def build_research_session_writeback(
+        self,
+        *,
+        session: object,
+        rounds: Sequence[object] | None = None,
+    ) -> KnowledgeGraphWritebackChange:
+        rounds = list(rounds or [])
+        session_id = _string(getattr(session, "id", None)) or _stable_suffix(
+            getattr(session, "owner_agent_id", None),
+            getattr(session, "goal", None),
+        )
+        goal = _string(getattr(session, "goal", None)) or f"Research session {session_id}"
+        owner_agent_id = _string(getattr(session, "owner_agent_id", None))
+        industry_instance_id = _string(getattr(session, "industry_instance_id", None))
+        work_context_id = _string(getattr(session, "work_context_id", None))
+        brief = _mapping(getattr(session, "brief", None))
+        stable_findings = _unique_strings(getattr(session, "stable_findings", None))
+
+        if work_context_id is not None:
+            scope = self._work_context_scope(
+                context_id=work_context_id,
+                industry_instance_id=industry_instance_id,
+                owner_agent_id=owner_agent_id,
+            )
+        elif industry_instance_id is not None:
+            scope = self._industry_scope(
+                industry_instance_id=industry_instance_id,
+                owner_agent_id=owner_agent_id,
+            )
+        elif owner_agent_id is not None:
+            scope = self._scope(
+                scope_type="agent",
+                scope_id=owner_agent_id,
+                owner_agent_id=owner_agent_id,
+            )
+        else:
+            scope = self._scope(scope_type="global", scope_id="runtime")
+
+        session_node = KnowledgeGraphNode(
+            node_id=f"research-session:{session_id}",
+            node_type="event",
+            scope=scope,
+            title=goal,
+            summary=_string(brief.get("question")) or goal,
+            source_refs=[f"research-session:{session_id}"],
+            metadata={
+                "provider": _string(getattr(session, "provider", None)),
+                "trigger_source": _string(getattr(session, "trigger_source", None)),
+                "question": _string(brief.get("question")),
+                "why_needed": _string(brief.get("why_needed")),
+                "done_when": _string(brief.get("done_when")),
+            },
+        )
+        upsert_nodes: list[KnowledgeGraphNode] = [session_node]
+        upsert_relations: list[KnowledgeGraphRelation] = []
+
+        if work_context_id is not None:
+            work_context_node = self._work_context_anchor_node(
+                context_id=work_context_id,
+                industry_instance_id=industry_instance_id,
+                owner_agent_id=owner_agent_id,
+            )
+            upsert_nodes.append(work_context_node)
+            upsert_relations.append(
+                self._relation(
+                    relation_type="belongs_to",
+                    source_id=session_node.node_id,
+                    target_id=work_context_node.node_id,
+                    scope=scope,
+                    source_refs=session_node.source_refs,
+                    metadata={
+                        "summary": (
+                            f"Research session {session_id} belongs to work context {work_context_id}"
+                        ),
+                    },
+                ),
+            )
+
+        source_node_ids_by_round: dict[str, list[str]] = {}
+        seen_sources: set[str] = set()
+        for round_record in rounds:
+            round_id = _string(getattr(round_record, "id", None)) or f"{session_id}:round"
+            round_index = getattr(round_record, "round_index", None)
+            round_evidence_refs = _unique_strings(getattr(round_record, "evidence_ids", None))
+            round_source_node_ids: list[str] = []
+            for source in list(getattr(round_record, "sources", None) or []):
+                source_mapping = _mapping(source)
+                source_key = _string(
+                    source_mapping.get("normalized_ref")
+                    or source_mapping.get("source_ref")
+                    or source_mapping.get("source_id")
+                    or source_mapping.get("title"),
+                )
+                if source_key is None:
+                    continue
+                dedupe_key = source_key.casefold()
+                if dedupe_key in seen_sources:
+                    continue
+                seen_sources.add(dedupe_key)
+                source_id = _string(source_mapping.get("source_id")) or _stable_suffix(
+                    session_id,
+                    round_id,
+                    source_key,
+                )
+                source_node = KnowledgeGraphNode(
+                    node_id=f"research-source:{session_id}:{source_id}",
+                    node_type="evidence",
+                    scope=scope,
+                    title=_string(source_mapping.get("title")) or source_key,
+                    summary=_string(source_mapping.get("snippet")) or source_key,
+                    source_refs=_unique_strings(
+                        source_mapping.get("source_ref"),
+                        source_mapping.get("normalized_ref"),
+                        source_mapping.get("source_id"),
+                    ),
+                    evidence_refs=_unique_strings(
+                        source_mapping.get("evidence_id"),
+                        _mapping(source_mapping.get("metadata")).get("evidence_id"),
+                        round_evidence_refs,
+                    ),
+                    metadata={
+                        "source_kind": _string(source_mapping.get("source_kind")),
+                        "collection_action": _string(source_mapping.get("collection_action")),
+                        "round_id": round_id,
+                        "round_index": round_index,
+                    },
+                )
+                upsert_nodes.append(source_node)
+                round_source_node_ids.append(source_node.node_id)
+                upsert_relations.append(
+                    self._relation(
+                        relation_type="produces",
+                        source_id=session_node.node_id,
+                        target_id=source_node.node_id,
+                        scope=scope,
+                        evidence_refs=source_node.evidence_refs,
+                        source_refs=session_node.source_refs,
+                        metadata={
+                            "summary": (
+                                f"Research session {session_id} collected source {source_node.title}"
+                            ),
+                        },
+                    ),
+                )
+            if round_source_node_ids:
+                source_node_ids_by_round[round_id] = round_source_node_ids
+
+        stable_lookup = {item.casefold() for item in stable_findings}
+        for index, finding in enumerate(stable_findings, start=1):
+            finding_node = KnowledgeGraphNode(
+                node_id=f"research-finding:{session_id}:{index}",
+                node_type="fact",
+                scope=scope,
+                title=f"{goal} finding {index}",
+                summary=finding,
+                source_refs=session_node.source_refs,
+            )
+            upsert_nodes.append(finding_node)
+            upsert_relations.append(
+                self._relation(
+                    relation_type="produces",
+                    source_id=session_node.node_id,
+                    target_id=finding_node.node_id,
+                    scope=scope,
+                    source_refs=session_node.source_refs,
+                ),
+            )
+            for source_node_ids in source_node_ids_by_round.values():
+                for source_node_id in source_node_ids:
+                    upsert_relations.append(
+                        self._relation(
+                            relation_type="derived_from",
+                            source_id=finding_node.node_id,
+                            target_id=source_node_id,
+                            scope=scope,
+                            source_refs=session_node.source_refs,
+                        ),
+                    )
+
+        working_index = 0
+        for round_record in rounds:
+            round_id = _string(getattr(round_record, "id", None)) or f"{session_id}:round"
+            for finding in _unique_strings(getattr(round_record, "new_findings", None)):
+                if finding.casefold() in stable_lookup:
+                    continue
+                working_index += 1
+                finding_node = KnowledgeGraphNode(
+                    node_id=f"research-working-finding:{session_id}:{working_index}",
+                    node_type="opinion",
+                    scope=scope,
+                    title=f"{goal} working finding {working_index}",
+                    summary=finding,
+                    source_refs=session_node.source_refs,
+                )
+                upsert_nodes.append(finding_node)
+                upsert_relations.append(
+                    self._relation(
+                        relation_type="produces",
+                        source_id=session_node.node_id,
+                        target_id=finding_node.node_id,
+                        scope=scope,
+                        source_refs=session_node.source_refs,
+                    ),
+                )
+                for source_node_id in source_node_ids_by_round.get(round_id, []):
+                    upsert_relations.append(
+                        self._relation(
+                            relation_type="derived_from",
+                            source_id=finding_node.node_id,
+                            target_id=source_node_id,
+                            scope=scope,
+                            source_refs=session_node.source_refs,
+                        ),
+                    )
+
+        return KnowledgeGraphWritebackChange(
+            scope=scope,
+            upsert_nodes=upsert_nodes,
+            upsert_relations=upsert_relations,
+            metadata={
+                "source": "research-session",
+                "research_session_id": session_id,
+            },
+        )
+
     def build_human_boundary_writeback(
         self,
         *,
