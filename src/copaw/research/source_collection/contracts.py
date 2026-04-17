@@ -67,6 +67,8 @@ class ResearchAdapterResult(BaseModel):
     round_id: str | None = None
     collected_sources: list[CollectedSource] = Field(default_factory=list)
     findings: list[ResearchFinding] = Field(default_factory=list)
+    conflicts: list[str] = Field(default_factory=list)
+    gaps: list[str] = Field(default_factory=list)
     summary: str = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
 
