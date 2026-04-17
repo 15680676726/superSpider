@@ -44,6 +44,264 @@ def _runtime_non_empty_str(value: object | None) -> str | None:
     return resolved or None
 
 
+def _runtime_mapping(value: object | None) -> dict[str, object]:
+    payload = _model_dump_or_dict(value)
+    return payload or {}
+
+
+def _runtime_mapping_list(value: object | None) -> list[dict[str, object]]:
+    if value is None:
+        return []
+    items = value if isinstance(value, list) else [value]
+    normalized: list[dict[str, object]] = []
+    for item in items:
+        payload = _runtime_mapping(item)
+        if payload:
+            normalized.append(payload)
+    return normalized
+
+
+def _runtime_text_list(*values: object | None) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if isinstance(value, str):
+            candidate = value.strip()
+            if candidate and candidate not in seen:
+                deduped.append(candidate)
+                seen.add(candidate)
+            continue
+        if isinstance(value, list):
+            for item in value:
+                if not isinstance(item, str):
+                    continue
+                candidate = item.strip()
+                if candidate and candidate not in seen:
+                    deduped.append(candidate)
+                    seen.add(candidate)
+    return deduped
+
+
+def _runtime_writeback_target(
+    session_payload: dict[str, object],
+    brief_payload: dict[str, object],
+) -> dict[str, object] | None:
+    writeback_target = _runtime_mapping(brief_payload.get("writeback_target"))
+    if writeback_target:
+        return {
+            "scope_type": _runtime_non_empty_str(writeback_target.get("scope_type")),
+            "scope_id": _runtime_non_empty_str(writeback_target.get("scope_id")),
+        }
+
+    work_context_id = _runtime_non_empty_str(session_payload.get("work_context_id"))
+    if work_context_id:
+        return {
+            "scope_type": "work_context",
+            "scope_id": work_context_id,
+        }
+    industry_instance_id = _runtime_non_empty_str(session_payload.get("industry_instance_id"))
+    if industry_instance_id:
+        return {
+            "scope_type": "industry",
+            "scope_id": industry_instance_id,
+        }
+    return None
+
+
+def serialize_runtime_research_brief(
+    *,
+    session_payload: dict[str, object],
+    round_payload: dict[str, object],
+) -> dict[str, object]:
+    session_metadata = _runtime_mapping(session_payload.get("metadata"))
+    round_metadata = _runtime_mapping(round_payload.get("metadata"))
+    brief_payload = _runtime_mapping(round_metadata.get("brief")) or _runtime_mapping(
+        session_metadata.get("brief"),
+    )
+    writeback_target = _runtime_writeback_target(session_payload, brief_payload)
+    return {
+        "goal": _runtime_non_empty_str(brief_payload.get("goal"))
+        or _runtime_non_empty_str(session_payload.get("goal")),
+        "question": _runtime_non_empty_str(brief_payload.get("question"))
+        or _runtime_non_empty_str(round_payload.get("question")),
+        "why_needed": _runtime_non_empty_str(brief_payload.get("why_needed")),
+        "done_when": _runtime_non_empty_str(brief_payload.get("done_when")),
+        "collection_mode_hint": _runtime_non_empty_str(
+            brief_payload.get("collection_mode_hint"),
+        ),
+        "requested_sources": _runtime_text_list(brief_payload.get("requested_sources")),
+        "writeback_target": writeback_target,
+    }
+
+
+def serialize_runtime_research_findings(
+    *,
+    session_payload: dict[str, object],
+    round_payload: dict[str, object],
+) -> list[dict[str, object]]:
+    session_id = _runtime_non_empty_str(session_payload.get("id")) or "runtime-center-research"
+    round_metadata = _runtime_mapping(round_payload.get("metadata"))
+    structured_findings = _runtime_mapping_list(round_metadata.get("findings"))
+    if structured_findings:
+        return [
+            {
+                "finding_id": _runtime_non_empty_str(item.get("finding_id"))
+                or f"{session_id}:finding:{index}",
+                "finding_type": _runtime_non_empty_str(item.get("finding_type")) or "finding",
+                "summary": _runtime_non_empty_str(item.get("summary")) or "",
+                "supporting_source_ids": _runtime_text_list(
+                    item.get("supporting_source_ids"),
+                ),
+                "supporting_evidence_ids": _runtime_text_list(
+                    item.get("supporting_evidence_ids"),
+                ),
+                "conflicts": _runtime_text_list(item.get("conflicts")),
+                "gaps": _runtime_text_list(item.get("gaps")),
+            }
+            for index, item in enumerate(structured_findings, start=1)
+            if _runtime_non_empty_str(item.get("summary"))
+        ]
+
+    fallback_findings = _runtime_text_list(round_payload.get("new_findings"))
+    if not fallback_findings:
+        fallback_findings = _runtime_text_list(session_payload.get("stable_findings"))
+    return [
+        {
+            "finding_id": f"{session_id}:finding:{index}",
+            "finding_type": "finding",
+            "summary": summary,
+            "supporting_source_ids": [],
+            "supporting_evidence_ids": [],
+            "conflicts": [],
+            "gaps": [],
+        }
+        for index, summary in enumerate(fallback_findings, start=1)
+    ]
+
+
+def serialize_runtime_research_sources(
+    *,
+    session_payload: dict[str, object],
+    round_payload: dict[str, object],
+) -> list[dict[str, object]]:
+    session_id = _runtime_non_empty_str(session_payload.get("id")) or "runtime-center-research"
+    round_metadata = _runtime_mapping(round_payload.get("metadata"))
+    structured_sources = _runtime_mapping_list(round_metadata.get("collected_sources"))
+    if structured_sources:
+        return [
+            {
+                "source_id": _runtime_non_empty_str(item.get("source_id"))
+                or f"{session_id}:source:{index}",
+                "source_kind": _runtime_non_empty_str(item.get("source_kind")) or "source",
+                "collection_action": _runtime_non_empty_str(item.get("collection_action"))
+                or "read",
+                "source_ref": _runtime_non_empty_str(item.get("source_ref")) or "",
+                "normalized_ref": _runtime_non_empty_str(item.get("normalized_ref"))
+                or _runtime_non_empty_str(item.get("source_ref"))
+                or "",
+                "title": _runtime_non_empty_str(item.get("title")) or "",
+                "snippet": _runtime_non_empty_str(item.get("snippet")) or "",
+                "access_status": _runtime_non_empty_str(item.get("access_status")) or "",
+                "evidence_id": _runtime_non_empty_str(item.get("evidence_id")),
+                "artifact_id": _runtime_non_empty_str(item.get("artifact_id")),
+                "captured_at": item.get("captured_at"),
+            }
+            for index, item in enumerate(structured_sources, start=1)
+            if _runtime_non_empty_str(item.get("source_ref"))
+        ]
+
+    fallback_links = _runtime_mapping_list(round_payload.get("selected_links")) or _runtime_mapping_list(
+        round_payload.get("raw_links"),
+    )
+    return [
+        {
+            "source_id": f"{session_id}:source:{index}",
+            "source_kind": _runtime_non_empty_str(item.get("kind")) or "web",
+            "collection_action": "read",
+            "source_ref": _runtime_non_empty_str(item.get("url")) or "",
+            "normalized_ref": _runtime_non_empty_str(item.get("url")) or "",
+            "title": _runtime_non_empty_str(item.get("title")) or "",
+            "snippet": "",
+            "access_status": "",
+            "evidence_id": None,
+            "artifact_id": None,
+            "captured_at": None,
+        }
+        for index, item in enumerate(fallback_links, start=1)
+        if _runtime_non_empty_str(item.get("url"))
+    ]
+
+
+def serialize_runtime_research_gaps(
+    *,
+    session_payload: dict[str, object],
+    round_payload: dict[str, object],
+) -> list[str]:
+    round_metadata = _runtime_mapping(round_payload.get("metadata"))
+    round_gaps = _runtime_text_list(
+        round_metadata.get("gaps"),
+        round_payload.get("remaining_gaps"),
+    )
+    if round_gaps:
+        return round_gaps
+    session_metadata = _runtime_mapping(session_payload.get("metadata"))
+    return _runtime_text_list(
+        session_metadata.get("gaps"),
+        session_payload.get("open_questions"),
+    )
+
+
+def serialize_runtime_research_conflicts(
+    *,
+    session_payload: dict[str, object],
+    round_payload: dict[str, object],
+    findings_payload: list[dict[str, object]],
+) -> list[str]:
+    session_metadata = _runtime_mapping(session_payload.get("metadata"))
+    round_metadata = _runtime_mapping(round_payload.get("metadata"))
+    direct_conflicts = _runtime_text_list(
+        round_metadata.get("conflicts"),
+        session_metadata.get("conflicts"),
+    )
+    if direct_conflicts:
+        return direct_conflicts
+    return _runtime_text_list(
+        *[item.get("conflicts") for item in findings_payload],
+    )
+
+
+def serialize_runtime_research_writeback_truth(
+    *,
+    session_payload: dict[str, object],
+    round_payload: dict[str, object],
+    brief_payload: dict[str, object],
+) -> dict[str, object] | None:
+    session_metadata = _runtime_mapping(session_payload.get("metadata"))
+    round_metadata = _runtime_mapping(round_payload.get("metadata"))
+    payload = _runtime_mapping(round_metadata.get("writeback_truth")) or _runtime_mapping(
+        session_metadata.get("writeback_truth"),
+    )
+    writeback_target = _runtime_writeback_target(session_payload, brief_payload)
+    scope_type = _runtime_non_empty_str(payload.get("scope_type")) or _runtime_non_empty_str(
+        (writeback_target or {}).get("scope_type"),
+    )
+    scope_id = _runtime_non_empty_str(payload.get("scope_id")) or _runtime_non_empty_str(
+        (writeback_target or {}).get("scope_id"),
+    )
+    report_id = _runtime_non_empty_str(payload.get("report_id")) or _runtime_non_empty_str(
+        session_payload.get("final_report_id"),
+    )
+    status = _runtime_non_empty_str(payload.get("status")) or "pending"
+    if not any((scope_type, scope_id, report_id, status)):
+        return None
+    return {
+        "status": status,
+        "scope_type": scope_type,
+        "scope_id": scope_id,
+        "report_id": report_id,
+    }
+
+
 def _actor_runtime_payload(runtime: object) -> dict[str, object]:
     payload = _model_dump_or_dict(runtime)
     if payload is None:

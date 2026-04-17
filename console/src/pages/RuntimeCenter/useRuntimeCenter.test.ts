@@ -249,6 +249,44 @@ describe("useRuntimeCenter", () => {
 
   it("loads research session summary from the dedicated runtime research surface", async () => {
     getRuntimeResearchMock.mockResolvedValue({
+      brief: {
+        goal: "研究百度搜索结果里的 SaaS 竞品线索",
+        question: "最近有哪些竞品在官网上更新了价格或套餐？",
+        why_needed: "主脑需要决定下一轮定位和跟进动作。",
+        done_when: "拿到价格变化、来源和剩余缺口。",
+        requested_sources: ["search", "web_page"],
+        writeback_target: {
+          scope_type: "work_context",
+          scope_id: "ctx-research-1",
+        },
+      },
+      findings: [
+        {
+          finding_id: "finding-1",
+          finding_type: "pricing",
+          summary: "一款竞品把基础套餐提高到了每月 299 元。",
+          supporting_source_ids: ["source-1"],
+          supporting_evidence_ids: ["evidence-1"],
+        },
+      ],
+      sources: [
+        {
+          source_id: "source-1",
+          source_kind: "web_page",
+          collection_action: "read",
+          source_ref: "https://example.com/pricing",
+          title: "官网定价页",
+          snippet: "基础套餐 299 元 / 月",
+        },
+      ],
+      gaps: ["还缺官方截图归档。"],
+      conflicts: ["第三方文章还在引用旧价格。"],
+      writeback_truth: {
+        status: "written",
+        scope_type: "work_context",
+        scope_id: "ctx-research-1",
+        report_id: "report-1",
+      },
       session: {
         id: "research-session-1",
         status: "running",
@@ -281,6 +319,22 @@ describe("useRuntimeCenter", () => {
           roundCount: number;
           waitingLogin: boolean;
           latestStatus: string;
+          brief: {
+            question: string | null;
+            whyNeeded: string | null;
+            doneWhen: string | null;
+            requestedSources: string[];
+          };
+          findings: Array<{ summary: string }>;
+          sources: Array<{ title: string; sourceRef: string }>;
+          gaps: string[];
+          conflicts: string[];
+          writebackTruth: {
+            status: string | null;
+            scopeType: string | null;
+            scopeId: string | null;
+            reportId: string | null;
+          } | null;
         } | null;
       }
     ).researchSummary;
@@ -294,6 +348,31 @@ describe("useRuntimeCenter", () => {
         roundCount: 2,
         waitingLogin: false,
         latestStatus: "正在比对第二轮抓到的竞品页面。",
+        brief: expect.objectContaining({
+          question: "最近有哪些竞品在官网上更新了价格或套餐？",
+          whyNeeded: "主脑需要决定下一轮定位和跟进动作。",
+          doneWhen: "拿到价格变化、来源和剩余缺口。",
+          requestedSources: ["search", "web_page"],
+        }),
+        findings: [
+          expect.objectContaining({
+            summary: "一款竞品把基础套餐提高到了每月 299 元。",
+          }),
+        ],
+        sources: [
+          expect.objectContaining({
+            title: "官网定价页",
+            sourceRef: "https://example.com/pricing",
+          }),
+        ],
+        gaps: ["还缺官方截图归档。"],
+        conflicts: ["第三方文章还在引用旧价格。"],
+        writebackTruth: expect.objectContaining({
+          status: "written",
+          scopeType: "work_context",
+          scopeId: "ctx-research-1",
+          reportId: "report-1",
+        }),
       }),
     );
   });

@@ -120,6 +120,40 @@ describe("MainBrainCockpitPanel", () => {
         roundLabel: "第 2 轮",
         waitingLogin: false,
         latestStatus: "正在整理第二轮抓到的页面线索。",
+        brief: {
+          goal: "研究飞书与多维表格相关竞品能力",
+          question: "最近有哪些官网能力更新值得主脑跟进？",
+          whyNeeded: "主脑要决定本周产品定位说明。",
+          doneWhen: "拿到能力变化、来源和剩余缺口。",
+          requestedSources: ["search", "web_page"],
+          scopeType: "work_context",
+          scopeId: "ctx-research-1",
+        },
+        findings: [
+          {
+            id: "finding-1",
+            summary: "官网能力页新增了自动化编排和模板市场描述。",
+            findingType: "capability",
+          },
+        ],
+        sources: [
+          {
+            id: "source-1",
+            title: "官网能力页",
+            sourceKind: "web_page",
+            sourceRef: "https://example.com/capabilities",
+            snippet: "自动化编排与模板市场",
+          },
+        ],
+        gaps: ["还缺一条官方案例证据。"],
+        conflicts: ["第三方解读还在引用旧版本页面。"],
+        writebackTruth: {
+          status: "written",
+          statusLabel: "已回写正式真相",
+          scopeType: "work_context",
+          scopeId: "ctx-research-1",
+          reportId: "report-1",
+        },
       },
     } as unknown as MainBrainCockpitPanelProps;
 
@@ -129,6 +163,20 @@ describe("MainBrainCockpitPanel", () => {
     expect(screen.getByText("研究飞书与多维表格相关竞品能力")).toBeInTheDocument();
     expect(screen.getByText("第 2 轮")).toBeInTheDocument();
     expect(screen.getByText("最近状态")).toBeInTheDocument();
+    expect(screen.getByText("研究简报")).toBeInTheDocument();
+    expect(screen.getByText("最近有哪些官网能力更新值得主脑跟进？")).toBeInTheDocument();
+    expect(screen.getByText("核心发现")).toBeInTheDocument();
+    expect(
+      screen.getByText("官网能力页新增了自动化编排和模板市场描述。"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("来源")).toBeInTheDocument();
+    expect(screen.getByText("官网能力页")).toBeInTheDocument();
+    expect(screen.getByText("缺口")).toBeInTheDocument();
+    expect(screen.getByText("还缺一条官方案例证据。")).toBeInTheDocument();
+    expect(screen.getByText("冲突")).toBeInTheDocument();
+    expect(screen.getByText("第三方解读还在引用旧版本页面。")).toBeInTheDocument();
+    expect(screen.getByText("回写真相")).toBeInTheDocument();
+    expect(screen.getByText("已回写正式真相")).toBeInTheDocument();
   });
 
   it("renders trace lines inside the trace tab", () => {

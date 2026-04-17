@@ -191,6 +191,20 @@ function ResearchSummarySection({
   if (!researchSummary) {
     return null;
   }
+  const brief = researchSummary.brief ?? {
+    goal: researchSummary.goal,
+    question: null,
+    whyNeeded: null,
+    doneWhen: null,
+    requestedSources: [],
+    scopeType: null,
+    scopeId: null,
+  };
+  const findings = researchSummary.findings ?? [];
+  const sources = researchSummary.sources ?? [];
+  const gaps = researchSummary.gaps ?? [];
+  const conflicts = researchSummary.conflicts ?? [];
+  const writebackTruth = researchSummary.writebackTruth ?? null;
 
   return (
     <div className={styles.stageSummaryCard} style={{ marginBottom: 16 }}>
@@ -219,6 +233,88 @@ function ResearchSummarySection({
           {normalizeDisplayChinese(researchSummary.latestStatus)}
         </p>
       </div>
+
+      {brief.question || brief.whyNeeded || brief.doneWhen ? (
+        <div className={styles.approvalReasonBlock}>
+          <div className={styles.approvalLabel}>研究简报</div>
+          {brief.question ? (
+            <p className={styles.approvalText}>
+              {normalizeDisplayChinese(brief.question)}
+            </p>
+          ) : null}
+          {brief.whyNeeded ? (
+            <p className={styles.approvalText}>
+              {normalizeDisplayChinese(brief.whyNeeded)}
+            </p>
+          ) : null}
+          {brief.doneWhen ? (
+            <p className={styles.approvalText}>
+              {normalizeDisplayChinese(brief.doneWhen)}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
+      {findings.length > 0 ? (
+        <div className={styles.approvalReasonBlock}>
+          <div className={styles.approvalLabel}>核心发现</div>
+          <ul className={styles.stageSummaryList}>
+            {findings.map((item) => (
+              <li key={item.id} className={styles.stageSummaryListItem}>
+                {normalizeDisplayChinese(item.summary)}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {sources.length > 0 ? (
+        <div className={styles.approvalReasonBlock}>
+          <div className={styles.approvalLabel}>来源</div>
+          <ul className={styles.stageSummaryList}>
+            {sources.map((item) => (
+              <li key={item.id} className={styles.stageSummaryListItem}>
+                {normalizeDisplayChinese(item.title)}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {gaps.length > 0 ? (
+        <div className={styles.approvalReasonBlock}>
+          <div className={styles.approvalLabel}>缺口</div>
+          <ul className={styles.stageSummaryList}>
+            {gaps.map((item) => (
+              <li key={item} className={styles.stageSummaryListItem}>
+                {normalizeDisplayChinese(item)}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {conflicts.length > 0 ? (
+        <div className={styles.approvalReasonBlock}>
+          <div className={styles.approvalLabel}>冲突</div>
+          <ul className={styles.stageSummaryList}>
+            {conflicts.map((item) => (
+              <li key={item} className={styles.stageSummaryListItem}>
+                {normalizeDisplayChinese(item)}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {writebackTruth ? (
+        <div className={styles.approvalReasonBlock}>
+          <div className={styles.approvalLabel}>回写真相</div>
+          <p className={styles.approvalText}>
+            {normalizeDisplayChinese(writebackTruth.statusLabel)}
+          </p>
+        </div>
+      ) : null}
     </div>
   );
 }

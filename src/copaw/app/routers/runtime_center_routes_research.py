@@ -3,6 +3,14 @@ from __future__ import annotations
 
 from .runtime_center_shared_core import *  # noqa: F401,F403
 from .runtime_center_dependencies import _get_research_session_repository
+from .runtime_center_payloads import (
+    serialize_runtime_research_brief,
+    serialize_runtime_research_conflicts,
+    serialize_runtime_research_findings,
+    serialize_runtime_research_gaps,
+    serialize_runtime_research_sources,
+    serialize_runtime_research_writeback_truth,
+)
 
 
 def _serialize_research_round(round_record: object | None) -> dict[str, object] | None:
@@ -57,23 +65,83 @@ async def get_runtime_research(
             "updated_at": None,
             "session": None,
             "latest_round": None,
+            "brief": None,
+            "findings": [],
+            "sources": [],
+            "gaps": [],
+            "conflicts": [],
+            "writeback_truth": None,
         }
     session = sessions[0]
     serialized_session = _serialize_research_session(session)
     rounds = repository.list_research_rounds(session_id=session.id, limit=50)
     latest_round = rounds[-1] if rounds else None
     serialized_round = _serialize_research_round(latest_round)
+    session_payload = getattr(session, "model_dump", lambda **_: {})(mode="json")
+    if not isinstance(session_payload, dict):
+        session_payload = {}
+    round_payload: dict[str, object] = {}
+    if latest_round is not None:
+        round_payload = getattr(latest_round, "model_dump", lambda **_: {})(mode="json")
+        if not isinstance(round_payload, dict):
+            round_payload = {}
+    brief_payload = serialize_runtime_research_brief(
+        session_payload=session_payload,
+        round_payload=round_payload,
+    )
+    findings_payload = serialize_runtime_research_findings(
+        session_payload=session_payload,
+        round_payload=round_payload,
+    )
+    sources_payload = serialize_runtime_research_sources(
+        session_payload=session_payload,
+        round_payload=round_payload,
+    )
+    gaps_payload = serialize_runtime_research_gaps(
+        session_payload=session_payload,
+        round_payload=round_payload,
+    )
+    conflicts_payload = serialize_runtime_research_conflicts(
+        session_payload=session_payload,
+        round_payload=round_payload,
+        findings_payload=findings_payload,
+    )
+    writeback_truth_payload = serialize_runtime_research_writeback_truth(
+        session_payload=session_payload,
+        round_payload=round_payload,
+        brief_payload=brief_payload,
+    )
     latest_status = (
         (serialized_round or {}).get("response_summary")
         or (serialized_round or {}).get("status")
         or serialized_session.get("latest_status")
     )
+    if serialized_round is not None:
+        serialized_round = {
+            **serialized_round,
+            "findings": findings_payload,
+            "sources": sources_payload,
+            "gaps": gaps_payload,
+            "conflicts": conflicts_payload,
+        }
     return {
         **serialized_session,
         "latest_status": latest_status,
+        "brief": brief_payload,
+        "findings": findings_payload,
+        "sources": sources_payload,
+        "gaps": gaps_payload,
+        "conflicts": conflicts_payload,
+        "writeback_truth": writeback_truth_payload,
         "session": {
             **serialized_session,
             "latest_status": latest_status,
+            "brief": brief_payload,
+            "findings": findings_payload,
+            "sources": sources_payload,
+            "gaps": gaps_payload,
+            "conflicts": conflicts_payload,
+            "writeback_truth": writeback_truth_payload,
         },
         "latest_round": serialized_round,
     }
