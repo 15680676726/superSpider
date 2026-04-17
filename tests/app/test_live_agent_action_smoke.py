@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 import copaw.kernel.query_execution_runtime as query_execution_runtime_module
 import copaw.kernel.query_execution_writeback as query_execution_writeback_module
+import copaw.providers.runtime_provider_facade as runtime_provider_facade_module
 from copaw.app.runtime_session import SafeJSONSession
 from copaw.agents.tools.browser_control_shared import get_browser_runtime_snapshot
 from copaw.capabilities import CapabilityService
@@ -73,6 +74,64 @@ def _ensure_live_chat_writeback_model_ready_or_skip() -> None:
         pytest.skip(
             "Live chat writeback decision model did not resolve execute-task readiness.",
         )
+
+
+def _ensure_live_runtime_execution_model_ready_or_skip(
+    runtime_provider: object | None = None,
+    *,
+    timeout_seconds: float = 15.0,
+) -> None:
+    resolved_runtime_provider = (
+        runtime_provider
+        or runtime_provider_facade_module.build_compat_runtime_provider_facade()
+    )
+    active_slot = getattr(resolved_runtime_provider, "get_active_model", lambda: None)()
+    fallback_enabled = bool(
+        getattr(
+            getattr(resolved_runtime_provider, "get_fallback_config", lambda: None)(),
+            "enabled",
+            False,
+        )
+    )
+    fallback_slots = (
+        list(getattr(resolved_runtime_provider, "get_fallback_slots", lambda: [])())
+        if fallback_enabled
+        else []
+    )
+    candidate_slots = [slot for slot in [active_slot, *fallback_slots] if slot is not None]
+
+    if not candidate_slots:
+        try:
+            slot, _fallback_applied, _reason, _unavailable = (
+                resolved_runtime_provider.resolve_model_slot()
+            )
+        except Exception as exc:
+            pytest.skip(f"Live runtime execution model is unavailable: {exc}")
+        candidate_slots = [slot]
+
+    attempted: list[str] = []
+    for slot in candidate_slots:
+        provider_id = str(getattr(slot, "provider_id", "") or "").strip()
+        model_id = str(getattr(slot, "model", "") or "").strip()
+        if not provider_id or not model_id:
+            continue
+        provider = resolved_runtime_provider.get_provider(provider_id)
+        if provider is None:
+            attempted.append(f"{provider_id}/{model_id}: provider not configured")
+            continue
+        try:
+            reachable = asyncio.run(
+                provider.check_model_connection(model_id, timeout=timeout_seconds),
+            )
+        except Exception as exc:
+            attempted.append(f"{provider_id}/{model_id}: {exc}")
+            continue
+        if reachable:
+            return
+        attempted.append(f"{provider_id}/{model_id}: unreachable")
+
+    detail = "; ".join(attempted) if attempted else "no provider/model candidates"
+    pytest.skip(f"Live runtime execution model is unavailable: {detail}")
 
 
 def _parse_sse_events(raw_text: str) -> list[dict[str, object]]:
@@ -167,7 +226,9 @@ def _attach_live_runtime_turn_executor(app, tmp_path: Path) -> None:
         task_store=task_store,
         environment_service=environment_service,
     )
-    provider_manager = ProviderManager()
+    runtime_provider = getattr(app.state, "runtime_provider", None)
+    if runtime_provider is None:
+        runtime_provider = runtime_provider_facade_module.build_compat_runtime_provider_facade()
     query_execution_service = KernelQueryExecutionService(
         session_backend=session_backend,
         tool_bridge=tool_bridge,
@@ -181,13 +242,13 @@ def _attach_live_runtime_turn_executor(app, tmp_path: Path) -> None:
         task_repository=app.state.task_repository,
         task_runtime_repository=app.state.task_runtime_repository,
         evidence_ledger=app.state.evidence_ledger,
-        provider_manager=provider_manager,
+        provider_manager=runtime_provider,
     )
     main_brain_chat_service = MainBrainChatService(
         session_backend=session_backend,
         industry_service=app.state.industry_service,
         agent_profile_service=app.state.agent_profile_service,
-        model_factory=provider_manager.get_active_chat_model,
+        model_factory=runtime_provider.get_active_chat_model,
     )
     main_brain_orchestrator = MainBrainOrchestrator(
         query_execution_service=query_execution_service,
@@ -205,12 +266,14 @@ def _attach_live_runtime_turn_executor(app, tmp_path: Path) -> None:
     )
     app.state.session_backend = session_backend
     app.state.environment_service = environment_service
+    app.state.runtime_provider = runtime_provider
     app.state.query_execution_service = query_execution_service
     app.state.main_brain_chat_service = main_brain_chat_service
     app.state.main_brain_orchestrator = main_brain_orchestrator
     app.state.turn_executor = turn_executor
     app.state.kernel_task_store = task_store
     app.state.kernel_tool_bridge = tool_bridge
+    app.state.capability_service.set_runtime_provider(runtime_provider)
     app.state.capability_service.set_turn_executor(turn_executor)
 
 
@@ -395,6 +458,107 @@ def _run_live_agent_action_case(tmp_path: Path) -> dict[str, object]:
     return _run_live_python_script(script)
 
 
+def test_attach_live_runtime_turn_executor_uses_runtime_provider_facade(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(
+        tmp_path,
+        draft_generator=BrowserIndustryDraftGenerator(),
+    )
+
+    _attach_live_runtime_turn_executor(app, tmp_path)
+
+    runtime_provider = app.state.query_execution_service._provider_manager
+    assert runtime_provider is not None
+    assert callable(getattr(runtime_provider, "get_active_chat_model", None))
+    assert callable(getattr(runtime_provider, "resolve_runtime_provider_contract", None))
+    assert not isinstance(runtime_provider, ProviderManager)
+
+
+def test_ensure_live_runtime_execution_model_ready_or_skip_accepts_reachable_slot() -> None:
+    class _FakeProvider:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, float]] = []
+
+        async def check_model_connection(self, model_id: str, timeout: float = 5) -> bool:
+            self.calls.append((model_id, timeout))
+            return True
+
+    class _FakeRuntimeProvider:
+        def __init__(self) -> None:
+            self.provider = _FakeProvider()
+
+        def resolve_model_slot(self):
+            return type("Slot", (), {"provider_id": "code998", "model": "qwen"})(), False, "", []
+
+        def get_provider(self, provider_id: str):
+            assert provider_id == "code998"
+            return self.provider
+
+    runtime_provider = _FakeRuntimeProvider()
+
+    _ensure_live_runtime_execution_model_ready_or_skip(runtime_provider, timeout_seconds=9.0)
+
+    assert runtime_provider.provider.calls == [("qwen", 9.0)]
+
+
+def test_ensure_live_runtime_execution_model_ready_or_skip_skips_for_unreachable_slot() -> None:
+    class _FakeProvider:
+        async def check_model_connection(self, model_id: str, timeout: float = 5) -> bool:
+            _ = (model_id, timeout)
+            return False
+
+    class _FakeRuntimeProvider:
+        def resolve_model_slot(self):
+            return type("Slot", (), {"provider_id": "code998", "model": "qwen"})(), False, "", []
+
+        def get_provider(self, provider_id: str):
+            assert provider_id == "code998"
+            return _FakeProvider()
+
+    with pytest.raises(pytest.skip.Exception, match="code998/qwen: unreachable"):
+        _ensure_live_runtime_execution_model_ready_or_skip(_FakeRuntimeProvider())
+
+
+def test_ensure_live_runtime_execution_model_ready_or_skip_accepts_reachable_fallback_slot() -> None:
+    class _FakeProvider:
+        def __init__(self, *, reachable: bool) -> None:
+            self.reachable = reachable
+            self.calls: list[tuple[str, float]] = []
+
+        async def check_model_connection(self, model_id: str, timeout: float = 5) -> bool:
+            self.calls.append((model_id, timeout))
+            return self.reachable
+
+    class _FakeRuntimeProvider:
+        def __init__(self) -> None:
+            self.active_provider = _FakeProvider(reachable=False)
+            self.fallback_provider = _FakeProvider(reachable=True)
+
+        def get_active_model(self):
+            return type("Slot", (), {"provider_id": "code998", "model": "qwen"})()
+
+        def get_fallback_config(self):
+            return type("Config", (), {"enabled": True})()
+
+        def get_fallback_slots(self):
+            return [type("Slot", (), {"provider_id": "new", "model": "gpt-5.2"})()]
+
+        def get_provider(self, provider_id: str):
+            if provider_id == "code998":
+                return self.active_provider
+            if provider_id == "new":
+                return self.fallback_provider
+            return None
+
+    runtime_provider = _FakeRuntimeProvider()
+
+    _ensure_live_runtime_execution_model_ready_or_skip(runtime_provider, timeout_seconds=7.0)
+
+    assert runtime_provider.active_provider.calls == [("qwen", 7.0)]
+    assert runtime_provider.fallback_provider.calls == [("gpt-5.2", 7.0)]
+
+
 @pytest.mark.skipif(
     not _env_flag("COPAW_RUN_LIVE_AGENT_ACTION_SMOKE"),
     reason=LIVE_AGENT_ACTION_SMOKE_SKIP_REASON,
@@ -403,6 +567,7 @@ def test_live_solution_lead_browser_action_runs_through_runtime_center_chat_fron
     tmp_path,
 ) -> None:
     _ensure_live_chat_writeback_model_ready_or_skip()
+    _ensure_live_runtime_execution_model_ready_or_skip()
     payload = _run_live_agent_action_case(tmp_path)
     assert payload["response_status"] == 200
     assert payload["event_count"] >= 1

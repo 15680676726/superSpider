@@ -84,6 +84,12 @@ def _sanitize_chunk(chunk: Any) -> Any:
             sanitized_choices.append(choice)
             continue
 
+        raw_audio = getattr(delta, "audio", None)
+        if raw_audio is None and hasattr(delta, "audio"):
+            changed = True
+            delta = _clone_with_overrides(delta, audio={})
+            choice = _clone_with_overrides(choice, delta=delta)
+
         raw_tool_calls = getattr(delta, "tool_calls", None)
         if not raw_tool_calls:
             sanitized_choices.append(choice)
@@ -165,7 +171,7 @@ class _SanitizedStream:
     def _capture_extra_content(self, item: Any) -> None:
         """Store ``extra_content`` keyed by tool-call id."""
         chunk = getattr(item, "chunk", item)
-        for choice in getattr(chunk, "choices", []):
+        for choice in getattr(chunk, "choices", None) or []:
             delta = getattr(choice, "delta", None)
             if not delta:
                 continue
