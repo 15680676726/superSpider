@@ -140,3 +140,47 @@ def test_research_service_stops_after_two_rounds_without_new_findings() -> None:
     assert result.session.status == "completed"
     assert result.stop_reason == "no-new-findings"
     assert len(result.rounds) >= 3
+
+
+def test_research_service_starts_browser_with_persisted_login_state_by_default() -> None:
+    browser_runner = _FakeBrowserRunner(
+        evaluate_results=["<main><button>login</button></main>"],
+    )
+    service = _build_service(browser_runner=browser_runner)
+    start_result = service.start_session(
+        goal="research browser continuity",
+        trigger_source="user-direct",
+        owner_agent_id="industry-researcher-demo",
+    )
+
+    service.run_session(start_result.session.id)
+
+    start_call = next(call for call in browser_runner.calls if call["action"] == "start")
+    assert start_call["persist_login_state"] is True
+    assert str(start_call["storage_state_path"]).endswith(
+        "state\\research_browser_storage\\industry-researcher-demo.json",
+    )
+
+
+def test_research_service_uses_explicit_login_state_override_from_metadata() -> None:
+    browser_runner = _FakeBrowserRunner(
+        evaluate_results=["<main><button>login</button></main>"],
+    )
+    service = _build_service(browser_runner=browser_runner)
+    start_result = service.start_session(
+        goal="custom browser continuity",
+        trigger_source="user-direct",
+        owner_agent_id="industry-researcher-demo",
+        metadata={
+            "browser_session": {
+                "persist_login_state": False,
+                "storage_state_path": "D:/tmp/custom-research-storage.json",
+            },
+        },
+    )
+
+    service.run_session(start_result.session.id)
+
+    start_call = next(call for call in browser_runner.calls if call["action"] == "start")
+    assert start_call["persist_login_state"] is False
+    assert start_call["storage_state_path"] == "D:/tmp/custom-research-storage.json"

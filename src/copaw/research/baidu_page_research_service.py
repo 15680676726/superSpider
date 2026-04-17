@@ -4,8 +4,10 @@ from __future__ import annotations
 from dataclasses import asdict
 from datetime import datetime, timezone
 from hashlib import sha1
+from pathlib import Path
 from typing import Any, Mapping
 
+from ..constant import WORKING_DIR
 from ..state import AgentReportRecord, ResearchSessionRecord, ResearchSessionRoundRecord
 from .baidu_page_contract import extract_answer_contract
 from .models import ResearchLink, ResearchSessionRunResult
@@ -31,6 +33,21 @@ def _mapping(value: object | None) -> dict[str, Any]:
     if isinstance(namespace, dict):
         return dict(namespace)
     return {}
+
+
+def _optional_bool(value: object | None) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return bool(value)
+    text = _text(value).lower()
+    if not text:
+        return None
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return None
 
 
 def _repo_list_sessions(repository: object, **kwargs: Any) -> list[ResearchSessionRecord]:
@@ -111,6 +128,17 @@ def _stable_id(prefix: str, *parts: object) -> str:
     normalized = "|".join(_text(part) for part in parts if _text(part))
     digest = sha1(normalized.encode("utf-8")).hexdigest()[:16]
     return f"{prefix}:{digest}"
+
+
+def _safe_path_token(value: object | None) -> str:
+    raw = _text(value)
+    if not raw:
+        return "default"
+    normalized = "".join(
+        character if character.isalnum() or character in {"-", "_"} else "-"
+        for character in raw
+    ).strip("-")
+    return normalized or "default"
 
 
 class BaiduPageResearchService:
@@ -488,10 +516,13 @@ class BaiduPageResearchService:
         )
 
     def _ensure_browser_session(self, session: ResearchSessionRecord) -> str:
-        if session.browser_session_id:
-            return session.browser_session_id
-        payload = self._browser_call(action="start", session_id=session.id)
-        return _text(payload.get("session_id")) or session.id
+        browser_session_id = _text(session.browser_session_id) or session.id
+        payload = self._browser_call(
+            action="start",
+            session_id=browser_session_id,
+            **self._browser_session_start_kwargs(session),
+        )
+        return _text(payload.get("session_id")) or browser_session_id
 
     def _browser_call(self, **payload: Any) -> dict[str, Any]:
         runner = self._browser_action_runner
@@ -499,6 +530,40 @@ class BaiduPageResearchService:
             return {}
         result = runner(**payload)
         return dict(result) if isinstance(result, dict) else _mapping(result)
+
+    def _browser_session_start_kwargs(self, session: ResearchSessionRecord) -> dict[str, Any]:
+        browser_metadata = self._browser_session_metadata(session)
+        persist_login_state = _optional_bool(
+            browser_metadata.get("persist_login_state"),
+        )
+        effective_persist_login_state = (
+            True if persist_login_state is None else persist_login_state
+        )
+        storage_state_path = _text(browser_metadata.get("storage_state_path"))
+        if not storage_state_path and effective_persist_login_state:
+            storage_state_path = self._default_storage_state_path(session)
+        return {
+            "persist_login_state": effective_persist_login_state,
+            "storage_state_path": storage_state_path or "",
+        }
+
+    def _browser_session_metadata(self, session: ResearchSessionRecord) -> dict[str, Any]:
+        metadata = _mapping(session.metadata)
+        browser_metadata = _mapping(metadata.get("browser_session"))
+        if browser_metadata:
+            return browser_metadata
+        direct_keys = {
+            key: metadata[key]
+            for key in ("persist_login_state", "storage_state_path")
+            if key in metadata
+        }
+        return direct_keys
+
+    def _default_storage_state_path(self, session: ResearchSessionRecord) -> str:
+        directory = WORKING_DIR / "state" / "research_browser_storage"
+        directory.mkdir(parents=True, exist_ok=True)
+        owner_token = _safe_path_token(session.owner_agent_id)
+        return str((directory / f"{owner_token}.json").resolve())
 
     def _resolve_downloads(self, **payload: Any) -> list[dict[str, Any]]:
         resolver = self._browser_download_resolver

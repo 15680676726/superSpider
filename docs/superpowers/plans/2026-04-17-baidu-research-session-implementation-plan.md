@@ -16,6 +16,8 @@
 
 没有正式 brief，就不创建 research session。
 
+**Execution note (`2026-04-17`):** 浏览器 runtime 跨 loop / Windows selector policy 启动问题已修复；`BaiduPageResearchService` 现在默认会把 researcher 的百度登录态持久化到 `WORKING_DIR/state/research_browser_storage/<owner_agent_id>.json`。当前 live 真边界已经从“浏览器起不来”收口为“真实百度页面还需要用户先登录”。
+
 ---
 
 ## File Map
