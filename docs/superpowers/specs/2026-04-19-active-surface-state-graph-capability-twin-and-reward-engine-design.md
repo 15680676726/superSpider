@@ -390,6 +390,7 @@ reward 不是固定写死的“哪个能力永远最好”。
 
 ### `SurfaceProbeEvidence`
 ### `SurfaceTransitionEvidence`
+### `SurfaceDiscoveryEvidence`
 
 建议性质：
 
@@ -437,6 +438,44 @@ evidence kind 建议新增：
 - `OperatingLane`
 - `Assignment`
 - `role blueprint`
+
+## 5.4 正式读链与脏标记
+
+这套设计如果只停在 environment / learning 内部，就会退化成：
+
+- 后台学了一点
+- 但职业 agent 真正决策时没吃到
+- Runtime Center / Knowledge 读面也没吃到
+
+第一轮必须接入的正式消费入口固定为：
+
+- `query execution prompt`
+- `main brain scope snapshot`
+- `Runtime Center / Knowledge` 读面
+- 任何正式 profession-agent surface planning 入口
+
+要求：
+
+- 读链统一吃 active `playbook`、`reward ranking`、live `graph summary`
+- 新 `transition`、`twin activation`、`reward refresh` 发生后，必须 dirty-mark 相关 `scope snapshot`
+- 不允许只更新内部 service，不更新 prompt/read surface
+- 不允许只更新 UI，不更新正式消费链
+
+## 5.5 学习写链
+
+surface 学习的正式写链必须是：
+
+`observe / probe / act / diff -> evidence -> twin merge -> playbook projection -> reward refresh`
+
+第一轮边界固定为：
+
+- 同步、限界、进程内完成
+- 先不引入独立队列和第二套 learning runtime
+- 每次 `merge / activate / supersede` 都必须带：
+  - `scope`
+  - `version`
+  - `source transition evidence refs`
+  - `derived discovery refs`
 
 ---
 
@@ -693,6 +732,7 @@ evidence kind 建议新增：
 - browser/document/desktop 的统一 graph 合同
 - probe -> reobserve -> diff -> evidence 主链合同
 - capability twin 写链与读链一致
+- `query execution prompt / main brain scope snapshot / Runtime Center` 读到同一份 active playbook / reward projection
 
 ### `L3`
 
@@ -707,6 +747,7 @@ evidence kind 建议新增：
 - capability twin 不串 scope
 - reward ranking 不被旧缓存/旧 fallback 冲掉
 - 重启/恢复/并发后仍能续上同一条 surface 学习链
+- dirty-mark / cache invalidation 不会把旧 graph / 旧 playbook / 旧 ranking 重新顶回来
 
 ---
 
