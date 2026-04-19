@@ -164,7 +164,8 @@ def build_guided_browser_surface_owner(
             ]
             primary_input_candidates = list(getattr(observation, "primary_input_candidates", []) or [])
             if normalized_intent.fallback_to_enter and (
-                "submit" in action_hints or primary_input_candidates
+                "submit" in action_hints
+                or ("submit" in str(getattr(page_summary, "page_kind", "") or "").strip().lower() and primary_input_candidates)
             ):
                 return ProfessionSurfaceOperationPlan(
                     intent_kind="press",
@@ -259,6 +260,8 @@ def build_guided_desktop_surface_owner(
             and str(getattr(step, "status", "") or "").strip() == "succeeded"
             for step in history
         )
+        if normalized_intent.require_focus and not expected_window_selector and not focus_done:
+            return None
         if (
             normalized_intent.require_focus
             and expected_window_selector

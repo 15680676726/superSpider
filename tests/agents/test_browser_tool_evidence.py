@@ -151,7 +151,7 @@ def test_browser_use_guided_surface_reads_page_then_types_and_submits(monkeypatc
         return _json_response(
             {
                 "ok": True,
-                "snapshot": '- textbox "问题输入框" [ref=e1]',
+                "snapshot": '- textbox "问题输入框" [ref=e1]\n- button "Submit" [ref=e2]',
                 "url": "https://example.com/chat",
                 "title": "Chat page",
             },

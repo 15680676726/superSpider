@@ -1364,3 +1364,50 @@ def test_browser_guided_owner_stops_on_login_wall() -> None:
 
     assert loop_result.steps == []
     assert loop_result.stop_reason == "planner-stop"
+
+
+def test_browser_guided_owner_does_not_fallback_to_enter_without_submit_cue() -> None:
+    runner = _ServiceRunner()
+    service = BrowserSurfaceExecutionService(browser_runner=runner)
+    snapshot_text = '- textbox "Title" [ref=e1]'
+    initial_observation = observe_browser_page(
+        snapshot_text=snapshot_text,
+        page_url="https://example.com/editor",
+        page_title="Editor",
+        dom_probe={
+            "page": {
+                "bodyText": "Draft editor only",
+                "href": "https://example.com/editor",
+                "title": "Editor",
+            }
+        },
+    )
+    owner = build_guided_browser_surface_owner(
+        formal_session_id="profession-session-1",
+        surface_thread_id="editor-page",
+        intent=GuidedBrowserSurfaceIntent(
+            desired_text="draft only",
+            request_submit=True,
+        ),
+    )
+
+    loop_result = service.run_step_loop(
+        session_id="browser-session-1",
+        page_id="editor-page",
+        owner=owner,
+        initial_observation=initial_observation,
+        snapshot_text=snapshot_text,
+        page_url="https://example.com/editor",
+        page_title="Editor",
+        dom_probe={
+            "page": {
+                "bodyText": "Draft editor only",
+                "href": "https://example.com/editor",
+                "title": "Editor",
+            }
+        },
+        max_steps=3,
+    )
+
+    assert [step.intent_kind for step in loop_result.steps] == ["type"]
+    assert all(call["action"] != "press_key" for call in runner.calls)

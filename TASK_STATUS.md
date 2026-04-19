@@ -996,9 +996,9 @@
       - 这轮也已把“登录页先乱打字”这类机械行为收掉一条：至少在 Baidu chat 这条 profiled live 链上，shared observation 一旦先读到 `login-required`，提交前门会直接 fail-closed
       - shared browser substrate 现已具备最小 submit loop owner，而且 research chat 这条线的高层 `读回答 -> 判断是否继续 -> 生成下一步动作` 也已正式抽成 shared continuation owner；当前 Baidu heavy session 已不再只靠 service 内联 if/else 接下一轮
       - `2026-04-19` 又补上了 shared guided owner 第一版：
-        - browser 已有通用 `type -> submit / login-wall stop` planner
-        - document 已有通用 `replace_text / write_document` planner
-        - desktop 已有通用 `focus_window -> type_text` planner
+        - browser 已有基础 guided planner：`type -> login-wall stop`，有明确 submit cue 时再提交
+        - document 已有 `replace_text / write_document` 两条 guided planner 分支
+        - desktop 已有 `focus_window -> type_text` guided planner，但前提是存在可解析的 `window_target`
         - 三类 surface 现在都不只接受裸 `planner callable`，也有可复用的 guided owner builder，开始形成“职业 agent 提意图，surface 底座执行通用连续动作”的共享高层基线
       - `2026-04-19` 这条 guided 基线已经不再只停在环境测试：
         - `browser_use` 前门现已正式支持 `action="guided_surface"`
@@ -1010,10 +1010,10 @@
         - 显式共享已登录 storage state 时，主脑 / cron 两条 heavy live 链都能真实 completed
       - 但这还不等于“任意职业 agent 已完全自己看页面并自由决策多轮动作链”：当前完成的是 `research chat surface` 这一个 profession family 的共享 continuation owner，不是所有职业/所有页面的统一高层 planner
       - 当前新补上的 guided owner 也还只是 shared high-level planner 的第一版，不是最终态：
-        - browser 目前覆盖的是通用 form/chat 一类基础动作
+        - browser 目前覆盖的是通用 form/chat 一类基础动作，而且 Enter fallback 已收紧为“必须有 submit cue”，不再只因页面上有输入框就盲提交
         - browser 的主线前门目前也只正式接到了 `browser_use.guided_surface` 这一类连续操作，不是所有 browser 动作都自动走 shared planner
         - document 目前覆盖的是通用写入/替换
-        - desktop 目前覆盖的是通用聚焦后输入
+        - desktop 目前覆盖的是“能解析目标窗口时先聚焦再输入”，不是完整桌面任务规划器
         - 更复杂的多区块页面理解、分页/上传/结果筛选、跨窗口上下文切换，仍需继续补
       - 当前因此只能诚实声明：这条线已过 `L1/L2`，并新增了登录门槛 `L3` smoke；但还没有完整 `L4` soak，也不能把“research chat 共享 continuation owner 已接上”混写成“通用页面理解 + 任意职业连续多轮自主追问已完成”
 
