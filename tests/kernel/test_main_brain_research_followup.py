@@ -203,6 +203,52 @@ async def test_main_brain_followup_brief_uses_attached_trigger_source() -> None:
 
 
 @pytest.mark.asyncio
+async def test_main_brain_forwards_browser_session_override_into_frontdoor_metadata() -> None:
+    backend = _FakeSessionBackend()
+    research_service = _FakeResearchSessionService(statuses=["waiting-login"])
+    service = MainBrainChatService(
+        session_backend=backend,
+        industry_service=_FakeIndustryService(),
+        research_session_service=research_service,
+        model_factory=lambda: _ExplodingModel(),
+    )
+    request = SimpleNamespace(
+        session_id="sess-research-browser-session",
+        user_id="user-research-browser-session",
+        industry_instance_id="industry-v1-demo",
+        industry_role_id="execution-core",
+        agent_id="copaw-agent-runner",
+        channel="console",
+        _copaw_research_brief={
+            "goal": "继续行业研究",
+            "question": "继续行业研究并补齐来源",
+            "trigger_source": "main-brain-followup",
+            "collection_mode_hint": "heavy",
+            "browser_session": {
+                "persist_login_state": True,
+                "storage_state_path": "D:/tmp/main-brain-shared.json",
+            },
+        },
+    )
+
+    _ = [
+        item
+        async for item in service.execute_stream(
+            msgs=[Msg(name="user", role="user", content="继续")],
+            request=request,
+        )
+    ]
+
+    assert research_service.frontdoor_calls[0]["metadata"] == {
+        "entry_surface": "main-brain-chat",
+        "browser_session": {
+            "persist_login_state": True,
+            "storage_state_path": "D:/tmp/main-brain-shared.json",
+        },
+    }
+
+
+@pytest.mark.asyncio
 async def test_main_brain_waiting_login_prompt_persists_formal_continuation_and_reuses_same_research_session() -> None:
     backend = _FakeSessionBackend()
     research_service = _FakeResearchSessionService(statuses=["waiting-login", "completed"])

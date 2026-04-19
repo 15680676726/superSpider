@@ -252,6 +252,80 @@ def test_monitoring_frontdoor_prefers_unified_source_collection_entry() -> None:
     ]
 
 
+def test_monitoring_frontdoor_forwards_browser_session_override_into_metadata() -> None:
+    executor = CronExecutor(
+        kernel_dispatcher=_FakeKernelDispatcher(),
+        research_session_service=_FakeSourceCollectionFrontdoor(),
+    )
+    job = CronJobSpec.model_validate(
+        {
+            "id": "cron-monitoring-browser-session-1",
+            "name": "Monitoring with shared login state",
+            "enabled": True,
+            "schedule": {
+                "type": "cron",
+                "cron": "0 9 * * 1",
+                "timezone": "UTC",
+            },
+            "task_type": "agent",
+            "request": {
+                "input": [
+                    {
+                        "role": "user",
+                        "content": [{"type": "text", "text": "run monitoring brief"}],
+                    }
+                ],
+                "industry_instance_id": "industry-v1-demo",
+                "work_context_id": "ctx-monitoring-1",
+            },
+            "dispatch": {
+                "type": "channel",
+                "channel": "console",
+                "target": {"user_id": "workflow", "session_id": "monitoring-run-1"},
+                "mode": "final",
+                "meta": {"summary": "monitoring follow-up"},
+            },
+            "runtime": {
+                "max_concurrency": 1,
+                "timeout_seconds": 30,
+                "misfire_grace_seconds": 30,
+            },
+            "meta": {
+                "research_provider": "baidu-page",
+                "research_mode": "monitoring-brief",
+                "research_goal": "collect opening monitoring brief",
+                "research_question": "collect opening monitoring brief",
+                "research_why_needed": "need stable monitoring coverage",
+                "research_done_when": "have at least three reliable changes",
+                "requested_sources": ["search", "web_page"],
+                "collection_mode_hint": "heavy",
+                "owner_agent_id": "industry-researcher-demo",
+                "industry_instance_id": "industry-v1-demo",
+                "work_context_id": "ctx-monitoring-1",
+                "supervisor_agent_id": "copaw-agent-runner",
+                "browser_session": {
+                    "persist_login_state": True,
+                    "storage_state_path": "D:/tmp/cron-shared.json",
+                },
+            },
+        }
+    )
+
+    asyncio_result = __import__("asyncio").run(executor.execute(job))
+    assert asyncio_result is None
+    assert executor._research_session_service.calls[0]["metadata"] == {  # type: ignore[attr-defined]
+        "entry_surface": "cron-monitoring",
+        "schedule_id": "cron-monitoring-browser-session-1",
+        "schedule_name": "Monitoring with shared login state",
+        "research_provider": "baidu-page",
+        "research_mode": "monitoring-brief",
+        "browser_session": {
+            "persist_login_state": True,
+            "storage_state_path": "D:/tmp/cron-shared.json",
+        },
+    }
+
+
 @pytest.mark.skipif(
     not _env_flag("COPAW_RUN_BAIDU_RESEARCH_LIVE_SMOKE"),
     reason=LIVE_BAIDU_RESEARCH_SMOKE_SKIP_REASON,

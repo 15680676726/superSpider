@@ -228,6 +228,13 @@ class CronExecutor:
                     "schedule_name": job.name,
                     "research_provider": research_provider,
                     "research_mode": research_mode,
+                    **(
+                        {
+                            "browser_session": dict(meta.get("browser_session"))
+                        }
+                        if isinstance(meta.get("browser_session"), dict)
+                        else {}
+                    ),
                 },
             )
             return True

@@ -489,6 +489,30 @@ def test_research_service_uses_explicit_login_state_override_from_metadata() -> 
     assert start_call["storage_state_path"] == "D:/tmp/custom-research-storage.json"
 
 
+def test_research_service_uses_shared_storage_state_override_from_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    browser_runner = _FakeBrowserRunner(
+        evaluate_results=["<main><button>login</button></main>"],
+    )
+    service = _build_service(browser_runner=browser_runner)
+    monkeypatch.setenv(
+        "COPAW_BAIDU_RESEARCH_STORAGE_STATE_PATH",
+        "D:/tmp/shared-baidu-storage.json",
+    )
+    start_result = service.start_session(
+        goal="shared browser continuity",
+        trigger_source="user-direct",
+        owner_agent_id="industry-researcher-demo",
+    )
+
+    service.run_session(start_result.session.id)
+
+    start_call = next(call for call in browser_runner.calls if call["action"] == "start")
+    assert start_call["persist_login_state"] is True
+    assert start_call["storage_state_path"] == "D:/tmp/shared-baidu-storage.json"
+
+
 def test_research_service_queries_baidu_with_round_question_and_extracts_body_text_answer() -> None:
     browser_runner = _FakeBrowserRunner(
         evaluate_results=[

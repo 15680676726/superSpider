@@ -1385,6 +1385,9 @@ class MainBrainChatService:
         persisted_continuation: dict[str, Any],
     ) -> dict[str, Any]:
         metadata = {"entry_surface": "main-brain-chat"}
+        browser_session = _safe_mapping(brief.get("browser_session"))
+        if browser_session:
+            metadata["browser_session"] = browser_session
         if preferred_session_id is not None or persisted_continuation:
             metadata["continuation"] = {
                 "preferred_session_id": preferred_session_id,

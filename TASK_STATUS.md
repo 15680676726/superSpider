@@ -930,6 +930,15 @@
         - `MainBrainChatService` 现在会在 waiting-login 时把 `research_continuation` 正式写进 session snapshot 与 request runtime context，而不是只在当前 turn 内临时记住
         - 主脑回复文案现在会明确告诉用户“先完成百度登录，然后直接在这个聊天线程回复‘继续’或‘我登录好了’，系统会沿同一个研究会话和浏览器窗口继续”
         - 当用户在同一聊天线程回复继续类文案时，主脑会从 snapshot 里恢复 formal brief，并把 `preferred_session_id` 显式传给 heavy frontdoor，不再重新猜一个新 session
+      - `2026-04-19` heavy research 的共享登录态路由已正式补上：
+        - `BaiduPageResearchService._browser_session_start_kwargs(...)` 现已改成按这条正式优先级选 `storage_state_path`：
+          - `session.metadata.browser_session.storage_state_path`
+          - `COPAW_BAIDU_RESEARCH_STORAGE_STATE_PATH / COPAW_RESEARCH_BROWSER_STORAGE_STATE_PATH`
+          - owner 默认 `state/research_browser_storage/{owner}.json`
+        - 这意味着主脑 / cron / 其他 heavy entry 不再只能碰运气吃 owner 默认 storage file；现在可以稳定指向一个明确的共享已登录 storage state
+        - `MainBrainChatService._build_research_frontdoor_metadata(...)` 现已会把 `_copaw_research_brief.browser_session` 正式透传给 heavy frontdoor
+        - `CronExecutor` 现已会把 `job.meta.browser_session` 正式透传给 heavy frontdoor
+        - 这条改动直接收掉了此前 live 环境里“同样代码，有的 storage file completed、有的却 waiting-login”的关键断点：根因不是研究 loop 假跑，而是 storage-state 选路不稳定
       - `2026-04-19` shared surface owner/checkpoint 合同已镜像到三类 surface：
         - `src/copaw/environments/surface_execution/owner.py` 已正式定义 `ProfessionSurfaceOperationOwner / ProfessionSurfaceOperationPlan / ProfessionSurfaceOperationCheckpoint`
         - browser / document / desktop 三套 `run_step_loop(...)` 现在都接受共享 `owner`，并在 loop result 上正式返回 `operation_checkpoint`
@@ -950,6 +959,8 @@
         - `python -m pytest tests/app/test_runtime_center_research_surface.py tests/app/test_research_session_api.py -q` -> `7 passed`
         - `python -m pytest tests/app/test_source_collection_frontdoor_service.py tests/environments/test_browser_surface_execution.py tests/environments/test_document_desktop_surface_execution.py tests/research/test_chat_continuation_policy.py tests/research/test_chat_continuation_owner.py tests/research/test_baidu_page_contract.py tests/research/test_baidu_page_research_service.py tests/research/test_research_knowledge_ingestion.py tests/research/test_research_report_writeback.py tests/kernel/test_main_brain_research_followup.py tests/kernel/test_tool_bridge.py -q` -> `108 passed`
         - `python -m pytest tests/app/test_research_session_live_contract.py -q` -> `2 passed, 1 skipped`
+        - `python -m pytest tests/research/test_baidu_page_research_service.py tests/kernel/test_main_brain_research_followup.py tests/app/test_research_session_live_contract.py -q` -> `39 passed, 1 skipped`
+        - `python -m pytest tests/kernel/test_main_brain_chat_service.py tests/app/test_source_collection_frontdoor_service.py tests/app/test_runtime_center_research_surface.py tests/app/test_research_session_api.py -q` -> `66 passed`
         - 额外 focused regression：`python -m pytest tests/research/test_baidu_page_research_service.py -k "no_longer_exposes_private_input_selector_helper or shared_browser_service_entry or split_action_and_readback or deep_think_state_scopes" -q` -> `5 passed`
         - active-session continuity focused regression：`python -m pytest tests/app/test_source_collection_frontdoor_service.py -k "forces_reuse_of_active_waiting_login_session_in_same_scope" -q` -> `1 passed`
         - query runtime 读面兼容回归：`python -m pytest tests/kernel/test_query_execution_runtime.py -k "artifact_refs or result_items" -q` -> `1 passed, 30 deselected`
@@ -959,13 +970,26 @@
         - `2026-04-19` continuation owner cutover 后已再次重跑同一 live smoke；结果保持不变，说明这轮 shared continuation owner 切线没有把 heavy frontdoor / formal session / Runtime Center waiting-login 读面打断
         - `2026-04-19` 主脑 waiting-login continuation formalization 后已再次重跑同一 live smoke；结果仍稳定落到 `waiting-login`，说明“聊天窗口提示用户登录 -> 记录 formal continuation -> Runtime Center 读到同一 formal session”这条 fail-closed 主链没有被打断
         - 这说明当前真实 live 环境下，“主脑/cron -> heavy research frontdoor -> formal session -> Runtime Center 读面” 这条链在未登录 Baidu 时会 fail-closed 到同一类 `waiting-login` 真相，不再误落模型闲聊
-      - `L4`：这轮还没完成 long soak；第二轮 live acceptance 被人工中断，当前不能把单次 live smoke 写成 soak 通过
+        - `2026-04-19` 共享登录态路由补齐后，已用真实已登录 storage file 再跑 logged-in live smoke：
+          - 环境：`COPAW_BAIDU_RESEARCH_STORAGE_STATE_PATH=C:\Users\21492\.copaw\state\research_browser_storage\industry-researcher-live-demo.json`
+          - 命令：`python scripts/live_external_information_chain_acceptance.py --output tmp/live_external_information_chain_acceptance_logged_in.json`
+          - 真实结果：`main_brain.status=completed`、`cron.status=completed`
+          - 同轮结果里，`main_brain.runtime.findings_count=1 / sources_count=1`，`cron.runtime.findings_count=1 / sources_count=5`
+        - `2026-04-19` 已继续做 3 轮重复 live smoke（同一共享已登录 storage file）：
+          - run1：`main=completed / cron=completed`
+          - run2：`main=completed / cron=completed`
+          - run3：`main=completed / cron=completed`
+          - 这说明 logged-in shared-storage 路由已经不再卡死在 `waiting-login`，主脑和 cron 两条 heavy 入口都能真实走到 completed
+      - `L4`：这轮仍不能诚实写成 long soak 完成；虽然已补了 `3` 轮重复 logged-in live smoke，但这还不是完整的长链 soak 口径
     - 当前边界：
       - 这轮已把“provider-specific 执行硬编码”收回为“共享底座 + 薄页面提示”
       - 这轮还额外把“无 profile 页面先读正文/识别登录阻塞”补进了 shared browser substrate；因此通用页面理解不再完全依赖 provider 专用 page profile
       - 这轮现在又进一步补到了“共享页面摘要”这一层：上层不再只能拿原始 `readable_sections`，也能拿一份最小 `page_summary`
       - 这轮也已把“登录页先乱打字”这类机械行为收掉一条：至少在 Baidu chat 这条 profiled live 链上，shared observation 一旦先读到 `login-required`，提交前门会直接 fail-closed
       - shared browser substrate 现已具备最小 submit loop owner，而且 research chat 这条线的高层 `读回答 -> 判断是否继续 -> 生成下一步动作` 也已正式抽成 shared continuation owner；当前 Baidu heavy session 已不再只靠 service 内联 if/else 接下一轮
+      - heavy research 现在不再只有“未登录 fail-closed”这半边 live 真相；已经同时证明了：
+        - 未登录时会稳定落到 `waiting-login`
+        - 显式共享已登录 storage state 时，主脑 / cron 两条 heavy live 链都能真实 completed
       - 但这还不等于“任意职业 agent 已完全自己看页面并自由决策多轮动作链”：当前完成的是 `research chat surface` 这一个 profession family 的共享 continuation owner，不是所有职业/所有页面的统一高层 planner
       - 当前因此只能诚实声明：这条线已过 `L1/L2`，并新增了登录门槛 `L3` smoke；但还没有完整 `L4` soak，也不能把“research chat 共享 continuation owner 已接上”混写成“通用页面理解 + 任意职业连续多轮自主追问已完成”
 

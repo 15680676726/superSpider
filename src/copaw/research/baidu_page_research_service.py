@@ -5,6 +5,7 @@ from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from hashlib import sha1
 import logging
+import os
 from pathlib import Path
 import re
 from typing import Any, Mapping
@@ -1075,6 +1076,8 @@ class BaiduPageResearchService:
         )
         storage_state_path = _text(browser_metadata.get("storage_state_path"))
         if not storage_state_path and effective_persist_login_state:
+            storage_state_path = self._shared_storage_state_path_override()
+        if not storage_state_path and effective_persist_login_state:
             storage_state_path = self._default_storage_state_path(session)
         return {
             "persist_login_state": effective_persist_login_state,
@@ -1098,6 +1101,16 @@ class BaiduPageResearchService:
         directory.mkdir(parents=True, exist_ok=True)
         owner_token = _safe_path_token(session.owner_agent_id)
         return str((directory / f"{owner_token}.json").resolve())
+
+    def _shared_storage_state_path_override(self) -> str:
+        for env_name in (
+            "COPAW_BAIDU_RESEARCH_STORAGE_STATE_PATH",
+            "COPAW_RESEARCH_BROWSER_STORAGE_STATE_PATH",
+        ):
+            value = _text(os.getenv(env_name))
+            if value:
+                return value
+        return ""
 
     def _resolve_downloads(self, **payload: Any) -> list[dict[str, Any]]:
         resolver = self._browser_download_resolver
