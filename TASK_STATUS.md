@@ -32,7 +32,9 @@
 21. `docs/superpowers/specs/2026-04-04-next-round-discipline-closure-spec.md`（如任务涉及下一轮 runtime/capability 纪律收口、熵控制、source chain、去重归一、写串行合同、child-run shell、MCP 生命周期、skill/package 元数据与 portfolio compaction）
 22. `docs/superpowers/plans/2026-04-04-donor-first-capability-evolution-priority-plan.md`（如任务涉及纠偏后的 capability evolution 下一轮施工顺序、donor-first 复用优先级、baseline import、MCP-native candidate、fallback-only local authored 边界）
 23. `docs/superpowers/specs/2026-04-06-universal-donor-execution-contract-design.md`（如任务涉及 donor formal provider injection、universal execution envelope、host compatibility contract、真实 donor “安装后不等于真正可用”的平台收口）
-24. 与当前任务直接相关的源码和测试
+24. `docs/superpowers/specs/2026-04-19-active-surface-state-graph-capability-twin-and-reward-engine-design.md`（如任务涉及“不要只做页面理解”，而要把 browser/document/desktop 升级成主动探测、状态图、能力孪生、收益排序这一层）
+25. `docs/superpowers/plans/2026-04-19-active-surface-state-graph-capability-twin-and-reward-engine-implementation-plan.md`（如任务涉及这条新方向的正式施工顺序、文件落点、测试和分层验收）
+26. 与当前任务直接相关的源码和测试
 
 ---
 
@@ -1026,6 +1028,25 @@
         - “document / desktop 没接成正式主线 frontdoor”这条缺口已完成
         - 这条 frontdoor 升级线已过 `L1/L2`
         - document / desktop 这轮没有新增 `L3/L4` live/soak，不能混写成“所有 surface 的真实长链都已验完”
+      - `2026-04-19` 新方向补充：
+        - `docs/superpowers/specs/2026-04-19-active-surface-state-graph-capability-twin-and-reward-engine-design.md` 已写入仓库，正式把下一阶段目标从“更强页面理解器”提升为：
+          - `Surface State Graph`
+          - `Probe Engine`
+          - `Transition Miner`
+          - `Capability Twin`
+          - `Goal-Conditioned Reward Engine`
+        - 这份 spec 的目的不是推翻现有 shared browser/document/desktop substrate，而是在现有 `observe / execute / reobserve / guided owner / evidence` 基线之上，再补“状态编译 + 主动探测 + 状态转移学习 + 能力归并 + 收益排序”
+        - `docs/superpowers/plans/2026-04-19-active-surface-state-graph-capability-twin-and-reward-engine-implementation-plan.md` 已补入仓库，正式把这条新方向拆成可执行施工阶段：
+          - `Surface Graph Baseline`
+          - `Probe Engine`
+          - `Transition Miner`
+          - `Capability Twin`
+          - `Reward Ranking`
+          - `Runtime Center / Knowledge` 读面
+        - 当前口径必须写死：
+          - 这是正式设计 + 正式实施计划，已写文档
+          - 还不是代码已实现
+          - 当前验收层级只到文档一致性检查，不得混写成 surface runtime 已闭环升级
 
 ### 3.3.1 `Symbiotic Host Runtime V1` 当前落地边界
 
