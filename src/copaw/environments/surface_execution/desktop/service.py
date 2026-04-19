@@ -1,6 +1,10 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import inspect
+import logging
+
+from ....agents.tools.evidence_runtime import get_desktop_evidence_sink
 from ..graph_compiler import compile_desktop_observation_to_graph
 from ..owner import ProfessionSurfaceOperationOwner, ProfessionSurfaceOperationPlan
 from ..probe_engine import decide_surface_probe
@@ -11,6 +15,8 @@ from .contracts import (
     DesktopObservation,
     DesktopTargetCandidate,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class DesktopSurfaceExecutionService:
@@ -141,6 +147,33 @@ class DesktopSurfaceExecutionService:
             after_observation.surface_graph,
             action_kind=intent_kind,
         )
+        evidence_ids = self._emit_desktop_evidence(
+            action=intent_kind,
+            app_identity=app_identity,
+            session_mount_id=session_mount_id,
+            selector=target.action_selector,
+            status="success" if verification_passed else "error",
+            result_summary=transition.result_summary,
+            metadata={
+                "evidence_kind": "surface-transition",
+                "target_slot": target_slot,
+                "target": {
+                    "action_selector": target.action_selector,
+                    "readback_key": target.readback_key,
+                    "scope_anchor": target.scope_anchor,
+                    "label": target.label,
+                },
+                "verification": {
+                    "verified": verification_passed,
+                    "expected_normalized_text": expected_normalized,
+                    "observed_normalized_text": readback.get("normalized_text", ""),
+                    "expected_focused_selector": expected_focused_selector,
+                    "observed_focused_selector": str(after_observation.readback.get("focused_window") or ""),
+                },
+                "transition": transition.model_dump(mode="json"),
+            },
+        )
+        transition = transition.model_copy(update={"evidence_refs": list(evidence_ids)})
         return DesktopExecutionResult(
             status="succeeded" if verification_passed else "failed",
             intent_kind=intent_kind,
@@ -153,6 +186,7 @@ class DesktopSurfaceExecutionService:
             transition=transition,
             readback=readback,
             verification_passed=verification_passed,
+            evidence_ids=evidence_ids,
         )
 
     def run_step_loop(
@@ -265,6 +299,66 @@ class DesktopSurfaceExecutionService:
             target_slot=target_slot,
         )
         return probed_observation, refreshed_target
+
+    def _emit_desktop_evidence(
+        self,
+        *,
+        action: str,
+        app_identity: str,
+        session_mount_id: str,
+        selector: str,
+        status: str,
+        result_summary: str,
+        metadata: dict[str, object],
+    ) -> list[str]:
+        sink = get_desktop_evidence_sink()
+        if sink is None:
+            return []
+        try:
+            result = sink(
+                {
+                    "tool_name": "desktop_surface_execution",
+                    "action": action,
+                    "app_identity": app_identity,
+                    "session_mount_id": session_mount_id,
+                    "selector": selector,
+                    "status": status,
+                    "result_summary": result_summary,
+                    "metadata": dict(metadata),
+                }
+            )
+            if inspect.isawaitable(result):
+                logger.warning(
+                    "desktop surface execution evidence sink returned awaitable; ignoring in sync path",
+                )
+                return []
+            return self._extract_evidence_ids(result)
+        except Exception:
+            logger.warning(
+                "desktop surface execution evidence sink failed; keeping result unchanged",
+                exc_info=True,
+            )
+            return []
+
+    @staticmethod
+    def _extract_evidence_ids(result: object) -> list[str]:
+        if isinstance(result, str):
+            normalized = result.strip()
+            return [normalized] if normalized else []
+        if not isinstance(result, dict):
+            return []
+        evidence_id = str(result.get("evidence_id") or "").strip()
+        if evidence_id:
+            return [evidence_id]
+        raw_ids = result.get("evidence_ids")
+        if not isinstance(raw_ids, list):
+            return []
+        evidence_ids: list[str] = []
+        for item in raw_ids:
+            normalized = str(item or "").strip()
+            if normalized:
+                evidence_ids.append(normalized)
+        return evidence_ids
 
 
 __all__ = ["DesktopSurfaceExecutionService"]

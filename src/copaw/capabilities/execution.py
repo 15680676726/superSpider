@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from ..agents.tools import (
     bind_browser_evidence_sink,
+    bind_desktop_evidence_sink,
     bind_file_evidence_sink,
     bind_shell_evidence_sink,
     browser_use,
@@ -417,68 +418,71 @@ class CapabilityExecutionFacade:
             with bind_file_evidence_sink(
                 self._make_file_evidence_sink(task.id, execution_metadata=metadata),
             ):
-                with bind_browser_evidence_sink(
-                    self._make_browser_evidence_sink(task.id, execution_metadata=metadata),
+                with bind_desktop_evidence_sink(
+                    self._make_desktop_evidence_sink(task.id, execution_metadata=metadata),
                 ):
-                    try:
-                        response = await self._execute_direct_path(
-                            executor=executor,
-                            kwargs=kwargs,
-                            execution_context=execution_context,
-                            mount=mount,
-                        )
-                    except ChildRunWriterLeaseConflict as exc:
-                        summary = str(exc)
-                        error_kind = "blocked"
-                        evidence_id = self._append_execution_evidence(
-                            task=task,
-                            mount=mount,
-                            result_summary=summary,
-                            status=evidence_status_for_outcome(error_kind),
-                            metadata={
-                                **metadata,
-                                "error_class": exc.__class__.__name__,
-                                "error_kind": error_kind,
-                            },
-                        )
-                        return self._build_execution_result(
-                            execution_context=execution_context,
-                            mount=mount,
-                            payload=json_safe_kwargs,
-                            success=False,
-                            summary=summary,
-                            error_kind=error_kind,
-                            evidence_id=evidence_id,
-                            read_only=execution_context.is_read_only,
-                            concurrency_class=concurrency_class,
-                            preflight_policy=preflight_policy,
-                        )
-                    except Exception as exc:
-                        summary = f"{exc.__class__.__name__}: {exc}"
-                        error_kind = classify_runtime_outcome(summary, success=False)
-                        evidence_id = self._append_execution_evidence(
-                            task=task,
-                            mount=mount,
-                            result_summary=summary,
-                            status=evidence_status_for_outcome(error_kind),
-                            metadata={
-                                **metadata,
-                                "error_class": exc.__class__.__name__,
-                                "error_kind": error_kind,
-                            },
-                        )
-                        return self._build_execution_result(
-                            execution_context=execution_context,
-                            mount=mount,
-                            payload=json_safe_kwargs,
-                            success=False,
-                            summary=summary,
-                            error_kind=error_kind,
-                            evidence_id=evidence_id,
-                            read_only=execution_context.is_read_only,
-                            concurrency_class=concurrency_class,
-                            preflight_policy=preflight_policy,
-                        )
+                    with bind_browser_evidence_sink(
+                        self._make_browser_evidence_sink(task.id, execution_metadata=metadata),
+                    ):
+                        try:
+                            response = await self._execute_direct_path(
+                                executor=executor,
+                                kwargs=kwargs,
+                                execution_context=execution_context,
+                                mount=mount,
+                            )
+                        except ChildRunWriterLeaseConflict as exc:
+                            summary = str(exc)
+                            error_kind = "blocked"
+                            evidence_id = self._append_execution_evidence(
+                                task=task,
+                                mount=mount,
+                                result_summary=summary,
+                                status=evidence_status_for_outcome(error_kind),
+                                metadata={
+                                    **metadata,
+                                    "error_class": exc.__class__.__name__,
+                                    "error_kind": error_kind,
+                                },
+                            )
+                            return self._build_execution_result(
+                                execution_context=execution_context,
+                                mount=mount,
+                                payload=json_safe_kwargs,
+                                success=False,
+                                summary=summary,
+                                error_kind=error_kind,
+                                evidence_id=evidence_id,
+                                read_only=execution_context.is_read_only,
+                                concurrency_class=concurrency_class,
+                                preflight_policy=preflight_policy,
+                            )
+                        except Exception as exc:
+                            summary = f"{exc.__class__.__name__}: {exc}"
+                            error_kind = classify_runtime_outcome(summary, success=False)
+                            evidence_id = self._append_execution_evidence(
+                                task=task,
+                                mount=mount,
+                                result_summary=summary,
+                                status=evidence_status_for_outcome(error_kind),
+                                metadata={
+                                    **metadata,
+                                    "error_class": exc.__class__.__name__,
+                                    "error_kind": error_kind,
+                                },
+                            )
+                            return self._build_execution_result(
+                                execution_context=execution_context,
+                                mount=mount,
+                                payload=json_safe_kwargs,
+                                success=False,
+                                summary=summary,
+                                error_kind=error_kind,
+                                evidence_id=evidence_id,
+                                read_only=execution_context.is_read_only,
+                                concurrency_class=concurrency_class,
+                                preflight_policy=preflight_policy,
+                            )
 
         summary = _tool_response_summary(response)
         output_payload = (
@@ -988,6 +992,22 @@ class CapabilityExecutionFacade:
         if self._tool_bridge is None:
             return None
         return lambda payload: self._tool_bridge.record_browser_event(
+            task_id,
+            {
+                **dict(execution_metadata or {}),
+                **dict(payload or {}),
+            },
+        )
+
+    def _make_desktop_evidence_sink(
+        self,
+        task_id: str,
+        *,
+        execution_metadata: dict[str, object] | None = None,
+    ):
+        if self._tool_bridge is None:
+            return None
+        return lambda payload: self._tool_bridge.record_desktop_event(
             task_id,
             {
                 **dict(execution_metadata or {}),

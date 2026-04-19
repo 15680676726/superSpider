@@ -66,6 +66,39 @@ def test_kernel_task_store_emits_task_decision_and_evidence_events(tmp_path) -> 
     assert "evidence.recorded" in names
 
 
+def test_kernel_task_store_append_evidence_preserves_explicit_kind(tmp_path) -> None:
+    state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    task_repository = SqliteTaskRepository(state_store)
+    task_runtime_repository = SqliteTaskRuntimeRepository(state_store)
+    evidence_ledger = EvidenceLedger(tmp_path / "evidence.sqlite3")
+    task_store = KernelTaskStore(
+        task_repository=task_repository,
+        task_runtime_repository=task_runtime_repository,
+        evidence_ledger=evidence_ledger,
+    )
+
+    task = KernelTask(
+        id="task-surface-transition-kind",
+        title="Surface transition kind",
+        capability_ref="tool:browser_use",
+        owner_agent_id="ops-agent",
+        risk_level="auto",
+    )
+    task_store.upsert(task)
+    task_store.append_evidence(
+        task,
+        action_summary="record one surface transition",
+        result_summary="typed into the current browser surface",
+        kind="surface-transition",
+        metadata={"evidence_kind": "surface-transition"},
+    )
+
+    records = evidence_ledger.list_by_task(task.id)
+
+    assert len(records) == 1
+    assert records[0].kind == "surface-transition"
+
+
 def test_kernel_task_store_review_transition_emits_runtime_event(tmp_path) -> None:
     state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
     task_repository = SqliteTaskRepository(state_store)

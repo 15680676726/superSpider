@@ -421,3 +421,145 @@ def test_tool_bridge_builds_formal_download_file_result_items_from_browser_evide
     assert str(result_item["label"]).strip()
     assert result_item["summary"] == "Downloaded operator report"
     assert result_item["route"] == "/api/runtime-center/artifacts/artifact-download-1"
+
+
+def test_tool_bridge_promotes_surface_transition_kind_from_file_metadata() -> None:
+    class _FakeTaskStore:
+        def __init__(self) -> None:
+            self.task = KernelTask(
+                id="ktask:file-surface-transition",
+                title="File surface transition evidence",
+                capability_ref="tool:document_surface",
+                owner_agent_id="ops-agent",
+                risk_level="auto",
+            )
+            self.appended: list[dict[str, object]] = []
+
+        def get(self, task_id: str) -> KernelTask | None:
+            return self.task if task_id == self.task.id else None
+
+        def append_evidence(self, task: KernelTask, **kwargs):
+            _ = task
+            self.appended.append(kwargs)
+            return SimpleNamespace(id="evidence-file-transition-1")
+
+        def upsert(self, task: KernelTask, **kwargs) -> None:
+            _ = (task, kwargs)
+
+    store = _FakeTaskStore()
+    bridge = KernelToolBridge(task_store=store)
+
+    bridge.record_file_event(
+        "ktask:file-surface-transition",
+        {
+            "tool_name": "document_surface_execution",
+            "action": "edit",
+            "resolved_path": "D:/word/copaw/notes.txt",
+            "status": "success",
+            "result_summary": "replace_text changed 1 node",
+            "metadata": {
+                "evidence_kind": "surface-transition",
+                "transition": {
+                    "before_graph_ref": "document:before",
+                    "after_graph_ref": "document:after",
+                },
+            },
+        },
+    )
+
+    assert store.appended
+    assert store.appended[0]["kind"] == "surface-transition"
+
+
+def test_tool_bridge_promotes_surface_transition_kind_from_browser_metadata() -> None:
+    class _FakeTaskStore:
+        def __init__(self) -> None:
+            self.task = KernelTask(
+                id="ktask:browser-surface-transition",
+                title="Browser surface transition evidence",
+                capability_ref="tool:browser_use",
+                owner_agent_id="ops-agent",
+                risk_level="auto",
+            )
+            self.appended: list[dict[str, object]] = []
+
+        def get(self, task_id: str) -> KernelTask | None:
+            return self.task if task_id == self.task.id else None
+
+        def append_evidence(self, task: KernelTask, **kwargs):
+            _ = task
+            self.appended.append(kwargs)
+            return SimpleNamespace(id="evidence-browser-transition-1")
+
+        def upsert(self, task: KernelTask, **kwargs) -> None:
+            _ = (task, kwargs)
+
+    store = _FakeTaskStore()
+    bridge = KernelToolBridge(task_store=store)
+
+    bridge.record_browser_event(
+        "ktask:browser-surface-transition",
+        {
+            "action": "type",
+            "page_id": "page-1",
+            "status": "success",
+            "result_summary": "type changed 1 node",
+            "metadata": {
+                "evidence_kind": "surface-transition",
+                "transition": {
+                    "before_graph_ref": "browser:before",
+                    "after_graph_ref": "browser:after",
+                },
+            },
+        },
+    )
+
+    assert store.appended
+    assert store.appended[0]["kind"] == "surface-transition"
+
+
+def test_tool_bridge_promotes_surface_transition_kind_from_desktop_metadata() -> None:
+    class _FakeTaskStore:
+        def __init__(self) -> None:
+            self.task = KernelTask(
+                id="ktask:desktop-surface-transition",
+                title="Desktop surface transition evidence",
+                capability_ref="tool:desktop_actuation",
+                owner_agent_id="ops-agent",
+                risk_level="auto",
+            )
+            self.appended: list[dict[str, object]] = []
+
+        def get(self, task_id: str) -> KernelTask | None:
+            return self.task if task_id == self.task.id else None
+
+        def append_evidence(self, task: KernelTask, **kwargs):
+            _ = task
+            self.appended.append(kwargs)
+            return SimpleNamespace(id="evidence-desktop-transition-1")
+
+        def upsert(self, task: KernelTask, **kwargs) -> None:
+            _ = (task, kwargs)
+
+    store = _FakeTaskStore()
+    bridge = KernelToolBridge(task_store=store)
+
+    bridge.record_desktop_event(
+        "ktask:desktop-surface-transition",
+        {
+            "action": "type_text",
+            "app_identity": "notepad",
+            "status": "success",
+            "result_summary": "type_text changed 1 node",
+            "metadata": {
+                "evidence_kind": "surface-transition",
+                "transition": {
+                    "before_graph_ref": "desktop:before",
+                    "after_graph_ref": "desktop:after",
+                },
+            },
+        },
+    )
+
+    assert store.appended
+    assert store.appended[0]["kind"] == "surface-transition"

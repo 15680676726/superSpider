@@ -72,6 +72,7 @@ class KernelToolBridge:
             )
         evidence = self._append_evidence(
             task,
+            kind=None,
             action_summary=f"shell {status}",
             result_summary=summary,
             status=self._tool_evidence_status(status),
@@ -124,6 +125,7 @@ class KernelToolBridge:
         )
         evidence = self._append_evidence(
             task,
+            kind=self._tool_evidence_kind(payload_metadata),
             action_summary=f"file {action} {status}",
             result_summary=summary,
             status=self._tool_evidence_status(status),
@@ -178,6 +180,7 @@ class KernelToolBridge:
         )
         evidence = self._append_evidence(
             task,
+            kind=self._tool_evidence_kind(payload_metadata),
             action_summary=f"browser {action} {status}",
             result_summary=summary,
             status=self._tool_evidence_status(status),
@@ -205,6 +208,58 @@ class KernelToolBridge:
         self._update_task(task, status=status, summary=summary, evidence_id=evidence.id if evidence else None)
         return self._build_tool_use_summary(evidence)
 
+    def record_desktop_event(
+        self,
+        task_id: str,
+        payload: dict[str, object],
+    ) -> dict[str, object] | None:
+        task = self._get_task(task_id)
+        if task is None:
+            return None
+        payload_metadata = self._payload_metadata(payload)
+        status = self._string(payload_metadata.get("status")) or "success"
+        action = self._string(payload.get("action")) or "desktop"
+        app_identity = self._string(payload.get("app_identity"))
+        session_mount_id = self._string(payload.get("session_mount_id"))
+        selector = self._string(payload.get("selector"))
+        environment_ref = app_identity or session_mount_id or selector
+        result_summary = self._string(payload.get("result_summary"))
+        summary = self._desktop_summary(status, action, environment_ref, result_summary)
+        outcome_kind = self._string(payload_metadata.get("outcome_kind")) or classify_runtime_outcome(
+            summary,
+            success=status == "success",
+            phase=self._string(payload_metadata.get("phase")) or status,
+        )
+        evidence = self._append_evidence(
+            task,
+            kind=self._tool_evidence_kind(payload_metadata),
+            action_summary=f"desktop {action} {status}",
+            result_summary=summary,
+            status=self._tool_evidence_status(status),
+            environment_ref=environment_ref,
+            capability_ref="tool:desktop_actuation",
+            actor_ref="tool:desktop_actuation",
+            metadata={
+                **payload_metadata,
+                "outcome_kind": outcome_kind,
+            },
+        )
+        self._touch_environment(
+            ref=environment_ref,
+            kind="desktop",
+            metadata={
+                "source": "desktop",
+                "action": action,
+                "status": status,
+                "app_identity": app_identity,
+                "session_mount_id": session_mount_id,
+                "selector": selector,
+            },
+            last_active_at=self._coerce_datetime(payload.get("finished_at")),
+        )
+        self._update_task(task, status=status, summary=summary, evidence_id=evidence.id if evidence else None)
+        return self._build_tool_use_summary(evidence)
+
     def _get_task(self, task_id: str) -> KernelTask | None:
         try:
             return self._task_store.get(task_id)
@@ -216,6 +271,7 @@ class KernelToolBridge:
         self,
         task: KernelTask,
         *,
+        kind: str | None,
         action_summary: str,
         result_summary: str,
         status: str,
@@ -228,6 +284,7 @@ class KernelToolBridge:
     ):
         return self._task_store.append_evidence(
             task,
+            kind=kind,
             action_summary=action_summary,
             result_summary=result_summary,
             status=status,
@@ -635,6 +692,20 @@ class KernelToolBridge:
         return prefix
 
     @staticmethod
+    def _desktop_summary(
+        status: str,
+        action: str,
+        target: str | None,
+        result_summary: str | None,
+    ) -> str:
+        prefix = f"Desktop {action} {status}"
+        if target:
+            prefix = f"{prefix}: {target}"
+        if result_summary:
+            return f"{prefix} -> {result_summary}"
+        return prefix
+
+    @staticmethod
     def _tool_evidence_status(status: str) -> str:
         normalized = str(status or "").strip().lower()
         if normalized == "success":
@@ -646,6 +717,11 @@ class KernelToolBridge:
         if normalized == "cancelled":
             return "cancelled"
         return "failed"
+
+    @staticmethod
+    def _tool_evidence_kind(payload_metadata: dict[str, object]) -> str | None:
+        evidence_kind = str(payload_metadata.get("evidence_kind") or "").strip()
+        return evidence_kind or None
 
     @staticmethod
     def _payload_metadata(payload: dict[str, object]) -> dict[str, object]:

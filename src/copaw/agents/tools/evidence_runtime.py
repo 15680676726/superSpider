@@ -21,6 +21,8 @@ ShellEvidenceStatus = Literal["success", "error", "timeout", "blocked"]
 ShellEvidenceSink = Callable[[dict[str, Any]], Any]
 BrowserEvidenceStatus = Literal["success", "error"]
 BrowserEvidenceSink = Callable[[dict[str, Any]], Any]
+DesktopEvidenceStatus = Literal["success", "error"]
+DesktopEvidenceSink = Callable[[dict[str, Any]], Any]
 FileEvidenceStatus = Literal["success", "error"]
 FileEvidenceSink = Callable[[dict[str, Any]], Any]
 
@@ -30,6 +32,10 @@ _shell_evidence_sink: ContextVar[ShellEvidenceSink | None] = ContextVar(
 )
 _browser_evidence_sink: ContextVar[BrowserEvidenceSink | None] = ContextVar(
     "browser_evidence_sink",
+    default=None,
+)
+_desktop_evidence_sink: ContextVar[DesktopEvidenceSink | None] = ContextVar(
+    "desktop_evidence_sink",
     default=None,
 )
 _file_evidence_sink: ContextVar[FileEvidenceSink | None] = ContextVar(
@@ -109,6 +115,38 @@ class BrowserEvidenceEvent:
 
 
 @dataclass(frozen=True)
+class DesktopEvidenceEvent:
+    """Normalized desktop action event payload."""
+
+    action: str
+    app_identity: str
+    status: DesktopEvidenceStatus
+    result_summary: str
+    started_at: datetime
+    finished_at: datetime
+    duration_ms: int
+    selector: str | None = None
+    session_mount_id: str | None = None
+    tool_name: str = "desktop_actuation"
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "tool_name": self.tool_name,
+            "action": self.action,
+            "app_identity": self.app_identity,
+            "status": self.status,
+            "result_summary": self.result_summary,
+            "selector": self.selector,
+            "session_mount_id": self.session_mount_id,
+            "started_at": self.started_at.isoformat(),
+            "finished_at": self.finished_at.isoformat(),
+            "duration_ms": self.duration_ms,
+            "metadata": dict(self.metadata),
+        }
+
+
+@dataclass(frozen=True)
 class FileEvidenceEvent:
     """Normalized file tool execution event payload."""
 
@@ -178,6 +216,24 @@ def get_browser_evidence_sink() -> BrowserEvidenceSink | None:
 
 
 @contextmanager
+def bind_desktop_evidence_sink(
+    sink: DesktopEvidenceSink | None,
+) -> Iterator[None]:
+    """Bind a desktop evidence sink for the current async context."""
+    previous = _desktop_evidence_sink.get()
+    _desktop_evidence_sink.set(sink)
+    try:
+        yield
+    finally:
+        _desktop_evidence_sink.set(previous)
+
+
+def get_desktop_evidence_sink() -> DesktopEvidenceSink | None:
+    """Return the currently bound desktop evidence sink, if any."""
+    return _desktop_evidence_sink.get()
+
+
+@contextmanager
 def bind_file_evidence_sink(
     sink: FileEvidenceSink | None,
 ) -> Iterator[None]:
@@ -231,6 +287,23 @@ async def emit_browser_evidence(event: BrowserEvidenceEvent) -> None:
     except Exception:
         logger.warning(
             "browser evidence sink failed; keeping tool response unchanged",
+            exc_info=True,
+        )
+
+
+async def emit_desktop_evidence(event: DesktopEvidenceEvent) -> None:
+    """Best-effort emit for desktop evidence."""
+    sink = get_desktop_evidence_sink()
+    if sink is None:
+        return
+
+    try:
+        result = sink(event.to_payload())
+        if inspect.isawaitable(result):
+            await result
+    except Exception:
+        logger.warning(
+            "desktop evidence sink failed; keeping tool response unchanged",
             exc_info=True,
         )
 

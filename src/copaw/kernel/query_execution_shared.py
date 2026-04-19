@@ -23,6 +23,7 @@ from ..agents.react_agent import (
 )
 from ..agents.tools import (
     bind_browser_evidence_sink,
+    bind_desktop_evidence_sink,
     bind_file_evidence_sink,
     bind_shell_evidence_sink,
 )

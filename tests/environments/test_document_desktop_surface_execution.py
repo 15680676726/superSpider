@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import importlib
 
-from copaw.agents.tools.evidence_runtime import bind_file_evidence_sink
+from copaw.agents.tools.evidence_runtime import bind_desktop_evidence_sink, bind_file_evidence_sink
 from copaw.environments.surface_execution.desktop import (
     DesktopExecutionResult,
     DesktopExecutionStep,
@@ -489,6 +489,66 @@ def test_desktop_surface_service_attaches_shared_transition_after_type_text() ->
     assert result.status == "succeeded"
     assert result.transition is not None
     assert "result:desktop:editor_text" in result.transition.changed_nodes
+
+
+def test_desktop_surface_service_emits_surface_transition_evidence_after_type_text() -> None:
+    states = [
+        DesktopObservation(
+            app_identity="notepad",
+            window_title="Research Notes",
+            slot_candidates={
+                "primary_input": [
+                    DesktopTargetCandidate(
+                        target_kind="input",
+                        action_selector="window:notepad/editor",
+                        readback_key="editor_text",
+                        scope_anchor="editor",
+                        score=10,
+                        label="Editor",
+                    )
+                ]
+            },
+            readback={},
+        ),
+        DesktopObservation(
+            app_identity="notepad",
+            window_title="Research Notes",
+            slot_candidates={},
+            readback={"editor_text": "hello desktop"},
+        ),
+    ]
+    sink_payloads: list[dict[str, object]] = []
+
+    def _observe_desktop(**_kwargs):
+        return states.pop(0)
+
+    def _sink(payload: dict[str, object]) -> dict[str, object]:
+        sink_payloads.append(dict(payload))
+        evidence_kind = str(payload.get("metadata", {}).get("evidence_kind") or "")
+        if evidence_kind == "surface-transition":
+            return {"evidence_id": "desktop-transition-1"}
+        return {"evidence_id": "desktop-other-1"}
+
+    service = DesktopSurfaceExecutionService(
+        desktop_observer=_observe_desktop,
+        desktop_runner=lambda **_kwargs: {"ok": True},
+    )
+
+    with bind_desktop_evidence_sink(_sink):
+        result = service.execute_step(
+            session_mount_id="session-desktop-1",
+            app_identity="notepad",
+            target_slot="primary_input",
+            intent_kind="type_text",
+            payload={"text": "hello desktop"},
+            success_assertion={"normalized_text": "hello desktop"},
+        )
+
+    assert result.status == "succeeded"
+    assert result.transition is not None
+    assert result.transition.evidence_refs == ["desktop-transition-1"]
+    assert len(sink_payloads) == 1
+    assert sink_payloads[0]["metadata"]["evidence_kind"] == "surface-transition"
 
 
 def test_document_surface_service_run_step_loop_reuses_initial_observation() -> None:

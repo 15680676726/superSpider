@@ -1500,54 +1500,27 @@ class _QueryExecutionRuntimeMixin(
                                     capability_trial_attribution=capability_trial_attribution,
                                 ),
                             ):
-                                with bind_browser_evidence_sink(
-                                    self._make_browser_evidence_sink(
+                                with bind_desktop_evidence_sink(
+                                    self._make_desktop_evidence_sink(
                                         kernel_task_id,
                                         request=request,
                                         capability_trial_attribution=capability_trial_attribution,
                                     ),
                                 ):
-                                    agent_call_started_at = perf_counter()
-                                    logger.info(
-                                        "Query runtime agent call started: task=%s owner=%s",
-                                        kernel_task_id,
-                                        owner_agent_id,
-                                    )
-                                    if heartbeat is None:
-                                        async for msg, last in stream_printing_messages(
-                                            agents=[agent],
-                                            coroutine_task=agent(msgs),
-                                        ):
-                                            if stream_step_count == 0 and agent_call_started_at is not None:
-                                                logger.info(
-                                                    "Query runtime first stream output: task=%s owner=%s elapsed=%.2fs",
-                                                    kernel_task_id,
-                                                    owner_agent_id,
-                                                    perf_counter() - agent_call_started_at,
-                                                )
-                                            stream_step_count += 1
-                                            final_summary = _message_preview(msg) or final_summary
-                                            self._record_query_checkpoint(
-                                                agent_id=owner_agent_id,
-                                                task_id=kernel_task_id,
-                                                session_id=session_id,
-                                                user_id=user_id,
-                                                conversation_thread_id=session_id,
-                                                channel=channel,
-                                                phase="query-streaming",
-                                                checkpoint_kind="worker-step",
-                                                status="ready",
-                                                summary=final_summary or f"Stream output step {stream_step_count}",
-                                                execution_context=execution_context,
-                                                stream_step_count=stream_step_count,
-                                                snapshot_payload={
-                                                    "last_message_preview": final_summary,
-                                                    "last_message_is_terminal": last,
-                                                },
-                                            )
-                                            yield msg, last
-                                    else:
-                                        async with heartbeat:
+                                    with bind_browser_evidence_sink(
+                                        self._make_browser_evidence_sink(
+                                            kernel_task_id,
+                                            request=request,
+                                            capability_trial_attribution=capability_trial_attribution,
+                                        ),
+                                    ):
+                                        agent_call_started_at = perf_counter()
+                                        logger.info(
+                                            "Query runtime agent call started: task=%s owner=%s",
+                                            kernel_task_id,
+                                            owner_agent_id,
+                                        )
+                                        if heartbeat is None:
                                             async for msg, last in stream_printing_messages(
                                                 agents=[agent],
                                                 coroutine_task=agent(msgs),
@@ -1560,7 +1533,6 @@ class _QueryExecutionRuntimeMixin(
                                                         perf_counter() - agent_call_started_at,
                                                     )
                                                 stream_step_count += 1
-                                                await heartbeat.pulse()
                                                 final_summary = _message_preview(msg) or final_summary
                                                 self._record_query_checkpoint(
                                                     agent_id=owner_agent_id,
@@ -1581,6 +1553,41 @@ class _QueryExecutionRuntimeMixin(
                                                     },
                                                 )
                                                 yield msg, last
+                                        else:
+                                            async with heartbeat:
+                                                async for msg, last in stream_printing_messages(
+                                                    agents=[agent],
+                                                    coroutine_task=agent(msgs),
+                                                ):
+                                                    if stream_step_count == 0 and agent_call_started_at is not None:
+                                                        logger.info(
+                                                            "Query runtime first stream output: task=%s owner=%s elapsed=%.2fs",
+                                                            kernel_task_id,
+                                                            owner_agent_id,
+                                                            perf_counter() - agent_call_started_at,
+                                                        )
+                                                    stream_step_count += 1
+                                                    await heartbeat.pulse()
+                                                    final_summary = _message_preview(msg) or final_summary
+                                                    self._record_query_checkpoint(
+                                                        agent_id=owner_agent_id,
+                                                        task_id=kernel_task_id,
+                                                        session_id=session_id,
+                                                        user_id=user_id,
+                                                        conversation_thread_id=session_id,
+                                                        channel=channel,
+                                                        phase="query-streaming",
+                                                        checkpoint_kind="worker-step",
+                                                        status="ready",
+                                                        summary=final_summary or f"Stream output step {stream_step_count}",
+                                                        execution_context=execution_context,
+                                                        stream_step_count=stream_step_count,
+                                                        snapshot_payload={
+                                                            "last_message_preview": final_summary,
+                                                            "last_message_is_terminal": last,
+                                                        },
+                                                    )
+                                                    yield msg, last
         except asyncio.CancelledError:
             final_error = "任务已取消。"
             if agent is not None:
@@ -2087,6 +2094,29 @@ class _QueryExecutionRuntimeMixin(
             return None
         def _sink(payload):
             tool_use_summary = self._tool_bridge.record_browser_event(
+                kernel_task_id,
+                _merge_query_tool_trial_attribution(payload, capability_trial_attribution),
+            )
+            self._persist_query_tool_use_summary(
+                request=request,
+                tool_use_summary=tool_use_summary,
+            )
+            return tool_use_summary
+
+        return _sink
+
+    def _make_desktop_evidence_sink(
+        self,
+        kernel_task_id: str | None,
+        *,
+        request: Any | None = None,
+        capability_trial_attribution: Mapping[str, Any] | None = None,
+    ):
+        if self._tool_bridge is None or kernel_task_id is None:
+            return None
+
+        def _sink(payload):
+            tool_use_summary = self._tool_bridge.record_desktop_event(
                 kernel_task_id,
                 _merge_query_tool_trial_attribution(payload, capability_trial_attribution),
             )
