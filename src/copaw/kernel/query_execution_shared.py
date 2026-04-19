@@ -94,6 +94,7 @@ _CONTEXTUAL_BROWSER_RISK_ACTIONS = frozenset(
     {
         "click",
         "fill_form",
+        "guided_surface",
         "press_key",
         "select_option",
         "type",
@@ -700,7 +701,7 @@ def _risky_tool_confirmation_state(
             return False, None
         fragments = _tool_context_fragments(kwargs, keys=_RISKY_BROWSER_CONTEXT_KEYS)
         matched_tokens = _matched_risky_semantic_tokens(fragments)
-        if normalized_action == "type" and bool(kwargs.get("submit")):
+        if normalized_action in {"type", "guided_surface"} and bool(kwargs.get("submit")):
             matched_tokens.add("submit")
             fragments.append("submit")
         if not matched_tokens:

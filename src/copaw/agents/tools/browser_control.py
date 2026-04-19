@@ -5,8 +5,15 @@ import atexit
 import asyncio
 import sys
 import threading
+from types import SimpleNamespace
 from typing import Any
 
+from ...environments.surface_execution.browser.observer import observe_browser_page
+from ...environments.surface_execution.browser.resolver import resolve_browser_target
+from ...environments.surface_execution.owner import (
+    GuidedBrowserSurfaceIntent,
+    build_guided_browser_surface_owner,
+)
 from . import browser_control_actions_core as browser_control_actions_core_module
 from .browser_control_shared import *  # noqa: F401,F403
 from .browser_control_actions_core import *  # noqa: F401,F403
@@ -141,6 +148,219 @@ def list_browser_downloads(
     ]
 
 
+_GUIDED_BROWSER_GENERIC_PROBE_CODE = (
+    "(() => ({"
+    " bodyText: (document.body && document.body.innerText) ? document.body.innerText : '',"
+    " href: location.href || '',"
+    " title: document.title || ''"
+    " }))()"
+)
+
+
+async def _observe_guided_browser_surface(
+    *,
+    session_id: str,
+    page_id: str,
+    frame_selector: str = "",
+) -> tuple[dict[str, Any], Any]:
+    snapshot_response = await _action_snapshot(
+        page_id,
+        "",
+        frame_selector,
+        session_id,
+    )
+    snapshot_payload = _parse_tool_response_json(snapshot_response)
+    snapshot_text = str(snapshot_payload.get("snapshot") or "")
+    page_url = str(snapshot_payload.get("url") or "")
+    page_title = str(snapshot_payload.get("title") or "")
+    evaluate_response = await _action_evaluate(
+        page_id,
+        _GUIDED_BROWSER_GENERIC_PROBE_CODE,
+        "",
+        "",
+        frame_selector,
+        session_id,
+    )
+    evaluate_payload = _parse_tool_response_json(evaluate_response)
+    result_payload = evaluate_payload.get("result")
+    if not isinstance(result_payload, dict):
+        result_payload = {}
+    dom_probe = {
+        "page": {
+            "bodyText": str(result_payload.get("bodyText") or result_payload.get("body_text") or ""),
+            "href": str(result_payload.get("href") or page_url or ""),
+            "title": str(result_payload.get("title") or page_title or ""),
+        },
+    }
+    observation = observe_browser_page(
+        snapshot_text=snapshot_text,
+        page_url=str(dom_probe["page"]["href"] or page_url),
+        page_title=str(dom_probe["page"]["title"] or page_title),
+        dom_probe=dom_probe,
+    )
+    return {
+        "snapshot_text": snapshot_text,
+        "page_url": observation.page_url,
+        "page_title": observation.page_title,
+        "dom_probe": dom_probe,
+    }, observation
+
+
+async def _action_guided_surface(
+    *,
+    page_id: str,
+    session_id: str,
+    text: str,
+    submit: bool,
+    frame_selector: str = "",
+    max_steps: int = 4,
+) -> ToolResponse:
+    context, observation = await _observe_guided_browser_surface(
+        session_id=session_id,
+        page_id=page_id,
+        frame_selector=frame_selector,
+    )
+    owner = build_guided_browser_surface_owner(
+        formal_session_id=session_id or "default",
+        surface_thread_id=page_id,
+        intent=GuidedBrowserSurfaceIntent(
+            desired_text=text,
+            request_submit=bool(submit),
+        ),
+    )
+    history: list[object] = []
+    executed_steps: list[str] = []
+    stop_reason = "planner-stop"
+    blocker_kind = ""
+    for _ in range(max(1, int(max_steps or 0))):
+        checkpoint = owner.build_checkpoint(
+            surface_kind="browser",
+            step_index=len(history),
+            history=history,
+        )
+        step = owner.plan(
+            observation=observation,
+            history=history,
+            checkpoint=checkpoint,
+        )
+        if step is None:
+            if observation.login_state == "login-required" or "login-required" in list(observation.blockers or []):
+                stop_reason = "login-required"
+                blocker_kind = "login-required"
+            break
+        if step.intent_kind == "press":
+            response = await _action_press_key(
+                page_id,
+                str(step.payload.get("key") or "Enter"),
+                session_id,
+            )
+        else:
+            target = resolve_browser_target(observation, target_slot=step.target_slot)
+            if target is None:
+                blocker_kind = "target-unresolved"
+                stop_reason = blocker_kind
+                history.append(
+                    SimpleNamespace(
+                        intent_kind=step.intent_kind,
+                        target_slot=step.target_slot,
+                        status="failed",
+                        blocker_kind=blocker_kind,
+                    )
+                )
+                break
+            selector = str(target.action_selector or "")
+            ref = str(target.action_ref or "")
+            if step.intent_kind == "type":
+                response = await _action_type(
+                    page_id,
+                    selector,
+                    ref,
+                    "",
+                    str(step.payload.get("text") or ""),
+                    False,
+                    False,
+                    frame_selector,
+                    session_id,
+                )
+            elif step.intent_kind == "click":
+                response = await _action_click(
+                    page_id,
+                    selector,
+                    ref,
+                    "",
+                    0,
+                    False,
+                    "left",
+                    "",
+                    frame_selector,
+                    session_id,
+                )
+            else:
+                response = _tool_response(
+                    json.dumps(
+                        {"ok": False, "error": f"Unsupported guided step: {step.intent_kind}"},
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
+                )
+        response_payload = _parse_tool_response_json(response)
+        if not bool(response_payload.get("ok")):
+            blocker_kind = str(response_payload.get("error") or "guided-step-failed").strip()
+            stop_reason = "step-failed"
+            history.append(
+                SimpleNamespace(
+                    intent_kind=step.intent_kind,
+                    target_slot=step.target_slot,
+                    status="failed",
+                    blocker_kind=blocker_kind,
+                )
+            )
+            break
+        history.append(
+            SimpleNamespace(
+                intent_kind=step.intent_kind,
+                target_slot=step.target_slot,
+                status="succeeded",
+                blocker_kind="",
+            )
+        )
+        executed_steps.append(str(step.intent_kind))
+        context, observation = await _observe_guided_browser_surface(
+            session_id=session_id,
+            page_id=page_id,
+            frame_selector=frame_selector,
+        )
+    page_summary = getattr(observation, "page_summary", None)
+    payload: dict[str, Any] = {
+        "ok": blocker_kind == "" or bool(executed_steps),
+        "message": (
+            "Guided browser surface operation completed."
+            if blocker_kind == "" or bool(executed_steps)
+            else "Current page requires login before continuing."
+            if blocker_kind == "login-required"
+            else "Guided browser surface operation did not complete."
+        ),
+        "steps": [step.replace("_key", "").replace("_text", "") for step in executed_steps],
+        "step_count": len(executed_steps),
+        "stop_reason": stop_reason,
+        "url": str(context.get("page_url") or ""),
+        "page_title": str(context.get("page_title") or ""),
+        "login_state": str(getattr(observation, "login_state", "") or ""),
+        "page_kind": str(getattr(page_summary, "page_kind", "") or ""),
+    }
+    if blocker_kind == "login-required":
+        payload["ok"] = False
+        payload["error"] = "Current page requires login before continuing."
+        payload["guardrail"] = {
+            "kind": "login-required",
+            "resume_hint": "finish-login-and-resume-current-session",
+        }
+    elif blocker_kind:
+        payload["ok"] = False
+        payload["error"] = blocker_kind
+    return _tool_response(json.dumps(payload, ensure_ascii=False, indent=2))
+
+
 async def browser_use(  # pylint: disable=R0911,R0912
     action: str,
     url: str = "",
@@ -203,7 +423,7 @@ async def browser_use(  # pylint: disable=R0911,R0912
             navigate_back, snapshot, screenshot, click, type, eval, evaluate,
             resize, console_messages, network_requests, handle_dialog,
             file_upload, fill_form, install, press_key, run_code, drag, hover,
-            select_option, tabs, wait_for, pdf, close.
+            select_option, tabs, wait_for, pdf, close, guided_surface.
         url (str):
             URL to open. Required for action=open or navigate.
         page_id (str):
@@ -549,6 +769,16 @@ async def browser_use(  # pylint: disable=R0911,R0912
                 slowly,
                 frame_selector,
                 resolved_session_id,
+            )
+        if action == "guided_surface":
+            return await _invoke_action(
+                _action_guided_surface,
+                page_id=page_id,
+                session_id=resolved_session_id,
+                text=text,
+                submit=submit,
+                frame_selector=frame_selector,
+                emit_evidence=True,
             )
         if action == "eval":
             return await _invoke_action(

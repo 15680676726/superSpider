@@ -955,9 +955,17 @@
         - `python -m pytest tests/app/test_source_collection_frontdoor_service.py tests/environments/test_browser_surface_execution.py tests/research/test_chat_continuation_policy.py tests/research/test_chat_continuation_owner.py tests/research/test_baidu_page_research_service.py tests/kernel/test_tool_bridge.py tests/kernel/test_query_execution_runtime.py -q` -> `109 passed`
         - `python -m pytest tests/app/test_source_collection_frontdoor_service.py tests/research/test_baidu_page_research_service.py tests/kernel/test_main_brain_research_followup.py -q` -> `41 passed`
         - `python -m pytest tests/environments/test_browser_surface_execution.py tests/environments/test_document_desktop_surface_execution.py -q` -> `31 passed`
+        - `python -m pytest tests/environments/test_browser_surface_execution.py -k "guided_owner" -q` -> `2 passed`
+        - `python -m pytest tests/environments/test_document_desktop_surface_execution.py -k "guided_owner" -q` -> `2 passed`
+        - `python -m pytest tests/agents/test_browser_tool_evidence.py -k "guided_surface" -q` -> `2 passed`
+        - `python -m pytest tests/kernel/query_execution_environment_parts/confirmations.py -k "guided_browser_submit or contextual_browser_submit_click" -q` -> `2 passed`
+        - `python -m pytest tests/kernel/query_execution_environment_parts/confirmations.py -q` -> `17 passed`
+        - `python -m pytest tests/environments/test_browser_surface_execution.py tests/environments/test_document_desktop_surface_execution.py tests/research/test_baidu_page_research_service.py -q` -> `67 passed`
+        - `python -m pytest tests/agents/test_browser_tool_evidence.py tests/environments/test_browser_surface_execution.py tests/environments/test_document_desktop_surface_execution.py tests/research/test_baidu_page_research_service.py tests/kernel/query_execution_environment_parts/confirmations.py -q` -> `121 passed`
         - `python -m pytest tests/kernel/test_main_brain_chat_service.py tests/kernel/test_main_brain_research_followup.py tests/app/test_source_collection_frontdoor_service.py -q` -> `62 passed`
         - `python -m pytest tests/app/test_runtime_center_research_surface.py tests/app/test_research_session_api.py -q` -> `7 passed`
         - `python -m pytest tests/app/test_source_collection_frontdoor_service.py tests/environments/test_browser_surface_execution.py tests/environments/test_document_desktop_surface_execution.py tests/research/test_chat_continuation_policy.py tests/research/test_chat_continuation_owner.py tests/research/test_baidu_page_contract.py tests/research/test_baidu_page_research_service.py tests/research/test_research_knowledge_ingestion.py tests/research/test_research_report_writeback.py tests/kernel/test_main_brain_research_followup.py tests/kernel/test_tool_bridge.py -q` -> `108 passed`
+        - `python -m pytest tests/app/test_source_collection_frontdoor_service.py tests/environments/test_browser_surface_execution.py tests/environments/test_document_desktop_surface_execution.py tests/research/test_chat_continuation_policy.py tests/research/test_chat_continuation_owner.py tests/research/test_baidu_page_research_service.py tests/kernel/test_tool_bridge.py tests/kernel/test_query_execution_runtime.py tests/agents/test_browser_tool_evidence.py tests/kernel/query_execution_environment_parts/confirmations.py -q` -> `177 passed`
         - `python -m pytest tests/app/test_research_session_live_contract.py -q` -> `2 passed, 1 skipped`
         - `python -m pytest tests/research/test_baidu_page_research_service.py tests/kernel/test_main_brain_research_followup.py tests/app/test_research_session_live_contract.py -q` -> `39 passed, 1 skipped`
         - `python -m pytest tests/kernel/test_main_brain_chat_service.py tests/app/test_source_collection_frontdoor_service.py tests/app/test_runtime_center_research_surface.py tests/app/test_research_session_api.py -q` -> `66 passed`
@@ -987,10 +995,26 @@
       - 这轮现在又进一步补到了“共享页面摘要”这一层：上层不再只能拿原始 `readable_sections`，也能拿一份最小 `page_summary`
       - 这轮也已把“登录页先乱打字”这类机械行为收掉一条：至少在 Baidu chat 这条 profiled live 链上，shared observation 一旦先读到 `login-required`，提交前门会直接 fail-closed
       - shared browser substrate 现已具备最小 submit loop owner，而且 research chat 这条线的高层 `读回答 -> 判断是否继续 -> 生成下一步动作` 也已正式抽成 shared continuation owner；当前 Baidu heavy session 已不再只靠 service 内联 if/else 接下一轮
+      - `2026-04-19` 又补上了 shared guided owner 第一版：
+        - browser 已有通用 `type -> submit / login-wall stop` planner
+        - document 已有通用 `replace_text / write_document` planner
+        - desktop 已有通用 `focus_window -> type_text` planner
+        - 三类 surface 现在都不只接受裸 `planner callable`，也有可复用的 guided owner builder，开始形成“职业 agent 提意图，surface 底座执行通用连续动作”的共享高层基线
+      - `2026-04-19` 这条 guided 基线已经不再只停在环境测试：
+        - `browser_use` 前门现已正式支持 `action="guided_surface"`
+        - 当前会先读页面快照和正文，再走 shared guided owner 决策 `type -> submit`
+        - 遇到 `login-required` 会直接停住并回正式 `guardrail`，而不是盲打
+        - query prompt 也已明确提示：普通 chat/form 页优先走 guided surface，不要一上来就手写 selector chase
       - heavy research 现在不再只有“未登录 fail-closed”这半边 live 真相；已经同时证明了：
         - 未登录时会稳定落到 `waiting-login`
         - 显式共享已登录 storage state 时，主脑 / cron 两条 heavy live 链都能真实 completed
       - 但这还不等于“任意职业 agent 已完全自己看页面并自由决策多轮动作链”：当前完成的是 `research chat surface` 这一个 profession family 的共享 continuation owner，不是所有职业/所有页面的统一高层 planner
+      - 当前新补上的 guided owner 也还只是 shared high-level planner 的第一版，不是最终态：
+        - browser 目前覆盖的是通用 form/chat 一类基础动作
+        - browser 的主线前门目前也只正式接到了 `browser_use.guided_surface` 这一类连续操作，不是所有 browser 动作都自动走 shared planner
+        - document 目前覆盖的是通用写入/替换
+        - desktop 目前覆盖的是通用聚焦后输入
+        - 更复杂的多区块页面理解、分页/上传/结果筛选、跨窗口上下文切换，仍需继续补
       - 当前因此只能诚实声明：这条线已过 `L1/L2`，并新增了登录门槛 `L3` smoke；但还没有完整 `L4` soak，也不能把“research chat 共享 continuation owner 已接上”混写成“通用页面理解 + 任意职业连续多轮自主追问已完成”
 
 ### 3.3.1 `Symbiotic Host Runtime V1` 当前落地边界

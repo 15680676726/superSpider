@@ -319,6 +319,7 @@ def test_query_execution_service_recognizes_desktop_mcp_as_actuation(
     assert "Desktop actuation is mounted in this session" in prompt_appendix
     assert "Attempt mounted browser or desktop workflows before claiming the task is impossible" in prompt_appendix
     assert "Mounted browser/desktop actuation may be used for registration, login, dashboard operations" in prompt_appendix
+    assert "prefer the browser guided surface flow first" in prompt_appendix
     assert "Treat manual verification as a checkpoint to resume from" in prompt_appendix
     assert "Desktop access is observation-only via screenshots" not in prompt_appendix
     assert mcp_manager.requested_keys == ["browser", "desktop_windows"]
@@ -600,6 +601,32 @@ def test_query_execution_tool_preflight_requires_confirmation_for_contextual_bro
     assert payload["action"] == "click"
 
     assert preflight("browser_use", tuple(), {"action": "click", "selector": "#next-page"}) is None
+
+
+def test_query_execution_tool_preflight_requires_confirmation_for_guided_browser_submit() -> None:
+    service = KernelQueryExecutionService(
+        session_backend=_FakeSessionBackend(),
+        capability_service=_FakeCapabilityService(),
+        agent_profile_service=_FakeAgentProfileService(),
+    )
+
+    preflight = service._build_tool_preflight(
+        delegation_guard=None,
+        msgs=[SimpleNamespace(get_text_content=lambda: "继续网页操作并提交转账表单")],
+    )
+    assert preflight is not None
+
+    blocked = preflight(
+        "browser_use",
+        tuple(),
+        {"action": "guided_surface", "text": "确认转账", "submit": True},
+    )
+    assert isinstance(blocked, ToolResponse)
+    payload = json.loads(query_execution_module._tool_response_text(blocked))
+    assert payload["success"] is False
+    assert payload["error_code"] == "user_confirmation_required"
+    assert payload["confirmation_required"] is True
+    assert payload["action"] == "guided_surface"
 
 
 def test_query_execution_tool_preflight_requires_confirmation_for_contextual_desktop_transfer() -> None:

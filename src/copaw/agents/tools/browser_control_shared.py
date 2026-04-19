@@ -45,6 +45,7 @@ _BROWSER_EVIDENCE_ACTIONS = frozenset({
     "click",
     "fill_form",
     "file_upload",
+    "guided_surface",
     "tabs",
     "pdf",
     "screenshot",

@@ -2,9 +2,15 @@
 """Shared surface execution foundations."""
 
 from .owner import (
+    GuidedBrowserSurfaceIntent,
+    GuidedDesktopSurfaceIntent,
+    GuidedDocumentSurfaceIntent,
     ProfessionSurfaceOperationCheckpoint,
     ProfessionSurfaceOperationOwner,
     ProfessionSurfaceOperationPlan,
+    build_guided_browser_surface_owner,
+    build_guided_desktop_surface_owner,
+    build_guided_document_surface_owner,
 )
 from .desktop import (
     DesktopExecutionLoopResult,
@@ -26,9 +32,15 @@ from .document import (
 )
 
 __all__ = [
+    "GuidedBrowserSurfaceIntent",
+    "GuidedDesktopSurfaceIntent",
+    "GuidedDocumentSurfaceIntent",
     "ProfessionSurfaceOperationCheckpoint",
     "ProfessionSurfaceOperationOwner",
     "ProfessionSurfaceOperationPlan",
+    "build_guided_browser_surface_owner",
+    "build_guided_desktop_surface_owner",
+    "build_guided_document_surface_owner",
     "DesktopExecutionLoopResult",
     "DesktopExecutionResult",
     "DesktopExecutionStatus",

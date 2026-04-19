@@ -142,6 +142,155 @@ def test_browser_use_emits_open_success_payload(monkeypatch) -> None:
     assert payloads[0]["metadata"]["verification"]["observed_after"]["url"] == "https://example.com"
 
 
+def test_browser_use_guided_surface_reads_page_then_types_and_submits(monkeypatch) -> None:
+    action_calls: list[tuple[str, dict[str, object]]] = []
+    evidence_payloads: list[dict[str, object]] = []
+
+    async def fake_snapshot(page_id: str, filename: str, frame_selector: str, session_id: str):
+        _ = (filename, frame_selector, session_id)
+        return _json_response(
+            {
+                "ok": True,
+                "snapshot": '- textbox "问题输入框" [ref=e1]',
+                "url": "https://example.com/chat",
+                "title": "Chat page",
+            },
+        )
+
+    async def fake_evaluate(
+        page_id: str,
+        code: str,
+        ref: str,
+        element: str,
+        frame_selector: str,
+        session_id: str,
+    ):
+        _ = (page_id, code, ref, element, frame_selector, session_id)
+        return _json_response(
+            {
+                "ok": True,
+                "result": {
+                    "bodyText": "欢迎继续提问",
+                    "href": "https://example.com/chat",
+                    "title": "Chat page",
+                },
+            },
+        )
+
+    async def fake_type(
+        page_id: str,
+        selector: str,
+        ref: str,
+        element: str,
+        text: str,
+        submit: bool,
+        slowly: bool,
+        frame_selector: str,
+        session_id: str,
+    ):
+        _ = (page_id, selector, element, submit, slowly, frame_selector, session_id)
+        action_calls.append(("type", {"ref": ref, "text": text}))
+        return _json_response({"ok": True, "message": f"Typed {text}"})
+
+    async def fake_press_key(page_id: str, key: str, session_id: str):
+        _ = (page_id, session_id)
+        action_calls.append(("press_key", {"key": key}))
+        return _json_response({"ok": True, "message": f"Pressed {key}"})
+
+    monkeypatch.setattr("copaw.agents.tools.browser_control._action_snapshot", fake_snapshot)
+    monkeypatch.setattr("copaw.agents.tools.browser_control._action_evaluate", fake_evaluate)
+    monkeypatch.setattr("copaw.agents.tools.browser_control._action_type", fake_type)
+    monkeypatch.setattr("copaw.agents.tools.browser_control._action_press_key", fake_press_key)
+
+    async def run() -> ToolResponse:
+        with bind_browser_evidence_sink(evidence_payloads.append):
+            return await browser_use(
+                action="guided_surface",
+                session_id="guided-session",
+                page_id="chat-page",
+                text="继续解释刚才的问题",
+                submit=True,
+            )
+
+    payload = _response_payload(asyncio.run(run()))
+
+    assert payload["ok"] is True
+    assert payload["steps"] == ["type", "press"]
+    assert action_calls == [
+        ("type", {"ref": "e1", "text": "继续解释刚才的问题"}),
+        ("press_key", {"key": "Enter"}),
+    ]
+    assert len(evidence_payloads) == 1
+    assert evidence_payloads[0]["action"] == "guided_surface"
+    assert evidence_payloads[0]["status"] == "success"
+
+
+def test_browser_use_guided_surface_stops_on_login_wall(monkeypatch) -> None:
+    action_calls: list[str] = []
+
+    async def fake_snapshot(page_id: str, filename: str, frame_selector: str, session_id: str):
+        _ = (page_id, filename, frame_selector, session_id)
+        return _json_response(
+            {
+                "ok": True,
+                "snapshot": '- heading "请登录后继续"\n- button "登录" [ref=e1]',
+                "url": "https://example.com/login",
+                "title": "Login required",
+            },
+        )
+
+    async def fake_evaluate(
+        page_id: str,
+        code: str,
+        ref: str,
+        element: str,
+        frame_selector: str,
+        session_id: str,
+    ):
+        _ = (page_id, code, ref, element, frame_selector, session_id)
+        return _json_response(
+            {
+                "ok": True,
+                "result": {
+                    "bodyText": "请登录后继续 当前页面需要登录才能继续。",
+                    "href": "https://example.com/login",
+                    "title": "Login required",
+                },
+            },
+        )
+
+    async def fake_type(*args, **kwargs):
+        _ = (args, kwargs)
+        action_calls.append("type")
+        return _json_response({"ok": True})
+
+    async def fake_press_key(*args, **kwargs):
+        _ = (args, kwargs)
+        action_calls.append("press")
+        return _json_response({"ok": True})
+
+    monkeypatch.setattr("copaw.agents.tools.browser_control._action_snapshot", fake_snapshot)
+    monkeypatch.setattr("copaw.agents.tools.browser_control._action_evaluate", fake_evaluate)
+    monkeypatch.setattr("copaw.agents.tools.browser_control._action_type", fake_type)
+    monkeypatch.setattr("copaw.agents.tools.browser_control._action_press_key", fake_press_key)
+
+    payload = _response_payload(
+        asyncio.run(
+            browser_use(
+                action="guided_surface",
+                session_id="guided-session",
+                page_id="login-page",
+                text="不应该输入",
+                submit=True,
+            ),
+        )
+    )
+
+    assert payload["ok"] is False
+    assert payload["guardrail"]["kind"] == "login-required"
+    assert action_calls == []
+
+
 def test_browser_open_blocks_host_outside_navigation_guard_allowlist(monkeypatch) -> None:
     class _FakePage:
         def __init__(self) -> None:

@@ -1491,6 +1491,7 @@ class _QueryExecutionPromptMixin:
                 [
                     "- Attempt mounted browser or desktop workflows before claiming the task is impossible or refusing on generic account-access grounds.",
                     "- Mounted browser/desktop actuation may be used for registration, login, dashboard operations, product listing, posting, messaging, upload, and other executable real-site workflows; do not refuse merely because the target is a real account or business backend.",
+                    "- On generic chat/form pages, prefer the browser guided surface flow first: read the current page, detect login blockers, find the primary input, type, then submit or pause from the same page instead of immediately falling back to manual selector-chasing.",
                     "- Ask for explicit confirmation only on irreversible, costly, publicly visible, or account/security-mutating actions such as publish/post to a public surface, publicly list a product, submit an order/payment, save account/security settings, change pricing, or bulk delete data.",
                     "- Routine login, navigation, draft editing, private replies, and ordinary uploads should continue without an extra confirmation unless the user or channel policy explicitly requires one.",
                     "- If login, CAPTCHA, SMS/2FA, device approval, payment confirmation, or another user-owned verification step appears, pause at that checkpoint, tell the user exactly what to finish, and resume from the current session after they confirm.",

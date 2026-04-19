@@ -12,8 +12,10 @@ from copaw.environments.surface_execution.browser.resolver import resolve_browse
 from copaw.environments.surface_execution.browser.service import BrowserSurfaceExecutionService
 from copaw.environments.surface_execution.browser.verifier import read_browser_target_readback
 from copaw.environments.surface_execution.owner import (
+    GuidedBrowserSurfaceIntent,
     ProfessionSurfaceOperationOwner,
     ProfessionSurfaceOperationPlan,
+    build_guided_browser_surface_owner,
 )
 
 
@@ -1265,3 +1267,100 @@ def test_browser_surface_service_run_step_loop_accepts_shared_profession_owner_c
     assert loop_result.operation_checkpoint.surface_kind == "browser"
     assert loop_result.operation_checkpoint.surface_thread_id == "chat-page"
     assert loop_result.operation_checkpoint.last_status == "succeeded"
+
+
+def test_browser_guided_owner_types_then_submits_generic_form_flow() -> None:
+    runner = _ServiceRunner()
+    service = BrowserSurfaceExecutionService(browser_runner=runner)
+    snapshot_text = '- textbox "Title" [ref=e1]\n- button "Submit" [ref=e2]'
+    dom_probe = {
+        "inputs": [
+            {
+                "target_kind": "input",
+                "action_ref": "e1",
+                "readback_selector": "#chat-textarea",
+                "element_kind": "textarea",
+                "scope_anchor": "form",
+                "score": 10,
+                "reason": "primary form field",
+            }
+        ],
+        "targets": [
+            {
+                "target_kind": "button",
+                "action_ref": "e2",
+                "readback_selector": "button.submit",
+                "element_kind": "button",
+                "scope_anchor": "form",
+                "score": 9,
+                "reason": "submit button",
+                "metadata": {"target_slots": ["submit_button"]},
+            }
+        ],
+    }
+    initial_observation = observe_browser_page(
+        snapshot_text=snapshot_text,
+        page_url="https://example.com/form",
+        page_title="Generic Form",
+        dom_probe=dom_probe,
+    )
+    owner = build_guided_browser_surface_owner(
+        formal_session_id="profession-session-1",
+        surface_thread_id="form-page",
+        intent=GuidedBrowserSurfaceIntent(
+            desired_text="launch listing draft",
+            request_submit=True,
+        ),
+    )
+
+    loop_result = service.run_step_loop(
+        session_id="browser-session-1",
+        page_id="form-page",
+        owner=owner,
+        initial_observation=initial_observation,
+        snapshot_text=snapshot_text,
+        page_url="https://example.com/form",
+        page_title="Generic Form",
+        dom_probe=dom_probe,
+        max_steps=3,
+    )
+
+    assert [step.intent_kind for step in loop_result.steps] == ["type", "click"]
+    click_call = next(call for call in runner.calls if call["action"] == "click")
+    assert click_call["ref"] == "e2"
+
+
+def test_browser_guided_owner_stops_on_login_wall() -> None:
+    runner = _ServiceRunner()
+    service = BrowserSurfaceExecutionService(browser_runner=runner)
+    initial_observation = observe_browser_page(
+        snapshot_text='- heading "请登录后继续"\n- button "登录" [ref=e1]',
+        page_url="https://example.com/login",
+        page_title="Login required",
+        dom_probe={
+            "page": {
+                "bodyText": "请登录后继续\n当前页面需要登录才能继续。",
+                "href": "https://example.com/login",
+                "title": "Login required",
+            }
+        },
+    )
+    owner = build_guided_browser_surface_owner(
+        formal_session_id="profession-session-1",
+        surface_thread_id="login-page",
+        intent=GuidedBrowserSurfaceIntent(
+            desired_text="should never type",
+            request_submit=True,
+        ),
+    )
+
+    loop_result = service.run_step_loop(
+        session_id="browser-session-1",
+        page_id="login-page",
+        owner=owner,
+        initial_observation=initial_observation,
+        max_steps=2,
+    )
+
+    assert loop_result.steps == []
+    assert loop_result.stop_reason == "planner-stop"
