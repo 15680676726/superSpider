@@ -228,7 +228,9 @@ git commit -m "docs: record browser substrate generic cutover progress"
 **Files:**
 - Future follow-up only
 
-- [ ] **Step 1: Add profession-agent step loop owner**
-- [ ] **Step 2: Add browser substrate evidence materialization**
-- [ ] **Step 3: Mirror the same contract into document/desktop**
+- [x] **Step 1: Add profession-agent step loop owner**
+- [x] **Step 2: Add browser substrate evidence materialization**
+- [x] **Step 3: Mirror the same contract into document/desktop**
 - [ ] **Step 4: Run L3/L4 long-chain acceptance**
+  - `L3` 已补到 logged-in / waiting-login live smoke
+  - `L4` long soak 仍未完成

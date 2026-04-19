@@ -35,7 +35,9 @@ from .model_factory import create_model_and_formatter
 from .prompt import build_system_prompt_from_working_dir
 from .tools import (
     browser_use,
+    desktop_actuation,
     desktop_screenshot,
+    document_surface,
     edit_file,
     execute_shell_command,
     get_current_time,
@@ -77,6 +79,8 @@ _BUILTIN_TOOL_FUNCTIONS = (
     write_file,
     edit_file,
     browser_use,
+    document_surface,
+    desktop_actuation,
     desktop_screenshot,
     send_file_to_user,
     get_current_time,

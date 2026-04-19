@@ -12,7 +12,9 @@ from ..agents.tools import (
     bind_file_evidence_sink,
     bind_shell_evidence_sink,
     browser_use,
+    desktop_actuation,
     desktop_screenshot,
+    document_surface,
     edit_file,
     execute_shell_command,
     get_current_time,
@@ -67,7 +69,9 @@ if TYPE_CHECKING:
 
 _TOOL_EXECUTORS = {
     "tool:browser_use": browser_use,
+    "tool:desktop_actuation": desktop_actuation,
     "tool:desktop_screenshot": desktop_screenshot,
+    "tool:document_surface": document_surface,
     "tool:edit_file": edit_file,
     "tool:execute_shell_command": execute_shell_command,
     "tool:get_current_time": get_current_time,

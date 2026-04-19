@@ -1746,3 +1746,71 @@ def test_query_execution_service_preserves_verified_browser_desktop_tools_for_ex
     }
     assert system_capability_ids == {"system:dispatch_query"}
     assert desktop_actuation_available is True
+
+
+def test_query_execution_service_preserves_document_and_desktop_frontdoors_for_execution_core() -> None:
+    def _mount(capability_id: str, source_kind: str) -> SimpleNamespace:
+        return SimpleNamespace(id=capability_id, source_kind=source_kind)
+
+    service = KernelQueryExecutionService(
+        session_backend=object(),
+        capability_service=SimpleNamespace(
+            list_accessible_capabilities=lambda *, agent_id, enabled_only=True: [
+                _mount("tool:document_surface", "tool"),
+                _mount("tool:desktop_actuation", "tool"),
+                _mount("tool:desktop_screenshot", "tool"),
+                _mount("tool:read_file", "tool"),
+                _mount("system:dispatch_query", "system"),
+            ],
+        ),
+    )
+
+    (
+        tool_capability_ids,
+        _skill_names,
+        _mcp_client_keys,
+        system_capability_ids,
+        desktop_actuation_available,
+    ) = service._prune_execution_core_control_capability_context(  # pylint: disable=protected-access
+        request=SimpleNamespace(
+            industry_instance_id="industry-v1-ops",
+            industry_role_id="execution-core",
+            _copaw_main_brain_runtime_context={
+                "environment": {
+                    "ref": "desktop:session-1",
+                    "kind": "desktop",
+                    "session_id": "session:console:desktop-session-1",
+                    "resume_ready": True,
+                    "live_session_bound": True,
+                    "surface_contracts": {
+                        "browser_site_contract_status": "verified-writer",
+                        "desktop_app_contract_status": "verified-writer",
+                    },
+                },
+            },
+        ),
+        owner_agent_id="ops-agent",
+        agent_profile=SimpleNamespace(
+            industry_instance_id="industry-v1-ops",
+            industry_role_id="execution-core",
+        ),
+        tool_capability_ids={
+            "tool:document_surface",
+            "tool:desktop_actuation",
+            "tool:desktop_screenshot",
+            "tool:read_file",
+        },
+        skill_names=set(),
+        mcp_client_keys=[],
+        system_capability_ids={"system:dispatch_query"},
+        desktop_actuation_available=True,
+    )
+
+    assert tool_capability_ids == {
+        "tool:document_surface",
+        "tool:desktop_actuation",
+        "tool:desktop_screenshot",
+        "tool:read_file",
+    }
+    assert system_capability_ids == {"system:dispatch_query"}
+    assert desktop_actuation_available is True

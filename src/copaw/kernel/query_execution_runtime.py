@@ -53,6 +53,7 @@ def stream_printing_messages(*args, **kwargs):
 
 
 _EXECUTION_CORE_ALLOWED_LOCAL_TOOL_CAPABILITY_IDS = {
+    "tool:document_surface",
     "tool:edit_file",
     "tool:execute_shell_command",
     "tool:get_current_time",
@@ -265,7 +266,9 @@ def _runtime_entropy_failure_source(
 
 _QUERY_TOOL_CAPABILITY_IDS_BY_NAME = {
     "browser_use": "tool:browser_use",
+    "desktop_actuation": "tool:desktop_actuation",
     "desktop_screenshot": "tool:desktop_screenshot",
+    "document_surface": "tool:document_surface",
     "edit_file": "tool:edit_file",
     "execute_shell_command": "tool:execute_shell_command",
     "get_current_time": "tool:get_current_time",
@@ -2765,7 +2768,9 @@ class _QueryExecutionRuntimeMixin(
         if browser_writer_ready:
             allowed_tool_capability_ids.add("tool:browser_use")
         if desktop_writer_ready:
-            allowed_tool_capability_ids.add("tool:desktop_screenshot")
+            allowed_tool_capability_ids.update(
+                {"tool:desktop_actuation", "tool:desktop_screenshot"},
+            )
         filtered_tool_capability_ids = {
             capability_id
             for capability_id in (tool_capability_ids or set())

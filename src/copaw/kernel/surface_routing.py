@@ -298,7 +298,7 @@ def _surface_supported_by_capabilities(
 ) -> bool:
     if surface == "file":
         return any(
-            capability_id in {"tool:read_file", "tool:write_file", "tool:edit_file"}
+            capability_id in {"tool:read_file", "tool:write_file", "tool:edit_file", "tool:document_surface"}
             for capability_id in capability_ids
         ) or any(hint in mount_blob for hint in (" file ", " file-view ", " document ", " folder "))
     if surface == "desktop":

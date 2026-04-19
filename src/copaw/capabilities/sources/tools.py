@@ -5,7 +5,9 @@ from collections.abc import Callable
 
 from ...agents.tools import (
     browser_use,
+    desktop_actuation,
     desktop_screenshot,
+    document_surface,
     edit_file,
     execute_shell_command,
     get_current_time,
@@ -105,6 +107,44 @@ def list_tool_capabilities() -> list[CapabilityMount]:
                 "evidence_description": "记录浏览器操作和截图等产物",
                 "replay_support": True,
                 "tags": ["browser", "network", "external"],
+                "metadata": {
+                    "execution_policy": {
+                        "action_mode": "write",
+                        "evidence_owner": "tool-bridge",
+                    },
+                },
+            },
+        ),
+        (
+            document_surface,
+            {
+                "risk_level": "guarded",
+                "risk_description": "Operate a document thread through observe/write/replace or guided document flow",
+                "environment_requirements": ["workspace", "document-view"],
+                "environment_description": "Requires a local document path or mounted document workspace",
+                "evidence_contract": ["file-read", "file-write"],
+                "evidence_description": "Records document observation and document mutation results",
+                "replay_support": True,
+                "tags": ["document", "workspace", "guided-surface"],
+                "metadata": {
+                    "execution_policy": {
+                        "action_mode": "write",
+                        "evidence_owner": "tool-bridge",
+                    },
+                },
+            },
+        ),
+        (
+            desktop_actuation,
+            {
+                "risk_level": "guarded",
+                "risk_description": "Operate desktop windows through observe/focus/type/click or guided desktop flow",
+                "environment_requirements": ["desktop"],
+                "environment_description": "Requires a live Windows desktop host to observe and act on windows",
+                "evidence_contract": ["call-record"],
+                "evidence_description": "Records desktop actuation requests and returned verification payloads",
+                "replay_support": True,
+                "tags": ["desktop", "windows", "guided-surface"],
                 "metadata": {
                     "execution_policy": {
                         "action_mode": "write",

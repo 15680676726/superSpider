@@ -29,7 +29,9 @@ from .evidence_runtime import (
 from .shell import execute_shell_command
 from .send_file import send_file_to_user
 from .browser_control import browser_use
+from .desktop_actuation import desktop_actuation
 from .desktop_screenshot import desktop_screenshot
+from .document_surface import document_surface
 from .memory_search import create_memory_search_tool
 from .get_current_time import get_current_time
 
@@ -55,7 +57,9 @@ __all__ = [
     "glob_search",
     "send_file_to_user",
     "desktop_screenshot",
+    "desktop_actuation",
     "browser_use",
+    "document_surface",
     "create_memory_search_tool",
     "get_current_time",
 ]

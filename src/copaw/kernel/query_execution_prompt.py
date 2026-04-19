@@ -1482,6 +1482,10 @@ class _QueryExecutionPromptMixin:
             lines.append(
                 "- Browser actuation is available through the mounted browser capability.",
             )
+        if "tool:document_surface" in capability_ids:
+            lines.append(
+                "- Document surface actuation is available; prefer reading the current document thread, then replace or write from the same document path instead of treating each edit as a fresh task.",
+            )
         if desktop_actuation_available:
             lines.append(
                 "- Desktop actuation is mounted in this session; use the available desktop/window tools for launch, focus, click, typing, and key input when needed.",

@@ -8,7 +8,9 @@ from typing import Any, Callable, Literal
 
 from ..agents.tools import (
     browser_use,
+    desktop_actuation,
     desktop_screenshot,
+    document_surface,
     edit_file,
     execute_shell_command,
     get_current_time,
@@ -202,6 +204,20 @@ TOOL_EXECUTION_CONTRACTS: dict[str, ToolExecutionContract] = {
     "tool:browser_use": ToolExecutionContract(
         capability_id="tool:browser_use",
         executor=browser_use,
+        action_mode="write",
+        concurrency_class="serial-write",
+        preflight_policy="inline",
+    ),
+    "tool:document_surface": ToolExecutionContract(
+        capability_id="tool:document_surface",
+        executor=document_surface,
+        action_mode="write",
+        concurrency_class="serial-write",
+        preflight_policy="inline",
+    ),
+    "tool:desktop_actuation": ToolExecutionContract(
+        capability_id="tool:desktop_actuation",
+        executor=desktop_actuation,
         action_mode="write",
         concurrency_class="serial-write",
         preflight_policy="inline",

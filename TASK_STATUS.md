@@ -966,6 +966,8 @@
         - `python -m pytest tests/app/test_runtime_center_research_surface.py tests/app/test_research_session_api.py -q` -> `7 passed`
         - `python -m pytest tests/app/test_source_collection_frontdoor_service.py tests/environments/test_browser_surface_execution.py tests/environments/test_document_desktop_surface_execution.py tests/research/test_chat_continuation_policy.py tests/research/test_chat_continuation_owner.py tests/research/test_baidu_page_contract.py tests/research/test_baidu_page_research_service.py tests/research/test_research_knowledge_ingestion.py tests/research/test_research_report_writeback.py tests/kernel/test_main_brain_research_followup.py tests/kernel/test_tool_bridge.py -q` -> `108 passed`
         - `python -m pytest tests/app/test_source_collection_frontdoor_service.py tests/environments/test_browser_surface_execution.py tests/environments/test_document_desktop_surface_execution.py tests/research/test_chat_continuation_policy.py tests/research/test_chat_continuation_owner.py tests/research/test_baidu_page_research_service.py tests/kernel/test_tool_bridge.py tests/kernel/test_query_execution_runtime.py tests/agents/test_browser_tool_evidence.py tests/kernel/query_execution_environment_parts/confirmations.py -q` -> `177 passed`
+        - `python -m pytest tests/agents/test_surface_tool_frontdoors.py tests/agents/test_react_agent_tool_compat.py tests/environments/test_document_desktop_surface_execution.py tests/kernel/query_execution_environment_parts/confirmations.py tests/kernel/test_query_execution_runtime.py -q` -> `69 passed`
+        - `python -m pytest tests/agents/test_browser_tool_evidence.py tests/agents/test_surface_tool_frontdoors.py tests/agents/test_react_agent_tool_compat.py tests/environments/test_document_desktop_surface_execution.py tests/kernel/query_execution_environment_parts/confirmations.py tests/kernel/test_query_execution_runtime.py -q` -> `106 passed`
         - `python -m pytest tests/app/test_research_session_live_contract.py -q` -> `2 passed, 1 skipped`
         - `python -m pytest tests/research/test_baidu_page_research_service.py tests/kernel/test_main_brain_research_followup.py tests/app/test_research_session_live_contract.py -q` -> `39 passed, 1 skipped`
         - `python -m pytest tests/kernel/test_main_brain_chat_service.py tests/app/test_source_collection_frontdoor_service.py tests/app/test_runtime_center_research_surface.py tests/app/test_research_session_api.py -q` -> `66 passed`
@@ -1002,20 +1004,28 @@
         - 三类 surface 现在都不只接受裸 `planner callable`，也有可复用的 guided owner builder，开始形成“职业 agent 提意图，surface 底座执行通用连续动作”的共享高层基线
       - `2026-04-19` 这条 guided 基线已经不再只停在环境测试：
         - `browser_use` 前门现已正式支持 `action="guided_surface"`
-        - 当前会先读页面快照和正文，再走 shared guided owner 决策 `type -> submit`
+        - `document_surface` 前门现已正式支持 `observe / write_document / replace_text / guided_surface`
+        - `desktop_actuation` 前门现已正式支持 `observe / launch / focus / click / type / keys / control-dialog action / guided_surface`
+        - `CoPawAgent` built-in toolkit、tool capability catalog、tool execution contract、query-runtime tool mapping 现已同时把 browser / document / desktop 三条 frontdoor 接进正式主链
+        - browser 当前会先读页面快照和正文，再走 shared guided owner 决策 `type -> submit`
+        - document 当前会先读同一 document thread，再在同一路径上决定 `replace_text / write_document`
+        - desktop 当前会先看同一窗口 thread，再按 shared guided owner 决策 `focus_window -> type_text`
         - 遇到 `login-required` 会直接停住并回正式 `guardrail`，而不是盲打
-        - query prompt 也已明确提示：普通 chat/form 页优先走 guided surface，不要一上来就手写 selector chase
+        - query prompt 也已明确提示：普通 chat/form 页优先走 guided surface，不要一上来就手写 selector chase；document thread 也优先沿同一路径继续写
       - heavy research 现在不再只有“未登录 fail-closed”这半边 live 真相；已经同时证明了：
         - 未登录时会稳定落到 `waiting-login`
         - 显式共享已登录 storage state 时，主脑 / cron 两条 heavy live 链都能真实 completed
-      - 但这还不等于“任意职业 agent 已完全自己看页面并自由决策多轮动作链”：当前完成的是 `research chat surface` 这一个 profession family 的共享 continuation owner，不是所有职业/所有页面的统一高层 planner
-      - 当前新补上的 guided owner 也还只是 shared high-level planner 的第一版，不是最终态：
-        - browser 目前覆盖的是通用 form/chat 一类基础动作，而且 Enter fallback 已收紧为“必须有 submit cue”，不再只因页面上有输入框就盲提交
-        - browser 的主线前门目前也只正式接到了 `browser_use.guided_surface` 这一类连续操作，不是所有 browser 动作都自动走 shared planner
-        - document 目前覆盖的是通用写入/替换
-        - desktop 目前覆盖的是“能解析目标窗口时先聚焦再输入”，不是完整桌面任务规划器
-        - 更复杂的多区块页面理解、分页/上传/结果筛选、跨窗口上下文切换，仍需继续补
-      - 当前因此只能诚实声明：这条线已过 `L1/L2`，并新增了登录门槛 `L3` smoke；但还没有完整 `L4` soak，也不能把“research chat 共享 continuation owner 已接上”混写成“通用页面理解 + 任意职业连续多轮自主追问已完成”
+      - 之前“browser 有正式 guided frontdoor，但 document / desktop 还只是 shared substrate + guided owner 基线，没接成同等级主线”这条真缺口，现已收掉：
+        - 三类 surface 现在都各自有模型可直接调用的正式 frontdoor
+        - 三类 frontdoor 现在都挂在同一套 `ProfessionSurfaceOperationOwner / Checkpoint` 合同上
+        - 这意味着“职业 agent 决策、surface frontdoor 执行、底座观察/回读”这条边界已不再只在 browser 成立
+      - 但这轮也不能夸成“所有复杂 surface 任务都已终态”：
+        - 当前是三类 surface 都有正式主线 frontdoor，不再缺入口
+        - 但 shared high-level planner 仍是第一版，复杂多区块页面理解、分页/上传/结果筛选、跨窗口上下文切换，还要继续补强
+      - 当前因此只能诚实声明：
+        - “document / desktop 没接成正式主线 frontdoor”这条缺口已完成
+        - 这条 frontdoor 升级线已过 `L1/L2`
+        - document / desktop 这轮没有新增 `L3/L4` live/soak，不能混写成“所有 surface 的真实长链都已验完”
 
 ### 3.3.1 `Symbiotic Host Runtime V1` 当前落地边界
 
