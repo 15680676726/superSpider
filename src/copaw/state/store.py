@@ -343,6 +343,7 @@ CREATE TABLE IF NOT EXISTS runtime_frames (
     capabilities_summary TEXT,
     pending_decisions_summary TEXT,
     budget_summary TEXT,
+    surface_projection_json TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL,
     FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
 );
@@ -2334,6 +2335,12 @@ _ADDITIVE_SCHEMA_COLUMNS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = 
             ("recommendation", "TEXT"),
             ("needs_followup", "INTEGER NOT NULL DEFAULT 0"),
             ("followup_reason", "TEXT"),
+        ),
+    ),
+    (
+        "runtime_frames",
+        (
+            ("surface_projection_json", "TEXT NOT NULL DEFAULT '{}'"),
         ),
     ),
     (

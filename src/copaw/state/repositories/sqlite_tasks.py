@@ -423,7 +423,7 @@ class SqliteRuntimeFrameRepository(BaseRuntimeFrameRepository):
                 "SELECT * FROM runtime_frames WHERE id = ?",
                 (frame_id,),
             ).fetchone()
-        return _model_from_row(RuntimeFrameRecord, row)
+        return _runtime_frame_from_row(row)
 
     def list_frames(
         self,
@@ -442,10 +442,11 @@ class SqliteRuntimeFrameRepository(BaseRuntimeFrameRepository):
 
         with self._store.connection() as conn:
             rows = conn.execute(query, params).fetchall()
-        return [RuntimeFrameRecord.model_validate(dict(row)) for row in rows]
+        return [item for item in (_runtime_frame_from_row(row) for row in rows) if item is not None]
 
     def append_frame(self, frame: RuntimeFrameRecord) -> RuntimeFrameRecord:
         payload = _payload(frame)
+        payload["surface_projection_json"] = _encode_json(frame.surface_projection)
         with self._store.connection() as conn:
             conn.execute(
                 """
@@ -462,6 +463,7 @@ class SqliteRuntimeFrameRepository(BaseRuntimeFrameRepository):
                     capabilities_summary,
                     pending_decisions_summary,
                     budget_summary,
+                    surface_projection_json,
                     created_at
                 ) VALUES (
                     :id,
@@ -476,6 +478,7 @@ class SqliteRuntimeFrameRepository(BaseRuntimeFrameRepository):
                     :capabilities_summary,
                     :pending_decisions_summary,
                     :budget_summary,
+                    :surface_projection_json,
                     :created_at
                 )
                 """,
@@ -490,6 +493,14 @@ class SqliteRuntimeFrameRepository(BaseRuntimeFrameRepository):
                 (frame_id,),
             )
         return cursor.rowcount > 0
+
+
+def _runtime_frame_from_row(row) -> RuntimeFrameRecord | None:
+    payload = dict(row) if row is not None else None
+    if payload is None:
+        return None
+    payload["surface_projection"] = _decode_any_json(payload.pop("surface_projection_json", None)) or {}
+    return RuntimeFrameRecord.model_validate(payload)
 
 
 class SqliteScheduleRepository(BaseScheduleRepository):

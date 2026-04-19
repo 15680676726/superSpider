@@ -5,6 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from ..graph_models import SurfaceGraphSnapshot
 from ..owner import ProfessionSurfaceOperationCheckpoint
 
 BrowserTargetKind = Literal["input", "button", "toggle", "link", "menu", "tab", "upload"]
@@ -44,6 +45,7 @@ class BrowserObservation(BaseModel):
     login_state: str = ""
     blockers: list[str] = Field(default_factory=list)
     page_summary: BrowserPageSummary = Field(default_factory=BrowserPageSummary)
+    surface_graph: SurfaceGraphSnapshot | None = None
 
 
 class BrowserExecutionStep(BaseModel):
@@ -61,6 +63,8 @@ class BrowserExecutionResult(BaseModel):
     resolved_target: BrowserTargetCandidate | None = None
     before_observation: BrowserObservation | None = None
     after_observation: BrowserObservation | None = None
+    before_graph: SurfaceGraphSnapshot | None = None
+    after_graph: SurfaceGraphSnapshot | None = None
     readback: dict[str, str] = Field(default_factory=dict)
     verification_passed: bool = False
     blocker_kind: str = ""

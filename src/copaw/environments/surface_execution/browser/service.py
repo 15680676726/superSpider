@@ -6,6 +6,7 @@ import logging
 
 from ....agents.tools.evidence_runtime import get_browser_evidence_sink
 from ..owner import ProfessionSurfaceOperationOwner, ProfessionSurfaceOperationPlan
+from ..probe_engine import collect_surface_discoveries, decide_surface_probe
 from .contracts import BrowserExecutionLoopResult, BrowserExecutionResult
 from .observer import observe_browser_page
 from .profiles import (
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 class BrowserSurfaceExecutionService:
     def __init__(self, *, browser_runner) -> None:
         self._browser_runner = browser_runner
+        self._seen_surface_discoveries: set[tuple[str, str]] = set()
 
     def capture_page_context(
         self,
@@ -141,9 +143,22 @@ class BrowserSurfaceExecutionService:
                 dom_probe=dom_probe,
                 page_profile=page_profile,
             )
+        probe_evidence_ids: list[str] = []
         expected_text = str((success_assertion or {}).get("normalized_text") or "")
         expected_toggle_enabled = str((success_assertion or {}).get("toggle_enabled") or "").strip().lower()
-        target = None
+        target = None if intent_kind == "press" else resolve_browser_target(before_observation, target_slot=target_slot)
+        before_observation, probe_evidence_ids, target = self._maybe_probe_before_action(
+            session_id=session_id,
+            page_id=page_id,
+            before_observation=before_observation,
+            page_url=page_url,
+            page_title=page_title,
+            dom_probe=dom_probe,
+            page_profile=page_profile,
+            target_slot=target_slot,
+            intent_kind=intent_kind,
+            target=target,
+        )
         readback: dict[str, str] = {}
         verification_kind = "readback"
         if intent_kind == "press":
@@ -155,7 +170,6 @@ class BrowserSurfaceExecutionService:
                 key=str(payload.get("key") or "Enter"),
             )
         else:
-            target = resolve_browser_target(before_observation, target_slot=target_slot)
             if target is None:
                 evidence_ids = self._emit_browser_evidence(
                     action=intent_kind,
@@ -185,9 +199,11 @@ class BrowserSurfaceExecutionService:
                     target_slot=target_slot,
                     before_observation=before_observation,
                     after_observation=before_observation,
+                    before_graph=before_observation.surface_graph,
+                    after_graph=before_observation.surface_graph,
                     verification_passed=False,
                     blocker_kind="target-unresolved",
-                    evidence_ids=evidence_ids,
+                    evidence_ids=[*probe_evidence_ids, *evidence_ids],
                 )
             action_payload = {
                 "action": "type" if intent_kind == "type" else "click",
@@ -260,6 +276,14 @@ class BrowserSurfaceExecutionService:
                 },
             },
         )
+        discovery_evidence_ids = self._emit_surface_discovery_evidence(
+            surface_thread_id=page_id,
+            page_id=page_id,
+            url=after_observation.page_url or before_observation.page_url or page_url,
+            before_graph=before_observation.surface_graph,
+            after_graph=after_observation.surface_graph,
+            candidate_capability=target_slot or intent_kind,
+        )
         return BrowserExecutionResult(
             status="succeeded" if verification_passed else "failed",
             intent_kind=intent_kind,
@@ -267,9 +291,11 @@ class BrowserSurfaceExecutionService:
             resolved_target=target,
             before_observation=before_observation,
             after_observation=after_observation,
+            before_graph=before_observation.surface_graph,
+            after_graph=after_observation.surface_graph,
             readback=readback,
             verification_passed=verification_passed,
-            evidence_ids=evidence_ids,
+            evidence_ids=[*probe_evidence_ids, *evidence_ids, *discovery_evidence_ids],
         )
 
     @staticmethod
@@ -417,6 +443,125 @@ class BrowserSurfaceExecutionService:
                 exc_info=True,
             )
             return []
+
+    def _maybe_probe_before_action(
+        self,
+        *,
+        session_id: str,
+        page_id: str,
+        before_observation,
+        page_url: str,
+        page_title: str,
+        dom_probe: dict[str, object] | None,
+        page_profile: BrowserPageProfile | None,
+        target_slot: str,
+        intent_kind: str,
+        target,
+    ):
+        decision = decide_surface_probe(
+            before_observation.surface_graph,
+            intent_kind=intent_kind,
+            target_slot=target_slot,
+            target_resolved=(intent_kind == "press" or target is not None),
+        )
+        if decision is None or page_profile is None:
+            return before_observation, [], target
+        probed_observation = self.observe_page(
+            session_id=session_id,
+            page_id=page_id,
+            snapshot_text=before_observation.snapshot_text,
+            page_url=page_url,
+            page_title=page_title,
+            dom_probe=dom_probe,
+            page_profile=page_profile,
+        )
+        refreshed_target = (
+            target
+            if intent_kind == "press"
+            else resolve_browser_target(probed_observation, target_slot=target_slot)
+        )
+        old_confidence = float(getattr(before_observation.surface_graph, "confidence", 0.0) or 0.0)
+        new_confidence = float(getattr(probed_observation.surface_graph, "confidence", 0.0) or 0.0)
+        evidence_ids = self._emit_browser_evidence(
+            action="probe",
+            page_id=page_id,
+            status="success",
+            result_summary=f"Browser probe {decision.probe_action} refreshed current surface state",
+            url=probed_observation.page_url or before_observation.page_url or page_url,
+            metadata={
+                "evidence_kind": "surface-probe",
+                "probe_action": decision.probe_action,
+                "target_region": decision.target_region,
+                "reason": decision.reason,
+                "intent_kind": intent_kind,
+                "target_slot": target_slot,
+                "before_graph": (
+                    before_observation.surface_graph.model_dump(mode="json")
+                    if before_observation.surface_graph is not None
+                    else None
+                ),
+                "after_graph": (
+                    probed_observation.surface_graph.model_dump(mode="json")
+                    if probed_observation.surface_graph is not None
+                    else None
+                ),
+                "resolved_uncertainty": (
+                    new_confidence > old_confidence
+                    or (intent_kind != "press" and refreshed_target is not None)
+                ),
+            },
+        )
+        discovery_ids = self._emit_surface_discovery_evidence(
+            surface_thread_id=page_id,
+            page_id=page_id,
+            url=probed_observation.page_url or before_observation.page_url or page_url,
+            before_graph=before_observation.surface_graph,
+            after_graph=probed_observation.surface_graph,
+            candidate_capability=target_slot or intent_kind,
+        )
+        return probed_observation, [*evidence_ids, *discovery_ids], refreshed_target
+
+    def _emit_surface_discovery_evidence(
+        self,
+        *,
+        surface_thread_id: str,
+        page_id: str,
+        url: str,
+        before_graph,
+        after_graph,
+        candidate_capability: str,
+    ) -> list[str]:
+        evidence_ids: list[str] = []
+        discoveries = collect_surface_discoveries(
+            before_graph,
+            after_graph,
+            candidate_capability=candidate_capability,
+        )
+        for discovery in discoveries:
+            seen_key = (surface_thread_id, discovery.discovery_fingerprint)
+            if seen_key in self._seen_surface_discoveries:
+                continue
+            self._seen_surface_discoveries.add(seen_key)
+            evidence_ids.extend(
+                self._emit_browser_evidence(
+                    action="discovery",
+                    page_id=page_id,
+                    status="success",
+                    result_summary=f"Discovered {discovery.discovery_kind} on current browser surface",
+                    url=url,
+                    metadata={
+                        "evidence_kind": "surface-discovery",
+                        "discovery_kind": discovery.discovery_kind,
+                        "discovery_fingerprint": discovery.discovery_fingerprint,
+                        "region_ref": discovery.region_ref,
+                        "candidate_capability": discovery.candidate_capability,
+                        "node_id": discovery.node_id,
+                        "node_kind": discovery.node_kind,
+                        "label": discovery.label,
+                    },
+                )
+            )
+        return evidence_ids
 
     @staticmethod
     def _extract_evidence_ids(result: object) -> list[str]:

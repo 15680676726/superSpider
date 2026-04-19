@@ -165,6 +165,7 @@ _RUNTIME_FRAME_COLUMNS = (
     "capabilities_summary",
     "pending_decisions_summary",
     "budget_summary",
+    "surface_projection_json",
     "created_at",
 )
 _SCHEDULE_COLUMNS = (

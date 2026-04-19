@@ -148,6 +148,7 @@ def test_sqlite_state_store_initialize_upgrades_legacy_tables_before_schema_inde
             "cycle_id",
             "goal_class",
         }.issubset(_column_names(conn, "goals"))
+        assert {"surface_projection_json"}.issubset(_column_names(conn, "runtime_frames"))
         assert {
             "industry_instance_id",
             "assignment_id",
@@ -277,6 +278,14 @@ def test_sqlite_state_store_initialize_upgrades_legacy_tables_before_schema_inde
             "idx_research_rounds_session_round_index",
         }.issubset(_index_names(conn))
         assert conn.execute("PRAGMA user_version").fetchone()[0] == STATE_SCHEMA_VERSION
+
+
+def test_runtime_frame_surface_projection_schema_column_exists(tmp_path) -> None:
+    store = SQLiteStateStore(tmp_path / "state.db")
+    store.initialize()
+
+    with sqlite3.connect(store.path) as conn:
+        assert "surface_projection_json" in _column_names(conn, "runtime_frames")
 
 
 def test_sqlite_state_store_initializes_buddy_contract_schema_without_clarify_columns(

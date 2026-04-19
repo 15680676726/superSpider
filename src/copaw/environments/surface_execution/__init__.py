@@ -1,6 +1,16 @@
 # -*- coding: utf-8 -*-
 """Shared surface execution foundations."""
 
+from .graph_compiler import (
+    compile_browser_observation_to_graph,
+    compile_desktop_observation_to_graph,
+    compile_document_observation_to_graph,
+)
+from .graph_models import (
+    SurfaceGraphEdge,
+    SurfaceGraphNode,
+    SurfaceGraphSnapshot,
+)
 from .owner import (
     GuidedBrowserSurfaceIntent,
     GuidedDesktopSurfaceIntent,
@@ -35,6 +45,12 @@ __all__ = [
     "GuidedBrowserSurfaceIntent",
     "GuidedDesktopSurfaceIntent",
     "GuidedDocumentSurfaceIntent",
+    "SurfaceGraphEdge",
+    "SurfaceGraphNode",
+    "SurfaceGraphSnapshot",
+    "compile_browser_observation_to_graph",
+    "compile_desktop_observation_to_graph",
+    "compile_document_observation_to_graph",
     "ProfessionSurfaceOperationCheckpoint",
     "ProfessionSurfaceOperationOwner",
     "ProfessionSurfaceOperationPlan",

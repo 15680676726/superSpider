@@ -9,6 +9,7 @@ from .models import EvidenceRecord
 def serialize_evidence_record(record: EvidenceRecord) -> dict[str, Any]:
     return {
         "id": record.id,
+        "kind": record.kind,
         "task_id": record.task_id,
         "actor_ref": record.actor_ref,
         "environment_ref": record.environment_ref,

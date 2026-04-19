@@ -213,6 +213,48 @@ def test_sqlite_repositories_crud_round_trip(tmp_path) -> None:
     assert goal_repo.get_goal(goal.id) is None
 
 
+def test_runtime_frame_surface_projection_round_trip(tmp_path) -> None:
+    store = SQLiteStateStore(tmp_path / "state.db")
+    task_repo = SqliteTaskRepository(store)
+    frame_repo = SqliteRuntimeFrameRepository(store)
+
+    task = TaskRecord(
+        goal_id="goal-bootstrap",
+        title="Track surface runtime frame",
+        summary="Persist the latest projected surface graph.",
+        task_type="phase1-refactor",
+    )
+    task_repo.upsert_task(task)
+
+    frame = RuntimeFrameRecord(
+        task_id=task.id,
+        goal_summary="Surface runtime projection",
+        current_phase="surface-execution",
+        current_risk_level="auto",
+        environment_summary="browser session",
+        evidence_summary="surface graph captured",
+        surface_projection={
+            "surface_kind": "browser",
+            "regions": [{"node_id": "region:browser:root"}],
+            "controls": [{"node_id": "control:browser:e1"}],
+            "results": [{"node_id": "result:browser:page-summary"}],
+            "blockers": [],
+            "entities": [],
+            "relations": [{"edge_id": "edge:browser:root:0"}],
+            "confidence": 0.9,
+        },
+    )
+    frame_repo.append_frame(frame)
+
+    stored = frame_repo.get_frame(frame.id)
+    assert stored is not None
+    assert stored.surface_projection["surface_kind"] == "browser"
+    assert stored.surface_projection["controls"][0]["node_id"] == "control:browser:e1"
+
+    listed = frame_repo.list_frames(task.id)
+    assert listed[0].surface_projection["results"][0]["node_id"] == "result:browser:page-summary"
+
+
 def test_sqlite_agent_runtime_repository_recovers_after_live_state_db_is_deleted(
     tmp_path,
 ) -> None:

@@ -169,6 +169,7 @@ class RuntimeFrameRecord(CreatedRecord):
     capabilities_summary: str | None = None
     pending_decisions_summary: str | None = None
     budget_summary: str | None = None
+    surface_projection: dict[str, Any] = Field(default_factory=dict)
 
 
 class ScheduleRecord(UpdatedRecord):

@@ -5,6 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from ..graph_models import SurfaceGraphSnapshot
 from ..owner import ProfessionSurfaceOperationCheckpoint
 
 DocumentExecutionStatus = Literal["succeeded", "blocked", "failed"]
@@ -17,6 +18,7 @@ class DocumentObservation(BaseModel):
     revision_token: str = ""
     metadata: dict[str, object] = Field(default_factory=dict)
     blockers: list[str] = Field(default_factory=list)
+    surface_graph: SurfaceGraphSnapshot | None = None
 
 
 class DocumentExecutionStep(BaseModel):
@@ -31,6 +33,8 @@ class DocumentExecutionResult(BaseModel):
     intent_kind: str = ""
     before_observation: DocumentObservation | None = None
     after_observation: DocumentObservation | None = None
+    before_graph: SurfaceGraphSnapshot | None = None
+    after_graph: SurfaceGraphSnapshot | None = None
     readback: dict[str, str] = Field(default_factory=dict)
     verification_passed: bool = False
     blocker_kind: str = ""

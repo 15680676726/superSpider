@@ -87,6 +87,7 @@ class EvidenceLedger:
                     """
                     INSERT INTO evidence_records (
                         id,
+                        kind,
                         task_id,
                         actor_ref,
                         environment_ref,
@@ -99,10 +100,11 @@ class EvidenceLedger:
                         input_digest,
                         output_digest,
                         metadata_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         persisted_record.id,
+                        persisted_record.kind,
                         persisted_record.task_id,
                         persisted_record.actor_ref,
                         persisted_record.environment_ref,
@@ -191,6 +193,7 @@ class EvidenceLedger:
         return [
             EvidenceRecord(
                 id=row["id"],
+                kind=_row_kind(row),
                 task_id=row["task_id"],
                 actor_ref=row["actor_ref"],
                 environment_ref=row["environment_ref"],
@@ -229,6 +232,7 @@ class EvidenceLedger:
         return [
             EvidenceRecord(
                 id=row["id"],
+                kind=_row_kind(row),
                 task_id=row["task_id"],
                 actor_ref=row["actor_ref"],
                 environment_ref=row["environment_ref"],
@@ -296,6 +300,7 @@ class EvidenceLedger:
         return [
             EvidenceRecord(
                 id=row["id"],
+                kind=_row_kind(row),
                 task_id=row["task_id"],
                 actor_ref=row["actor_ref"],
                 environment_ref=row["environment_ref"],
@@ -334,6 +339,7 @@ class EvidenceLedger:
         replays = self._load_replays([evidence_id])
         return EvidenceRecord(
             id=row["id"],
+            kind=_row_kind(row),
             task_id=row["task_id"],
             actor_ref=row["actor_ref"],
             environment_ref=row["environment_ref"],
@@ -538,6 +544,7 @@ class EvidenceLedger:
         return [
             EvidenceRecord(
                 id=row["id"],
+                kind=_row_kind(row),
                 task_id=row["task_id"],
                 actor_ref=row["actor_ref"],
                 environment_ref=row["environment_ref"],
@@ -580,6 +587,7 @@ class EvidenceLedger:
         return [
             EvidenceRecord(
                 id=row["id"],
+                kind=_row_kind(row),
                 task_id=row["task_id"],
                 actor_ref=row["actor_ref"],
                 environment_ref=row["environment_ref"],
@@ -618,6 +626,7 @@ class EvidenceLedger:
                 """
                 CREATE TABLE IF NOT EXISTS evidence_records (
                     id TEXT PRIMARY KEY,
+                    kind TEXT NOT NULL DEFAULT 'generic',
                     task_id TEXT NOT NULL,
                     actor_ref TEXT NOT NULL,
                     environment_ref TEXT,
@@ -671,6 +680,27 @@ class EvidenceLedger:
                 ON replay_pointers (evidence_id, created_at);
                 """,
             )
+            self._ensure_column(
+                "evidence_records",
+                "kind",
+                "TEXT NOT NULL DEFAULT 'generic'",
+            )
+
+    def _ensure_column(
+        self,
+        table_name: str,
+        column_name: str,
+        column_sql: str,
+    ) -> None:
+        existing_columns = {
+            str(row["name"] or "")
+            for row in self._connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+        }
+        if column_name in existing_columns:
+            return
+        self._connection.execute(
+            f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}",
+        )
 
     def _load_artifacts(
         self,
@@ -764,3 +794,11 @@ def _encode_json(value: Any) -> str:
 def _decode_json(value: str) -> dict[str, Any]:
     payload = json.loads(value or "{}")
     return payload if isinstance(payload, dict) else {"value": payload}
+
+
+def _row_kind(row: sqlite3.Row) -> str:
+    try:
+        normalized = str(row["kind"] or "").strip()
+    except Exception:
+        normalized = ""
+    return normalized or "generic"

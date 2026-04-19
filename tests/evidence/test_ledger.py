@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from copaw.evidence import ArtifactRecord, EvidenceLedger, EvidenceRecord, ReplayPointer
+from copaw.evidence.serialization import serialize_evidence_record
 
 
 def test_append_persists_linked_artifacts_and_replays(tmp_path) -> None:
@@ -141,3 +142,27 @@ def test_delete_records_cascades_artifacts_and_replays(tmp_path) -> None:
         assert ledger.get_record(stored.id) is None
         assert ledger.get_artifact_record(stored.artifacts[0].id) is None
         assert ledger.get_replay_pointer(stored.replay_pointers[0].id) is None
+
+
+def test_surface_probe_evidence_kind_round_trips_and_serializes(tmp_path) -> None:
+    database_path = tmp_path / "evidence.sqlite3"
+
+    with EvidenceLedger(database_path=database_path) as ledger:
+        stored = ledger.append(
+            EvidenceRecord(
+                task_id="task-probe",
+                actor_ref="agent:surface-prober",
+                risk_level="auto",
+                kind="surface-probe",
+                action_summary="probe surface before action",
+                result_summary="refreshed current region and reduced uncertainty",
+                metadata={"probe_action": "refresh-local-region"},
+            ),
+        )
+
+    with EvidenceLedger(database_path=database_path) as ledger:
+        record = ledger.get_record(stored.id)
+
+    assert record is not None
+    assert record.kind == "surface-probe"
+    assert serialize_evidence_record(record)["kind"] == "surface-probe"

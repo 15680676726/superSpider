@@ -1,8 +1,14 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import importlib
+
 from copaw.agents.tools.evidence_runtime import bind_browser_evidence_sink
-from copaw.environments.surface_execution.browser import BrowserExecutionStep, BrowserTargetCandidate
+from copaw.environments.surface_execution.browser import (
+    BrowserExecutionResult,
+    BrowserExecutionStep,
+    BrowserTargetCandidate,
+)
 from copaw.environments.surface_execution.browser.observer import observe_browser_page
 from copaw.environments.surface_execution.browser.profiles import (
     BrowserPageProfile,
@@ -17,6 +23,84 @@ from copaw.environments.surface_execution.owner import (
     ProfessionSurfaceOperationPlan,
     build_guided_browser_surface_owner,
 )
+
+
+def _load_graph_symbol(name: str):
+    try:
+        module = importlib.import_module("copaw.environments.surface_execution.graph_compiler")
+    except ImportError:
+        return None
+    return getattr(module, name, None)
+
+
+def _load_probe_symbol(name: str):
+    try:
+        module = importlib.import_module("copaw.environments.surface_execution.probe_engine")
+    except ImportError:
+        return None
+    return getattr(module, name, None)
+
+
+def test_browser_graph_snapshot_observation_exposes_surface_graph_contract() -> None:
+    observation = observe_browser_page(
+        snapshot_text='- textbox "Ask anything" [ref=e1]\n- button "Send" [ref=e2]',
+        page_url="https://chat.baidu.com/search",
+        page_title="Baidu Chat",
+    )
+
+    payload = observation.model_dump(mode="json")
+
+    assert "surface_graph" in payload
+    assert payload["surface_graph"]["surface_kind"] == "browser"
+    assert payload["surface_graph"]["controls"]
+
+
+def test_browser_graph_snapshot_execution_result_keeps_before_after_graph_contract() -> None:
+    before_observation = observe_browser_page(
+        snapshot_text='- textbox "Ask anything" [ref=e1]',
+        page_url="https://chat.baidu.com/search",
+        page_title="Baidu Chat",
+    )
+    after_observation = observe_browser_page(
+        snapshot_text='- textbox "Ask anything" [ref=e1]\n- text "Sent"',
+        page_url="https://chat.baidu.com/search",
+        page_title="Baidu Chat",
+    )
+
+    result = BrowserExecutionResult.model_validate(
+        {
+            "status": "succeeded",
+            "intent_kind": "type",
+            "target_slot": "primary_input",
+            "before_observation": before_observation.model_dump(mode="json"),
+            "after_observation": after_observation.model_dump(mode="json"),
+            "before_graph": before_observation.model_dump(mode="json").get("surface_graph"),
+            "after_graph": after_observation.model_dump(mode="json").get("surface_graph"),
+        }
+    )
+
+    payload = result.model_dump(mode="json")
+
+    assert payload["before_graph"]["surface_kind"] == "browser"
+    assert payload["after_graph"]["surface_kind"] == "browser"
+
+
+def test_browser_graph_snapshot_compile_observation_to_graph_returns_shared_snapshot() -> None:
+    compile_browser = _load_graph_symbol("compile_browser_observation_to_graph")
+    assert callable(compile_browser)
+
+    observation = observe_browser_page(
+        snapshot_text='- textbox "Ask anything" [ref=e1]\n- button "Send" [ref=e2]',
+        page_url="https://chat.baidu.com/search",
+        page_title="Baidu Chat",
+    )
+
+    graph = compile_browser(observation)
+
+    assert graph.surface_kind == "browser"
+    assert graph.controls
+    assert graph.relations
+    assert graph.confidence > 0
 
 
 def test_browser_target_candidate_keeps_action_and_readback_separate() -> None:
@@ -633,6 +717,41 @@ def test_browser_surface_service_executes_type_with_split_readback() -> None:
     assert result.resolved_target.action_ref == "e1"
 
 
+def test_browser_surface_service_before_after_graph_tracks_observation_snapshots() -> None:
+    runner = _ServiceRunner()
+    service = BrowserSurfaceExecutionService(browser_runner=runner)
+
+    result = service.execute_step(
+        session_id="research-browser",
+        page_id="chat-page",
+        snapshot_text='- textbox "Ask anything" [ref=e1]',
+        page_url="https://chat.baidu.com/search",
+        page_title="Baidu Chat",
+        dom_probe={
+            "inputs": [
+                {
+                    "target_kind": "input",
+                    "action_ref": "e1",
+                    "readback_selector": "#chat-textarea",
+                    "element_kind": "textarea",
+                    "scope_anchor": "composer",
+                    "score": 10,
+                    "reason": "primary textarea",
+                }
+            ]
+        },
+        target_slot="primary_input",
+        intent_kind="type",
+        payload={"text": "Clarify the key Zi Wei Dou Shu terms."},
+        success_assertion={"normalized_text": "Clarify the key Zi Wei Dou Shu terms."},
+    )
+
+    assert result.before_graph is not None
+    assert result.after_graph is not None
+    assert result.before_graph.surface_kind == "browser"
+    assert result.after_graph.surface_kind == "browser"
+
+
 def test_browser_surface_service_executes_scoped_toggle_click() -> None:
     runner = _ServiceRunner()
     service = BrowserSurfaceExecutionService(browser_runner=runner)
@@ -1004,6 +1123,182 @@ def test_browser_surface_service_emits_failure_evidence_when_target_unresolved()
     assert sink_payloads[0]["status"] == "error"
     assert sink_payloads[0]["metadata"]["verification"]["verified"] is False
     assert sink_payloads[0]["metadata"]["blocker_kind"] == "target-unresolved"
+
+
+def test_browser_surface_service_runs_probe_before_action_when_graph_confidence_is_low() -> None:
+    runner = _LiveServiceRunner()
+    runner.snapshots = [
+        {
+            "ok": True,
+            "snapshot": '- textbox "Ask anything" [ref=e1]',
+            "url": "https://chat.baidu.com/search",
+        },
+        {
+            "ok": True,
+            "snapshot": '- textbox "Ask anything" [ref=e1]\n- region "Latest answer stream"',
+            "url": "https://chat.baidu.com/search",
+        },
+    ]
+    service = BrowserSurfaceExecutionService(browser_runner=runner)
+    sink_payloads: list[dict[str, object]] = []
+
+    def _sink(payload: dict[str, object]) -> dict[str, object]:
+        sink_payloads.append(dict(payload))
+        evidence_kind = str(payload.get("metadata", {}).get("evidence_kind") or "")
+        if evidence_kind == "surface-probe":
+            return {"evidence_id": "evidence-browser-probe-1"}
+        if evidence_kind == "surface-discovery":
+            return {"evidence_id": "evidence-browser-discovery-1"}
+        return {"evidence_id": "evidence-browser-step-1"}
+
+    before_observation = observe_browser_page(
+        snapshot_text='- text "Loading current page"',
+        page_url="https://chat.baidu.com/search",
+        page_title="Baidu Chat",
+    )
+    assert before_observation.surface_graph is not None
+    before_observation.surface_graph = before_observation.surface_graph.model_copy(
+        update={"confidence": 0.2},
+    )
+    profile = BrowserPageProfile(
+        profile_id="baidu-chat",
+        page_title="Baidu Chat",
+        dom_probe_builder=lambda **_kwargs: {
+            "inputs": [
+                {
+                    "target_kind": "input",
+                    "action_ref": "e1",
+                    "readback_selector": "#chat-textarea",
+                    "element_kind": "textarea",
+                    "scope_anchor": "composer",
+                    "score": 10,
+                    "reason": "primary textarea",
+                }
+            ]
+        },
+    )
+
+    with bind_browser_evidence_sink(_sink):
+        result = service.execute_step(
+            session_id="research-browser",
+            page_id="chat-page",
+            before_observation=before_observation,
+            page_profile=profile,
+            target_slot="primary_input",
+            intent_kind="type",
+            payload={"text": "continue current thread"},
+            success_assertion={"normalized_text": "continue current thread"},
+        )
+
+    assert result.status == "succeeded"
+    assert result.evidence_ids == [
+        "evidence-browser-probe-1",
+        "evidence-browser-discovery-1",
+        "evidence-browser-step-1",
+    ]
+    assert len(sink_payloads) == 3
+    assert sink_payloads[0]["metadata"]["evidence_kind"] == "surface-probe"
+    assert sink_payloads[0]["metadata"]["probe_action"] == "refresh-local-region"
+    assert sink_payloads[1]["metadata"]["evidence_kind"] == "surface-discovery"
+    assert sink_payloads[2]["action"] == "type"
+
+
+def test_browser_surface_service_emits_surface_discovery_once_per_thread_when_probe_reveals_new_control() -> None:
+    runner = _LiveServiceRunner()
+    runner.snapshots = [
+        {
+            "ok": True,
+            "snapshot": '- textbox "Ask anything" [ref=e1]',
+            "url": "https://chat.baidu.com/search",
+        },
+        {
+            "ok": True,
+            "snapshot": '- textbox "Ask anything" [ref=e1]',
+            "url": "https://chat.baidu.com/search",
+        },
+        {
+            "ok": True,
+            "snapshot": '- textbox "Ask anything" [ref=e1]',
+            "url": "https://chat.baidu.com/search",
+        },
+        {
+            "ok": True,
+            "snapshot": '- textbox "Ask anything" [ref=e1]',
+            "url": "https://chat.baidu.com/search",
+        },
+    ]
+    service = BrowserSurfaceExecutionService(browser_runner=runner)
+    sink_payloads: list[dict[str, object]] = []
+
+    def _sink(payload: dict[str, object]) -> dict[str, object]:
+        sink_payloads.append(dict(payload))
+        evidence_kind = str(payload.get("metadata", {}).get("evidence_kind") or "")
+        if evidence_kind == "surface-probe":
+            return {"evidence_id": "probe-id"}
+        if evidence_kind == "surface-discovery":
+            return {"evidence_id": "discovery-id"}
+        return {"evidence_id": "step-id"}
+
+    profile = BrowserPageProfile(
+        profile_id="baidu-chat",
+        page_title="Baidu Chat",
+        dom_probe_builder=lambda **_kwargs: {
+            "inputs": [
+                {
+                    "target_kind": "input",
+                    "action_ref": "e1",
+                    "readback_selector": "#chat-textarea",
+                    "element_kind": "textarea",
+                    "scope_anchor": "composer",
+                    "score": 10,
+                    "reason": "primary textarea",
+                }
+            ]
+        },
+    )
+
+    def _low_confidence_observation():
+        observation = observe_browser_page(
+            snapshot_text='- text "Loading current page"',
+            page_url="https://chat.baidu.com/search",
+            page_title="Baidu Chat",
+        )
+        assert observation.surface_graph is not None
+        observation.surface_graph = observation.surface_graph.model_copy(update={"confidence": 0.2})
+        return observation
+
+    with bind_browser_evidence_sink(_sink):
+        first = service.execute_step(
+            session_id="research-browser",
+            page_id="chat-page",
+            before_observation=_low_confidence_observation(),
+            page_profile=profile,
+            target_slot="primary_input",
+            intent_kind="type",
+            payload={"text": "first run"},
+            success_assertion={"normalized_text": "first run"},
+        )
+        second = service.execute_step(
+            session_id="research-browser",
+            page_id="chat-page",
+            before_observation=_low_confidence_observation(),
+            page_profile=profile,
+            target_slot="primary_input",
+            intent_kind="type",
+            payload={"text": "second run"},
+            success_assertion={"normalized_text": "second run"},
+        )
+
+    assert first.status == "succeeded"
+    assert second.status == "succeeded"
+    assert first.evidence_ids == ["probe-id", "discovery-id", "step-id"]
+    assert second.evidence_ids == ["probe-id", "step-id"]
+    discovery_payloads = [
+        payload
+        for payload in sink_payloads
+        if str(payload.get("metadata", {}).get("evidence_kind") or "") == "surface-discovery"
+    ]
+    assert len(discovery_payloads) == 1
 
 
 def test_browser_surface_service_runs_shared_step_loop_until_planner_stops() -> None:

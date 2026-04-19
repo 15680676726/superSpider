@@ -5,7 +5,9 @@ import inspect
 import logging
 
 from ....agents.tools.evidence_runtime import get_file_evidence_sink
+from ..graph_compiler import compile_document_observation_to_graph
 from ..owner import ProfessionSurfaceOperationOwner, ProfessionSurfaceOperationPlan
+from ..probe_engine import collect_surface_discoveries, decide_surface_probe
 from .contracts import (
     DocumentExecutionLoopResult,
     DocumentExecutionResult,
@@ -24,6 +26,7 @@ class DocumentSurfaceExecutionService:
     ) -> None:
         self._document_observer = document_observer
         self._document_runner = document_runner
+        self._seen_surface_discoveries: set[tuple[str, str]] = set()
 
     @staticmethod
     def _coerce_step(
@@ -50,12 +53,16 @@ class DocumentSurfaceExecutionService:
         if isinstance(payload, DocumentObservation):
             return payload
         if isinstance(payload, dict):
-            return DocumentObservation(**payload)
-        return DocumentObservation(
-            document_path=document_path,
-            document_family=document_family,
-            blockers=["observer-return-invalid"],
-        )
+            observation = DocumentObservation(**payload)
+        else:
+            observation = DocumentObservation(
+                document_path=document_path,
+                document_family=document_family,
+                blockers=["observer-return-invalid"],
+            )
+        if observation.surface_graph is None:
+            observation.surface_graph = compile_document_observation_to_graph(observation)
+        return observation
 
     def execute_step(
         self,
@@ -74,6 +81,13 @@ class DocumentSurfaceExecutionService:
                 document_path=document_path,
                 document_family=document_family,
             )
+        before_observation, probe_evidence_ids = self._maybe_probe_before_action(
+            session_mount_id=session_mount_id,
+            document_path=document_path,
+            document_family=document_family,
+            intent_kind=intent_kind,
+            before_observation=before_observation,
+        )
         if intent_kind == "replace_text":
             self._document_runner(
                 action="edit_document_file",
@@ -99,6 +113,8 @@ class DocumentSurfaceExecutionService:
                 intent_kind=intent_kind,
                 before_observation=before_observation,
                 after_observation=before_observation,
+                before_graph=before_observation.surface_graph,
+                after_graph=before_observation.surface_graph,
                 blocker_kind="unsupported-intent",
             )
         after_observation = self.observe_document(
@@ -144,14 +160,23 @@ class DocumentSurfaceExecutionService:
                 },
             },
         )
+        discovery_evidence_ids = self._emit_surface_discovery_evidence(
+            surface_thread_id=document_path,
+            file_path=document_path,
+            before_graph=before_observation.surface_graph,
+            after_graph=after_observation.surface_graph,
+            candidate_capability=intent_kind,
+        )
         return DocumentExecutionResult(
             status="succeeded" if verification_passed else "failed",
             intent_kind=intent_kind,
             before_observation=before_observation,
             after_observation=after_observation,
+            before_graph=before_observation.surface_graph,
+            after_graph=after_observation.surface_graph,
             readback=readback,
             verification_passed=verification_passed,
-            evidence_ids=evidence_ids,
+            evidence_ids=[*probe_evidence_ids, *evidence_ids, *discovery_evidence_ids],
         )
 
     def run_step_loop(
@@ -275,6 +300,96 @@ class DocumentSurfaceExecutionService:
                 exc_info=True,
             )
             return []
+
+    def _maybe_probe_before_action(
+        self,
+        *,
+        session_mount_id: str,
+        document_path: str,
+        document_family: str,
+        intent_kind: str,
+        before_observation: DocumentObservation,
+    ) -> tuple[DocumentObservation, list[str]]:
+        decision = decide_surface_probe(
+            before_observation.surface_graph,
+            intent_kind=intent_kind,
+            target_slot="document-body",
+            target_resolved=True,
+        )
+        if decision is None:
+            return before_observation, []
+        probed_observation = self.observe_document(
+            session_mount_id=session_mount_id,
+            document_path=document_path,
+            document_family=document_family,
+        )
+        old_confidence = float(getattr(before_observation.surface_graph, "confidence", 0.0) or 0.0)
+        new_confidence = float(getattr(probed_observation.surface_graph, "confidence", 0.0) or 0.0)
+        evidence_ids = self._emit_file_evidence(
+            action="probe",
+            file_path=document_path,
+            status="success",
+            result_summary=f"Document probe {decision.probe_action} refreshed current surface state",
+            metadata={
+                "evidence_kind": "surface-probe",
+                "probe_action": decision.probe_action,
+                "target_region": decision.target_region,
+                "reason": decision.reason,
+                "intent_kind": intent_kind,
+                "before_graph": (
+                    before_observation.surface_graph.model_dump(mode="json")
+                    if before_observation.surface_graph is not None
+                    else None
+                ),
+                "after_graph": (
+                    probed_observation.surface_graph.model_dump(mode="json")
+                    if probed_observation.surface_graph is not None
+                    else None
+                ),
+                "resolved_uncertainty": new_confidence > old_confidence,
+            },
+        )
+        return probed_observation, evidence_ids
+
+    def _emit_surface_discovery_evidence(
+        self,
+        *,
+        surface_thread_id: str,
+        file_path: str,
+        before_graph,
+        after_graph,
+        candidate_capability: str,
+    ) -> list[str]:
+        evidence_ids: list[str] = []
+        discoveries = collect_surface_discoveries(
+            before_graph,
+            after_graph,
+            candidate_capability=candidate_capability,
+        )
+        for discovery in discoveries:
+            seen_key = (surface_thread_id, discovery.discovery_fingerprint)
+            if seen_key in self._seen_surface_discoveries:
+                continue
+            self._seen_surface_discoveries.add(seen_key)
+            evidence_ids.extend(
+                self._emit_file_evidence(
+                    action="discovery",
+                    file_path=file_path,
+                    status="success",
+                    result_summary=f"Discovered {discovery.discovery_kind} on current document surface",
+                    metadata={
+                        "evidence_kind": "surface-discovery",
+                        "discovery_kind": discovery.discovery_kind,
+                        "discovery_fingerprint": discovery.discovery_fingerprint,
+                        "region_ref": discovery.region_ref,
+                        "candidate_capability": discovery.candidate_capability,
+                        "node_id": discovery.node_id,
+                        "node_kind": discovery.node_kind,
+                        "label": discovery.label,
+                    },
+                )
+            )
+        return evidence_ids
 
     @staticmethod
     def _extract_evidence_ids(result: object) -> list[str]:

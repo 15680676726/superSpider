@@ -5,6 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from ..graph_models import SurfaceGraphSnapshot
 from ..owner import ProfessionSurfaceOperationCheckpoint
 
 DesktopTargetKind = Literal["window", "input", "button"]
@@ -27,6 +28,7 @@ class DesktopObservation(BaseModel):
     slot_candidates: dict[str, list[DesktopTargetCandidate]] = Field(default_factory=dict)
     readback: dict[str, str] = Field(default_factory=dict)
     blockers: list[str] = Field(default_factory=list)
+    surface_graph: SurfaceGraphSnapshot | None = None
 
 
 class DesktopExecutionStep(BaseModel):
@@ -44,6 +46,8 @@ class DesktopExecutionResult(BaseModel):
     resolved_target: DesktopTargetCandidate | None = None
     before_observation: DesktopObservation | None = None
     after_observation: DesktopObservation | None = None
+    before_graph: SurfaceGraphSnapshot | None = None
+    after_graph: SurfaceGraphSnapshot | None = None
     readback: dict[str, str] = Field(default_factory=dict)
     verification_passed: bool = False
     blocker_kind: str = ""

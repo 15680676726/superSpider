@@ -1,14 +1,19 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import importlib
+
 from copaw.agents.tools.evidence_runtime import bind_file_evidence_sink
 from copaw.environments.surface_execution.desktop import (
+    DesktopExecutionResult,
     DesktopExecutionStep,
     DesktopObservation,
     DesktopSurfaceExecutionService,
     DesktopTargetCandidate,
 )
 from copaw.environments.surface_execution.document import (
+    DocumentExecutionResult,
+    DocumentObservation,
     DocumentExecutionStep,
     DocumentSurfaceExecutionService,
 )
@@ -22,7 +27,242 @@ from copaw.environments.surface_execution.owner import (
 )
 
 
-def test_document_surface_service_executes_replace_text_with_reread_verification() -> None:
+def _load_graph_symbol(name: str):
+    try:
+        module = importlib.import_module("copaw.environments.surface_execution.graph_compiler")
+    except ImportError:
+        return None
+    return getattr(module, name, None)
+
+
+def _load_probe_symbol(name: str):
+    try:
+        module = importlib.import_module("copaw.environments.surface_execution.probe_engine")
+    except ImportError:
+        return None
+    return getattr(module, name, None)
+
+
+def test_document_graph_snapshot_observation_exposes_surface_graph_contract() -> None:
+    observation = DocumentObservation.model_validate(
+        {
+            "document_path": "D:/tmp/outline.txt",
+            "document_family": "documents",
+            "content_text": "draft outline",
+            "revision_token": "rev-1",
+            "surface_graph": {
+                "surface_kind": "document",
+                "regions": [{"node_id": "region:body"}],
+                "controls": [],
+                "results": [],
+                "blockers": [],
+                "entities": [],
+                "relations": [],
+                "confidence": 0.8,
+            },
+        }
+    )
+
+    payload = observation.model_dump(mode="json")
+
+    assert "surface_graph" in payload
+    assert payload["surface_graph"]["surface_kind"] == "document"
+
+
+def test_document_graph_snapshot_execution_result_keeps_before_after_graph_contract() -> None:
+    result = DocumentExecutionResult.model_validate(
+        {
+            "status": "succeeded",
+            "intent_kind": "replace_text",
+            "before_graph": {
+                "surface_kind": "document",
+                "regions": [{"node_id": "region:before"}],
+                "controls": [],
+                "results": [],
+                "blockers": [],
+                "entities": [],
+                "relations": [],
+                "confidence": 0.8,
+            },
+            "after_graph": {
+                "surface_kind": "document",
+                "regions": [{"node_id": "region:after"}],
+                "controls": [],
+                "results": [{"node_id": "result:after"}],
+                "blockers": [],
+                "entities": [],
+                "relations": [{"edge_id": "edge:after"}],
+                "confidence": 0.9,
+            },
+        }
+    )
+
+    payload = result.model_dump(mode="json")
+
+    assert payload["before_graph"]["surface_kind"] == "document"
+    assert payload["after_graph"]["results"]
+
+
+def test_document_graph_snapshot_compile_observation_to_graph_returns_shared_snapshot() -> None:
+    compile_document = _load_graph_symbol("compile_document_observation_to_graph")
+    assert callable(compile_document)
+
+    observation = DocumentObservation(
+        document_path="D:/tmp/outline.txt",
+        document_family="documents",
+        content_text="chapter one draft",
+        revision_token="rev-1",
+    )
+
+    graph = compile_document(observation)
+
+    assert graph.surface_kind == "document"
+    assert graph.regions
+    assert graph.results
+    assert graph.confidence > 0
+
+
+def test_desktop_graph_snapshot_observation_exposes_surface_graph_contract() -> None:
+    observation = DesktopObservation.model_validate(
+        {
+            "app_identity": "notepad",
+            "window_title": "Research Notes",
+            "surface_graph": {
+                "surface_kind": "desktop",
+                "regions": [{"node_id": "region:window"}],
+                "controls": [{"node_id": "control:editor"}],
+                "results": [],
+                "blockers": [],
+                "entities": [],
+                "relations": [{"edge_id": "edge:contains"}],
+                "confidence": 0.7,
+            },
+        }
+    )
+
+    payload = observation.model_dump(mode="json")
+
+    assert "surface_graph" in payload
+    assert payload["surface_graph"]["surface_kind"] == "desktop"
+
+
+def test_desktop_graph_snapshot_execution_result_keeps_before_after_graph_contract() -> None:
+    result = DesktopExecutionResult.model_validate(
+        {
+            "status": "succeeded",
+            "intent_kind": "type_text",
+            "target_slot": "primary_input",
+            "before_graph": {
+                "surface_kind": "desktop",
+                "regions": [{"node_id": "region:before"}],
+                "controls": [{"node_id": "control:before"}],
+                "results": [],
+                "blockers": [],
+                "entities": [],
+                "relations": [],
+                "confidence": 0.6,
+            },
+            "after_graph": {
+                "surface_kind": "desktop",
+                "regions": [{"node_id": "region:after"}],
+                "controls": [{"node_id": "control:after"}],
+                "results": [{"node_id": "result:after"}],
+                "blockers": [],
+                "entities": [],
+                "relations": [{"edge_id": "edge:after"}],
+                "confidence": 0.9,
+            },
+        }
+    )
+
+    payload = result.model_dump(mode="json")
+
+    assert payload["before_graph"]["surface_kind"] == "desktop"
+    assert payload["after_graph"]["relations"]
+
+
+def test_desktop_graph_snapshot_compile_observation_to_graph_returns_shared_snapshot() -> None:
+    compile_desktop = _load_graph_symbol("compile_desktop_observation_to_graph")
+    assert callable(compile_desktop)
+
+    observation = DesktopObservation(
+        app_identity="notepad",
+        window_title="Research Notes",
+        slot_candidates={
+            "primary_input": [
+                DesktopTargetCandidate(
+                    target_kind="input",
+                    action_selector="window:notepad/editor",
+                    readback_key="editor_text",
+                    scope_anchor="editor",
+                    score=10,
+                    label="Editor",
+                )
+            ]
+        },
+    )
+
+    graph = compile_desktop(observation)
+
+    assert graph.surface_kind == "desktop"
+    assert graph.controls
+    assert graph.relations
+    assert graph.confidence > 0
+
+
+def test_shared_probe_engine_requests_refresh_for_low_confidence_document_graph() -> None:
+    decide_probe = _load_probe_symbol("decide_surface_probe")
+    assert callable(decide_probe)
+
+    graph = _load_graph_symbol("compile_document_observation_to_graph")(
+        DocumentObservation(
+            document_path="D:/tmp/outline.txt",
+            document_family="documents",
+            content_text="",
+            revision_token="rev-1",
+        )
+    ).model_copy(update={"confidence": 0.2})
+
+    decision = decide_probe(
+        graph,
+        intent_kind="replace_text",
+        target_slot="document-body",
+        target_resolved=True,
+    )
+
+    assert decision is not None
+    assert decision.probe_action == "refresh-local-region"
+    assert decision.target_region == "region:document:root"
+    assert decision.reason == "low-confidence-graph"
+
+
+def test_shared_probe_engine_requests_refresh_for_unresolved_desktop_target() -> None:
+    decide_probe = _load_probe_symbol("decide_surface_probe")
+    assert callable(decide_probe)
+
+    graph = _load_graph_symbol("compile_desktop_observation_to_graph")(
+        DesktopObservation(
+            app_identity="notepad",
+            window_title="Research Notes",
+            slot_candidates={},
+            readback={},
+        )
+    )
+
+    decision = decide_probe(
+        graph,
+        intent_kind="type_text",
+        target_slot="primary_input",
+        target_resolved=False,
+    )
+
+    assert decision is not None
+    assert decision.probe_action == "refresh-local-region"
+    assert decision.target_region == "region:desktop:root"
+    assert decision.reason == "target-unresolved"
+
+
+def test_document_surface_service_before_after_graph_executes_replace_text_with_reread_verification() -> None:
     observe_calls: list[dict[str, object]] = []
     action_calls: list[dict[str, object]] = []
     contents = ["draft line", "final line"]
@@ -73,6 +313,83 @@ def test_document_surface_service_executes_replace_text_with_reread_verification
         }
     ]
     assert evidence_payloads[0]["action"] == "edit"
+    assert result.before_graph is not None
+    assert result.after_graph is not None
+    assert result.before_graph.surface_kind == "document"
+    assert result.after_graph.surface_kind == "document"
+
+
+def test_document_surface_service_emits_surface_probe_before_edit_when_graph_confidence_is_low() -> None:
+    observe_calls: list[dict[str, object]] = []
+    action_calls: list[dict[str, object]] = []
+    contents = ["draft line", "final line"]
+
+    def _observe_document(**kwargs):
+        observe_calls.append(dict(kwargs))
+        return {
+            "document_path": str(kwargs["document_path"]),
+            "document_family": str(kwargs.get("document_family") or "documents"),
+            "content_text": contents.pop(0),
+            "revision_token": f"rev-{len(observe_calls)}",
+        }
+
+    def _run_document_action(**kwargs):
+        action_calls.append(dict(kwargs))
+        return {"ok": True}
+
+    service = DocumentSurfaceExecutionService(
+        document_observer=_observe_document,
+        document_runner=_run_document_action,
+    )
+    sink_payloads: list[dict[str, object]] = []
+
+    def _sink(payload: dict[str, object]) -> dict[str, object]:
+        sink_payloads.append(dict(payload))
+        evidence_kind = str(payload.get("metadata", {}).get("evidence_kind") or "")
+        if evidence_kind == "surface-probe":
+            return {"evidence_id": "file-probe-1"}
+        return {"evidence_id": "file-step-1"}
+
+    before_observation = DocumentObservation(
+        document_path="D:/tmp/outline.txt",
+        document_family="documents",
+        content_text="",
+        revision_token="rev-before",
+    )
+    assert before_observation.surface_graph is None
+    compile_document = _load_graph_symbol("compile_document_observation_to_graph")
+    assert callable(compile_document)
+    before_observation.surface_graph = compile_document(before_observation).model_copy(
+        update={"confidence": 0.2},
+    )
+
+    with bind_file_evidence_sink(_sink):
+        result = service.execute_step(
+            session_mount_id="session-doc-1",
+            document_path="D:/tmp/outline.txt",
+            document_family="documents",
+            intent_kind="replace_text",
+            payload={"find_text": "draft", "replace_text": "final"},
+            success_assertion={"contains_text": "final line"},
+            before_observation=before_observation,
+        )
+
+    assert result.status == "succeeded"
+    assert result.evidence_ids == ["file-probe-1", "file-step-1"]
+    assert len(observe_calls) == 2
+    assert sink_payloads[0]["metadata"]["evidence_kind"] == "surface-probe"
+    assert sink_payloads[0]["metadata"]["probe_action"] == "refresh-local-region"
+    assert sink_payloads[1]["action"] == "edit"
+    assert action_calls == [
+        {
+            "action": "edit_document_file",
+            "session_mount_id": "session-doc-1",
+            "document_path": "D:/tmp/outline.txt",
+            "document_family": "documents",
+            "find_text": "draft",
+            "replace_text": "final",
+        }
+    ]
 
 
 def test_document_surface_service_run_step_loop_reuses_initial_observation() -> None:
@@ -181,7 +498,7 @@ def test_document_surface_service_run_step_loop_accepts_shared_profession_owner_
     assert loop_result.operation_checkpoint.last_status == "succeeded"
 
 
-def test_desktop_surface_service_executes_focus_then_type_with_shared_slots() -> None:
+def test_desktop_surface_service_before_after_graph_executes_focus_then_type_with_shared_slots() -> None:
     observe_calls: list[dict[str, object]] = []
     action_calls: list[dict[str, object]] = []
     states = [
@@ -295,6 +612,11 @@ def test_desktop_surface_service_executes_focus_then_type_with_shared_slots() ->
         },
     ]
     assert len(observe_calls) == 3
+    assert loop_result.steps[0].before_graph is not None
+    assert loop_result.steps[0].after_graph is not None
+    assert loop_result.steps[0].before_graph.surface_kind == "desktop"
+    assert loop_result.steps[1].after_graph is not None
+    assert loop_result.steps[1].after_graph.surface_kind == "desktop"
 
 
 def test_desktop_surface_service_run_step_loop_accepts_shared_profession_owner_checkpoint() -> None:

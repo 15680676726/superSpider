@@ -6,6 +6,7 @@ import re
 from typing import Any
 
 from .contracts import BrowserObservation, BrowserPageSummary, BrowserTargetCandidate
+from ..graph_compiler import compile_browser_observation_to_graph
 
 
 _REF_PATTERN = re.compile(r"\[ref=(?P<ref>[^\]]+)\]")
@@ -320,7 +321,7 @@ def observe_browser_page(
     readable_sections = _derive_readable_sections(snapshot_text=snapshot_text, payload=payload)
     login_state = _infer_login_state(snapshot_text=snapshot_text, payload=payload)
     blockers = _derive_blockers(login_state=login_state, payload=payload)
-    return BrowserObservation(
+    observation = BrowserObservation(
         page_url=page_url,
         page_title=page_title,
         snapshot_text=snapshot_text,
@@ -341,6 +342,8 @@ def observe_browser_page(
             blockers=blockers,
         ),
     )
+    observation.surface_graph = compile_browser_observation_to_graph(observation)
+    return observation
 
 
 __all__ = ["observe_browser_page"]

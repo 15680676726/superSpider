@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+from ..graph_compiler import compile_desktop_observation_to_graph
 from ..owner import ProfessionSurfaceOperationOwner, ProfessionSurfaceOperationPlan
+from ..probe_engine import decide_surface_probe
 from .contracts import (
     DesktopExecutionLoopResult,
     DesktopExecutionResult,
@@ -41,13 +43,17 @@ class DesktopSurfaceExecutionService:
             app_identity=app_identity,
         )
         if isinstance(payload, DesktopObservation):
-            return payload
-        if isinstance(payload, dict):
-            return DesktopObservation(**payload)
-        return DesktopObservation(
-            app_identity=app_identity,
-            blockers=["observer-return-invalid"],
-        )
+            observation = payload
+        elif isinstance(payload, dict):
+            observation = DesktopObservation(**payload)
+        else:
+            observation = DesktopObservation(
+                app_identity=app_identity,
+                blockers=["observer-return-invalid"],
+            )
+        if observation.surface_graph is None:
+            observation.surface_graph = compile_desktop_observation_to_graph(observation)
+        return observation
 
     def resolve_target(
         self,
@@ -77,6 +83,14 @@ class DesktopSurfaceExecutionService:
                 app_identity=app_identity,
             )
         target = self.resolve_target(before_observation, target_slot=target_slot)
+        before_observation, target = self._maybe_probe_before_action(
+            session_mount_id=session_mount_id,
+            app_identity=app_identity,
+            before_observation=before_observation,
+            intent_kind=intent_kind,
+            target_slot=target_slot,
+            target=target,
+        )
         if target is None:
             return DesktopExecutionResult(
                 status="failed",
@@ -84,6 +98,8 @@ class DesktopSurfaceExecutionService:
                 target_slot=target_slot,
                 before_observation=before_observation,
                 after_observation=before_observation,
+                before_graph=before_observation.surface_graph,
+                after_graph=before_observation.surface_graph,
                 blocker_kind="target-unresolved",
             )
         action_payload = {
@@ -126,6 +142,8 @@ class DesktopSurfaceExecutionService:
             resolved_target=target,
             before_observation=before_observation,
             after_observation=after_observation,
+            before_graph=before_observation.surface_graph,
+            after_graph=after_observation.surface_graph,
             readback=readback,
             verification_passed=verification_passed,
         )
@@ -212,6 +230,34 @@ class DesktopSurfaceExecutionService:
             stop_reason="max-steps",
             operation_checkpoint=operation_checkpoint,
         )
+
+    def _maybe_probe_before_action(
+        self,
+        *,
+        session_mount_id: str,
+        app_identity: str,
+        before_observation: DesktopObservation,
+        intent_kind: str,
+        target_slot: str,
+        target: DesktopTargetCandidate | None,
+    ) -> tuple[DesktopObservation, DesktopTargetCandidate | None]:
+        decision = decide_surface_probe(
+            before_observation.surface_graph,
+            intent_kind=intent_kind,
+            target_slot=target_slot,
+            target_resolved=target is not None,
+        )
+        if decision is None:
+            return before_observation, target
+        probed_observation = self.observe_surface(
+            session_mount_id=session_mount_id,
+            app_identity=app_identity,
+        )
+        refreshed_target = self.resolve_target(
+            probed_observation,
+            target_slot=target_slot,
+        )
+        return probed_observation, refreshed_target
 
 
 __all__ = ["DesktopSurfaceExecutionService"]

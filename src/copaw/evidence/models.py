@@ -76,6 +76,7 @@ class EvidenceRecord:
     risk_level: str
     action_summary: str
     result_summary: str
+    kind: str = "generic"
     id: str | None = None
     environment_ref: str | None = None
     capability_ref: str | None = None
