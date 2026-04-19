@@ -41,6 +41,14 @@ def _load_probe_symbol(name: str):
     return getattr(module, name, None)
 
 
+def _load_transition_symbol(name: str):
+    try:
+        module = importlib.import_module("copaw.environments.surface_execution.transition_miner")
+    except ImportError:
+        return None
+    return getattr(module, name, None)
+
+
 def test_browser_graph_snapshot_observation_exposes_surface_graph_contract() -> None:
     observation = observe_browser_page(
         snapshot_text='- textbox "Ask anything" [ref=e1]\n- button "Send" [ref=e2]',
@@ -1299,6 +1307,73 @@ def test_browser_surface_service_emits_surface_discovery_once_per_thread_when_pr
         if str(payload.get("metadata", {}).get("evidence_kind") or "") == "surface-discovery"
     ]
     assert len(discovery_payloads) == 1
+
+
+def test_browser_surface_service_attaches_shared_transition_after_live_action() -> None:
+    runner = _LiveServiceRunner()
+    runner.snapshots = [
+        {
+            "ok": True,
+            "snapshot": '- textbox "Ask anything" [ref=e1]',
+            "url": "https://chat.baidu.com/search",
+        },
+        {
+            "ok": True,
+            "snapshot": '- textbox "Ask anything" [ref=e1]\n- region "Latest answer stream"',
+            "url": "https://chat.baidu.com/search",
+        },
+    ]
+    service = BrowserSurfaceExecutionService(browser_runner=runner)
+    sink_payloads: list[dict[str, object]] = []
+
+    def _sink(payload: dict[str, object]) -> dict[str, object]:
+        sink_payloads.append(dict(payload))
+        evidence_kind = str(payload.get("metadata", {}).get("evidence_kind") or "")
+        if evidence_kind == "surface-transition":
+            return {"evidence_id": "browser-transition-1"}
+        return {"evidence_id": "other-evidence"}
+
+    profile = BrowserPageProfile(
+        profile_id="baidu-chat",
+        page_title="Baidu Chat",
+        dom_probe_builder=lambda **_kwargs: {
+            "inputs": [
+                {
+                    "target_kind": "input",
+                    "action_ref": "e1",
+                    "readback_selector": "#chat-textarea",
+                    "element_kind": "textarea",
+                    "scope_anchor": "composer",
+                    "score": 10,
+                    "reason": "primary textarea",
+                }
+            ]
+        },
+    )
+
+    with bind_browser_evidence_sink(_sink):
+        result = service.execute_step(
+            session_id="research-browser",
+            page_id="chat-page",
+            page_profile=profile,
+            target_slot="primary_input",
+            intent_kind="type",
+            payload={"text": "transition test"},
+            success_assertion={"normalized_text": "transition test"},
+        )
+
+    assert result.status == "succeeded"
+    assert result.transition is not None
+    assert result.transition.before_graph_ref.startswith("browser:")
+    assert result.transition.after_graph_ref.startswith("browser:")
+    assert result.transition.changed_nodes
+    assert result.transition.evidence_refs == ["browser-transition-1"]
+    transition_payloads = [
+        payload
+        for payload in sink_payloads
+        if str(payload.get("metadata", {}).get("evidence_kind") or "") == "surface-transition"
+    ]
+    assert len(transition_payloads) == 1
 
 
 def test_browser_surface_service_runs_shared_step_loop_until_planner_stops() -> None:

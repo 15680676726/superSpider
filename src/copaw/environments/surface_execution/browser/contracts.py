@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from ..graph_models import SurfaceGraphSnapshot
 from ..owner import ProfessionSurfaceOperationCheckpoint
+from ..transition_miner import SurfaceTransitionDelta
 
 BrowserTargetKind = Literal["input", "button", "toggle", "link", "menu", "tab", "upload"]
 BrowserElementKind = Literal["textarea", "input", "contenteditable", "button", "generic"]
@@ -65,6 +66,7 @@ class BrowserExecutionResult(BaseModel):
     after_observation: BrowserObservation | None = None
     before_graph: SurfaceGraphSnapshot | None = None
     after_graph: SurfaceGraphSnapshot | None = None
+    transition: SurfaceTransitionDelta | None = None
     readback: dict[str, str] = Field(default_factory=dict)
     verification_passed: bool = False
     blocker_kind: str = ""

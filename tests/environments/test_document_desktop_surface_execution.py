@@ -43,6 +43,14 @@ def _load_probe_symbol(name: str):
     return getattr(module, name, None)
 
 
+def _load_transition_symbol(name: str):
+    try:
+        module = importlib.import_module("copaw.environments.surface_execution.transition_miner")
+    except ImportError:
+        return None
+    return getattr(module, name, None)
+
+
 def test_document_graph_snapshot_observation_exposes_surface_graph_contract() -> None:
     observation = DocumentObservation.model_validate(
         {
@@ -390,6 +398,97 @@ def test_document_surface_service_emits_surface_probe_before_edit_when_graph_con
             "replace_text": "final",
         }
     ]
+
+
+def test_document_surface_service_attaches_shared_transition_after_edit() -> None:
+    observe_calls: list[dict[str, object]] = []
+    contents = ["draft line", "final line"]
+
+    def _observe_document(**kwargs):
+        observe_calls.append(dict(kwargs))
+        return {
+            "document_path": str(kwargs["document_path"]),
+            "document_family": str(kwargs.get("document_family") or "documents"),
+            "content_text": contents.pop(0),
+            "revision_token": f"rev-{len(observe_calls)}",
+        }
+
+    service = DocumentSurfaceExecutionService(
+        document_observer=_observe_document,
+        document_runner=lambda **_kwargs: {"ok": True},
+    )
+    sink_payloads: list[dict[str, object]] = []
+
+    def _sink(payload: dict[str, object]) -> dict[str, object]:
+        sink_payloads.append(dict(payload))
+        evidence_kind = str(payload.get("metadata", {}).get("evidence_kind") or "")
+        if evidence_kind == "surface-transition":
+            return {"evidence_id": "document-transition-1"}
+        return {"evidence_id": "document-other-1"}
+
+    with bind_file_evidence_sink(_sink):
+        result = service.execute_step(
+            session_mount_id="session-doc-1",
+            document_path="D:/tmp/outline.txt",
+            document_family="documents",
+            intent_kind="replace_text",
+            payload={"find_text": "draft", "replace_text": "final"},
+            success_assertion={"contains_text": "final line"},
+        )
+
+    assert result.status == "succeeded"
+    assert result.transition is not None
+    assert result.transition.changed_nodes == ["result:document:content"]
+    assert result.transition.evidence_refs == ["document-transition-1"]
+
+
+def test_desktop_surface_service_attaches_shared_transition_after_type_text() -> None:
+    states = [
+        DesktopObservation(
+            app_identity="notepad",
+            window_title="Research Notes",
+            slot_candidates={
+                "primary_input": [
+                    DesktopTargetCandidate(
+                        target_kind="input",
+                        action_selector="window:notepad/editor",
+                        readback_key="editor_text",
+                        scope_anchor="editor",
+                        score=10,
+                        label="Editor",
+                    )
+                ]
+            },
+            readback={},
+        ),
+        DesktopObservation(
+            app_identity="notepad",
+            window_title="Research Notes",
+            slot_candidates={},
+            readback={"editor_text": "hello desktop"},
+        ),
+    ]
+
+    def _observe_desktop(**_kwargs):
+        return states.pop(0)
+
+    service = DesktopSurfaceExecutionService(
+        desktop_observer=_observe_desktop,
+        desktop_runner=lambda **_kwargs: {"ok": True},
+    )
+
+    result = service.execute_step(
+        session_mount_id="session-desktop-1",
+        app_identity="notepad",
+        target_slot="primary_input",
+        intent_kind="type_text",
+        payload={"text": "hello desktop"},
+        success_assertion={"normalized_text": "hello desktop"},
+    )
+
+    assert result.status == "succeeded"
+    assert result.transition is not None
+    assert "result:desktop:editor_text" in result.transition.changed_nodes
 
 
 def test_document_surface_service_run_step_loop_reuses_initial_observation() -> None:

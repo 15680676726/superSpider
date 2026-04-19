@@ -166,3 +166,37 @@ def test_surface_probe_evidence_kind_round_trips_and_serializes(tmp_path) -> Non
     assert record is not None
     assert record.kind == "surface-probe"
     assert serialize_evidence_record(record)["kind"] == "surface-probe"
+
+
+def test_surface_transition_evidence_kind_round_trips_and_serializes(tmp_path) -> None:
+    database_path = tmp_path / "evidence.sqlite3"
+
+    with EvidenceLedger(database_path=database_path) as ledger:
+        stored = ledger.append(
+            EvidenceRecord(
+                task_id="task-transition",
+                actor_ref="agent:surface-runner",
+                risk_level="auto",
+                kind="surface-transition",
+                action_summary="commit one browser action transition",
+                result_summary="typed into the primary input and changed visible surface state",
+                metadata={
+                    "transition": {
+                        "before_graph_ref": "browser:before",
+                        "after_graph_ref": "browser:after",
+                        "changed_nodes": ["result:browser:page-summary"],
+                        "new_blockers": [],
+                        "resolved_blockers": [],
+                        "result_summary": "type changed 1 node",
+                        "evidence_refs": [],
+                    }
+                },
+            ),
+        )
+
+    with EvidenceLedger(database_path=database_path) as ledger:
+        record = ledger.get_record(stored.id)
+
+    assert record is not None
+    assert record.kind == "surface-transition"
+    assert serialize_evidence_record(record)["kind"] == "surface-transition"

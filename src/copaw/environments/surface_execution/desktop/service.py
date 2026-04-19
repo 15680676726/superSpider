@@ -4,6 +4,7 @@ from __future__ import annotations
 from ..graph_compiler import compile_desktop_observation_to_graph
 from ..owner import ProfessionSurfaceOperationOwner, ProfessionSurfaceOperationPlan
 from ..probe_engine import decide_surface_probe
+from ..transition_miner import mine_transition
 from .contracts import (
     DesktopExecutionLoopResult,
     DesktopExecutionResult,
@@ -135,6 +136,11 @@ class DesktopSurfaceExecutionService:
                 verification_passed
                 and readback.get("normalized_text") == expected_normalized
             )
+        transition = mine_transition(
+            before_observation.surface_graph,
+            after_observation.surface_graph,
+            action_kind=intent_kind,
+        )
         return DesktopExecutionResult(
             status="succeeded" if verification_passed else "failed",
             intent_kind=intent_kind,
@@ -144,6 +150,7 @@ class DesktopSurfaceExecutionService:
             after_observation=after_observation,
             before_graph=before_observation.surface_graph,
             after_graph=after_observation.surface_graph,
+            transition=transition,
             readback=readback,
             verification_passed=verification_passed,
         )

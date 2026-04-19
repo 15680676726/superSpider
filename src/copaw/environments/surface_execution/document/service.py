@@ -8,6 +8,7 @@ from ....agents.tools.evidence_runtime import get_file_evidence_sink
 from ..graph_compiler import compile_document_observation_to_graph
 from ..owner import ProfessionSurfaceOperationOwner, ProfessionSurfaceOperationPlan
 from ..probe_engine import collect_surface_discoveries, decide_surface_probe
+from ..transition_miner import mine_transition
 from .contracts import (
     DocumentExecutionLoopResult,
     DocumentExecutionResult,
@@ -136,16 +137,18 @@ class DocumentSurfaceExecutionService:
                 verification_passed
                 and readback.get("normalized_text") == expected_normalized
             )
+        transition = mine_transition(
+            before_observation.surface_graph,
+            after_observation.surface_graph,
+            action_kind=intent_kind,
+        )
         evidence_ids = self._emit_file_evidence(
             action=evidence_action,
             file_path=document_path,
             status="success" if verification_passed else "error",
-            result_summary=(
-                f"Document {intent_kind} completed for {document_path}"
-                if verification_passed
-                else f"Document {intent_kind} failed verification for {document_path}"
-            ),
+            result_summary=transition.result_summary,
             metadata={
+                "evidence_kind": "surface-transition",
                 "document_family": document_family,
                 "intent_kind": intent_kind,
                 "verification": {
@@ -158,8 +161,10 @@ class DocumentSurfaceExecutionService:
                     "before": before_observation.revision_token,
                     "after": after_observation.revision_token,
                 },
+                "transition": transition.model_dump(mode="json"),
             },
         )
+        transition = transition.model_copy(update={"evidence_refs": list(evidence_ids)})
         discovery_evidence_ids = self._emit_surface_discovery_evidence(
             surface_thread_id=document_path,
             file_path=document_path,
@@ -174,6 +179,7 @@ class DocumentSurfaceExecutionService:
             after_observation=after_observation,
             before_graph=before_observation.surface_graph,
             after_graph=after_observation.surface_graph,
+            transition=transition,
             readback=readback,
             verification_passed=verification_passed,
             evidence_ids=[*probe_evidence_ids, *evidence_ids, *discovery_evidence_ids],

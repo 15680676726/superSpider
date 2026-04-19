@@ -7,6 +7,7 @@ import logging
 from ....agents.tools.evidence_runtime import get_browser_evidence_sink
 from ..owner import ProfessionSurfaceOperationOwner, ProfessionSurfaceOperationPlan
 from ..probe_engine import collect_surface_discoveries, decide_surface_probe
+from ..transition_miner import mine_transition
 from .contracts import BrowserExecutionLoopResult, BrowserExecutionResult
 from .observer import observe_browser_page
 from .profiles import (
@@ -242,17 +243,19 @@ class BrowserSurfaceExecutionService:
             dom_probe=dom_probe,
             page_profile=page_profile,
         )
+        transition = mine_transition(
+            before_observation.surface_graph,
+            after_observation.surface_graph,
+            action_kind=intent_kind,
+        )
         evidence_ids = self._emit_browser_evidence(
             action=intent_kind,
             page_id=page_id,
             status="success" if verification_passed else "error",
-            result_summary=(
-                f"Browser {intent_kind} completed for slot {target_slot}"
-                if verification_passed
-                else f"Browser {intent_kind} failed verification for slot {target_slot}"
-            ),
+            result_summary=transition.result_summary,
             url=after_observation.page_url or before_observation.page_url or page_url,
             metadata={
+                "evidence_kind": "surface-transition",
                 "target_slot": target_slot,
                 "target": {
                     "action_ref": target.action_ref if target is not None else "",
@@ -274,8 +277,10 @@ class BrowserSurfaceExecutionService:
                     "before_url": before_observation.page_url,
                     "after_url": after_observation.page_url,
                 },
+                "transition": transition.model_dump(mode="json"),
             },
         )
+        transition = transition.model_copy(update={"evidence_refs": list(evidence_ids)})
         discovery_evidence_ids = self._emit_surface_discovery_evidence(
             surface_thread_id=page_id,
             page_id=page_id,
@@ -293,6 +298,7 @@ class BrowserSurfaceExecutionService:
             after_observation=after_observation,
             before_graph=before_observation.surface_graph,
             after_graph=after_observation.surface_graph,
+            transition=transition,
             readback=readback,
             verification_passed=verification_passed,
             evidence_ids=[*probe_evidence_ids, *evidence_ids, *discovery_evidence_ids],
