@@ -98,6 +98,29 @@ The main brain or requesting profession agent must define the collection need:
 
 The collection foundation does not become a second strategist.
 
+### 4.2.1 Execution Substrate Boundary
+
+The browser / desktop / file / MCP substrate is execution infrastructure, not a planner.
+
+This means:
+
+- profession agents decide what to collect, why it matters, what to read first, and when to continue or stop
+- the collection foundation may route and normalize execution, but it must not silently take over profession judgment
+- browser / desktop / file / MCP layers only:
+  - observe the live surface
+  - expose real structure and actionable elements
+  - execute the requested action
+  - read back what changed after execution
+
+They must not independently decide:
+
+- which resource is most valuable
+- which page section should be prioritized for the current profession goal
+- whether to deepen or stop for strategic reasons
+- what counts as “good enough” for the profession task
+
+If the system needs those decisions, they must come from the main brain or the requesting profession agent, not from the execution substrate.
+
 ### 4.3 Truth Boundary
 
 This design must not introduce a parallel truth source.

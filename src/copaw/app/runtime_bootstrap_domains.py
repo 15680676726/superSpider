@@ -119,6 +119,21 @@ def _mapping(value: object | None) -> dict[str, Any]:
     return {}
 
 
+def _preferred_session_id(
+    preferred_session_id: object | None,
+    metadata: object | None,
+) -> str | None:
+    explicit = _string(preferred_session_id)
+    if explicit is not None:
+        return explicit
+    normalized_metadata = _mapping(metadata)
+    return _string(
+        normalized_metadata.get("preferred_session_id")
+        or _mapping(normalized_metadata.get("continuation")).get("preferred_session_id")
+        or _mapping(normalized_metadata.get("continuation")).get("research_session_id")
+    )
+
+
 def _signature(value: object | None) -> str:
     return " ".join(str(value or "").strip().casefold().split())
 
@@ -242,6 +257,7 @@ class SourceCollectionFrontdoorService:
         requested_sources: list[str] | None = None,
         writeback_target: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
+        preferred_session_id: str | None = None,
     ) -> SourceCollectionFrontdoorResult:
         normalized_goal = _string(goal)
         if normalized_goal is None:
@@ -252,6 +268,10 @@ class SourceCollectionFrontdoorService:
         normalized_question = _string(question) or normalized_goal
         normalized_requested_sources = _string_list(requested_sources)
         normalized_metadata = _mapping(metadata)
+        normalized_preferred_session_id = _preferred_session_id(
+            preferred_session_id,
+            normalized_metadata,
+        )
         normalized_writeback_target = _mapping(writeback_target) or None
         brief = ResearchBrief(
             owner_agent_id=normalized_owner_agent_id,
@@ -290,12 +310,15 @@ class SourceCollectionFrontdoorService:
             "brief": brief_payload,
             "route": route_payload,
         }
+        if normalized_preferred_session_id is not None:
+            entry_metadata["preferred_session_id"] = normalized_preferred_session_id
         if route.mode == "heavy":
             return self._run_heavy_path(
                 brief=brief,
                 route_payload=route_payload,
                 metadata=entry_metadata,
                 trigger_source=trigger_source,
+                preferred_session_id=normalized_preferred_session_id,
             )
         return self._run_light_path(
             brief=brief,
@@ -312,6 +335,7 @@ class SourceCollectionFrontdoorService:
         route_payload: dict[str, Any],
         metadata: dict[str, Any],
         trigger_source: str,
+        preferred_session_id: str | None = None,
     ) -> SourceCollectionFrontdoorResult:
         service = self._heavy_research_service
         starter = getattr(service, "start_session", None)
@@ -321,6 +345,8 @@ class SourceCollectionFrontdoorService:
         reusable_session = self._find_reusable_heavy_session(
             brief=brief,
             execution_agent_id=str(route_payload.get("execution_agent_id") or brief.owner_agent_id),
+            trigger_source=trigger_source,
+            preferred_session_id=preferred_session_id,
         )
         if reusable_session is not None and callable(resumer):
             session_result = resumer(
@@ -410,8 +436,23 @@ class SourceCollectionFrontdoorService:
         *,
         brief: ResearchBrief,
         execution_agent_id: str,
+        trigger_source: str,
+        preferred_session_id: str | None = None,
     ) -> ResearchSessionRecord | None:
         followup_like = _looks_like_followup_question(brief.question)
+        normalized_trigger_source = _string(trigger_source) or ""
+        normalized_preferred_session_id = _string(preferred_session_id)
+        getter = getattr(self.research_session_repository, "get_research_session", None)
+        if normalized_preferred_session_id is not None and callable(getter):
+            preferred_session = getter(normalized_preferred_session_id)
+            if (
+                preferred_session is not None
+                and str(getattr(preferred_session, "provider", "") or "").strip() == "baidu-page"
+                and str(getattr(preferred_session, "owner_agent_id", "") or "").strip() == execution_agent_id
+                and str(getattr(preferred_session, "status", "") or "").strip()
+                not in {"failed", "cancelled"}
+            ):
+                return preferred_session
         lister = getattr(self.research_session_repository, "list_research_sessions", None)
         if not callable(lister):
             return None
@@ -434,6 +475,24 @@ class SourceCollectionFrontdoorService:
         ]
         if not reusable_candidates:
             return None
+        active_candidates = [
+            candidate
+            for candidate in reusable_candidates
+            if str(getattr(candidate, "status", "") or "").strip()
+            in {"queued", "running", "waiting-login"}
+        ]
+        if active_candidates:
+            return max(
+                active_candidates,
+                key=lambda item: getattr(item, "updated_at", None) or getattr(item, "created_at", None),
+            )
+        latest_reusable_candidate = max(
+            reusable_candidates,
+            key=lambda item: getattr(item, "updated_at", None) or getattr(item, "created_at", None),
+        )
+        if normalized_trigger_source == "main-brain-followup":
+            if len(reusable_candidates) == 1:
+                return latest_reusable_candidate
         if len(reusable_candidates) == 1:
             candidate = reusable_candidates[0]
             if followup_like or _allow_strong_overlap_reuse(brief=brief, candidate=candidate):
@@ -448,6 +507,8 @@ class SourceCollectionFrontdoorService:
                 best_candidate = candidate
         if best_candidate is None:
             return None
+        if normalized_trigger_source == "main-brain-followup" and best_score < 60:
+            return latest_reusable_candidate
         if followup_like and best_score > 0:
             return best_candidate
         return best_candidate if best_score >= 60 else None

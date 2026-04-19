@@ -419,3 +419,247 @@ def test_heavy_frontdoor_reuses_matching_session_for_strong_overlap_followup_wit
     assert heavy_service.start_calls == []
     assert heavy_service.resume_calls[0]["session_id"] == "research-session-ziwei"
     assert result.session_id == "research-session-ziwei"
+
+
+def test_heavy_frontdoor_main_brain_followup_reuses_only_completed_session_without_keyword_marker(
+    tmp_path,
+) -> None:
+    repository = SqliteResearchSessionRepository(SQLiteStateStore(tmp_path / "state.db"))
+    now = datetime.now(timezone.utc)
+    repository.upsert_research_session(
+        ResearchSessionRecord(
+            id="research-session-existing",
+            provider="baidu-page",
+            industry_instance_id="industry-1",
+            work_context_id="ctx-1",
+            owner_agent_id="industry-researcher-demo",
+            supervisor_agent_id="main-brain",
+            trigger_source="user-direct",
+            goal="Research Zi Wei Dou Shu basics",
+            status="completed",
+            round_count=3,
+            brief={
+                "goal": "Research Zi Wei Dou Shu basics",
+                "question": "What is Zi Wei Dou Shu?",
+            },
+            created_at=now,
+            updated_at=now,
+            completed_at=now,
+        )
+    )
+    heavy_service = _ReusableHeavyResearchService()
+    service = SourceCollectionFrontdoorService(
+        heavy_research_service=heavy_service,
+        research_session_repository=repository,
+    )
+
+    result = service.run_source_collection_frontdoor(
+        goal="Need one more decision-ready research clarification",
+        question="List the most worth-reading materials first.",
+        why_needed="Main brain is continuing the same research thread.",
+        done_when="One more clarification is enough for the next decision.",
+        trigger_source="main-brain-followup",
+        owner_agent_id="industry-researcher-demo",
+        industry_instance_id="industry-1",
+        work_context_id="ctx-1",
+        collection_mode_hint="heavy",
+        requested_sources=["search", "web_page"],
+        metadata={"entry_surface": "test"},
+    )
+
+    assert heavy_service.start_calls == []
+    assert heavy_service.resume_calls[0]["session_id"] == "research-session-existing"
+    assert result.session_id == "research-session-existing"
+
+
+def test_heavy_frontdoor_main_brain_followup_falls_back_to_latest_completed_session_when_ambiguous(
+    tmp_path,
+) -> None:
+    repository = SqliteResearchSessionRepository(SQLiteStateStore(tmp_path / "state.db"))
+    now = datetime.now(timezone.utc)
+    repository.upsert_research_session(
+        ResearchSessionRecord(
+            id="research-session-older",
+            provider="baidu-page",
+            industry_instance_id="industry-1",
+            work_context_id="ctx-1",
+            owner_agent_id="industry-researcher-demo",
+            supervisor_agent_id="main-brain",
+            trigger_source="user-direct",
+            goal="Track chip sector news",
+            status="completed",
+            round_count=2,
+            brief={
+                "goal": "Track chip sector news",
+                "question": "What moved the chip sector today?",
+            },
+            created_at=now.replace(minute=max(now.minute - 1, 0)),
+            updated_at=now.replace(minute=max(now.minute - 1, 0)),
+            completed_at=now.replace(minute=max(now.minute - 1, 0)),
+        )
+    )
+    repository.upsert_research_session(
+        ResearchSessionRecord(
+            id="research-session-latest",
+            provider="baidu-page",
+            industry_instance_id="industry-1",
+            work_context_id="ctx-1",
+            owner_agent_id="industry-researcher-demo",
+            supervisor_agent_id="main-brain",
+            trigger_source="user-direct",
+            goal="Research Zi Wei Dou Shu basics",
+            status="completed",
+            round_count=3,
+            brief={
+                "goal": "Research Zi Wei Dou Shu basics",
+                "question": "What is Zi Wei Dou Shu?",
+            },
+            created_at=now,
+            updated_at=now,
+            completed_at=now,
+        )
+    )
+    heavy_service = _ReusableHeavyResearchService()
+    service = SourceCollectionFrontdoorService(
+        heavy_research_service=heavy_service,
+        research_session_repository=repository,
+    )
+
+    result = service.run_source_collection_frontdoor(
+        goal="Need one more decision-ready research clarification",
+        question="List the most worth-reading materials first.",
+        why_needed="Main brain is continuing the same research thread.",
+        done_when="One more clarification is enough for the next decision.",
+        trigger_source="main-brain-followup",
+        owner_agent_id="industry-researcher-demo",
+        industry_instance_id="industry-1",
+        work_context_id="ctx-1",
+        collection_mode_hint="heavy",
+        requested_sources=["search", "web_page"],
+        metadata={"entry_surface": "test"},
+    )
+
+    assert heavy_service.start_calls == []
+    assert heavy_service.resume_calls[0]["session_id"] == "research-session-latest"
+    assert result.session_id == "research-session-latest"
+
+
+def test_heavy_frontdoor_forces_reuse_of_active_waiting_login_session_in_same_scope(
+    tmp_path,
+) -> None:
+    repository = SqliteResearchSessionRepository(SQLiteStateStore(tmp_path / "state.db"))
+    now = datetime.now(timezone.utc)
+    repository.upsert_research_session(
+        ResearchSessionRecord(
+            id="research-session-waiting-login",
+            provider="baidu-page",
+            industry_instance_id="industry-1",
+            work_context_id="ctx-1",
+            owner_agent_id="industry-researcher-demo",
+            supervisor_agent_id="main-brain",
+            trigger_source="main-brain-followup",
+            goal="Track market close news for two stock symbols",
+            status="waiting-login",
+            round_count=1,
+            brief={
+                "goal": "Track market close news for two stock symbols",
+                "question": "What moved the chip sector today?",
+            },
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    heavy_service = _ReusableHeavyResearchService()
+    service = SourceCollectionFrontdoorService(
+        heavy_research_service=heavy_service,
+        research_session_repository=repository,
+    )
+
+    result = service.run_source_collection_frontdoor(
+        goal="Research Zi Wei Dou Shu basics",
+        question="Explain the twelve palaces for a beginner.",
+        why_needed="keep the same active browser thread instead of opening a new one",
+        done_when="one more clarification is enough",
+        trigger_source="user-direct",
+        owner_agent_id="industry-researcher-demo",
+        industry_instance_id="industry-1",
+        work_context_id="ctx-1",
+        collection_mode_hint="heavy",
+        requested_sources=["search", "web_page"],
+        metadata={"entry_surface": "test"},
+    )
+
+    assert heavy_service.start_calls == []
+    assert heavy_service.resume_calls[0]["session_id"] == "research-session-waiting-login"
+    assert result.session_id == "research-session-waiting-login"
+
+
+def test_heavy_frontdoor_prefers_explicit_continuation_session_id_over_newer_waiting_login_session(
+    tmp_path,
+) -> None:
+    repository = SqliteResearchSessionRepository(SQLiteStateStore(tmp_path / "state.db"))
+    now = datetime.now(timezone.utc)
+    repository.upsert_research_session(
+        ResearchSessionRecord(
+            id="research-session-original",
+            provider="baidu-page",
+            industry_instance_id="industry-1",
+            work_context_id="ctx-1",
+            owner_agent_id="industry-researcher-demo",
+            supervisor_agent_id="main-brain",
+            trigger_source="main-brain-followup",
+            goal="补齐竞品定价资料和证据来源",
+            status="waiting-login",
+            round_count=2,
+            brief={
+                "goal": "补齐竞品定价资料和证据来源",
+                "question": "继续补齐竞品定价资料和证据来源，并标注官网与第三方口径差异。",
+            },
+            created_at=now.replace(minute=max(now.minute - 1, 0)),
+            updated_at=now.replace(minute=max(now.minute - 1, 0)),
+        )
+    )
+    repository.upsert_research_session(
+        ResearchSessionRecord(
+            id="research-session-newer",
+            provider="baidu-page",
+            industry_instance_id="industry-1",
+            work_context_id="ctx-1",
+            owner_agent_id="industry-researcher-demo",
+            supervisor_agent_id="main-brain",
+            trigger_source="main-brain-followup",
+            goal="另一条同 scope 的研究线程",
+            status="waiting-login",
+            round_count=1,
+            brief={
+                "goal": "另一条同 scope 的研究线程",
+                "question": "这条不该抢走原来的恢复链。",
+            },
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    heavy_service = _ReusableHeavyResearchService()
+    service = SourceCollectionFrontdoorService(
+        heavy_research_service=heavy_service,
+        research_session_repository=repository,
+    )
+
+    result = service.run_source_collection_frontdoor(
+        goal="补齐竞品定价资料和证据来源",
+        question="我登录好了，继续原来的研究。",
+        why_needed="登录后要继续原来的正式研究会话。",
+        done_when="沿原线程补齐证据。",
+        trigger_source="main-brain-followup",
+        owner_agent_id="industry-researcher-demo",
+        industry_instance_id="industry-1",
+        work_context_id="ctx-1",
+        collection_mode_hint="heavy",
+        requested_sources=["search", "web_page"],
+        preferred_session_id="research-session-original",
+        metadata={"entry_surface": "test"},
+    )
+
+    assert heavy_service.start_calls == []
+    assert heavy_service.resume_calls[0]["session_id"] == "research-session-original"
+    assert result.session_id == "research-session-original"

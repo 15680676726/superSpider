@@ -10,10 +10,17 @@ import re
 from typing import Any, Mapping
 
 from ..constant import WORKING_DIR
+from ..environments.surface_execution.browser import (
+    BrowserPageProfile,
+    BrowserTargetCandidate,
+)
+from ..environments.surface_execution.browser.service import BrowserSurfaceExecutionService
 from ..state import AgentReportRecord, ResearchSessionRecord, ResearchSessionRoundRecord
 from .baidu_page_contract import extract_answer_contract
+from .chat_continuation_owner import ResearchChatContinuationOwner
 from .models import ResearchLink, ResearchSessionRunResult
 from .source_collection.contracts import ResearchAdapterResult
+from .surface_loop_owner import ResearchChatSurfaceLoopOwner
 
 logger = logging.getLogger(__name__)
 _LATIN_TOKEN_RE = re.compile(r"[a-z0-9]{3,}", re.IGNORECASE)
@@ -335,6 +342,9 @@ class BaiduPageResearchService:
         self._knowledge_service = knowledge_service
         self._work_context_service = work_context_service
         self._knowledge_writeback_service = knowledge_writeback_service
+        self._browser_surface_service = BrowserSurfaceExecutionService(
+            browser_runner=self._browser_call,
+        )
 
     def start_session(
         self,
@@ -458,6 +468,8 @@ class BaiduPageResearchService:
             current_round = rounds[-1]
             rounds_processed += 1
             is_chat_round = _text(current_url) in {"", self.BAIDU_CHAT_URL}
+            submission_metadata: dict[str, Any] = {}
+            response_readback: dict[str, Any] | None = None
             if is_chat_round:
                 if not chat_page_ready:
                     self._ensure_chat_page(
@@ -465,11 +477,39 @@ class BaiduPageResearchService:
                         page_id=chat_page_id,
                     )
                     chat_page_ready = True
-                self._submit_chat_question(
+                submission_metadata = self._submit_chat_question(
                     session_id=browser_session_id,
                     page_id=chat_page_id,
                     question=current_round.question,
                 )
+                if bool(submission_metadata.get("pre_submit_login_required")):
+                    response_readback = _mapping(submission_metadata.get("response_readback"))
+                    updated_round = current_round.model_copy(
+                        update={
+                            "response_summary": "Login required before continuing research.",
+                            "decision": "login_required",
+                            "metadata": {
+                                **current_round.metadata,
+                                **submission_metadata,
+                            },
+                            "updated_at": _utc_now(),
+                        },
+                    )
+                    rounds[-1] = self._upsert_round(updated_round)
+                    session = session.model_copy(
+                        update={
+                            "status": "waiting-login",
+                            "updated_at": _utc_now(),
+                        },
+                    )
+                    self._upsert_session(session)
+                    return ResearchSessionRunResult(
+                        session=session,
+                        rounds=_unique_rounds(rounds),
+                        stop_reason="waiting-login",
+                        deepened_links=deepened_links,
+                        downloaded_artifacts=downloaded_artifacts,
+                    )
                 self._browser_call(
                     action="wait_for",
                     session_id=browser_session_id,
@@ -493,6 +533,10 @@ class BaiduPageResearchService:
                 contract = self._extract_chat_contract(
                     previous_snapshot=last_chat_snapshot,
                     current_snapshot=snapshot,
+                )
+                response_readback = self._build_response_readback(
+                    snapshot=snapshot,
+                    contract=contract,
                 )
                 last_chat_snapshot = _mapping(snapshot)
             else:
@@ -523,11 +567,20 @@ class BaiduPageResearchService:
                     ),
                 ).get("result")
                 contract = extract_answer_contract(snapshot)
+                response_readback = self._build_response_readback(
+                    snapshot=snapshot,
+                    contract=contract,
+                )
             if contract.login_state == "login-required":
                 updated_round = current_round.model_copy(
                     update={
                         "response_summary": "Login required before continuing research.",
                         "decision": "login_required",
+                        "metadata": {
+                            **current_round.metadata,
+                            **submission_metadata,
+                            **({"response_readback": response_readback} if response_readback else {}),
+                        },
                         "updated_at": _utc_now(),
                     },
                 )
@@ -604,6 +657,8 @@ class BaiduPageResearchService:
                         "collected_sources": source_payloads,
                         "gaps": adapter_gaps,
                         "conflicts": adapter_conflicts,
+                        **submission_metadata,
+                        **({"response_readback": response_readback} if response_readback else {}),
                     },
                     "updated_at": _utc_now(),
                 },
@@ -627,23 +682,55 @@ class BaiduPageResearchService:
                 ),
                 None,
             )
-            has_structured_answer = bool(findings or _text(contract.answer_text))
-            should_deepen = (
-                next_link is not None
-                and not has_structured_answer
-                and (
-                    len(raw_links) > 1
-                    or any(_text(item.get("kind")) == "pdf" for item in raw_links)
-                )
+            continuation_owner = ResearchChatContinuationOwner(
+                build_followup_question=lambda: self._build_followup_question(
+                    session=session,
+                    round_record=updated_round,
+                ),
+                build_continuation_question=lambda: self._build_continuation_question(
+                    session=session,
+                    round_record=updated_round,
+                ),
             )
-            if should_deepen and session.link_depth_count < self.MAX_LINK_DEPTH:
-                link_url = _text(next_link.get("url"))
+            response_readback_payload = _mapping(response_readback)
+            continuation_plan = continuation_owner.plan(
+                page_kind=(
+                    _text(response_readback_payload.get("page_kind"))
+                    or ("login-wall" if _text(getattr(contract, "login_state", None)) == "login-required" else "content-page")
+                ),
+                blocker_hints=[
+                    _text(item)
+                    for item in list(response_readback_payload.get("blocker_hints") or [])
+                    if _text(item)
+                ],
+                round_index=updated_round.round_index,
+                entry_mode=_text(_mapping(updated_round.metadata).get("entry_mode")),
+                has_structured_answer=bool(findings or _text(contract.answer_text)),
+                findings_count=len(findings),
+                new_findings_count=len(new_findings),
+                has_adapter_gaps=bool(adapter_gaps),
+                selected_links_count=len(selected_links),
+                deepened_link_count=len(deepened_links),
+                consecutive_no_new_findings=consecutive_no_new_findings,
+                next_link_url=_text(next_link.get("url")) if next_link is not None else "",
+                has_pdf_link=any(_text(item.get("kind")) == "pdf" for item in raw_links),
+                raw_link_count=len(raw_links),
+                current_link_depth=session.link_depth_count,
+                max_link_depth=self.MAX_LINK_DEPTH,
+                max_consecutive_no_new_findings=self.MAX_CONSECUTIVE_NO_NEW_FINDINGS,
+            )
+            if continuation_plan.action_kind == "deepen-link":
+                link_url = _text(continuation_plan.next_link_url)
                 visited_links.add(link_url)
                 deepened_links.append(dict(next_link))
                 session = session.model_copy(
                     update={
                         "status": "deepening",
-                        "link_depth_count": session.link_depth_count + 1,
+                        "link_depth_count": (
+                            session.link_depth_count + 1
+                            if continuation_plan.increment_link_depth
+                            else session.link_depth_count
+                        ),
                         "updated_at": _utc_now(),
                     },
                 )
@@ -651,94 +738,29 @@ class BaiduPageResearchService:
                 next_round = self._build_next_round(
                     session=session,
                     round_index=updated_round.round_index + 1,
-                    question=f"Deepen source: {link_url}",
+                    question=continuation_plan.next_question,
                 )
                 rounds.append(self._upsert_round(next_round))
                 current_url = link_url
                 continue
 
-            is_resume_followup_round = (
-                _text(_mapping(updated_round.metadata).get("entry_mode")) == "resume-followup"
-            )
-            is_coverage_followup_round = (
-                _text(_mapping(updated_round.metadata).get("entry_mode")) == "coverage-followup"
-            )
-            is_generic_continue_round = (
-                _text(_mapping(updated_round.metadata).get("entry_mode")) == "generic-continue"
-            )
-            if (
-                has_structured_answer
-                and not should_deepen
-                and updated_round.round_index == 1
-            ):
+            if continuation_plan.action_kind == "next-round":
                 next_round = self._build_next_round(
                     session=session,
                     round_index=updated_round.round_index + 1,
-                    question=self._build_followup_question(session=session, round_record=updated_round),
-                    metadata={"entry_mode": "coverage-followup"},
+                    question=continuation_plan.next_question,
+                    metadata={"entry_mode": continuation_plan.next_round_mode},
                 )
                 rounds.append(self._upsert_round(next_round))
-                current_url = self.BAIDU_CHAT_URL
+                current_url = (
+                    continuation_plan.next_link_url
+                    if continuation_plan.next_link_url
+                    else self.BAIDU_CHAT_URL
+                )
                 continue
 
-            if (
-                has_structured_answer
-                and not should_deepen
-                and is_resume_followup_round
-                and not adapter_gaps
-                and len(new_findings) >= 1
-            ):
-                stop_reason = "followup-complete"
-                break
-
-            if (
-                has_structured_answer
-                and not should_deepen
-                and is_coverage_followup_round
-                and not adapter_gaps
-                and len(new_findings) >= 2
-            ):
-                stop_reason = "followup-complete"
-                break
-
-            if (
-                has_structured_answer
-                and not should_deepen
-                and is_generic_continue_round
-                and not adapter_gaps
-                and len(new_findings) >= 1
-            ):
-                stop_reason = "followup-complete"
-                break
-
-            if (
-                not selected_links
-                and not deepened_links
-                and updated_round.round_index == 1
-                and len(findings) >= 2
-            ):
-                stop_reason = "enough-findings"
-                break
-
-            if consecutive_no_new_findings >= self.MAX_CONSECUTIVE_NO_NEW_FINDINGS:
-                stop_reason = "no-new-findings"
-                break
-
-            if deepened_links:
-                stop_reason = "deepened-link-closed"
-                break
-
-            next_round = self._build_next_round(
-                session=session,
-                round_index=updated_round.round_index + 1,
-                question=self._build_continuation_question(
-                    session=session,
-                    round_record=updated_round,
-                ),
-                metadata={"entry_mode": "generic-continue"},
-            )
-            rounds.append(self._upsert_round(next_round))
-            current_url = self.BAIDU_CHAT_URL
+            stop_reason = continuation_plan.stop_reason or "planner-stop"
+            break
 
         if stop_reason is None:
             stop_reason = "max-rounds"
@@ -1204,114 +1226,523 @@ class BaiduPageResearchService:
         session_id: str,
         page_id: str,
         question: str,
-    ) -> None:
-        target = self._resolve_chat_input_target(session_id=session_id, page_id=page_id)
-        payload: dict[str, Any] = {
-            "action": "type",
-            "session_id": session_id,
-            "page_id": page_id,
-            "text": question,
-            "submit": True,
+    ) -> dict[str, Any]:
+        surface_context = self._build_baidu_surface_context(
+            session_id=session_id,
+            page_id=page_id,
+        )
+        initial_observation = surface_context.get("observation")
+        if _text(getattr(initial_observation, "login_state", None)) == "login-required" or "login-required" in [
+            _text(item)
+            for item in list(getattr(initial_observation, "blockers", []) or [])
+        ]:
+            login_gate_payload = self._read_login_gate_payload(
+                session_id=session_id,
+                page_id=page_id,
+                deep_think={
+                    "requested": True,
+                    "available": False,
+                    "enabled_before": False,
+                    "enabled_after": False,
+                    "activated": False,
+                    "selector": "",
+                    "label": "",
+                },
+                input_readback={"matched": False},
+            )
+            if login_gate_payload is not None:
+                return login_gate_payload
+            readable_sections = list(getattr(initial_observation, "readable_sections", []) or [])
+            blocker_excerpt = next(
+                (
+                    _text(section.get("text"))
+                    for section in readable_sections
+                    if isinstance(section, Mapping) and _text(section.get("text"))
+                ),
+                "",
+            )
+            return {
+                "deep_think": {
+                    "requested": True,
+                    "available": False,
+                    "enabled_before": False,
+                    "enabled_after": False,
+                    "activated": False,
+                    "selector": "",
+                    "label": "",
+                },
+                "input_readback": {"matched": False},
+                "pre_submit_login_required": True,
+                "response_readback": {
+                    "page_href": _text(getattr(initial_observation, "page_url", None)),
+                    "page_title": _text(getattr(initial_observation, "page_title", None)),
+                    "login_state": "login-required",
+                    "page_kind": "login-wall",
+                    "blocker_hints": ["login-required"],
+                    "answer_excerpt": blocker_excerpt,
+                    "links": [],
+                },
+            }
+        loop_owner = ResearchChatSurfaceLoopOwner(question=question)
+        submission_loop = self._browser_surface_service.run_step_loop(
+            session_id=session_id,
+            page_id=page_id,
+            planner=loop_owner.plan_step,
+            initial_observation=initial_observation,
+            snapshot_text=_text(surface_context.get("snapshot_text")),
+            page_url=_text(surface_context.get("page_url")),
+            page_title=_text(surface_context.get("page_title")),
+            dom_probe=_mapping(surface_context.get("dom_probe")),
+            page_profile=self._build_baidu_page_profile(),
+            max_steps=3,
+        )
+        toggle_available = False
+        toggle_enabled_before = False
+        toggle_label = ""
+        toggle_selector = ""
+        if initial_observation is not None:
+            toggle_candidate = self._resolve_surface_target(
+                session_id=session_id,
+                page_id=page_id,
+                target_slot="reasoning_toggle",
+                surface_context=surface_context,
+            )
+            if toggle_candidate is not None:
+                toggle_available = True
+                toggle_enabled_before = bool(toggle_candidate.metadata.get("enabled"))
+                toggle_label = _text(toggle_candidate.metadata.get("label"))
+                toggle_selector = _text(toggle_candidate.readback_selector or toggle_candidate.action_selector)
+        toggle_result = next(
+            (
+                step
+                for step in submission_loop.steps
+                if _text(getattr(step, "intent_kind", None)) == "click"
+                and _text(getattr(step, "target_slot", None)) == "reasoning_toggle"
+            ),
+            None,
+        )
+        deep_think = {
+            "requested": True,
+            "available": toggle_available,
+            "enabled_before": toggle_enabled_before,
+            "enabled_after": (
+                str((getattr(toggle_result, "readback", {}) or {}).get("toggle_enabled") or "").strip().lower() == "true"
+                if toggle_result is not None
+                else toggle_enabled_before
+            ),
+            "activated": toggle_result is not None and _text(getattr(toggle_result, "status", None)) == "succeeded",
+            "selector": "",
+            "label": _text((getattr(toggle_result, "readback", {}) or {}).get("observed_text")) or toggle_label,
         }
-        ref = _text(target.get("ref"))
-        selector = _text(target.get("selector"))
-        if ref:
-            payload["ref"] = ref
-            payload["selector"] = ""
-        elif selector:
-            payload["selector"] = selector
+        if not deep_think["selector"]:
+            if toggle_result is not None and getattr(toggle_result, "resolved_target", None) is not None:
+                resolved_toggle_target = getattr(toggle_result, "resolved_target", None)
+                deep_think["selector"] = _text(
+                    getattr(resolved_toggle_target, "readback_selector", None)
+                    or getattr(resolved_toggle_target, "action_selector", None)
+                )
+            else:
+                deep_think["selector"] = toggle_selector
+        type_result = next(
+            (
+                step
+                for step in submission_loop.steps
+                if _text(getattr(step, "intent_kind", None)) == "type"
+                and _text(getattr(step, "target_slot", None)) == "primary_input"
+            ),
+            None,
+        )
+        input_readback = dict(getattr(type_result, "readback", {}) or {})
+        expected_signature = _question_signature(question)
+        observed_signature = _question_signature(input_readback.get("normalized_text"))
+        input_readback["matched"] = bool(
+            expected_signature
+            and observed_signature
+            and expected_signature == observed_signature
+            and bool(getattr(type_result, "verification_passed", False))
+        )
+        if not bool(input_readback.get("matched")):
+            login_gate_payload = self._read_login_gate_payload(
+                session_id=session_id,
+                page_id=page_id,
+                deep_think=deep_think,
+                input_readback=input_readback,
+            )
+            if login_gate_payload is not None:
+                return login_gate_payload
+            raise RuntimeError("Chat input readback did not match submitted question.")
+        submit_step = next(
+            (
+                step
+                for step in submission_loop.steps
+                if _text(getattr(step, "intent_kind", None)) == "press"
+                and _text(getattr(step, "target_slot", None)) == "page"
+            ),
+            None,
+        )
+        if submit_step is None or _text(getattr(submit_step, "status", None)) != "succeeded":
+            raise RuntimeError("Chat submit key press did not complete successfully.")
+        return {
+            "deep_think": deep_think,
+            "input_readback": input_readback,
+        }
+
+    def _read_login_gate_payload(
+        self,
+        *,
+        session_id: str,
+        page_id: str,
+        deep_think: Mapping[str, Any] | None,
+        input_readback: Mapping[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        snapshot = self._capture_page_snapshot(
+            session_id=session_id,
+            page_id=page_id,
+        )
+        contract = extract_answer_contract(snapshot)
+        if _text(getattr(contract, "login_state", None)) != "login-required":
+            return None
+        return {
+            "deep_think": dict(deep_think or {}),
+            "input_readback": dict(input_readback or {}),
+            "pre_submit_login_required": True,
+            "response_readback": self._build_response_readback(
+                snapshot=snapshot,
+                contract=contract,
+            ),
+        }
+
+    def _build_baidu_surface_context(
+        self,
+        *,
+        session_id: str,
+        page_id: str,
+    ) -> dict[str, Any]:
+        return self._browser_surface_service.capture_page_context(
+            session_id=session_id,
+            page_id=page_id,
+            page_profile=self._build_baidu_page_profile(),
+            page_url=self.BAIDU_CHAT_URL,
+        )
+
+    def _build_baidu_page_profile(
+        self,
+        *,
+        include_reasoning_toggle: bool = True,
+    ) -> BrowserPageProfile:
+        return BrowserPageProfile(
+            profile_id="baidu-chat",
+            page_title="Baidu Chat",
+            include_generic_live_probe=True,
+            dom_probe_builder=lambda **kwargs: self._build_baidu_surface_dom_probe(
+                include_reasoning_toggle=include_reasoning_toggle,
+                **kwargs,
+            ),
+        )
+
+    def _build_baidu_surface_dom_probe(
+        self,
+        *,
+        browser_runner,
+        session_id: str,
+        page_id: str,
+        snapshot_text: str,
+        page_url: str,
+        page_title: str,
+        include_reasoning_toggle: bool = True,
+    ) -> dict[str, Any]:
+        _ = browser_runner, page_url, page_title
+        dom_probe: dict[str, Any] = {
+            "inputs": [],
+            "control_groups": [],
+        }
+        seed_input_candidate = self._browser_surface_service.resolve_target(
+            session_id=session_id,
+            page_id=page_id,
+            target_slot="primary_input",
+            snapshot_text=snapshot_text,
+            page_url=self.BAIDU_CHAT_URL,
+            page_title="Baidu Chat",
+        )
+        if seed_input_candidate is not None and _text(seed_input_candidate.action_ref):
+            dom_probe["inputs"].append(
+                {
+                    "target_kind": "input",
+                    "action_ref": _text(seed_input_candidate.action_ref),
+                    "action_selector": "",
+                    "readback_selector": "#chat-textarea",
+                    "element_kind": "textarea",
+                    "scope_anchor": _text(seed_input_candidate.scope_anchor) or "composer",
+                    "score": max(int(seed_input_candidate.score or 0), 10),
+                    "reason": "baidu chat primary input via shared observer",
+                }
+            )
+        if not include_reasoning_toggle:
+            return dom_probe
+        deep_think_probe = self._browser_call(
+            action="evaluate",
+            session_id=session_id,
+            page_id=page_id,
+            code=(
+                "(() => {"
+                " const input = document.querySelector('#chat-textarea, textarea, [contenteditable=\"true\"], [role=\"textbox\"]');"
+                " if (!input) return { available: false, enabled: false, selector: '', label: '' };"
+                " const scopeRoot = input.closest('form, footer, main, [class*=\"input\"], [class*=\"composer\"], [class*=\"send\"]') || input.parentElement || document.body;"
+                " const candidates = Array.from(scopeRoot.querySelectorAll('button, [role=\"button\"], label'));"
+                " const match = candidates.find((element) => {"
+                "   const text = (element.innerText || element.textContent || '').replace(/\\s+/g, ' ').trim();"
+                "   return text.includes('\\u6df1\\u5ea6\\u601d\\u8003');"
+                " });"
+                " if (!match) return { available: false, enabled: false, selector: '', label: '' };"
+                " if (!match.hasAttribute('data-copaw-deep-think')) {"
+                "   match.setAttribute('data-copaw-deep-think', '1');"
+                " }"
+                " const pressed = (match.getAttribute('aria-pressed') || '').toLowerCase();"
+                " const className = (match.className || '').toString().toLowerCase();"
+                " const text = (match.innerText || match.textContent || '').replace(/\\s+/g, ' ').trim();"
+                " const enabled = pressed === 'true' || className.includes('active') || className.includes('selected') || className.includes('checked');"
+                " return {"
+                "   available: true,"
+                "   enabled,"
+                "   selector: '[data-copaw-deep-think=\"1\"]',"
+                "   label: text"
+                " };"
+                "})()"
+            ),
+        ).get("result")
+        deep_think_payload = _mapping(deep_think_probe)
+        if bool(deep_think_payload.get("available")):
+            dom_probe["control_groups"].append(
+                {
+                    "group_kind": "reasoning_toggle_group",
+                    "scope_anchor": "composer",
+                    "candidates": [
+                        {
+                            "target_kind": "toggle",
+                            "action_ref": "",
+                            "action_selector": _text(deep_think_payload.get("selector")),
+                            "readback_selector": _text(deep_think_payload.get("selector")),
+                            "element_kind": "button",
+                            "scope_anchor": "composer",
+                            "score": 8,
+                            "reason": "baidu deep think toggle",
+                            "metadata": {
+                                "enabled": bool(deep_think_payload.get("enabled")),
+                                "label": _text(deep_think_payload.get("label")),
+                            },
+                        }
+                    ],
+                }
+            )
+        return dom_probe
+
+    def _target_from_mapping(
+        self,
+        payload: Mapping[str, Any] | None,
+    ) -> BrowserTargetCandidate | None:
+        mapping = _mapping(payload)
+        if not mapping:
+            return None
+        return BrowserTargetCandidate(
+            target_kind=_text(mapping.get("target_kind")) or "input",
+            action_ref=_text(mapping.get("ref") or mapping.get("action_ref")),
+            action_selector=_text(mapping.get("selector") or mapping.get("action_selector")),
+            readback_selector=_text(mapping.get("readback_selector")),
+            element_kind=_text(mapping.get("element_kind")) or "generic",
+            scope_anchor=_text(mapping.get("scope_anchor")),
+            score=int(mapping.get("score") or 0),
+            reason=_text(mapping.get("reason")),
+            metadata=dict(_mapping(mapping.get("metadata"))),
+        )
+
+
+    def _ensure_baidu_deep_think_enabled(
+        self,
+        *,
+        session_id: str,
+        page_id: str,
+        surface_context: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        context = dict(surface_context or {})
+        requested = True
+        candidate = self._resolve_surface_target(
+            session_id=session_id,
+            page_id=page_id,
+            target_slot="reasoning_toggle",
+            surface_context=surface_context,
+        )
+        before = (
+            {
+                "available": True,
+                "enabled": bool(candidate.metadata.get("enabled")),
+                "selector": _text(candidate.readback_selector or candidate.action_selector),
+                "label": _text(candidate.metadata.get("label")),
+            }
+            if candidate is not None
+            else {
+                "available": False,
+                "enabled": False,
+                "selector": "",
+                "label": "",
+            }
+        )
+        available = bool(before.get("available"))
+        enabled_before = bool(before.get("enabled"))
+        selector = _text(before.get("selector"))
+        activated = False
+        after = before
+        if requested and available and not enabled_before:
+            if candidate is not None:
+                click_result = self._browser_surface_service.execute_step(
+                    session_id=session_id,
+                    page_id=page_id,
+                    before_observation=context.get("observation"),
+                    snapshot_text=_text(context.get("snapshot_text")),
+                    page_url=_text(context.get("page_url")),
+                    page_title=_text(context.get("page_title")),
+                    dom_probe=_mapping(context.get("dom_probe")),
+                    target_slot="reasoning_toggle",
+                    intent_kind="click",
+                    payload={},
+                    success_assertion={"toggle_enabled": "true"},
+                )
+                activated = _text(click_result.status) == "succeeded"
+                after = {
+                    "available": True,
+                    "enabled": str(click_result.readback.get("toggle_enabled") or "").strip().lower() == "true",
+                    "selector": _text(click_result.readback.get("selector")) or selector,
+                    "label": _text(click_result.readback.get("observed_text")) or _text(before.get("label")),
+                }
+        return {
+            "requested": requested,
+            "available": available,
+            "enabled_before": enabled_before,
+            "enabled_after": bool(after.get("enabled")),
+            "activated": activated,
+            "selector": _text(after.get("selector") or selector),
+            "label": _text(after.get("label") or before.get("label")),
+        }
+
+    def _read_baidu_deep_think_state(
+        self,
+        *,
+        session_id: str,
+        page_id: str,
+        surface_context: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        candidate = self._resolve_surface_target(
+            session_id=session_id,
+            page_id=page_id,
+            target_slot="reasoning_toggle",
+            surface_context=surface_context,
+        )
+        if candidate is None:
+            return {
+                "available": False,
+                "enabled": False,
+                "selector": "",
+                "label": "",
+            }
+        payload = self._browser_surface_service.read_target_readback(
+            session_id=session_id,
+            page_id=page_id,
+            target=candidate,
+        )
+        return {
+            "available": True,
+            "enabled": str(payload.get("toggle_enabled") or "").strip().lower() == "true",
+            "selector": _text(candidate.readback_selector or candidate.action_selector),
+            "label": _text(payload.get("observed_text")) or _text(candidate.metadata.get("label")),
+        }
+
+    def _read_chat_input_readback(
+        self,
+        *,
+        session_id: str,
+        page_id: str,
+        question: str,
+        target: Mapping[str, Any] | BrowserTargetCandidate | None = None,
+        surface_context: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        candidate = (
+            target
+            if isinstance(target, BrowserTargetCandidate)
+            else self._target_from_mapping(target)
+        )
+        if candidate is None:
+            resolved = self._resolve_chat_input_target(
+                session_id=session_id,
+                page_id=page_id,
+                surface_context=surface_context,
+            )
+            candidate = self._target_from_mapping(resolved)
+        if candidate is None:
+            observed_text = ""
+            normalized_text = ""
         else:
-            raise RuntimeError("Could not resolve a usable chat input target on the current page.")
-        self._browser_call(**payload)
+            payload = self._browser_surface_service.read_target_readback(
+                session_id=session_id,
+                page_id=page_id,
+                target=candidate,
+            )
+            observed_text = _text(payload.get("observed_text"))
+            normalized_text = _text(payload.get("normalized_text")) or observed_text
+        expected_signature = _question_signature(question)
+        observed_signature = _question_signature(normalized_text or observed_text)
+        return {
+            "matched": bool(expected_signature and observed_signature and expected_signature == observed_signature),
+            "observed_text": observed_text,
+            "normalized_text": normalized_text,
+        }
 
     def _resolve_chat_input_target(
         self,
         *,
         session_id: str,
         page_id: str,
+        surface_context: Mapping[str, Any] | None = None,
     ) -> dict[str, str]:
-        snapshot_payload = self._browser_call(
-            action="snapshot",
+        candidate = self._resolve_surface_target(
             session_id=session_id,
             page_id=page_id,
+            target_slot="primary_input",
+            surface_context=surface_context,
         )
-        snapshot_text = _text(snapshot_payload.get("snapshot"))
-        ref = self._select_chat_input_ref(snapshot_text)
-        if ref:
-            return {"ref": ref}
-        fallback = self._browser_call(
-            action="evaluate",
+        if candidate is None:
+            return {}
+        return {
+            "ref": candidate.action_ref,
+            "selector": candidate.action_selector,
+            "readback_selector": candidate.readback_selector,
+            "element_kind": candidate.element_kind,
+        }
+
+    def _resolve_surface_target(
+        self,
+        *,
+        session_id: str,
+        page_id: str,
+        target_slot: str,
+        surface_context: Mapping[str, Any] | None = None,
+    ) -> BrowserTargetCandidate | None:
+        context = dict(surface_context or {})
+        if context:
+            return self._browser_surface_service.resolve_target(
+                session_id=session_id,
+                page_id=page_id,
+                target_slot=target_slot,
+                snapshot_text=_text(context.get("snapshot_text")),
+                page_url=_text(context.get("page_url")),
+                page_title=_text(context.get("page_title")),
+                dom_probe=_mapping(context.get("dom_probe")),
+            )
+        return self._browser_surface_service.resolve_target(
             session_id=session_id,
             page_id=page_id,
-            code=(
-                "(() => {"
-                " const candidates = Array.from(document.querySelectorAll("
-                " 'textarea, input:not([type=\"hidden\"]), [contenteditable=\"true\"], "
-                " [role=\"textbox\"], [role=\"searchbox\"], [role=\"combobox\"]'"
-                " ));"
-                " const visible = candidates.filter((element) => {"
-                "   const rect = element.getBoundingClientRect();"
-                "   const style = window.getComputedStyle(element);"
-                "   const editable = !element.disabled && !element.readOnly && ("
-                "     element.isContentEditable ||"
-                "     element.tagName === 'TEXTAREA' ||"
-                "     element.tagName === 'INPUT' ||"
-                "     ['textbox','searchbox','combobox'].includes((element.getAttribute('role') || '').toLowerCase())"
-                "   );"
-                "   return editable && rect.width > 0 && rect.height > 0 &&"
-                "     style.display !== 'none' && style.visibility !== 'hidden';"
-                " });"
-                " const scored = visible.map((element, index) => {"
-                "   const text = ["
-                "     element.getAttribute('aria-label') || '',"
-                "     element.getAttribute('placeholder') || '',"
-                "     element.id || '',"
-                "     element.className || ''"
-                "   ].join(' ').toLowerCase();"
-                "   let score = 0;"
-                "   if (element.tagName === 'TEXTAREA') score += 6;"
-                "   if (element.isContentEditable) score += 6;"
-                "   if ((element.getAttribute('role') || '').toLowerCase() === 'textbox') score += 5;"
-                "   if (text.includes('chat') || text.includes('message') || text.includes('ask') || text.includes('输入') || text.includes('对话') || text.includes('消息')) score += 4;"
-                "   score -= index;"
-                "   return { element, score };"
-                " }).sort((left, right) => right.score - left.score);"
-                " const winner = scored[0] && scored[0].element;"
-                " if (!winner) return {};"
-                " winner.setAttribute('data-copaw-chat-input', '1');"
-                " return { selector: '[data-copaw-chat-input=\"1\"]' };"
-                "})()"
-            ),
-        ).get("result")
-        selector = _text(_mapping(fallback).get("selector"))
-        return {"selector": selector} if selector else {}
-
-    def _select_chat_input_ref(self, snapshot_text: str) -> str:
-        best_ref = ""
-        best_score = -1
-        for raw_line in snapshot_text.splitlines():
-            line = _text(raw_line)
-            if "[ref=" not in line:
-                continue
-            match = re.search(r"\[ref=(?P<ref>[^\]]+)\]", line)
-            if match is None:
-                continue
-            lowered = line.casefold()
-            score = 0
-            if "textbox" in lowered:
-                score += 10
-            if "searchbox" in lowered or "combobox" in lowered:
-                score += 8
-            if any(token in lowered for token in ("chat", "message", "ask", "input", "search")):
-                score += 4
-            if any(token in line for token in ("输入", "对话", "消息", "提问")):
-                score += 4
-            if "button" in lowered:
-                score -= 10
-            if score > best_score:
-                best_score = score
-                best_ref = match.group("ref")
-        return best_ref if best_score > 0 else ""
+            target_slot=target_slot,
+            page_profile=self._build_baidu_page_profile(),
+            page_url=self.BAIDU_CHAT_URL,
+        )
 
     def _extract_chat_contract(
         self,
@@ -1338,6 +1769,63 @@ class BaiduPageResearchService:
         incremental_payload = dict(payload)
         incremental_payload["bodyText"] = _tail_lines(previous_body, current_body) or current_body or ""
         return extract_answer_contract(incremental_payload)
+
+    def _capture_page_snapshot(
+        self,
+        *,
+        session_id: str,
+        page_id: str,
+    ) -> dict[str, Any]:
+        snapshot = self._browser_call(
+            action="evaluate",
+            session_id=session_id,
+            page_id=page_id,
+            code=(
+                "({"
+                " html: document.documentElement.outerHTML || '',"
+                " bodyText: (document.body && document.body.innerText) ? "
+                "document.body.innerText : '',"
+                " href: location.href || '',"
+                " title: document.title || ''"
+                "})"
+            ),
+        ).get("result")
+        return _mapping(snapshot)
+
+    def _build_response_readback(
+        self,
+        *,
+        snapshot: Mapping[str, Any] | object,
+        contract: object,
+    ) -> dict[str, Any]:
+        payload = _mapping(snapshot)
+        answer_text = _text(getattr(contract, "answer_text", None))
+        answer_excerpt = next(
+            (
+                line
+                for line in (_text(item) for item in answer_text.splitlines())
+                if line
+            ),
+            "",
+        )
+        links = list(getattr(contract, "links", None) or [])
+        return {
+            "page_href": _text(payload.get("href")),
+            "page_title": _text(payload.get("title")),
+            "login_state": _text(getattr(contract, "login_state", None)),
+            "page_kind": (
+                "login-wall"
+                if _text(getattr(contract, "login_state", None)) == "login-required"
+                else "content-page"
+            ),
+            "blocker_hints": (
+                ["login-required"]
+                if _text(getattr(contract, "login_state", None)) == "login-required"
+                else []
+            ),
+            "answer_excerpt": answer_excerpt,
+            "link_count": len(links),
+        }
 
     def _collect_citations(
         self,

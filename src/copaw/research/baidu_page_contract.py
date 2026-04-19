@@ -129,11 +129,11 @@ def _stable_id(prefix: str, *parts: object) -> str:
 def detect_login_state(page_text: str) -> LoginStateResult:
     normalized = _clean_text(page_text)
     lowered = normalized.casefold()
-    if any(hint.casefold() in lowered for hint in _READY_HINTS):
-        return LoginStateResult(state="ready", reason="authenticated-ui")
     for hint in _LOGIN_HINTS:
         if hint.casefold() in lowered:
             return LoginStateResult(state="login-required", reason=hint)
+    if any(hint.casefold() in lowered for hint in _READY_HINTS):
+        return LoginStateResult(state="ready", reason="authenticated-ui")
     if normalized:
         return LoginStateResult(state="ready", reason="")
     return LoginStateResult(state="unknown", reason="empty-page")
@@ -318,7 +318,7 @@ def extract_answer_contract(snapshot_text: str | Mapping[str, object]) -> BaiduP
             continue
         links.append(ResearchLink(url=url, label=label, kind=_link_kind(url, label)))
     login_state = login_result.state
-    if answer_text or links:
+    if login_state != "login-required" and (answer_text or links):
         login_state = "ready"
     return BaiduPageContractResult(
         login_state=login_state,

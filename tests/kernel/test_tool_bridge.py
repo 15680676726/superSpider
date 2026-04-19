@@ -177,6 +177,7 @@ def test_tool_bridge_builds_formal_file_result_items_from_recorded_evidence() ->
     )
 
     assert tool_use_summary == {
+        "evidence_id": "evidence-file-1",
         "summary": "saved report",
         "artifact_refs": ["D:/word/copaw/report.md"],
         "result_items": [
@@ -330,6 +331,7 @@ def test_tool_bridge_builds_formal_screenshot_result_items_from_browser_evidence
     )
 
     assert tool_use_summary is not None
+    assert tool_use_summary["evidence_id"] == "evidence-browser-1"
     assert tool_use_summary["summary"] == "Saved screenshot for operator review"
     assert tool_use_summary["artifact_refs"] == [
         "D:/word/copaw/artifacts/browser-shot.png",

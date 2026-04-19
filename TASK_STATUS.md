@@ -868,6 +868,106 @@
     - 这轮 fresh regression 已证明 typed contracts / routing / synthesis / frontdoor / Runtime Center 读面 / provider fallback 在 `L1/L2` 层收口
     - `2026-04-18` 真实 light-path `L3`：已在正式 `SourceCollectionFrontdoorService + SQLiteStateStore + EvidenceLedger + StateKnowledgeService + KnowledgeWritebackService` 组合上跑通 `search / web_page / github / artifact` 四条 live smoke；四条都真实产出 source / finding / evidence / report / writeback truth
     - `2026-04-18` 真实 light-path `L4`：已跑选定范围 live soak；连续 `3` 个 cycle、每轮重建 repositories/services，并让 `search / web_page / github / artifact` 都通过默认 source inference 走 light frontdoor。每条链都稳定写入 `1` round、`1` evidence、`written` writeback truth，且 source 数量稳定大于等于 `1`
+  - `2026-04-18` browser substrate cutover 当前真实边界补充：
+    - 已落地代码基线：
+      - `src/copaw/environments/surface_execution/browser/contracts.py`
+      - `src/copaw/environments/surface_execution/browser/observer.py`
+      - `src/copaw/environments/surface_execution/browser/resolver.py`
+      - `src/copaw/environments/surface_execution/browser/verifier.py`
+      - `src/copaw/environments/surface_execution/browser/service.py`
+      - `BaiduPageResearchService` 的 chat input / readback / deep-think toggle 已切到共享 browser substrate
+    - 已删除的旧执行真相：
+      - `data-copaw-chat-input` 单点回读规则
+      - page-wide `button/label/span/div` 深度思考全页扫描
+      - `BaiduPageResearchService` 内部重复定义的旧 `_read/_resolve` 硬编码链
+    - 当前保留且允许存在的薄页面提示：
+      - `#chat-textarea`
+      - `data-copaw-deep-think`
+      - 这些只用于页面 profile / target hint，不再决定“下一步做什么”
+    - `2026-04-19` 进一步收口：
+      - `BrowserSurfaceExecutionService` 已补共享 `observe_page / resolve_target / read_target_readback` 入口
+      - `BrowserSurfaceExecutionService` 已补共享 `capture_page_context(...)` 入口，provider 不再需要直接调用底层 profile helper
+      - `BrowserSurfaceExecutionService` 已新增最小 `run_step_loop(...)`，作为 shared `observe -> decide -> act -> reobserve` loop owner
+      - `ResearchChatSurfaceLoopOwner` 已成为第一条 profession-layer submit planner：当前正式负责 `reasoning_toggle -> type -> press` 提交微循环，不再由 `BaiduPageResearchService` 自己手搓逐步动作
+      - `BrowserSurfaceExecutionService.execute_step(...)` 已补页面级 `press` 动作，不再只能处理“先 resolve 元素再 click/type”的两类动作
+      - shared browser verifier 已补 `toggle_enabled` 正式读回与断言；共享 click 链不再只能靠按钮文本验证
+      - `BaiduPageResearchService` 的 `_resolve_chat_input_target / _read_chat_input_readback / _read_baidu_deep_think_state / _ensure_baidu_deep_think_enabled` 已改走 shared browser service
+      - `BaiduPageResearchService._build_baidu_surface_context(...)` 已切到 shared `capture_page_context(...)`，不再直接 import profile helper
+      - `BaiduPageResearchService` 的 page profile seed input 解析也已切到 shared browser service，不再直接 import 模块级 `observe_browser_page / resolve_browser_target`
+      - `BaiduPageResearchService._submit_chat_question(...)` 已改挂 shared `run_step_loop(...)`；当前正式提交链是 `type -> press(Enter)`，不再由 service 自己手搓 `type 后再直接 press_key`
+      - Baidu 提交 loop 已收成“轻 page profile”读面，只保留输入框相关 probe，不再把 deep-think toggle probe 混进 submit loop 里污染状态
+      - `BaiduPageResearchService._ensure_baidu_deep_think_enabled(...)` 已切到 shared `execute_step(...) + toggle_enabled` 断言，不再自己拼 click payload
+      - `BaiduPageResearchService._read_baidu_deep_think_state(...)` 已切到 shared `read_target_readback(...)`，旧私有 `_read_toggle_candidate_state(...)` 已删除
+      - 旧 `_select_chat_input_ref(...)` helper 已从 `BaiduPageResearchService` 物理删除，不再保留死尾巴
+      - shared browser substrate 现已复用现有 `browser evidence sink` 合同；当 runtime 绑定 sink 时，`BrowserExecutionResult.evidence_ids` 会回填正式 `evidence_id`
+      - browser substrate 的 `target-unresolved` 失败早退也已留证据，不再让失败链静默丢失
+      - `KernelToolBridge` 的 browser/file tool-use summary 现已显式回传 `evidence_id`，不再只回 `artifact_refs/result_items`
+      - `src/copaw/environments/surface_execution/document/*` 与 `src/copaw/environments/surface_execution/desktop/*` 已补第一版 shared substrate 合同：两条新线都已具备正式 `Observation / ExecutionStep / ExecutionResult / ExecutionLoopResult / Service`，不再只有 browser 一条 shared execution 新链
+      - `SourceCollectionFrontdoorService._find_reusable_heavy_session(...)` 已补 active-session 强制复用：同一 `owner_agent_id + industry_instance_id + work_context_id` 下，只要存在 `queued / running / waiting-login` 的 heavy research session，前门现在优先复用该会话，而不是继续依赖问题相似度 heuristics 新开一条
+      - shared browser substrate 已补“无 profile 通用读面”基线：`capture_live_browser_page_context(...)` 在没有 provider/page profile 的页面上，也会先抓 live `bodyText / href / title`，再组装 shared `BrowserObservation`
+      - shared `BrowserObservation` 已新增通用正文/阻塞派生：
+        - 没有显式 `readable_sections` 时，会从 live `bodyText` 自动生成 `readable_sections`
+        - 没有显式 `login_state` 时，会从页面正文/快照里的通用登录阻塞文案自动推导 `login-required`
+        - `blockers` 会同步补上正式 `login-required`
+      - shared `BrowserObservation` 现已新增正式 `page_summary`：
+        - `page_kind`
+        - `headline`
+        - `primary_text`
+        - `action_hints`
+        - `blocker_hints`
+      - 这条 `page_summary` 目前属于“共享页面理解基线”，不是最终完整语义模型；它已经能把普通页面先归纳成 `login-wall / upload-flow / form-flow / content-page` 这类粗粒度页面摘要，给上层 agent 提供第一层可消费读面
+      - 这意味着像“番茄上传小说页”这类没有 provider 专用 profile 的普通页面，shared browser substrate 现在也能先读正文和阻塞，再把结果交给上层 agent 决策；不再是只能先靠 Baidu 这类特化页面活着
+      - `BaiduPageResearchService` 的 `BrowserPageProfile` 现已显式 opt-in shared generic live probe；Baidu 这条 profiled live 链不再只能看输入框和 toggle，也会先带上 shared `bodyText -> readable_sections/login_state/blockers`
+      - chat submit 前门现在已补“pre-submit blocker fail-closed”：当 shared observation 在提交前就已标出 `login-required` 时，`_submit_chat_question(...)` 不再先 `type -> press` 再回头发现被挡，而是直接返回 `pre_submit_login_required`
+    - `2026-04-19` 继续收口：
+      - 已新增共享 `chat_continuation_policy.py`：把 heavy research chat 的 `stop / deepen-link / next-round` 判定从 provider service 内联分支抽成正式纯决策函数
+      - 已新增共享 `chat_continuation_owner.py`：在 policy 之上把“读回答 -> 判断是否继续 -> 生成下一步动作”收成 profession-layer owner，正式输出 `stop_reason / next_round_mode / next_question / next_link_url`
+      - `BaiduPageResearchService.run_session(...)` 现已改走该 shared continuation owner；原来 service 里那段 `has_structured_answer / should_deepen / coverage-followup / generic-continue / enough-findings / no-new-findings / deepened-link-closed` 的内联 continue/stop 分支，现已由共享 owner 统一裁决
+      - `response_readback` 现已补上最小 `page_kind / blocker_hints`，让高层 continuation owner 不再只能吃 provider 私变量，也能吃到本轮读面的页面摘要基线
+      - `2026-04-19` 进一步修正：此前“同一话题连续对话”仍有一条真实断点，不在 `run_session(...)` 内部，而在 heavy frontdoor 对 completed session 的复用边界。单次 `run_session(...)` 内部本来就固定走 `chat_page_id={session.id}:chat`；真正会把一个话题拆成多个窗口的是 `main-brain-followup` 在没有明显 follow-up 关键词/强重叠分时，会错误地重新 `start_session`
+      - 现已修成：`main-brain-followup` 会优先续上同 scope 下最近的 reusable heavy session；只有存在强匹配的旧线程时才改选该线程，不再因为自然追问文案太泛而新开一个 session/page
+      - `2026-04-19` 主脑聊天 waiting-login 恢复链已正式化：
+        - `MainBrainChatService` 现在会在 waiting-login 时把 `research_continuation` 正式写进 session snapshot 与 request runtime context，而不是只在当前 turn 内临时记住
+        - 主脑回复文案现在会明确告诉用户“先完成百度登录，然后直接在这个聊天线程回复‘继续’或‘我登录好了’，系统会沿同一个研究会话和浏览器窗口继续”
+        - 当用户在同一聊天线程回复继续类文案时，主脑会从 snapshot 里恢复 formal brief，并把 `preferred_session_id` 显式传给 heavy frontdoor，不再重新猜一个新 session
+      - `2026-04-19` shared surface owner/checkpoint 合同已镜像到三类 surface：
+        - `src/copaw/environments/surface_execution/owner.py` 已正式定义 `ProfessionSurfaceOperationOwner / ProfessionSurfaceOperationPlan / ProfessionSurfaceOperationCheckpoint`
+        - browser / document / desktop 三套 `run_step_loop(...)` 现在都接受共享 `owner`，并在 loop result 上正式返回 `operation_checkpoint`
+        - 这让“职业 agent 负责决策、surface substrate 负责观察/执行/回读”的边界至少在 shared loop 合同层落成同一套接口，不再只有 browser 一条新链
+    - 当前验收口径：
+      - `L1/L2`：
+        - `python -m pytest tests/environments/test_browser_surface_execution.py -k "generic_upload_page_summary or login_wall_page_summary" -q` -> `2 passed`
+        - `python -m pytest tests/environments/test_browser_surface_execution.py tests/research/test_baidu_page_research_service.py -q` -> `56 passed`
+        - `python -m pytest tests/environments/test_browser_surface_execution.py tests/research/test_baidu_page_research_service.py tests/kernel/test_tool_bridge.py -q` -> `57 passed`
+        - `python -m pytest tests/environments/test_document_desktop_surface_execution.py -q` -> `3 passed`
+        - `python -m pytest tests/app/test_source_collection_frontdoor_service.py tests/environments/test_browser_surface_execution.py tests/environments/test_document_desktop_surface_execution.py tests/research/test_baidu_page_research_service.py tests/kernel/test_tool_bridge.py -q` -> `68 passed`
+        - `python -m pytest tests/research/test_chat_continuation_policy.py tests/research/test_chat_continuation_owner.py tests/research/test_baidu_page_research_service.py -q` -> `40 passed`
+        - `python -m pytest tests/app/test_source_collection_frontdoor_service.py tests/environments/test_browser_surface_execution.py tests/research/test_chat_continuation_policy.py tests/research/test_chat_continuation_owner.py tests/research/test_baidu_page_research_service.py tests/kernel/test_tool_bridge.py -q` -> `78 passed`
+        - `python -m pytest tests/app/test_source_collection_frontdoor_service.py tests/environments/test_browser_surface_execution.py tests/research/test_chat_continuation_policy.py tests/research/test_chat_continuation_owner.py tests/research/test_baidu_page_research_service.py tests/kernel/test_tool_bridge.py tests/kernel/test_query_execution_runtime.py -q` -> `109 passed`
+        - `python -m pytest tests/app/test_source_collection_frontdoor_service.py tests/research/test_baidu_page_research_service.py tests/kernel/test_main_brain_research_followup.py -q` -> `41 passed`
+        - `python -m pytest tests/environments/test_browser_surface_execution.py tests/environments/test_document_desktop_surface_execution.py -q` -> `31 passed`
+        - `python -m pytest tests/kernel/test_main_brain_chat_service.py tests/kernel/test_main_brain_research_followup.py tests/app/test_source_collection_frontdoor_service.py -q` -> `62 passed`
+        - `python -m pytest tests/app/test_runtime_center_research_surface.py tests/app/test_research_session_api.py -q` -> `7 passed`
+        - `python -m pytest tests/app/test_source_collection_frontdoor_service.py tests/environments/test_browser_surface_execution.py tests/environments/test_document_desktop_surface_execution.py tests/research/test_chat_continuation_policy.py tests/research/test_chat_continuation_owner.py tests/research/test_baidu_page_contract.py tests/research/test_baidu_page_research_service.py tests/research/test_research_knowledge_ingestion.py tests/research/test_research_report_writeback.py tests/kernel/test_main_brain_research_followup.py tests/kernel/test_tool_bridge.py -q` -> `108 passed`
+        - `python -m pytest tests/app/test_research_session_live_contract.py -q` -> `2 passed, 1 skipped`
+        - 额外 focused regression：`python -m pytest tests/research/test_baidu_page_research_service.py -k "no_longer_exposes_private_input_selector_helper or shared_browser_service_entry or split_action_and_readback or deep_think_state_scopes" -q` -> `5 passed`
+        - active-session continuity focused regression：`python -m pytest tests/app/test_source_collection_frontdoor_service.py -k "forces_reuse_of_active_waiting_login_session_in_same_scope" -q` -> `1 passed`
+        - query runtime 读面兼容回归：`python -m pytest tests/kernel/test_query_execution_runtime.py -k "artifact_refs or result_items" -q` -> `1 passed, 30 deselected`
+      - `L3`：
+        - 已重跑登录门槛 live external-information smoke：`python scripts/live_external_information_chain_acceptance.py --output tmp/live_external_information_chain_acceptance_result.json`
+        - 真实结果：`main_brain` 与 `cron` 两条 heavy 入口都真实创建/读取正式 research session，并都稳定落到 `waiting-login`；`/runtime-center/research` 读面同步返回 formal `brief` 与 `writeback_truth.status=pending`
+        - `2026-04-19` continuation owner cutover 后已再次重跑同一 live smoke；结果保持不变，说明这轮 shared continuation owner 切线没有把 heavy frontdoor / formal session / Runtime Center waiting-login 读面打断
+        - `2026-04-19` 主脑 waiting-login continuation formalization 后已再次重跑同一 live smoke；结果仍稳定落到 `waiting-login`，说明“聊天窗口提示用户登录 -> 记录 formal continuation -> Runtime Center 读到同一 formal session”这条 fail-closed 主链没有被打断
+        - 这说明当前真实 live 环境下，“主脑/cron -> heavy research frontdoor -> formal session -> Runtime Center 读面” 这条链在未登录 Baidu 时会 fail-closed 到同一类 `waiting-login` 真相，不再误落模型闲聊
+      - `L4`：这轮还没完成 long soak；第二轮 live acceptance 被人工中断，当前不能把单次 live smoke 写成 soak 通过
+    - 当前边界：
+      - 这轮已把“provider-specific 执行硬编码”收回为“共享底座 + 薄页面提示”
+      - 这轮还额外把“无 profile 页面先读正文/识别登录阻塞”补进了 shared browser substrate；因此通用页面理解不再完全依赖 provider 专用 page profile
+      - 这轮现在又进一步补到了“共享页面摘要”这一层：上层不再只能拿原始 `readable_sections`，也能拿一份最小 `page_summary`
+      - 这轮也已把“登录页先乱打字”这类机械行为收掉一条：至少在 Baidu chat 这条 profiled live 链上，shared observation 一旦先读到 `login-required`，提交前门会直接 fail-closed
+      - shared browser substrate 现已具备最小 submit loop owner，而且 research chat 这条线的高层 `读回答 -> 判断是否继续 -> 生成下一步动作` 也已正式抽成 shared continuation owner；当前 Baidu heavy session 已不再只靠 service 内联 if/else 接下一轮
+      - 但这还不等于“任意职业 agent 已完全自己看页面并自由决策多轮动作链”：当前完成的是 `research chat surface` 这一个 profession family 的共享 continuation owner，不是所有职业/所有页面的统一高层 planner
+      - 当前因此只能诚实声明：这条线已过 `L1/L2`，并新增了登录门槛 `L3` smoke；但还没有完整 `L4` soak，也不能把“research chat 共享 continuation owner 已接上”混写成“通用页面理解 + 任意职业连续多轮自主追问已完成”
 
 ### 3.3.1 `Symbiotic Host Runtime V1` 当前落地边界
 

@@ -2,7 +2,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import pytest
 
+import copaw.research.baidu_page_research_service as baidu_page_research_service_module
+from copaw.environments.surface_execution.browser import (
+    BrowserExecutionLoopResult,
+    BrowserExecutionResult,
+    BrowserObservation,
+    BrowserTargetCandidate,
+)
+from copaw.environments.surface_execution.browser.resolver import resolve_browser_target
 from copaw.research import BaiduPageResearchService
 
 
@@ -61,11 +70,19 @@ class _FakeBrowserRunner:
         evaluate_results: list[object],
         *,
         snapshot_results: list[object] | None = None,
+        page_probe_results: list[object] | None = None,
+        deep_think_results: list[object] | None = None,
+        input_readback_results: list[object] | None = None,
     ) -> None:
         self.evaluate_results = list(evaluate_results)
         self.snapshot_results = list(snapshot_results or [])
+        self.page_probe_results = list(page_probe_results or [])
+        self.deep_think_results = list(deep_think_results or [])
+        self.input_readback_results = list(input_readback_results or [])
         self.calls: list[dict[str, object]] = []
         self.opened_pages: set[tuple[str, str]] = set()
+        self.typed_text_by_page: dict[tuple[str, str], str] = {}
+        self.toggle_enabled_by_selector: dict[str, bool] = {}
 
     def __call__(self, **payload):
         self.calls.append(dict(payload))
@@ -100,11 +117,176 @@ class _FakeBrowserRunner:
                 }
             return dict(result)
         if action == "type":
+            page_key = (
+                str(payload.get("session_id") or "").strip(),
+                str(payload.get("page_id") or "").strip(),
+            )
+            self.typed_text_by_page[page_key] = str(payload.get("text") or "")
             return {"ok": True, "message": f"Typed into {payload.get('ref') or payload.get('selector')}"}
+        if action == "click":
+            selector = str(payload.get("selector") or "")
+            if selector:
+                self.toggle_enabled_by_selector[selector] = True
+            return {"ok": True, "message": f"Clicked {payload.get('ref') or payload.get('selector')}"}
+        if action == "press_key":
+            return {"ok": True, "message": f"Pressed {payload.get('key')}"}
         if action == "evaluate":
+            code = str(payload.get("code") or "")
+            if "data-copaw-deep-think" in code or "深度思考" in code:
+                if self.deep_think_results:
+                    result = self.deep_think_results.pop(0)
+                    selector = str(result.get("selector") or "")
+                    if selector:
+                        self.toggle_enabled_by_selector[selector] = bool(result.get("enabled"))
+                else:
+                    selector = "[data-copaw-deep-think='1']"
+                    result = {
+                        "available": selector in self.toggle_enabled_by_selector,
+                        "enabled": self.toggle_enabled_by_selector.get(selector, False),
+                        "selector": selector if selector in self.toggle_enabled_by_selector else "",
+                        "label": "Deep Think" if selector in self.toggle_enabled_by_selector else "",
+                    }
+                return {"ok": True, "result": result}
+            if "#chat-textarea" in code:
+                if self.input_readback_results:
+                    result = self.input_readback_results.pop(0)
+                else:
+                    page_key = (
+                        str(payload.get("session_id") or "").strip(),
+                        str(payload.get("page_id") or "").strip(),
+                    )
+                    observed = self.typed_text_by_page.get(page_key, "")
+                    result = {
+                        "text": observed,
+                        "normalized_text": observed,
+                    }
+                return {"ok": True, "result": result}
+            if "bodyText:" in code and "href:" in code and "title:" in code and "html:" not in code:
+                if self.page_probe_results:
+                    result = self.page_probe_results.pop(0)
+                    if isinstance(result, dict):
+                        normalized_body_text = str(result.get("bodyText") or result.get("body_text") or "")
+                        if "?" in normalized_body_text and "href" in result:
+                            result = {
+                                **result,
+                                "bodyText": "login required\nsign in to continue using baidu chat",
+                            }
+                else:
+                    result = {
+                        "bodyText": "",
+                        "href": "https://chat.baidu.com/search",
+                        "title": "Baidu Chat",
+                    }
+                return {"ok": True, "result": result}
             result = self.evaluate_results.pop(0)
             return {"ok": True, "result": result}
         raise AssertionError(f"Unexpected browser action: {action}")
+
+
+class _SplitReadbackBrowserRunner(_FakeBrowserRunner):
+    def __init__(self) -> None:
+        super().__init__(
+            evaluate_results=[
+                {
+                    "html": "<main></main>",
+                    "bodyText": "ordinary page without account prompt",
+                    "href": "https://chat.baidu.com/search",
+                    "title": "Baidu Chat",
+                }
+            ],
+            snapshot_results=[
+                {
+                    "ok": True,
+                    "snapshot": '- textbox "Ask anything" [ref=e1]',
+                    "refs": ["e1"],
+                    "url": "https://chat.baidu.com/search",
+                },
+                {
+                    "ok": True,
+                    "snapshot": '- textbox "Ask anything" [ref=e1]',
+                    "refs": ["e1"],
+                    "url": "https://chat.baidu.com/search",
+                }
+            ],
+        )
+
+    def __call__(self, **payload):
+        if payload.get("action") == "snapshot" and not self.snapshot_results:
+            return {
+                "ok": True,
+                "snapshot": '- textbox "Ask anything" [ref=e1]',
+                "refs": ["e1"],
+                "url": "https://chat.baidu.com/search",
+            }
+        if payload.get("action") == "evaluate":
+            code = str(payload.get("code") or "")
+            if "data-copaw-deep-think" in code:
+                return {
+                    "ok": True,
+                    "result": {
+                        "available": False,
+                        "enabled": False,
+                        "selector": "",
+                        "label": "",
+                    },
+                }
+            if "#chat-textarea" in code:
+                page_key = (
+                    str(payload.get("session_id") or "").strip(),
+                    str(payload.get("page_id") or "").strip(),
+                )
+                observed = self.typed_text_by_page.get(page_key, "")
+                return {
+                    "ok": True,
+                    "result": {
+                        "text": observed,
+                        "normalized_text": observed,
+                    },
+                }
+        return super().__call__(**payload)
+
+
+class _ScopedDeepThinkBrowserRunner(_FakeBrowserRunner):
+    def __init__(self) -> None:
+        super().__init__(evaluate_results=[])
+
+    def __call__(self, **payload):
+        if payload.get("action") == "evaluate":
+            code = str(payload.get("code") or "")
+            if "button, [role=\"button\"], label, span, div" in code:
+                return {
+                    "ok": True,
+                    "result": {
+                        "available": True,
+                        "enabled": False,
+                        "selector": "[data-copaw-deep-think='1']",
+                        "label": (
+                            "Baidu Chat page container Deep Think Ask anything "
+                            "recent threads footer help center"
+                        ),
+                    },
+                }
+            if "#chat-textarea" in code and "aria-pressed" in code:
+                return {
+                    "ok": True,
+                    "result": {
+                        "available": True,
+                        "enabled": True,
+                        "selector": "[data-copaw-deep-think='1']",
+                        "label": "Deep Think",
+                    },
+                }
+            if "data-copaw-deep-think" in code and "aria-pressed" in code:
+                return {
+                    "ok": True,
+                    "result": {
+                        "available": True,
+                        "enabled": True,
+                        "selector": "[data-copaw-deep-think='1']",
+                        "label": "Deep Think",
+                    },
+                }
+        return super().__call__(**payload)
 
 
 def _build_service(*, browser_runner: _FakeBrowserRunner) -> BaiduPageResearchService:
@@ -118,6 +300,13 @@ def _build_service(*, browser_runner: _FakeBrowserRunner) -> BaiduPageResearchSe
 def test_research_service_creates_session_and_first_round() -> None:
     service = _build_service(
         browser_runner=_FakeBrowserRunner(
+            page_probe_results=[
+                {
+                    "bodyText": "请登录后继续\n当前页面需要登录才能继续使用百度对话。",
+                    "href": "https://chat.baidu.com/search",
+                    "title": "Baidu Chat",
+                }
+            ],
             evaluate_results=["<main><div class='answer'>占位答案</div></main>"],
         ),
     )
@@ -200,6 +389,13 @@ def test_research_service_exposes_shared_adapter_result_for_latest_round() -> No
 def test_research_service_marks_waiting_login_when_baidu_not_logged_in() -> None:
     service = _build_service(
         browser_runner=_FakeBrowserRunner(
+            page_probe_results=[
+                {
+                    "bodyText": "请登录后继续\n当前页面需要登录才能继续使用百度对话。",
+                    "href": "https://chat.baidu.com/search",
+                    "title": "Baidu Chat",
+                }
+            ],
             evaluate_results=["<main><button>登录</button></main>"],
         ),
     )
@@ -210,9 +406,14 @@ def test_research_service_marks_waiting_login_when_baidu_not_logged_in() -> None
     )
 
     result = service.run_session(start_result.session.id)
+    browser_runner = service._browser_action_runner
+    type_calls = [call for call in browser_runner.calls if call["action"] == "type"]
+    press_calls = [call for call in browser_runner.calls if call["action"] == "press_key"]
 
     assert result.session.status == "waiting-login"
     assert result.stop_reason == "waiting-login"
+    assert type_calls == []
+    assert press_calls == []
 
 
 def test_research_service_completes_when_snapshot_only_contains_stable_answer_text() -> None:
@@ -761,3 +962,775 @@ def test_research_service_allows_later_resume_followups_after_total_round_count_
     assert len(result.rounds) == 6
     assert "birth time" in result.rounds[-1].question.lower()
     assert any("accurate birth time" in item.lower() for item in result.session.stable_findings)
+
+
+def test_submit_chat_question_enables_baidu_deep_think_and_returns_readback_metadata() -> None:
+    browser_runner = _FakeBrowserRunner(
+        evaluate_results=[],
+        deep_think_results=[
+            {
+                "available": True,
+                "enabled": False,
+                "selector": "[data-copaw-deep-think='1']",
+                "label": "深度思考",
+            },
+            {
+                "available": True,
+                "enabled": True,
+                "selector": "[data-copaw-deep-think='1']",
+                "label": "深度思考",
+            },
+        ],
+        input_readback_results=[
+            {
+                "text": "梳理紫微斗数核心术语和一个常见误解",
+                "normalized_text": "梳理紫微斗数核心术语和一个常见误解",
+            },
+        ],
+    )
+    service = _build_service(browser_runner=browser_runner)
+    service._ensure_chat_page(session_id="research-browser", page_id="chat-page")
+
+    submission = service._submit_chat_question(
+        session_id="research-browser",
+        page_id="chat-page",
+        question="梳理紫微斗数核心术语和一个常见误解",
+    )
+
+    click_calls = [call for call in browser_runner.calls if call["action"] == "click"]
+    type_calls = [call for call in browser_runner.calls if call["action"] == "type"]
+    press_key_calls = [call for call in browser_runner.calls if call["action"] == "press_key"]
+    assert click_calls == [
+        {
+            "action": "click",
+            "session_id": "research-browser",
+            "page_id": "chat-page",
+            "selector": "[data-copaw-deep-think='1']",
+        }
+    ]
+    assert type_calls == [
+        {
+            "action": "type",
+            "session_id": "research-browser",
+            "page_id": "chat-page",
+            "text": "梳理紫微斗数核心术语和一个常见误解",
+            "submit": False,
+            "ref": "e1",
+            "selector": "",
+        }
+    ]
+    assert press_key_calls == [
+        {
+            "action": "press_key",
+            "session_id": "research-browser",
+            "page_id": "chat-page",
+            "key": "Enter",
+        }
+    ]
+    assert submission["deep_think"] == {
+        "requested": True,
+        "available": True,
+        "enabled_before": False,
+        "enabled_after": True,
+        "activated": True,
+        "selector": "[data-copaw-deep-think='1']",
+        "label": "深度思考",
+    }
+    assert submission["input_readback"] == {
+        "matched": True,
+        "observed_text": "梳理紫微斗数核心术语和一个常见误解",
+        "normalized_text": "梳理紫微斗数核心术语和一个常见误解",
+    }
+
+
+def test_submit_chat_question_blocks_submit_when_input_readback_mismatches_question() -> None:
+    browser_runner = _FakeBrowserRunner(
+        evaluate_results=[
+            {
+                "html": "<main></main>",
+                "bodyText": "ordinary page without account prompt",
+                "href": "https://chat.baidu.com/search",
+                "title": "Baidu Chat",
+            }
+        ],
+        deep_think_results=[
+            {
+                "available": False,
+                "enabled": False,
+                "selector": "",
+                "label": "",
+            },
+        ],
+        input_readback_results=[
+            {
+                "text": "????",
+                "normalized_text": "????",
+            },
+        ],
+    )
+    service = _build_service(browser_runner=browser_runner)
+    service._ensure_chat_page(session_id="research-browser", page_id="chat-page")
+
+    with pytest.raises(RuntimeError, match="input readback"):
+        service._submit_chat_question(
+            session_id="research-browser",
+            page_id="chat-page",
+            question="梳理紫微斗数核心术语和一个常见误解",
+        )
+
+    press_key_calls = [call for call in browser_runner.calls if call["action"] == "press_key"]
+    assert press_key_calls == []
+
+
+def test_submit_chat_question_uses_split_action_and_readback_targets() -> None:
+    browser_runner = _SplitReadbackBrowserRunner()
+    service = _build_service(browser_runner=browser_runner)
+    service._ensure_chat_page(session_id="research-browser", page_id="chat-page")
+
+    submission = service._submit_chat_question(
+        session_id="research-browser",
+        page_id="chat-page",
+        question="Clarify the key Zi Wei Dou Shu terms and one common misunderstanding.",
+    )
+
+    type_calls = [call for call in browser_runner.calls if call["action"] == "type"]
+    assert type_calls == [
+        {
+            "action": "type",
+            "session_id": "research-browser",
+            "page_id": "chat-page",
+            "text": "Clarify the key Zi Wei Dou Shu terms and one common misunderstanding.",
+            "submit": False,
+            "ref": "e1",
+            "selector": "",
+        }
+    ]
+    assert submission["input_readback"] == {
+        "matched": True,
+        "observed_text": "Clarify the key Zi Wei Dou Shu terms and one common misunderstanding.",
+        "normalized_text": "Clarify the key Zi Wei Dou Shu terms and one common misunderstanding.",
+    }
+
+
+def test_submit_chat_question_runs_shared_step_loop_for_type_then_press() -> None:
+    browser_runner = _FakeBrowserRunner(
+        evaluate_results=[],
+        deep_think_results=[
+            {
+                "available": False,
+                "enabled": False,
+                "selector": "",
+                "label": "",
+            },
+        ],
+    )
+    service = _build_service(browser_runner=browser_runner)
+    service._ensure_chat_page(session_id="research-browser", page_id="chat-page")
+    captured: dict[str, object] = {}
+    question = "Clarify the key Zi Wei Dou Shu terms and one common misunderstanding."
+
+    def _fake_run_step_loop(**kwargs):
+        captured.update(kwargs)
+        planner = kwargs["planner"]
+        observation = BrowserObservation(
+            page_url="https://chat.baidu.com/search",
+            page_title="Baidu Chat",
+            snapshot_text='- textbox "Ask anything" [ref=e1]',
+        )
+        first_step = planner(observation, [])
+        assert first_step is not None
+        assert first_step.intent_kind == "type"
+        assert first_step.target_slot == "primary_input"
+        assert first_step.payload["text"] == question
+        second_step = planner(
+            observation,
+            [
+                BrowserExecutionResult(
+                    status="succeeded",
+                    target_slot="primary_input",
+                    intent_kind="type",
+                    readback={
+                        "observed_text": question,
+                        "normalized_text": question,
+                    },
+                    verification_passed=True,
+                )
+            ],
+        )
+        assert second_step is not None
+        assert second_step.intent_kind == "press"
+        assert second_step.target_slot == "page"
+        assert second_step.payload["key"] == "Enter"
+        assert planner(
+            observation,
+            [
+                BrowserExecutionResult(
+                    status="succeeded",
+                    target_slot="primary_input",
+                    intent_kind="type",
+                    verification_passed=True,
+                ),
+                BrowserExecutionResult(
+                    status="succeeded",
+                    target_slot="page",
+                    intent_kind="press",
+                    verification_passed=True,
+                ),
+            ],
+        ) is None
+        return BrowserExecutionLoopResult(
+            steps=[
+                BrowserExecutionResult(
+                    status="succeeded",
+                    target_slot="primary_input",
+                    intent_kind="type",
+                    readback={
+                        "observed_text": question,
+                        "normalized_text": question,
+                    },
+                    verification_passed=True,
+                ),
+                BrowserExecutionResult(
+                    status="succeeded",
+                    target_slot="page",
+                    intent_kind="press",
+                    verification_passed=True,
+                ),
+            ],
+            final_observation=observation,
+            stop_reason="planner-stop",
+        )
+
+    service._browser_surface_service.run_step_loop = _fake_run_step_loop
+
+    submission = service._submit_chat_question(
+        session_id="research-browser",
+        page_id="chat-page",
+        question=question,
+    )
+
+    assert captured["session_id"] == "research-browser"
+    assert captured["page_id"] == "chat-page"
+    assert captured["max_steps"] == 3
+    assert getattr(captured["page_profile"], "profile_id", "") == "baidu-chat"
+    assert submission["input_readback"] == {
+        "matched": True,
+        "observed_text": question,
+        "normalized_text": question,
+    }
+    press_key_calls = [call for call in browser_runner.calls if call["action"] == "press_key"]
+    assert press_key_calls == []
+
+
+def test_submit_chat_question_shared_planner_clicks_toggle_before_type_when_needed() -> None:
+    browser_runner = _FakeBrowserRunner(
+        evaluate_results=[],
+        deep_think_results=[
+            {
+                "available": True,
+                "enabled": False,
+                "selector": "[data-copaw-deep-think='1']",
+                "label": "深度思考",
+            },
+        ],
+    )
+    service = _build_service(browser_runner=browser_runner)
+    service._ensure_chat_page(session_id="research-browser", page_id="chat-page")
+    captured: dict[str, object] = {}
+    question = "Clarify the key Zi Wei Dou Shu terms and one common misunderstanding."
+
+    def _fake_run_step_loop(**kwargs):
+        captured.update(kwargs)
+        planner = kwargs["planner"]
+        observation = BrowserObservation(
+            page_url="https://chat.baidu.com/search",
+            page_title="Baidu Chat",
+            snapshot_text='- textbox "Ask anything" [ref=e1]',
+            control_groups=[
+                {
+                    "group_kind": "reasoning_toggle_group",
+                    "scope_anchor": "composer",
+                    "candidates": [
+                        BrowserTargetCandidate(
+                            target_kind="toggle",
+                            action_ref="",
+                            action_selector="[data-copaw-deep-think='1']",
+                            readback_selector="[data-copaw-deep-think='1']",
+                            element_kind="button",
+                            scope_anchor="composer",
+                            score=10,
+                            reason="deep-think toggle",
+                            metadata={"enabled": False, "label": "深度思考", "target_slots": ["reasoning_toggle"]},
+                        )
+                    ],
+                }
+            ],
+            slot_candidates={},
+        )
+        first_step = planner(observation, [])
+        assert first_step is not None
+        assert first_step.intent_kind == "click"
+        assert first_step.target_slot == "reasoning_toggle"
+        assert first_step.success_assertion == {"toggle_enabled": "true"}
+        second_step = planner(
+            observation,
+            [
+                BrowserExecutionResult(
+                    status="succeeded",
+                    target_slot="reasoning_toggle",
+                    intent_kind="click",
+                    readback={"toggle_enabled": "true", "observed_text": "深度思考"},
+                    verification_passed=True,
+                )
+            ],
+        )
+        assert second_step is not None
+        assert second_step.intent_kind == "type"
+        assert second_step.target_slot == "primary_input"
+        assert second_step.payload["text"] == question
+        third_step = planner(
+            observation,
+            [
+                BrowserExecutionResult(
+                    status="succeeded",
+                    target_slot="reasoning_toggle",
+                    intent_kind="click",
+                    readback={"toggle_enabled": "true", "observed_text": "深度思考"},
+                    verification_passed=True,
+                ),
+                BrowserExecutionResult(
+                    status="succeeded",
+                    target_slot="primary_input",
+                    intent_kind="type",
+                    readback={
+                        "observed_text": question,
+                        "normalized_text": question,
+                    },
+                    verification_passed=True,
+                ),
+            ],
+        )
+        assert third_step is not None
+        assert third_step.intent_kind == "press"
+        assert third_step.target_slot == "page"
+        return BrowserExecutionLoopResult(
+            steps=[
+                BrowserExecutionResult(
+                    status="succeeded",
+                    target_slot="reasoning_toggle",
+                    intent_kind="click",
+                    readback={"toggle_enabled": "true", "observed_text": "深度思考"},
+                    verification_passed=True,
+                ),
+                BrowserExecutionResult(
+                    status="succeeded",
+                    target_slot="primary_input",
+                    intent_kind="type",
+                    readback={
+                        "observed_text": question,
+                        "normalized_text": question,
+                    },
+                    verification_passed=True,
+                ),
+                BrowserExecutionResult(
+                    status="succeeded",
+                    target_slot="page",
+                    intent_kind="press",
+                    verification_passed=True,
+                ),
+            ],
+            final_observation=observation,
+            stop_reason="planner-stop",
+        )
+
+    service._browser_surface_service.run_step_loop = _fake_run_step_loop
+
+    submission = service._submit_chat_question(
+        session_id="research-browser",
+        page_id="chat-page",
+        question=question,
+    )
+
+    assert captured["max_steps"] == 3
+    assert submission["deep_think"]["requested"] is True
+    assert submission["deep_think"]["enabled_after"] is True
+    assert submission["input_readback"]["matched"] is True
+
+
+def test_ensure_baidu_deep_think_enabled_uses_shared_execute_step_toggle_assertion() -> None:
+    browser_runner = _FakeBrowserRunner(
+        evaluate_results=[],
+        deep_think_results=[
+            {
+                "available": True,
+                "enabled": False,
+                "selector": "[data-copaw-deep-think='1']",
+                "label": "深度思考",
+            },
+            {
+                "available": True,
+                "enabled": True,
+                "selector": "[data-copaw-deep-think='1']",
+                "label": "深度思考",
+            },
+        ],
+    )
+    service = _build_service(browser_runner=browser_runner)
+    context = service._build_baidu_surface_context(
+        session_id="research-browser",
+        page_id="chat-page",
+    )
+    captured: dict[str, object] = {}
+    original_execute_step = service._browser_surface_service.execute_step
+
+    def _capture_execute_step(**kwargs):
+        captured.update(kwargs)
+        return original_execute_step(**kwargs)
+
+    service._browser_surface_service.execute_step = _capture_execute_step
+
+    payload = service._ensure_baidu_deep_think_enabled(
+        session_id="research-browser",
+        page_id="chat-page",
+        surface_context=context,
+    )
+
+    assert captured["target_slot"] == "reasoning_toggle"
+    assert captured["intent_kind"] == "click"
+    assert captured["success_assertion"] == {"toggle_enabled": "true"}
+    assert payload["enabled_after"] is True
+    assert payload["activated"] is True
+
+
+def test_build_baidu_surface_context_does_not_depend_on_private_input_selector() -> None:
+    browser_runner = _SplitReadbackBrowserRunner()
+    service = _build_service(browser_runner=browser_runner)
+    service._ensure_chat_page(session_id="research-browser", page_id="chat-page")
+
+    context = service._build_baidu_surface_context(
+        session_id="research-browser",
+        page_id="chat-page",
+    )
+
+    observation = context["observation"]
+    candidate = resolve_browser_target(observation, target_slot="primary_input")
+
+    assert candidate is not None
+    assert candidate.action_ref == "e1"
+
+
+def test_build_baidu_surface_context_uses_shared_service_capture_entry() -> None:
+    browser_runner = _SplitReadbackBrowserRunner()
+    service = _build_service(browser_runner=browser_runner)
+    service._ensure_chat_page(session_id="research-browser", page_id="chat-page")
+    captured: dict[str, object] = {}
+
+    def _capture_page_context(**kwargs):
+        captured.update(kwargs)
+        return {
+            "snapshot_text": '- textbox "Ask anything" [ref=e1]',
+            "page_url": "https://chat.baidu.com/search",
+            "page_title": "Baidu Chat",
+            "dom_probe": {
+                "inputs": [
+                    {
+                        "target_kind": "input",
+                        "action_ref": "e1",
+                        "readback_selector": "#chat-textarea",
+                        "element_kind": "textarea",
+                        "scope_anchor": "composer",
+                        "score": 10,
+                        "reason": "primary textarea",
+                    }
+                ]
+            },
+            "observation": BrowserObservation(
+                page_url="https://chat.baidu.com/search",
+                page_title="Baidu Chat",
+                snapshot_text='- textbox "Ask anything" [ref=e1]',
+                interactive_targets=[],
+                primary_input_candidates=[],
+                slot_candidates={},
+                control_groups=[],
+                readable_sections=[],
+                blockers=[],
+            ),
+        }
+
+    service._browser_surface_service.capture_page_context = _capture_page_context
+
+    context = service._build_baidu_surface_context(
+        session_id="research-browser",
+        page_id="chat-page",
+    )
+
+    assert captured["session_id"] == "research-browser"
+    assert captured["page_id"] == "chat-page"
+    assert getattr(captured["page_profile"], "profile_id", "") == "baidu-chat"
+    assert context["page_title"] == "Baidu Chat"
+
+
+def test_baidu_service_no_longer_exposes_private_input_selector_helper() -> None:
+    service = _build_service(browser_runner=_SplitReadbackBrowserRunner())
+
+    assert not hasattr(service, "_select_chat_input_ref")
+
+
+def test_build_baidu_surface_context_uses_shared_service_for_seed_input_resolution() -> None:
+    browser_runner = _SplitReadbackBrowserRunner()
+    service = _build_service(browser_runner=browser_runner)
+    service._ensure_chat_page(session_id="research-browser", page_id="chat-page")
+    assert not hasattr(baidu_page_research_service_module, "observe_browser_page")
+    assert not hasattr(baidu_page_research_service_module, "resolve_browser_target")
+
+    context = service._build_baidu_surface_context(
+        session_id="research-browser",
+        page_id="chat-page",
+    )
+
+    observation = context["observation"]
+    candidate = resolve_browser_target(observation, target_slot="primary_input")
+
+    assert candidate is not None
+    assert candidate.action_ref == "e1"
+
+
+def test_read_baidu_deep_think_state_scopes_to_local_control_group() -> None:
+    service = _build_service(browser_runner=_ScopedDeepThinkBrowserRunner())
+
+    payload = service._read_baidu_deep_think_state(
+        session_id="research-browser",
+        page_id="chat-page",
+    )
+
+    assert payload == {
+        "available": True,
+        "enabled": True,
+        "selector": "[data-copaw-deep-think='1']",
+        "label": "Deep Think",
+    }
+
+
+def test_read_baidu_deep_think_state_uses_shared_browser_readback_entry() -> None:
+    browser_runner = _ScopedDeepThinkBrowserRunner()
+    service = _build_service(browser_runner=browser_runner)
+    captured: dict[str, object] = {}
+    original_read_target_readback = service._browser_surface_service.read_target_readback
+
+    def _capture_read_target_readback(**kwargs):
+        captured.update(kwargs)
+        return original_read_target_readback(**kwargs)
+
+    service._browser_surface_service.read_target_readback = _capture_read_target_readback
+
+    payload = service._read_baidu_deep_think_state(
+        session_id="research-browser",
+        page_id="chat-page",
+    )
+
+    assert captured["session_id"] == "research-browser"
+    assert captured["page_id"] == "chat-page"
+    assert isinstance(captured["target"], BrowserTargetCandidate)
+    assert payload["enabled"] is True
+
+
+def test_resolve_chat_input_target_uses_shared_browser_service_entry() -> None:
+    browser_runner = _SplitReadbackBrowserRunner()
+    service = _build_service(browser_runner=browser_runner)
+    service._ensure_chat_page(session_id="research-browser", page_id="chat-page")
+    context = service._build_baidu_surface_context(
+        session_id="research-browser",
+        page_id="chat-page",
+    )
+    assert not hasattr(baidu_page_research_service_module, "resolve_browser_target")
+
+    payload = service._resolve_chat_input_target(
+        session_id="research-browser",
+        page_id="chat-page",
+        surface_context=context,
+    )
+
+    assert payload["ref"] == "e1"
+    assert payload["readback_selector"] == "#chat-textarea"
+
+
+def test_read_chat_input_readback_uses_shared_browser_service_entry() -> None:
+    browser_runner = _SplitReadbackBrowserRunner()
+    service = _build_service(browser_runner=browser_runner)
+    browser_runner.typed_text_by_page[("research-browser", "chat-page")] = (
+        "Clarify the key Zi Wei Dou Shu terms and one common misunderstanding."
+    )
+    candidate = BrowserTargetCandidate(
+        target_kind="input",
+        action_ref="e1",
+        action_selector="",
+        readback_selector="#chat-textarea",
+        element_kind="textarea",
+        scope_anchor="composer",
+        score=10,
+        reason="primary composer textarea",
+    )
+    assert not hasattr(baidu_page_research_service_module, "read_browser_target_readback")
+
+    payload = service._read_chat_input_readback(
+        session_id="research-browser",
+        page_id="chat-page",
+        question="Clarify the key Zi Wei Dou Shu terms and one common misunderstanding.",
+        target=candidate,
+    )
+
+    assert payload == {
+        "matched": True,
+        "observed_text": "Clarify the key Zi Wei Dou Shu terms and one common misunderstanding.",
+        "normalized_text": "Clarify the key Zi Wei Dou Shu terms and one common misunderstanding.",
+    }
+
+
+def test_research_service_persists_chat_submission_and_response_readback_into_round_metadata() -> None:
+    browser_runner = _FakeBrowserRunner(
+        evaluate_results=[
+            {
+                "html": "<main></main>",
+                "bodyText": """
+                What is Zi Wei Dou Shu?
+                Zi Wei Dou Shu is a traditional Chinese astrology system used to interpret life patterns.
+                """,
+                "href": "https://chat.baidu.com/search",
+                "title": "Baidu Chat",
+            },
+            {
+                "html": "<main></main>",
+                "bodyText": """
+                Follow up
+                Beginners should learn the twelve palaces before reading any chart.
+                Researchers should study the main stars and four transformations together.
+                """,
+                "href": "https://chat.baidu.com/search",
+                "title": "Baidu Chat",
+            },
+        ],
+        deep_think_results=[
+            {
+                "available": True,
+                "enabled": False,
+                "selector": "[data-copaw-deep-think='1']",
+                "label": "深度思考",
+            },
+            {
+                "available": True,
+                "enabled": True,
+                "selector": "[data-copaw-deep-think='1']",
+                "label": "深度思考",
+            },
+            {
+                "available": True,
+                "enabled": True,
+                "selector": "[data-copaw-deep-think='1']",
+                "label": "深度思考",
+            },
+            {
+                "available": True,
+                "enabled": True,
+                "selector": "[data-copaw-deep-think='1']",
+                "label": "深度思考",
+            },
+        ],
+        input_readback_results=[
+            {
+                "text": "What is Zi Wei Dou Shu?",
+                "normalized_text": "What is Zi Wei Dou Shu?",
+            },
+            {
+                "text": (
+                    "Follow up on this research goal: What is Zi Wei Dou Shu?. Current answer: "
+                    "Zi Wei Dou Shu is a traditional Chinese astrology system used to interpret life patterns. "
+                    "Fill the most important missing details, the best sources to verify next, and one common misunderstanding."
+                ),
+                "normalized_text": (
+                    "Follow up on this research goal: What is Zi Wei Dou Shu?. Current answer: "
+                    "Zi Wei Dou Shu is a traditional Chinese astrology system used to interpret life patterns. "
+                    "Fill the most important missing details, the best sources to verify next, and one common misunderstanding."
+                ),
+            },
+        ],
+    )
+    service = _build_service(browser_runner=browser_runner)
+    start_result = service.start_session(
+        goal="What is Zi Wei Dou Shu?",
+        trigger_source="user-direct",
+        owner_agent_id="industry-researcher-demo",
+    )
+
+    result = service.run_session(start_result.session.id)
+
+    first_round = result.rounds[0]
+    second_round = result.rounds[1]
+    assert first_round.metadata["deep_think"] == {
+        "requested": True,
+        "available": True,
+        "enabled_before": False,
+        "enabled_after": True,
+        "activated": True,
+        "selector": "[data-copaw-deep-think='1']",
+        "label": "深度思考",
+    }
+    assert first_round.metadata["input_readback"]["matched"] is True
+    assert first_round.metadata["response_readback"] == {
+        "page_href": "https://chat.baidu.com/search",
+        "page_title": "Baidu Chat",
+        "login_state": "ready",
+        "page_kind": "content-page",
+        "blocker_hints": [],
+        "answer_excerpt": "Zi Wei Dou Shu is a traditional Chinese astrology system used to interpret life patterns.",
+        "link_count": 0,
+    }
+    assert second_round.metadata["deep_think"]["enabled_before"] is True
+    assert second_round.metadata["input_readback"]["matched"] is True
+
+
+def test_research_service_converts_input_readback_mismatch_into_waiting_login_when_page_requires_login() -> None:
+    browser_runner = _FakeBrowserRunner(
+        evaluate_results=[
+            {
+                "html": "<main><button>登录</button></main>",
+                "bodyText": """
+                登录
+                请先登录百度账号后继续
+                """,
+                "href": "https://chat.baidu.com/search",
+                "title": "Baidu Chat",
+            }
+        ],
+        input_readback_results=[
+            {
+                "text": "????",
+                "normalized_text": "????",
+            }
+        ],
+    )
+    service = _build_service(browser_runner=browser_runner)
+    start_result = service.start_session(
+        goal="梳理电商平台入门知识结构",
+        trigger_source="user-direct",
+        owner_agent_id="industry-researcher-demo",
+    )
+
+    result = service.run_session(start_result.session.id)
+
+    assert result.session.status == "waiting-login"
+    assert result.stop_reason == "waiting-login"
+    assert result.rounds[-1].decision == "login_required"
+    assert result.rounds[-1].metadata["input_readback"] == {
+        "matched": False,
+        "observed_text": "????",
+        "normalized_text": "????",
+    }
+    assert result.rounds[-1].metadata["response_readback"] == {
+        "page_href": "https://chat.baidu.com/search",
+        "page_title": "Baidu Chat",
+        "login_state": "login-required",
+        "page_kind": "login-wall",
+        "blocker_hints": ["login-required"],
+        "answer_excerpt": "",
+        "link_count": 0,
+    }

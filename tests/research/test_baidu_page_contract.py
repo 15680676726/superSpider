@@ -27,6 +27,23 @@ def test_baidu_page_contract_does_not_mark_authenticated_home_as_login_required(
     assert result.state == "ready"
 
 
+def test_baidu_page_contract_prefers_login_required_when_login_and_ready_hints_coexist() -> None:
+    body_text = """
+    开启新对话
+    知识库
+    对话历史
+    登录同步历史对话
+    请登录
+    登录
+    深度思考
+    """
+
+    result = detect_login_state(body_text)
+
+    assert result.state == "login-required"
+    assert "登录" in result.reason
+
+
 def test_baidu_page_contract_extracts_answer_and_links() -> None:
     html = """
     <main>
@@ -129,4 +146,29 @@ def test_baidu_page_contract_marks_login_required_as_blocked_adapter_result() ->
     assert result.adapter_result is not None
     assert result.adapter_result.status == "blocked"
     assert result.adapter_result.collection_action == "interact"
+    assert result.adapter_result.metadata["login_state"] == "login-required"
+
+
+def test_baidu_page_contract_does_not_override_login_required_with_generic_prompt_text() -> None:
+    snapshot = {
+        "html": "<main><a href='https://chat.baidu.com/search'>请登录</a></main>",
+        "bodyText": """
+        开启新对话
+        知识库
+        对话历史
+        登录同步历史对话
+        请登录
+        登录
+        深度思考
+        今天想做“高效率达人”，还是想找个树洞聊聊天？
+        """,
+        "href": "https://chat.baidu.com/search",
+        "title": "Baidu Chat",
+    }
+
+    result = extract_answer_contract(snapshot)
+
+    assert result.login_state == "login-required"
+    assert result.adapter_result is not None
+    assert result.adapter_result.status == "blocked"
     assert result.adapter_result.metadata["login_state"] == "login-required"

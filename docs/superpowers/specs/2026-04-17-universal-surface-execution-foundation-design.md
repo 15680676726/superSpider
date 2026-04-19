@@ -447,3 +447,22 @@ The correct target is not "build three profession automations".
 The correct target is:
 
 build one formal universal surface execution foundation, reuse the current environment/evidence/execution spine, and prove it through three real profession demonstrations.
+
+## 17. 2026-04-18 Implementation Note
+
+This spec is no longer only a design target.
+
+The current repository baseline has already landed the first browser cutover slice:
+
+- shared browser substrate contracts / observer / resolver / verifier / service now exist under `src/copaw/environments/surface_execution/browser/`
+- `BaiduPageResearchService` chat input execution, split readback, and scoped deep-think toggle resolution now consume that shared substrate instead of keeping the old provider-private hardcoded chain
+- the retired bad patterns from this slice are:
+  - `data-copaw-chat-input` as the canonical readback truth
+  - page-wide deep-think container scanning
+  - duplicated provider-local `_resolve/_read` execution logic
+
+What is still not complete:
+
+- the browser substrate is now foundation truth, but profession agents do not yet fully own the higher-level multi-step read/decide/continue loop
+- thin page-profile hints still exist for the Baidu page seam, such as `#chat-textarea`, `data-copaw-deep-think`, and snapshot-ref preference
+- these hints are allowed only as profile hints, not as the formal planner or execution truth

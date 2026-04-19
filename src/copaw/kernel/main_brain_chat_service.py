@@ -78,6 +78,23 @@ _RESEARCH_DIRECT_HINTS = (
     "find sources",
 )
 
+_RESEARCH_CONTINUATION_HINTS = (
+    "continue",
+    "resume",
+    "login done",
+    "logged in",
+    "i logged in",
+    "i am logged in",
+    "go on",
+    "继续",
+    "接着",
+    "我登录好了",
+    "登录好了",
+    "我已登录",
+    "已经登录",
+    "登录完成",
+)
+
 
 def _missing_main_brain_chat_model() -> object:
     raise RuntimeError(
@@ -214,6 +231,13 @@ def _looks_like_explicit_research_request(query: str) -> bool:
     if not normalized:
         return False
     return any(hint in normalized for hint in _RESEARCH_DIRECT_HINTS)
+
+
+def _looks_like_research_continuation_reply(query: str) -> bool:
+    normalized = _normalize_query_signature(query)
+    if not normalized:
+        return False
+    return any(hint in normalized for hint in _RESEARCH_CONTINUATION_HINTS)
 
 
 def _int(value: object | None, default: int = 0) -> int:
@@ -982,11 +1006,22 @@ class MainBrainChatService:
         query: str,
         request: Any,
         assistant_message_id: str,
+        snapshot: dict[str, Any],
     ) -> tuple[Msg, dict[str, Any]] | None:
         service = self._research_session_service
         if service is None:
             return None
         brief = _safe_mapping(getattr(request, "_copaw_research_brief", None))
+        persisted_continuation = self._read_research_continuation_from_snapshot(snapshot)
+        preferred_session_id = _safe_text(brief.get("preferred_session_id"))
+        if not brief and persisted_continuation and _looks_like_research_continuation_reply(query):
+            brief = _safe_mapping(persisted_continuation.get("brief"))
+            preferred_session_id = _safe_text(
+                persisted_continuation.get("preferred_session_id")
+                or persisted_continuation.get("research_session_id"),
+            )
+            if brief:
+                self._set_request_runtime_value(request, "_copaw_research_brief", brief)
         trigger_source = _safe_text(brief.get("trigger_source"))
         goal = _safe_text(brief.get("goal"))
         if trigger_source is None:
@@ -1015,20 +1050,29 @@ class MainBrainChatService:
         writeback_target = _safe_mapping(brief.get("writeback_target")) or None
         frontdoor = getattr(service, "run_source_collection_frontdoor", None)
         if callable(frontdoor):
+            frontdoor_kwargs = {
+                "goal": goal,
+                "question": question,
+                "why_needed": why_needed,
+                "done_when": done_when,
+                "trigger_source": trigger_source,
+                "owner_agent_id": owner_agent_id,
+                "industry_instance_id": _safe_text(getattr(request, "industry_instance_id", None)),
+                "work_context_id": _safe_text(getattr(request, "work_context_id", None)),
+                "supervisor_agent_id": _safe_text(getattr(request, "agent_id", None)),
+                "collection_mode_hint": collection_mode_hint,
+                "requested_sources": requested_sources,
+                "writeback_target": writeback_target,
+                "metadata": self._build_research_frontdoor_metadata(
+                    brief=brief,
+                    preferred_session_id=preferred_session_id,
+                    persisted_continuation=persisted_continuation,
+                ),
+            }
+            if preferred_session_id is not None:
+                frontdoor_kwargs["preferred_session_id"] = preferred_session_id
             session_result = frontdoor(
-                goal=goal,
-                question=question,
-                why_needed=why_needed,
-                done_when=done_when,
-                trigger_source=trigger_source,
-                owner_agent_id=owner_agent_id,
-                industry_instance_id=_safe_text(getattr(request, "industry_instance_id", None)),
-                work_context_id=_safe_text(getattr(request, "work_context_id", None)),
-                supervisor_agent_id=_safe_text(getattr(request, "agent_id", None)),
-                collection_mode_hint=collection_mode_hint,
-                requested_sources=requested_sources,
-                writeback_target=writeback_target,
-                metadata={"entry_surface": "main-brain-chat"},
+                **frontdoor_kwargs,
             )
             session_payload = _safe_mapping(session_result)
             session_id = _safe_text(
@@ -1043,22 +1087,29 @@ class MainBrainChatService:
                     getattr(getattr(session_result, "session", None), "status", None),
                 ),
             )
-            reply_text = (
-                "研究任务已建立，但百度还没登录。你先登录百度，我再继续。"
-                if status == "waiting-login"
-                else "研究任务已经启动，我去查资料并整理成正式汇报。"
+            research_state = self._build_research_runtime_state(
+                request=request,
+                trigger_source=trigger_source,
+                status=status,
+                goal=goal,
+                question=question,
+                why_needed=why_needed,
+                done_when=done_when,
+                requested_sources=requested_sources,
+                collection_mode_hint=collection_mode_hint,
+                writeback_target=writeback_target,
+                session_id=session_id,
+                preferred_session_id=preferred_session_id or session_id,
             )
             return (
                 _build_assistant_message(
-                    text=reply_text,
+                    text=self._build_research_reply_text(
+                        status=status,
+                        resumed_existing_session=preferred_session_id is not None,
+                    ),
                     message_id=assistant_message_id,
                 ),
-                {
-                    "research_session_id": session_id,
-                    "trigger_source": trigger_source,
-                    "status": status,
-                    "goal": goal,
-                },
+                research_state,
             )
         starter = getattr(service, "start_session", None)
         if not callable(starter):
@@ -1090,22 +1141,29 @@ class MainBrainChatService:
             summary_result = summarizer(session_id)
             if inspect.isawaitable(summary_result):
                 await summary_result
-        reply_text = (
-            "研究任务已建立，但百度还没登录。你先登录百度，我再继续。"
-            if status == "waiting-login"
-            else "研究任务已经启动，我去查资料并整理成正式汇报。"
+        research_state = self._build_research_runtime_state(
+            request=request,
+            trigger_source=trigger_source,
+            status=status,
+            goal=goal,
+            question=question,
+            why_needed=why_needed,
+            done_when=done_when,
+            requested_sources=requested_sources,
+            collection_mode_hint=collection_mode_hint,
+            writeback_target=writeback_target,
+            session_id=session_id,
+            preferred_session_id=session_id,
         )
         return (
             _build_assistant_message(
-                text=reply_text,
+                text=self._build_research_reply_text(
+                    status=status,
+                    resumed_existing_session=False,
+                ),
                 message_id=assistant_message_id,
             ),
-            {
-                "research_session_id": session_id,
-                "trigger_source": trigger_source,
-                "status": status,
-                "goal": goal,
-            },
+            research_state,
         )
 
     def mark_scope_snapshot_dirty(
@@ -1313,6 +1371,128 @@ class MainBrainChatService:
         cache_entry.snapshot["main_brain"] = main_brain_payload
         cache_entry.dirty = True
 
+    def _read_research_continuation_from_snapshot(
+        self,
+        snapshot: dict[str, Any],
+    ) -> dict[str, Any]:
+        return _safe_mapping(_safe_mapping(snapshot.get("main_brain")).get("research_continuation"))
+
+    def _build_research_frontdoor_metadata(
+        self,
+        *,
+        brief: dict[str, Any],
+        preferred_session_id: str | None,
+        persisted_continuation: dict[str, Any],
+    ) -> dict[str, Any]:
+        metadata = {"entry_surface": "main-brain-chat"}
+        if preferred_session_id is not None or persisted_continuation:
+            metadata["continuation"] = {
+                "preferred_session_id": preferred_session_id,
+                "chat_thread_id": _safe_text(persisted_continuation.get("chat_thread_id")),
+                "resume_kind": "same-thread-research-session",
+            }
+        return metadata
+
+    def _build_research_reply_text(
+        self,
+        *,
+        status: str | None,
+        resumed_existing_session: bool,
+    ) -> str:
+        if _safe_text(status) == "waiting-login":
+            return (
+                "研究任务卡在登录。请先完成百度登录，登录好后直接在这个聊天线程回复“继续”或“我登录好了”，"
+                "我会沿同一个研究会话和浏览器窗口继续，不会新开线程。"
+            )
+        if resumed_existing_session:
+            return "研究任务已恢复，我会沿同一个研究会话和浏览器窗口继续，并整理成正式汇报。"
+        return "研究任务已经启动，我去查资料并整理成正式汇报。"
+
+    def _build_research_runtime_state(
+        self,
+        *,
+        request: Any,
+        trigger_source: str | None,
+        status: str | None,
+        goal: str,
+        question: str,
+        why_needed: str | None,
+        done_when: str | None,
+        requested_sources: list[str],
+        collection_mode_hint: str,
+        writeback_target: dict[str, Any] | None,
+        session_id: str | None,
+        preferred_session_id: str | None,
+    ) -> dict[str, Any]:
+        chat_thread_id = _safe_text(getattr(request, "session_id", None))
+        state = {
+            "research_session_id": session_id,
+            "preferred_session_id": preferred_session_id,
+            "trigger_source": trigger_source,
+            "status": status,
+            "goal": goal,
+            "question": question,
+            "why_needed": why_needed,
+            "done_when": done_when,
+            "requested_sources": list(requested_sources),
+            "collection_mode_hint": collection_mode_hint,
+            "writeback_target": dict(writeback_target or {}),
+            "chat_thread_id": chat_thread_id,
+            "brief": {
+                "goal": goal,
+                "question": question,
+                "why_needed": why_needed,
+                "done_when": done_when,
+                "requested_sources": list(requested_sources),
+                "collection_mode_hint": collection_mode_hint,
+                "writeback_target": dict(writeback_target or {}),
+                "trigger_source": trigger_source or "main-brain-followup",
+            },
+        }
+        if _safe_text(status) == "waiting-login":
+            state["waiting_login_checkpoint"] = {
+                "checkpoint_kind": "research-login",
+                "provider": "baidu-page",
+                "resume_kind": "same-thread-research-session",
+                "requires_user_action": "login",
+                "chat_thread_id": chat_thread_id,
+                "research_session_id": session_id,
+            }
+        return state
+
+    def _snapshot_with_research_runtime_state(
+        self,
+        *,
+        snapshot: dict[str, Any],
+        research_state: dict[str, Any],
+    ) -> dict[str, Any]:
+        updated_snapshot = dict(snapshot)
+        main_brain_payload = _safe_mapping(updated_snapshot.get("main_brain"))
+        status = _safe_text(research_state.get("status"))
+        if status == "waiting-login":
+            main_brain_payload["research_continuation"] = dict(research_state)
+        else:
+            main_brain_payload.pop("research_continuation", None)
+        updated_snapshot["main_brain"] = main_brain_payload
+        return updated_snapshot
+
+    def _sync_research_runtime_context(
+        self,
+        *,
+        request: Any,
+        research_state: dict[str, Any],
+    ) -> None:
+        runtime_context = _safe_mapping(getattr(request, "_copaw_main_brain_runtime_context", None))
+        if _safe_text(research_state.get("status")) == "waiting-login":
+            runtime_context["research_continuation"] = dict(research_state)
+        else:
+            runtime_context.pop("research_continuation", None)
+        self._set_request_runtime_value(
+            request,
+            "_copaw_main_brain_runtime_context",
+            runtime_context,
+        )
+
     async def execute_stream(
         self,
         *,
@@ -1375,9 +1555,18 @@ class MainBrainChatService:
                 query=query,
                 request=request,
                 assistant_message_id=assistant_message_id,
+                snapshot=snapshot,
             )
             if research_turn is not None:
                 assistant_message, research_state = research_turn
+                snapshot = self._snapshot_with_research_runtime_state(
+                    snapshot=snapshot,
+                    research_state=research_state,
+                )
+                self._sync_research_runtime_context(
+                    request=request,
+                    research_state=research_state,
+                )
                 try:
                     snapshot, now = await self._persist_assistant_snapshot(
                         assistant_message=assistant_message,

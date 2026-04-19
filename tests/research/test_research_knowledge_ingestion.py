@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import re
 
 from copaw.research import BaiduPageResearchService
 from copaw.state import ResearchSessionRecord, ResearchSessionRoundRecord, SQLiteStateStore
@@ -87,6 +88,20 @@ class _FakeBrowserRunner:
             </main>
             """,
         ]
+        self.typed_text_by_page: dict[tuple[str, str], str] = {}
+        self.page_html_by_page: dict[tuple[str, str], str] = {}
+
+    def _page_probe_result(self, *, session_id: str, page_id: str) -> dict[str, object]:
+        page_key = (session_id, page_id)
+        html = self.page_html_by_page.get(page_key, "<main><div class='chat-home'>Ready</div></main>")
+        body_text = re.sub(r"<[^>]+>", " ", html)
+        body_text = " ".join(body_text.split())
+        return {
+            "html": html,
+            "bodyText": body_text,
+            "href": "https://chat.baidu.com/search",
+            "title": "Baidu Chat",
+        }
 
     def __call__(self, **payload):
         if payload["action"] == "start":
@@ -96,6 +111,14 @@ class _FakeBrowserRunner:
         if payload["action"] == "wait_for":
             return {"ok": True, "message": f"Waited {payload.get('wait_time')}s"}
         if payload["action"] == "snapshot":
+            page_key = (
+                str(payload.get("session_id") or "").strip(),
+                str(payload.get("page_id") or "").strip(),
+            )
+            self.page_html_by_page.setdefault(
+                page_key,
+                "<main><div class='chat-home'>Ready</div></main>",
+            )
             return {
                 "ok": True,
                 "snapshot": '- textbox "Chat input" [ref=e1]',
@@ -103,9 +126,62 @@ class _FakeBrowserRunner:
                 "url": str(payload.get("page_id") or ""),
             }
         if payload["action"] == "type":
+            page_key = (
+                str(payload.get("session_id") or "").strip(),
+                str(payload.get("page_id") or "").strip(),
+            )
+            self.typed_text_by_page[page_key] = str(payload.get("text") or "")
             return {"ok": True, "message": f"Typed into {payload.get('ref') or payload.get('selector')}"}
+        if payload["action"] == "click":
+            return {"ok": True, "message": f"Clicked {payload.get('ref') or payload.get('selector')}"}
+        if payload["action"] == "press_key":
+            page_key = (
+                str(payload.get("session_id") or "").strip(),
+                str(payload.get("page_id") or "").strip(),
+            )
+            if self._html_queue:
+                self.page_html_by_page[page_key] = self._html_queue.pop(0)
+            return {"ok": True, "message": f"Pressed {payload.get('key')}"}
         if payload["action"] == "evaluate":
-            return {"ok": True, "result": self._html_queue.pop(0)}
+            code = str(payload.get("code") or "")
+            if "data-copaw-deep-think" in code:
+                return {
+                    "ok": True,
+                    "result": {
+                        "available": False,
+                        "enabled": False,
+                        "selector": "",
+                        "label": "",
+                    },
+                }
+            if "#chat-textarea" in code:
+                page_key = (
+                    str(payload.get("session_id") or "").strip(),
+                    str(payload.get("page_id") or "").strip(),
+                )
+                observed = self.typed_text_by_page.get(page_key, "")
+                return {
+                    "ok": True,
+                    "result": {
+                        "text": observed,
+                        "normalized_text": observed,
+                    },
+                }
+            if "bodyText:" in code and "href:" in code and "title:" in code:
+                return {
+                    "ok": True,
+                    "result": self._page_probe_result(
+                        session_id=str(payload.get("session_id") or "").strip(),
+                        page_id=str(payload.get("page_id") or "").strip(),
+                    ),
+                }
+            return {
+                "ok": True,
+                "result": self._page_probe_result(
+                    session_id=str(payload.get("session_id") or "").strip(),
+                    page_id=str(payload.get("page_id") or "").strip(),
+                ),
+            }
         raise AssertionError(payload["action"])
 
 

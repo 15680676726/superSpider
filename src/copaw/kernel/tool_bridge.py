@@ -332,6 +332,9 @@ class KernelToolBridge:
         payload: dict[str, object] = {
             "artifact_refs": artifact_refs[:_VISIBILITY_MAX_ITEMS],
         }
+        evidence_id = cls._string(serialized.get("id"))
+        if evidence_id:
+            payload["evidence_id"] = evidence_id
         if result_items:
             payload["result_items"] = result_items[:_VISIBILITY_MAX_ITEMS]
         summary = cls._first_non_empty(
