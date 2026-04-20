@@ -8,6 +8,10 @@ from pydantic import BaseModel, Field
 
 ProtocolSurfaceKind = Literal[
     "native_mcp",
+    "app_server",
+    "event_stream",
+    "thread_turn_control",
+    "runtime_provider",
     "api",
     "sdk",
     "cli_runtime",
@@ -203,6 +207,48 @@ class HostCompatibilityRequirements(BaseModel):
     startup_expectations: list[str] = Field(default_factory=list)
 
 
+def _app_server_surface_candidate(
+    payload: Mapping[str, Any],
+) -> ExternalProtocolSurface | None:
+    app_server_ref = _string(payload.get("app_server_ref")) or _string(
+        payload.get("codex_app_server_ref"),
+    )
+    if app_server_ref is None:
+        return None
+    app_server_actions = _action_entries(
+        payload.get("app_server_actions") or payload.get("thread_turn_actions"),
+    )
+    thread_turn_control_supported = bool(payload.get("thread_turn_control_supported"))
+    event_stream_supported = bool(payload.get("event_stream_supported"))
+    blockers: list[str] = []
+    if not app_server_actions:
+        blockers.append("no-typed-action-surface")
+    if not thread_turn_control_supported:
+        blockers.append("missing-thread-turn-control")
+    if not event_stream_supported:
+        blockers.append("missing-event-stream")
+    eligible = bool(app_server_actions) and thread_turn_control_supported and event_stream_supported
+    return ExternalProtocolSurface(
+        protocol_surface_kind="app_server",
+        transport_kind="sdk",
+        call_surface_ref=app_server_ref,
+        schema_ref=_string(payload.get("app_server_schema_ref")),
+        formal_adapter_eligible=eligible,
+        blockers=blockers,
+        hints={
+            "actions": app_server_actions,
+            "event_return_path": "event_stream" if event_stream_supported else None,
+            "lifecycle_contract_kind": (
+                "thread_turn_control" if thread_turn_control_supported else None
+            ),
+            "runtime_provider_contract_kind": (
+                _string(payload.get("runtime_provider_contract_kind"))
+                or "runtime_provider"
+            ),
+        },
+    )
+
+
 def _action_entries(value: object | None) -> list[dict[str, Any]]:
     items: Sequence[object]
     if isinstance(value, list):
@@ -295,6 +341,7 @@ def classify_external_protocol_surface(
     candidates = [
         _mcp_surface_candidate(payload),
         _api_surface_candidate(payload),
+        _app_server_surface_candidate(payload),
         _sdk_surface_candidate(payload),
     ]
     for candidate in candidates:
@@ -479,7 +526,17 @@ def adapter_attribution_metadata(
     payload = dict(metadata or {})
     normalized: dict[str, Any] = {}
     protocol_surface_kind = _string(payload.get("protocol_surface_kind"))
-    if protocol_surface_kind in {"native_mcp", "api", "sdk", "cli_runtime", "unknown"}:
+    if protocol_surface_kind in {
+        "native_mcp",
+        "app_server",
+        "event_stream",
+        "thread_turn_control",
+        "runtime_provider",
+        "api",
+        "sdk",
+        "cli_runtime",
+        "unknown",
+    }:
         normalized["protocol_surface_kind"] = protocol_surface_kind
     transport_kind = _string(payload.get("transport_kind"))
     if transport_kind in {"mcp", "http", "sdk"}:
@@ -514,13 +571,36 @@ def merge_adapter_attribution_metadata(
     return merged
 
 
+ExecutorProtocolSurface = ExternalProtocolSurface
+CompiledExecutorContract = CompiledAdapterContract
+
+
+def classify_executor_protocol_surface(
+    metadata: Mapping[str, Any] | None = None,
+) -> ExternalProtocolSurface:
+    return classify_external_protocol_surface(metadata=metadata)
+
+
+def derive_executor_surface(
+    metadata: Mapping[str, Any] | None = None,
+) -> ExternalProtocolSurface:
+    return classify_external_protocol_surface(metadata=metadata)
+
+
+executor_execution_contract_metadata = donor_execution_contract_metadata
+executor_execution_envelope_from_metadata = donor_execution_envelope_from_metadata
+executor_execution_envelope_metadata = donor_execution_envelope_metadata
+
+
 __all__ = [
     "ADAPTER_ATTRIBUTION_LIST_FIELDS",
     "ADAPTER_ATTRIBUTION_SCALAR_FIELDS",
     "CompiledAdapterAction",
     "CompiledAdapterContract",
+    "CompiledExecutorContract",
     "CompatibilityStatus",
     "DonorExecutionEnvelope",
+    "ExecutorProtocolSurface",
     "ExternalProtocolSurface",
     "HostCompatibilityRequirements",
     "ProviderInjectionMode",
@@ -528,9 +608,14 @@ __all__ = [
     "VerifiedCapabilityStage",
     "adapter_attribution_metadata",
     "classify_external_protocol_surface",
+    "classify_executor_protocol_surface",
+    "derive_executor_surface",
     "donor_execution_contract_metadata",
     "donor_execution_envelope_from_metadata",
     "donor_execution_envelope_metadata",
+    "executor_execution_contract_metadata",
+    "executor_execution_envelope_from_metadata",
+    "executor_execution_envelope_metadata",
     "host_compatibility_requirements_from_metadata",
     "host_compatibility_requirements_metadata",
     "merge_adapter_attribution_metadata",
