@@ -212,7 +212,7 @@ CoPaw 负责：
 
 ### 3.2 删除目标
 
-以下模块属于被 Codex 执行体替代的旧执行层：
+以下模块属于被外部执行体替代的旧执行层：
 
 - 本地 `actor worker` 执行循环
 - 本地 `actor supervisor`
@@ -491,9 +491,9 @@ V1 最小字段建议：
   PROJECT.md
   executors/
     codex/
-      config.toml
+      provider.toml
     hermes/
-      config.toml
+      provider.toml
   .agents/
     skills/
       copaw-worker-core/
@@ -508,7 +508,7 @@ V1 最小字段建议：
 - `AGENTS.md`：主脑合同投影
 - `ROLE.md`：详细角色定义
 - `PROJECT.md`：项目背景与完成定义
-- `executors/`：runtime-specific 配置；`Codex` 第一版实际落在 `executors/codex/`
+- `executors/`：CoPaw 侧 provider projection 与 runtime-specific 配置源；若某执行体要求原生配置文件位置（例如 `Codex` 的 `.codex/config.toml`），应由 adapter 从这里投影生成，`executors/` 才是 CoPaw 侧正式配置真相
 - `.agents/skills/`：工作方法增强层
 - `plans/`：计划草案和阶段计划
 - `reports/`：阶段汇报、日报、周报
@@ -660,6 +660,8 @@ V1 第一版统一采用 `open_default`。
 - 多环境类型治理
 - 复杂能力白名单
 - MCP 安装审批闭环
+- 改写现有 `MCP/skill` canonical 安装、搜索、演进主链
+- 把 `/api/capability-market/skills`、`/api/capability-market/hub/*`、`/api/capability-market/mcp*`、`/api/capability-market/install-templates*` 误并入 executor runtime provider intake
 - 自动学习 patch 闭环
 - 多职业并发调度优化
 - 桌面/浏览器/文档三套环境治理细分
@@ -695,6 +697,7 @@ V1 第一版统一采用 `open_default`。
 - 必须支持“全局统一执行体”和“按职业路由不同执行体”两种模式
 - 必须把模型调用治理纳入主脑正式对象，不允许每个执行体各自变成黑箱
 - 必须先完成 generic executor seam，再退役本地 actor runtime
+- 必须显式保护现有 `MCP/skill` capability-market 与 evolution 主链；执行体 provider intake 不能吞并现有 capability acquisition taxonomy
 
 ### 11.2.1 旧 donor / 外接项目体系必须显式收口的内容
 

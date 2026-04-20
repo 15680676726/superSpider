@@ -41,6 +41,10 @@
   - 旧 GitHub/open-source donor intake 要收口成 `executor runtime provider intake`
   - 系统必须支持 `single-runtime` 和 `role-routed` 两种执行体绑定模式
   - 模型调用必须有统一治理对象，而不是完全散落在外部执行体内部
+- 当前 `MCP/skill` canonical 主链仍然成立，且不应被本轮 executor-runtime 改造打乱：
+  - `/api/capability-market/skills`、`/api/capability-market/hub/*` 仍是 skill 安装/搜索 canonical product surface
+  - `/api/capability-market/mcp*` 与 `/api/capability-market/install-templates*` 仍是 MCP/host adapter canonical product surface
+  - `CapabilitySkillService / capability_discovery / skill_candidate_service / skill_trial_service` 仍承载 skill 搜索与演进链
 - 第一阶段不删除浏览器/桌面/文档底座代码，只把它们从正式执行脑降级为待退役遗留层。
 - 当前代码已经确认的 7 个硬缺口，必须在实现中显式对齐：
   - `models_external_runtime.py` 仍是 capability-centric，不足以表达 executor thread/turn truth
@@ -182,6 +186,7 @@ Required content:
   - donor-first 旧 specs/contracts
   - donor-first 测试与 TASK_STATUS 口径
 - 显式写清 `ExecutorRuntime / MCP / skill` 三者边界，避免后续继续混层
+- 显式写清“现有 MCP/skill 安装、搜索、演进主链不属于本轮收口目标”
 
 - [ ] **Step 5: Commit docs sync**
 
@@ -356,6 +361,7 @@ Required outcome:
 - `Codex` can land as `app_server`
 - future `Hermes` can land as `api / sdk / cli_runtime` depending on its real protocol surface
 - arbitrary GitHub repo that lacks formal runtime contract cannot become a first-class executor provider
+- current skill/MCP install-search-evolution flows remain capability-market/capability-evolution concerns, not executor-provider concerns
 
 - [ ] **Step 6: Run tests to verify they pass**
 
@@ -612,7 +618,7 @@ git commit -m "refactor: cut runtime center over to executor runtimes"
 
 - [ ] **Step 1: Run backend focused regression**
 
-Run: `PYTHONPATH=src python -m pytest tests/state/test_executor_runtime_service.py tests/capabilities/test_executor_runtime_contracts.py tests/capabilities/test_executor_runtime_execution.py tests/adapters/test_codex_app_server_adapter.py tests/kernel/test_executor_event_ingest_service.py tests/kernel/test_main_brain_executor_runtime_integration.py tests/app/test_runtime_center_executor_runtime_projection.py -q`
+Run: `PYTHONPATH=src python -m pytest tests/state/test_executor_runtime_service.py tests/capabilities/test_executor_runtime_contracts.py tests/capabilities/test_executor_runtime_execution.py tests/adapters/test_codex_app_server_adapter.py tests/kernel/test_executor_event_ingest_service.py tests/kernel/test_main_brain_executor_runtime_integration.py tests/app/test_runtime_center_executor_runtime_projection.py tests/capabilities/test_capability_discovery.py tests/capabilities/test_install_templates.py tests/app/test_capability_skill_service.py tests/test_skill_service.py tests/test_skills_cmd.py tests/capabilities/test_mcp_registry_cache.py tests/app/test_mcp_runtime_contract.py tests/test_mcp_resilience.py tests/predictions/test_skill_trial_service.py tests/predictions/test_skill_candidate_service.py -q`
 
 Expected: PASS
 
@@ -658,6 +664,7 @@ git commit -m "docs: record executor runtime cutover verification"
 - Do not keep local actor runtime and executor runtime as long-lived peers after cutover.
 - Do not let “arbitrary project donor install” continue masquerading as executor-runtime intake after the new seam lands.
 - Do not leave the old donor-first product surfaces undocumented; every retained donor/project surface must be labeled `compatibility` or explicitly narrowed to executor providers.
+- Do not rewrite or merge away the current MCP/skill install-search-evolution chain in the same phase; that remains the capability-market/capability-evolution domain.
 
 ---
 

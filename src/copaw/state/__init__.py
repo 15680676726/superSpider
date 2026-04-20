@@ -30,6 +30,12 @@ from .models import (
     CapabilityOverrideRecord,
     DecisionRequestRecord,
     ExecutionRoutineRecord,
+    ExecutorProtocolKind,
+    ExecutorProviderRecord,
+    ExecutorRuntimeInstanceRecord,
+    ExecutorRuntimeScopeKind,
+    ExecutorRuntimeStatus,
+    ExecutorSelectionMode,
     ExternalCapabilityRuntimeInstanceRecord,
     FixedSopBindingRecord,
     FixedSopTemplateRecord,
@@ -43,6 +49,8 @@ from .models import (
     LaneBudgetRecord,
     MediaAnalysisRecord,
     MetricRecord,
+    ModelInvocationOwnershipMode,
+    ModelInvocationPolicyRecord,
     OperatingCycleRecord,
     OperatingLaneRecord,
     PredictionCaseRecord,
@@ -51,6 +59,7 @@ from .models import (
     PredictionScenarioRecord,
     PredictionSignalRecord,
     ReportRecord,
+    RoleExecutorBindingRecord,
     RuntimeFrameRecord,
     RoutineRunRecord,
     ScheduleRecord,
@@ -114,6 +123,7 @@ from .donor_trust_service import DonorTrustService
 from .skill_lifecycle_decision_service import SkillLifecycleDecisionService
 from .skill_trial_service import SkillTrialService
 from .external_runtime_service import ExternalCapabilityRuntimeService
+from .executor_runtime_service import ExecutorRuntimeService
 from .store import SQLiteStateStore, STATE_SCHEMA_VERSION
 
 __all__ = [
@@ -147,6 +157,13 @@ __all__ = [
     "DonorSourceService",
     "DonorTrustService",
     "ExecutionRoutineRecord",
+    "ExecutorProtocolKind",
+    "ExecutorProviderRecord",
+    "ExecutorRuntimeInstanceRecord",
+    "ExecutorRuntimeScopeKind",
+    "ExecutorRuntimeStatus",
+    "ExecutorRuntimeService",
+    "ExecutorSelectionMode",
     "ExternalCapabilityRuntimeInstanceRecord",
     "ExternalCapabilityRuntimeService",
     "FixedSopBindingRecord",
@@ -171,6 +188,8 @@ __all__ = [
     "MemoryEntityViewRecord",
     "MemoryFactIndexRecord",
     "MemoryMergeResultRecord",
+    "ModelInvocationOwnershipMode",
+    "ModelInvocationPolicyRecord",
     "MemoryOpinionViewRecord",
     "MemoryRelationViewRecord",
     "MemoryReflectionRunRecord",
@@ -192,6 +211,7 @@ __all__ = [
     "ResearchSessionRecord",
     "ResearchSessionRoundRecord",
     "ReportRecord",
+    "RoleExecutorBindingRecord",
     "RuntimeFrameRecord",
     "RoutineRunRecord",
     "ScheduleRecord",
