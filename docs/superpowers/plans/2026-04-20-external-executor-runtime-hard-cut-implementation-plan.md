@@ -134,6 +134,31 @@
 
 ---
 
+## Landed Status (2026-04-20)
+
+Status notes in this section supersede the unchecked historical checklist items below.
+
+- `Task 1`: Completed. The hard-cut direction is now reflected across the design/model/transition/status/deprecation docs; this sync closes the remaining `TASK_STATUS.md` and `DEPRECATION_LEDGER.md` lag.
+- `Task 2`: Partially completed via `3c2327c`. The formal executor runtime records/service and focused state tests landed, but the planned bridge work in `models_external_runtime.py` and `external_runtime_service.py` is still pending.
+- `Task 3`: Partially completed via `d772861`. The first generic executor protocol taxonomy and focused contract tests landed, but the broader refactor across `external_adapter_execution.py`, `external_runtime_execution.py`, and `project_donor_contracts.py` is still pending.
+- `Task 4`: Completed via `155c6b6`. `executor_runtime_port.py`, the Codex protocol shim, the Codex adapter, and adapter tests are in tree.
+- `Task 5`: Partially completed. Commit `a73cace` landed `executor_event_ingest_service.py` plus `tests/kernel/test_executor_event_ingest_service.py`, and the current worktree also contains coordinator/orchestrator wiring groundwork. The full `Assignment -> ExecutorRuntime -> Event -> Evidence/Report` mainline is still not landed end-to-end, so Task 5 is not complete.
+- `Task 6`: Partial groundwork only. The current worktree contains Runtime Center executor-runtime-first query/projection changes and focused tests, but that cutover is not yet landed on `main`, and actor-runtime-first truth is not retired.
+- `Task 7`: Pending. Verification/cleanup for the executor cutover remains blocked on landing and stabilizing Tasks 5-6.
+- Current focused regression evidence:
+  - Landed checkpoint:
+    - `PYTHONPATH=src python -m pytest tests/state/test_executor_runtime_service.py tests/capabilities/test_executor_runtime_contracts.py tests/capabilities/test_executor_runtime_execution.py tests/adapters/test_codex_app_server_adapter.py tests/kernel/test_executor_event_ingest_service.py -q`
+    - Result: `23 passed in 4.49s`
+    - Acceptance boundary: `L1 + L2`
+  - Current worktree groundwork only:
+    - `PYTHONPATH=src python -m pytest tests/kernel/test_main_brain_executor_runtime_integration.py tests/app/test_runtime_center_executor_runtime_projection.py -q`
+    - Result: `5 passed in 12.09s`
+    - Acceptance boundary: `L1 + L2`
+    - Scope note: this second command covers in-progress, uncommitted Task 5/6 groundwork and must not be treated as landed cutover proof
+  - Not run: `default regression`, `L3 live smoke`, `L4 long soak`
+
+---
+
 ## Task 1: Sync The Architecture Docs To The New Generic Runtime Direction
 
 **Files:**

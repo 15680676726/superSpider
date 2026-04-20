@@ -84,6 +84,53 @@
   - Runtime Center donor/external-runtime 双读面
   - donor-first 旧 specs / tests / TASK_STATUS 口径
 
+## 1.0.2 `2026-04-20` 外部执行体 hard-cut 当前落点（Task 1-4 已落地，Task 5/6 有部分 groundwork）
+
+- 当前阶段边界：
+  - `Task 1`：已完成。设计/模型/迁移/状态/退役文档现已按 executor-runtime 方向同步，`ExecutorRuntime != MCP != skill` 的边界文本保持不变。
+  - `Task 2`：部分完成。提交 `3c2327c`（`feat: start formal executor runtime state layer`）已落地正式 executor runtime state layer：
+    - `src/copaw/state/models_executor_runtime.py`
+    - `src/copaw/state/executor_runtime_service.py`
+    - `tests/state/test_executor_runtime_service.py`
+    - 当前仍未完成原计划里的 `models_external_runtime.py` / `external_runtime_service.py` bridge 收口。
+  - `Task 3`：部分完成。提交 `d772861`（`refactor: add generic executor protocol taxonomy`）已落地首批 generic executor protocol taxonomy 与 focused tests：
+    - `src/copaw/capabilities/external_adapter_contracts.py`
+    - `tests/capabilities/test_executor_runtime_contracts.py`
+    - `tests/capabilities/test_executor_runtime_execution.py`
+    - 当前仍未完成原计划里的 `external_adapter_execution.py` / `external_runtime_execution.py` / `project_donor_contracts.py` 全量重构。
+  - `Task 4`：已完成。提交 `155c6b6`（`feat: add codex app server executor adapter`）已落地 Codex first adapter：
+    - `src/copaw/kernel/executor_runtime_port.py`
+    - `src/copaw/adapters/executors/codex_protocol.py`
+    - `src/copaw/adapters/executors/codex_app_server_adapter.py`
+    - `tests/adapters/test_codex_app_server_adapter.py`
+  - `Task 5`：部分完成。提交 `a73cace`（`Add executor event ingest service slice`）已落地：
+    - `src/copaw/kernel/executor_event_ingest_service.py`
+    - `tests/kernel/test_executor_event_ingest_service.py`
+    - 当前工作树还存在 `main_brain_orchestrator.py` / `turn_executor.py` / `runtime_coordination.py` / `runtime_service_graph.py` / `runtime_bootstrap_execution.py` 的 executor coordination groundwork，但 `Assignment -> ExecutorRuntime -> Event -> Evidence/Report` 端到端主链尚未作为已落地主链收口，不能写成 Task 5 已完成。
+  - `Task 6`：有部分 groundwork，但未落地。当前工作树已经出现 Runtime Center executor-runtime-first query/projection 调整与 focused tests；但 `main` 上尚未完成 executor truth cutover，actor runtime 也还没进入 `read-only-compat`。
+  - `Task 7`：待施工。验证、清理、退役台账收尾都还依赖 Task 5/6 真正落地后再做，不得提前记为完成。
+- 当前阶段边界补充：
+  - 已落地主线到 `a73cace` 为止，意味着 `Task 1-4 + Task 5 event-ingest slice` 已入树。
+  - 当前聚焦阶段仍然是 `Task 5-7 pending`；工作树里出现的 orchestrator/runtime-center groundwork 只能记为进行中证据，不能记成 cutover 已完成。
+- 当前 focused regression 证据：
+  - 已落地提交栈：
+    - 命令：`PYTHONPATH=src python -m pytest tests/state/test_executor_runtime_service.py tests/capabilities/test_executor_runtime_contracts.py tests/capabilities/test_executor_runtime_execution.py tests/adapters/test_codex_app_server_adapter.py tests/kernel/test_executor_event_ingest_service.py -q`
+    - 结果：`23 passed in 4.49s`
+    - 验收层级：`L1 + L2`
+  - 当前工作树中的 Task 5/6 groundwork：
+    - 命令：`PYTHONPATH=src python -m pytest tests/kernel/test_main_brain_executor_runtime_integration.py tests/app/test_runtime_center_executor_runtime_projection.py -q`
+    - 结果：`5 passed in 12.09s`
+    - 验收层级：`L1 + L2`
+    - 说明：这是当前工作树 focused regression，不代表 `main` 上的 cutover 已经落地
+  - `default regression`：本轮 docs sync 未重跑
+  - `live smoke`：未跑
+  - `long soak`：未跑
+- 当前仍需优先盯住的缺口：
+  - `delegation_service.py` 仍承担正式派单链
+  - Runtime Center executor-runtime-first 读面仍未在 `main` 上完成切换
+  - actor runtime 仍未降到 `read-only-compat`
+  - browser / desktop / document 本地执行层仍是后续退役目标，而不是本轮已删除项
+
 ## 1.1.1 `2026-04-07` Buddy 领域能力阶段收口补充
 
 - Buddy 当前成长阶段的正式真相已从关系经验切到 active `BuddyDomainCapabilityRecord`

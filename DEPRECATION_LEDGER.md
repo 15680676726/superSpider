@@ -217,6 +217,14 @@
   - 先停新写
   - 再把 actor runtime 降为 `read-only-compat`
   - 最后物理删除
+- `2026-04-20` 落点补充：
+  - 第一条正式替代接缝已经落地，但还没有完成 cutover：
+    - `3c2327c`：`models_executor_runtime.py` + `executor_runtime_service.py`
+    - `d772861`：generic executor protocol taxonomy baseline
+    - `155c6b6`：`executor_runtime_port.py` + `Codex App Server` first adapter
+    - `a73cace`：`executor_event_ingest_service.py` + focused ingest tests
+  - 当前工作树还存在 coordinator/orchestrator/runtime-center 侧的 Task 5/6 groundwork，但这些变更尚未形成已落地 cutover 事实。
+  - 因为 `Task 5/6` 仍未完成，这组本地 actor runtime 还不能降成 `read-only-compat`，更不能写成 `ready-to-delete`
 
 ### 3.1.4 `src/copaw/kernel/delegation_service.py`
 
@@ -235,6 +243,10 @@
 - 删除方式：
   - 先把正式派单链切到 executor runtime
   - 再删除旧 delegation 执行分支
+- `2026-04-20` 落点补充：
+  - `Codex` first adapter 与 event-ingest slice 已经落地，但 `delegation_service.py` 仍是正式派单链的一部分。
+  - 当前工作树里的 executor coordination wiring 只能说明 cutover groundwork 在推进，不等于 `delegation_service.py` 已退役。
+  - 在 `Assignment -> ExecutorRuntime -> Event -> Evidence/Report` 主链落地前，本条目继续维持 `frozen`，不得提前标记为已退役。
 
 ### 3.1.5 donor-first 外接项目产品面：`/capability-market/projects/install*`、`project donor` taxonomy、Runtime Center donor 读面
 
@@ -256,6 +268,75 @@
   - 先给 donor-first 路由、文档、测试补 `compatibility/acquisition-only` 标记
   - 再把 active execution 语义迁出
   - 最后删除不再需要的 project-donor 产品壳
+- `2026-04-20` 落点补充：
+  - 当前 generic executor runtime taxonomy 已开始替代 donor-first active runtime taxonomy。
+  - 但 `/capability-market/projects/install*`、`project-package / adapter / runtime-component`、donor state/trust/trial/retirement、Runtime Center donor 读面仍是 compatibility/acquisition-only 遗留，尚未完成正式拆分。
+
+### 3.1.6 本地 browser 执行层：`src/copaw/agents/tools/browser_control.py`、`src/copaw/capabilities/browser_runtime.py`、`src/copaw/environments/surface_execution/browser/service.py`
+
+- 当前状态：`frozen`
+- 问题：
+  - 这条链仍把本地 browser actuation 当成 CoPaw 自带执行脑的一部分
+  - 与“外部执行体负责执行、CoPaw 保留主脑真相”的 hard-cut 方向冲突
+- 目标替代：
+  - `ExecutorRuntimePort`
+  - 外部 executor browser-facing tool surface
+  - executor event -> `EvidenceRecord / AgentReport`
+- 删除阶段：`external-executor hard-cut follow-up`
+- 删除前提：
+  - executor runtime 主链已接管 browser 相关 assignment 执行
+  - Runtime Center 已能显示 executor truth，而不是本地 browser runtime truth
+- 删除方式：
+  - 先停掉新的本地 browser-first 正式写链
+  - 再把本地 browser actuation 降成 compatibility/fallback
+  - 最后物理删除
+- `2026-04-20` 落点补充：
+  - `Codex App Server` first adapter 已落地，但 browser local execution 还没有被 executor runtime 正式接管。
+  - 因此本条目继续是 retirement target，不得误记为已替代或已删除。
+
+### 3.1.7 本地 desktop 执行层：`src/copaw/agents/tools/desktop_actuation.py`、`src/copaw/adapters/desktop/windows_host.py`、`src/copaw/adapters/desktop/windows_mcp_server.py`、`src/copaw/environments/surface_execution/desktop/service.py`
+
+- 当前状态：`frozen`
+- 问题：
+  - 这条链仍把 Windows/desktop 控制维持为本地主执行层
+  - 一旦继续扩张，会与外部 executor runtime 形成第二套执行主链
+- 目标替代：
+  - `ExecutorRuntimePort`
+  - 外部 executor desktop-facing control surface
+  - executor event -> `EvidenceRecord / AgentReport`
+- 删除阶段：`external-executor hard-cut follow-up`
+- 删除前提：
+  - 外部 executor 能承接 desktop 相关 assignment
+  - 当前 desktop local runtime 不再承担正式主链写入
+- 删除方式：
+  - 先冻结新设计
+  - 再把本地 desktop path 降成 compatibility/fallback
+  - 最后物理删除
+- `2026-04-20` 落点补充：
+  - `Codex App Server` first adapter 已落地，但 desktop local execution 仍未切到 executor runtime 主链。
+  - 因此本条目继续是 retirement target，不得误记为已替代或已删除。
+
+### 3.1.8 本地 document 执行层：`src/copaw/agents/tools/document_surface.py`、`src/copaw/environments/surface_execution/document/service.py`
+
+- 当前状态：`frozen`
+- 问题：
+  - 这条链仍把 document/file actuation 保留在本地主执行层
+  - 与统一 `ExecutorRuntime` 接缝下的执行边界不一致
+- 目标替代：
+  - `ExecutorRuntimePort`
+  - 外部 executor document/file-facing tool surface
+  - executor event -> `EvidenceRecord / AgentReport`
+- 删除阶段：`external-executor hard-cut follow-up`
+- 删除前提：
+  - executor runtime 已能承接 document/file assignment 执行
+  - Runtime Center 与主脑读面不再依赖本地 document runtime
+- 删除方式：
+  - 先冻结新增设计
+  - 再降级为 compatibility/fallback
+  - 最后物理删除
+- `2026-04-20` 落点补充：
+  - `Codex App Server` first adapter 已落地，但 document/file local execution 仍未切到 executor runtime 主链。
+  - 因此本条目继续是 retirement target，不得误记为已替代或已删除。
 
 ---
 
