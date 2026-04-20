@@ -223,8 +223,15 @@
     - `d772861`：generic executor protocol taxonomy baseline
     - `155c6b6`：`executor_runtime_port.py` + `Codex App Server` first adapter
     - `a73cace`：`executor_event_ingest_service.py` + focused ingest tests
-  - 当前工作树还存在 coordinator/orchestrator/runtime-center 侧的 Task 5/6 groundwork，但这些变更尚未形成已落地 cutover 事实。
-  - 因为 `Task 5/6` 仍未完成，这组本地 actor runtime 还不能降成 `read-only-compat`，更不能写成 `ready-to-delete`
+  - 当前工作树继续把 Task 5 推到 focused mainline：
+    - `executor_event_writeback_service.py`
+    - `runtime_coordination.py` 的 background event drain
+    - `AgentReportService.record_structured_report(...)`
+    - `runtime_service_graph.py` / `runtime_bootstrap_execution.py` 的 writeback wiring
+  - 当前工作树继续把 Task 6 推到 focused projection：
+    - Runtime Center external runtime list/detail 优先读 executor runtime truth
+    - query bootstrap 已显式挂接 `executor_runtime_service`
+  - 但因为 actor runtime 仍存在于启动图、`delegation_service.py` 仍承担正式派单链、Runtime Center overview/control 仍保留旧 actor 读面，所以这组本地 actor runtime 仍不能降成 `read-only-compat`，更不能写成 `ready-to-delete`
 
 ### 3.1.4 `src/copaw/kernel/delegation_service.py`
 
@@ -245,7 +252,7 @@
   - 再删除旧 delegation 执行分支
 - `2026-04-20` 落点补充：
   - `Codex` first adapter 与 event-ingest slice 已经落地，但 `delegation_service.py` 仍是正式派单链的一部分。
-  - 当前工作树里的 executor coordination wiring 只能说明 cutover groundwork 在推进，不等于 `delegation_service.py` 已退役。
+  - 当前工作树里的 executor coordination / event writeback 主链已经能在 focused regression 下回写 evidence/report，但这仍不等于 `delegation_service.py` 已退役。
   - 在 `Assignment -> ExecutorRuntime -> Event -> Evidence/Report` 主链落地前，本条目继续维持 `frozen`，不得提前标记为已退役。
 
 ### 3.1.5 donor-first 外接项目产品面：`/capability-market/projects/install*`、`project donor` taxonomy、Runtime Center donor 读面

@@ -36,7 +36,10 @@ from ...state.repositories import (
     SqliteWorkContextRepository,
 )
 from .environment_feedback_projection import RuntimeCenterEnvironmentFeedbackProjector
-from .execution_runtime_projection import summarize_execution_knowledge_writeback
+from .execution_runtime_projection import (
+    serialize_executor_runtime_record,
+    summarize_execution_knowledge_writeback,
+)
 from .goal_decision_projection import RuntimeCenterGoalDecisionProjector
 from .task_review_projection import serialize_evidence_record
 from .task_detail_projection import RuntimeCenterTaskDetailProjector
@@ -81,6 +84,7 @@ class RuntimeCenterStateQueryService:
         human_assist_task_service: object | None = None,
         environment_service: object | None = None,
         external_runtime_service: object | None = None,
+        executor_runtime_service: object | None = None,
         weixin_ilink_runtime_state: object | None = None,
         memory_activation_service: object | None = None,
         knowledge_graph_service: object | None = None,
@@ -111,6 +115,7 @@ class RuntimeCenterStateQueryService:
         self._human_assist_task_service = human_assist_task_service
         self._environment_service = environment_service
         self._external_runtime_service = external_runtime_service
+        self._executor_runtime_service = executor_runtime_service
         self._weixin_ilink_runtime_state = weixin_ilink_runtime_state
         self._memory_activation_service = memory_activation_service
         self._knowledge_graph_service = knowledge_graph_service
@@ -358,6 +363,24 @@ class RuntimeCenterStateQueryService:
         scope_kind: str | None = None,
         limit: int | None = 20,
     ) -> list[dict[str, object]]:
+        executor_service = getattr(self, "_executor_runtime_service", None)
+        executor_lister = getattr(executor_service, "list_runtimes", None)
+        if callable(executor_lister):
+            items = executor_lister(
+                executor_id=capability_id,
+                assignment_id=None,
+                role_id=None,
+                runtime_status=status,
+                formal_only=True,
+            )
+            payload = [
+                serialize_executor_runtime_record(item)
+                for item in list(items or [])[: limit or None]
+                if scope_kind is None
+                or str(getattr(item, "scope_kind", "") or "").strip() == scope_kind
+            ]
+            if payload:
+                return payload
         service = getattr(self, "_external_runtime_service", None)
         lister = getattr(service, "list_runtimes", None)
         if not callable(lister):
@@ -416,6 +439,18 @@ class RuntimeCenterStateQueryService:
         }
 
     def get_external_runtime_detail(self, runtime_id: str) -> dict[str, object] | None:
+        executor_service = getattr(self, "_executor_runtime_service", None)
+        executor_getter = getattr(executor_service, "get_runtime", None)
+        if callable(executor_getter):
+            try:
+                record = executor_getter(runtime_id, formal_only=True)
+            except TypeError:
+                record = executor_getter(runtime_id)
+            if record is not None:
+                return {
+                    "runtime": serialize_executor_runtime_record(record),
+                    "route": f"/api/runtime-center/external-runtimes/{runtime_id}",
+                }
         service = getattr(self, "_external_runtime_service", None)
         getter = getattr(service, "get_runtime", None)
         if not callable(getter):

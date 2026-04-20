@@ -93,7 +93,10 @@ function renderEntry(
     userFacing?: boolean;
   },
 ) {
-  const localizedTitle = translateRuntimeEntryTitle(card.key, entry.title);
+  const localizedTitle = translateRuntimeEntryTitle(
+    card.key,
+    runtimeEntryPrimaryLabel(entry),
+  );
   const localizedSummary = translateRuntimeEntrySummary(card.key, entry.summary);
   const userFacing = options?.userFacing === true;
   const visibleMeta =
@@ -207,6 +210,15 @@ function renderEntry(
   );
 }
 
+function runtimeEntryPrimaryLabel(entry: RuntimeOverviewEntry): string {
+  const executorId = metaStringValue(entry.meta, "executor_id");
+  const providerId = metaStringValue(entry.meta, "provider_id");
+  if (entry.kind === "executor-runtime") {
+    return executorId ?? providerId ?? entry.title;
+  }
+  return entry.title;
+}
+
 function summaryRows(
   summary: StartupRecoverySummary | null,
 ): Array<[string, string]> {
@@ -283,6 +295,7 @@ export {
   renderDetailDrawer,
   renderRuntimeDetailDrawer,
   renderEntry,
+  runtimeEntryPrimaryLabel,
   summaryRows,
   toggleSelection,
   renderLoading,

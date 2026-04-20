@@ -10,11 +10,14 @@ from ..kernel import (
     ActorMailboxService,
     ActorSupervisor,
     ActorWorker,
+    ExecutorEventWritebackService,
     GovernanceService,
     KernelDispatcher,
     KernelTaskStore,
     KernelToolBridge,
 )
+from ..kernel.executor_runtime_port import ExecutorRuntimePort
+from ..kernel.runtime_coordination import AssignmentExecutorRuntimeCoordinator
 from ..kernel.query_execution_runtime import (
     build_runtime_entropy_contract_payload,
     build_runtime_entropy_sidecar_memory_projection,
@@ -22,6 +25,7 @@ from ..kernel.query_execution_runtime import (
 from ..learning import LearningService, PatchExecutor
 from ..state import SQLiteStateStore
 from ..state.agent_experience_service import AgentExperienceMemoryService
+from ..state.executor_runtime_service import ExecutorRuntimeService
 from ..state.work_context_service import WorkContextService
 from .mcp import MCPClientManager
 from .runtime_bootstrap_models import RuntimeRepositories
@@ -38,6 +42,11 @@ RuntimeExecutionStack: TypeAlias = tuple[
     ActorMailboxService,
     ActorWorker,
     ActorSupervisor,
+]
+
+ExecutorRuntimeCoordination: TypeAlias = tuple[
+    ExecutorRuntimeService,
+    AssignmentExecutorRuntimeCoordinator,
 ]
 
 
@@ -95,13 +104,23 @@ def build_runtime_execution_stack(
         evidence_ledger=evidence_ledger,
         runtime_event_bus=runtime_event_bus,
     )
+    surface_capability_twin_repository = getattr(
+        repositories,
+        "surface_capability_twin_repository",
+        None,
+    )
+    surface_playbook_repository = getattr(
+        repositories,
+        "surface_playbook_repository",
+        None,
+    )
     if (
-        repositories.surface_capability_twin_repository is not None
-        and repositories.surface_playbook_repository is not None
+        surface_capability_twin_repository is not None
+        and surface_playbook_repository is not None
     ):
         learning_service.configure_surface_learning(
-            surface_capability_twin_repository=repositories.surface_capability_twin_repository,
-            surface_playbook_repository=repositories.surface_playbook_repository,
+            surface_capability_twin_repository=surface_capability_twin_repository,
+            surface_playbook_repository=surface_playbook_repository,
             strategy_memory_repository=repositories.strategy_memory_repository,
             operating_lane_repository=repositories.operating_lane_repository,
             assignment_repository=repositories.assignment_repository,
@@ -184,4 +203,42 @@ def build_runtime_execution_stack(
         actor_mailbox_service,
         actor_worker,
         actor_supervisor,
+    )
+
+
+def build_executor_runtime_coordination(
+    *,
+    assignment_service: object | None,
+    external_runtime_service: object,
+    project_root: str | None,
+    executor_runtime_port: ExecutorRuntimePort | None = None,
+    default_executor_provider_id: str | None = None,
+    default_model_policy_id: str | None = None,
+) -> ExecutorRuntimeCoordination:
+    executor_runtime_service = ExecutorRuntimeService(
+        external_runtime_service=external_runtime_service,
+    )
+    coordinator = AssignmentExecutorRuntimeCoordinator(
+        assignment_service=assignment_service,
+        executor_runtime_service=executor_runtime_service,
+        executor_runtime_port=executor_runtime_port,
+        default_executor_provider_id=default_executor_provider_id,
+        default_model_policy_id=default_model_policy_id,
+        project_root=project_root,
+    )
+    return executor_runtime_service, coordinator
+
+
+def build_executor_event_writeback_service(
+    *,
+    evidence_ledger: EvidenceLedger,
+    assignment_service: object | None,
+    agent_report_service: object | None,
+    runtime_event_bus: RuntimeEventBus | None = None,
+) -> ExecutorEventWritebackService:
+    return ExecutorEventWritebackService(
+        evidence_ledger=evidence_ledger,
+        assignment_service=assignment_service,
+        agent_report_service=agent_report_service,
+        runtime_event_bus=runtime_event_bus,
     )

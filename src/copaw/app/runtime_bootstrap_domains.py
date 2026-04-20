@@ -33,6 +33,7 @@ from ..kernel import (
 )
 from ..kernel.main_brain_execution_planner import MainBrainExecutionPlanner
 from ..kernel.main_brain_intake import resolve_request_main_brain_intake_contract
+from ..kernel.runtime_coordination import AssignmentExecutorRuntimeCoordinator
 from ..learning import LearningService
 from ..learning.runtime_bindings import LearningRuntimeBindings
 from ..media import MediaService
@@ -969,6 +970,7 @@ def build_runtime_domain_services(
     kernel_tool_bridge: KernelToolBridge | None = None,
     actor_mailbox_service: ActorMailboxService | None = None,
     actor_supervisor: ActorSupervisor | None = None,
+    executor_runtime_coordinator: AssignmentExecutorRuntimeCoordinator | None = None,
 ) -> RuntimeDomainServices:
     strategy_planning_compiler = StrategyPlanningCompiler()
     cycle_planner = CyclePlanningCompiler()
@@ -1296,6 +1298,7 @@ def build_runtime_domain_services(
         execution_planner=MainBrainExecutionPlanner(
             knowledge_graph_service=knowledge_graph_service,
         ),
+        executor_runtime_coordinator=executor_runtime_coordinator,
     )
     heavy_research_session_service = BaiduPageResearchService(
         research_session_repository=repositories.research_session_repository,

@@ -1052,6 +1052,21 @@ class AgentReportService:
                 latest[report.assignment_id] = report
         return latest
 
+    def record_structured_report(
+        self,
+        report: AgentReportRecord,
+    ) -> AgentReportRecord:
+        previous = self._repository.get_report(report.id)
+        stored = self._repository.upsert_report(report)
+        self._project_report(stored, previous_report=previous)
+        retain = getattr(self._memory_retain_service, "retain_agent_report", None)
+        if callable(retain):
+            try:
+                retain(stored)
+            except Exception:
+                pass
+        return stored
+
     def record_task_terminal_report(
         self,
         *,

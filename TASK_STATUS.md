@@ -84,7 +84,7 @@
   - Runtime Center donor/external-runtime 双读面
   - donor-first 旧 specs / tests / TASK_STATUS 口径
 
-## 1.0.2 `2026-04-20` 外部执行体 hard-cut 当前落点（Task 1-4 已落地，Task 5/6 有部分 groundwork）
+## 1.0.2 `2026-04-20` 外部执行体 hard-cut 当前落点（Task 1-5 已进入主链，Task 6/7 部分完成）
 
 - 当前阶段边界：
   - `Task 1`：已完成。设计/模型/迁移/状态/退役文档现已按 executor-runtime 方向同步，`ExecutorRuntime != MCP != skill` 的边界文本保持不变。
@@ -103,31 +103,50 @@
     - `src/copaw/adapters/executors/codex_protocol.py`
     - `src/copaw/adapters/executors/codex_app_server_adapter.py`
     - `tests/adapters/test_codex_app_server_adapter.py`
-  - `Task 5`：部分完成。提交 `a73cace`（`Add executor event ingest service slice`）已落地：
+  - `Task 5`：当前工作树已完成到 `L1 + L2`。以 `a73cace` 的 ingest slice 为起点，本轮继续补上：
     - `src/copaw/kernel/executor_event_ingest_service.py`
+    - `src/copaw/kernel/executor_event_writeback_service.py`
+    - `src/copaw/kernel/runtime_coordination.py`
+    - `src/copaw/state/main_brain_service.py` 中 `AgentReportService.record_structured_report(...)`
     - `tests/kernel/test_executor_event_ingest_service.py`
-    - 当前工作树还存在 `main_brain_orchestrator.py` / `turn_executor.py` / `runtime_coordination.py` / `runtime_service_graph.py` / `runtime_bootstrap_execution.py` 的 executor coordination groundwork，但 `Assignment -> ExecutorRuntime -> Event -> Evidence/Report` 端到端主链尚未作为已落地主链收口，不能写成 Task 5 已完成。
-  - `Task 6`：有部分 groundwork，但未落地。当前工作树已经出现 Runtime Center executor-runtime-first query/projection 调整与 focused tests；但 `main` 上尚未完成 executor truth cutover，actor runtime 也还没进入 `read-only-compat`。
-  - `Task 7`：待施工。验证、清理、退役台账收尾都还依赖 Task 5/6 真正落地后再做，不得提前记为完成。
+    - `tests/kernel/test_executor_event_writeback_service.py`
+    - `tests/state/test_agent_report_service_structured_write.py`
+    - 当前已经证明 `Assignment -> ExecutorRuntime -> Event -> Evidence/Report` focused mainline 可跑；剩余边界是没有 `L3/L4`，也还没有 formal persisted `ExecutorEventRecord` 真相对象。
+  - `Task 6`：部分完成。当前工作树已补：
+    - `src/copaw/app/runtime_center/execution_runtime_projection.py`
+    - `src/copaw/app/runtime_center/state_query.py`
+    - `src/copaw/app/runtime_bootstrap_query.py`
+    - `console/src/pages/RuntimeCenter/viewHelpers.tsx`
+    - `tests/app/test_runtime_center_executor_runtime_projection.py`
+    - `tests/app/test_runtime_center_executor_runtime_bootstrap.py`
+    - Runtime Center 外部 runtime list/detail 现在优先读 executor runtime truth，并保留 legacy fallback；但 actor runtime 仍未进入 `read-only-compat`，overview/control 读面也还没完全退役。
+  - `Task 7`：部分完成。focused verification、`MCP/skill` guardrail regression、以及 deferred-retirement ledger 同步现在都可以基于真实代码状态执行；但 `default regression`、`live smoke`、`long soak` 仍未跑，不能写成整套 cutover 已完成。
 - 当前阶段边界补充：
-  - 已落地主线到 `a73cace` 为止，意味着 `Task 1-4 + Task 5 event-ingest slice` 已入树。
-  - 当前聚焦阶段仍然是 `Task 5-7 pending`；工作树里出现的 orchestrator/runtime-center groundwork 只能记为进行中证据，不能记成 cutover 已完成。
+  - 旧本地 actor runtime 仍然在应用启动图里存在，`delegation_service.py` 也还没有退役，所以这轮不能写成“旧执行脑已完全删除”。
+  - 当前能硬说的只有：executor 主链接缝、focused writeback 主链、Runtime Center 外部 runtime executor projection 已经入树；整套 cutover 仍未达到 `L3/L4`。
 - 当前 focused regression 证据：
-  - 已落地提交栈：
-    - 命令：`PYTHONPATH=src python -m pytest tests/state/test_executor_runtime_service.py tests/capabilities/test_executor_runtime_contracts.py tests/capabilities/test_executor_runtime_execution.py tests/adapters/test_codex_app_server_adapter.py tests/kernel/test_executor_event_ingest_service.py -q`
-    - 结果：`23 passed in 4.49s`
+  - Executor focused regression：
+    - 命令：`PYTHONPATH=src python -m pytest tests/adapters/test_codex_app_server_adapter.py tests/capabilities/test_executor_runtime_contracts.py tests/capabilities/test_executor_runtime_execution.py tests/state/test_executor_runtime_service.py tests/state/test_agent_report_service_structured_write.py tests/kernel/test_executor_event_ingest_service.py tests/kernel/test_executor_event_writeback_service.py tests/kernel/test_main_brain_executor_runtime_integration.py tests/app/test_runtime_center_executor_runtime_projection.py tests/app/test_runtime_center_executor_runtime_bootstrap.py tests/app/test_executor_event_writeback_bootstrap.py tests/app/test_runtime_bootstrap_helpers.py tests/app/test_runtime_execution_provider_wiring.py tests/app/test_runtime_bootstrap_split.py tests/app/test_runtime_center_external_runtime_api.py -q`
+    - 结果：`89 passed in 32.96s`
     - 验收层级：`L1 + L2`
-  - 当前工作树中的 Task 5/6 groundwork：
-    - 命令：`PYTHONPATH=src python -m pytest tests/kernel/test_main_brain_executor_runtime_integration.py tests/app/test_runtime_center_executor_runtime_projection.py -q`
-    - 结果：`5 passed in 12.09s`
+  - Main-brain orchestrator sanity：
+    - 命令：`PYTHONPATH=src python -m pytest tests/kernel/test_main_brain_orchestrator.py -q`
+    - 结果：`6 passed in 7.11s`
     - 验收层级：`L1 + L2`
-    - 说明：这是当前工作树 focused regression，不代表 `main` 上的 cutover 已经落地
-  - `default regression`：本轮 docs sync 未重跑
+  - Frontend focused regression：
+    - 命令：`npm --prefix console test -- src/pages/RuntimeCenter/viewHelpers.test.tsx`
+    - 结果：`12 passed`
+    - 验收层级：`L1 + L2`
+  - `MCP/skill` guardrail regression：
+    - 命令：`PYTHONPATH=src python -m pytest tests/capabilities/test_capability_discovery.py tests/capabilities/test_install_templates.py tests/app/test_capability_skill_service.py tests/test_skill_service.py tests/test_skills_cmd.py tests/capabilities/test_mcp_registry_cache.py tests/app/test_mcp_runtime_contract.py tests/test_mcp_resilience.py tests/predictions/test_skill_trial_service.py tests/predictions/test_skill_candidate_service.py -q`
+    - 结果：`103 passed in 48.21s`
+    - 验收层级：`L1 + L2`
+  - `default regression`：未跑
   - `live smoke`：未跑
   - `long soak`：未跑
 - 当前仍需优先盯住的缺口：
   - `delegation_service.py` 仍承担正式派单链
-  - Runtime Center executor-runtime-first 读面仍未在 `main` 上完成切换
+  - Runtime Center actor overview/control 读面仍未完全切到 executor-runtime-first
   - actor runtime 仍未降到 `read-only-compat`
   - browser / desktop / document 本地执行层仍是后续退役目标，而不是本轮已删除项
 

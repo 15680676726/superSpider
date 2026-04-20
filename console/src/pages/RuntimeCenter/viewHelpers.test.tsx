@@ -9,7 +9,10 @@ import {
   buildRuntimeEnvironmentCockpitSignals,
 } from "./runtimeEnvironmentSections";
 import { buildRuntimeIndustryCockpitSignals } from "./runtimeIndustrySections";
-import { renderIndustryExecutionFocusSection } from "./viewHelpers";
+import {
+  renderIndustryExecutionFocusSection,
+  runtimeEntryPrimaryLabel,
+} from "./viewHelpers";
 
 const baseDetail = {
   instance_id: "industry-1",
@@ -96,6 +99,25 @@ const baseDetail = {
 } as IndustryInstanceDetail;
 
 describe("runtimeCenter viewHelpers", () => {
+  it("prefers executor runtime ids over legacy entry titles", () => {
+    expect(
+      runtimeEntryPrimaryLabel({
+        id: "runtime-1",
+        title: "Legacy external runtime",
+        kind: "executor-runtime",
+        status: "ready",
+        summary: null,
+        updated_at: null,
+        route: null,
+        actions: {},
+        meta: {
+          executor_id: "codex",
+          provider_id: "codex-app-server",
+        },
+      }),
+    ).toBe("codex");
+  });
+
   it("labels the runtime focus card as current focus instead of current goal", () => {
     render(
       renderIndustryExecutionFocusSection(

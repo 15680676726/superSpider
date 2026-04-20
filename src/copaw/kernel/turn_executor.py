@@ -68,6 +68,7 @@ from .query_execution_writeback import (
     ChatWritebackDecisionModelTimeoutError,
     ChatWritebackDecisionModelUnavailableError,
 )
+from .runtime_coordination import AssignmentExecutorRuntimeCoordinator
 from ..memory.conversation_compaction_service import ConversationCompactionService
 
 logger = logging.getLogger(__name__)
@@ -721,6 +722,7 @@ class KernelTurnExecutor:
         query_execution_service: KernelQueryExecutionService | None = None,
         main_brain_chat_service: MainBrainChatService | None = None,
         main_brain_orchestrator: MainBrainOrchestrator | None = None,
+        executor_runtime_coordinator: AssignmentExecutorRuntimeCoordinator | None = None,
         restart_callback: Callable[[], Any] | None = None,
         in_type_converters: dict[str, Callable] | None = None,
         out_type_converters: dict[str, Callable] | None = None,
@@ -745,7 +747,9 @@ class KernelTurnExecutor:
             query_execution_service=self._query_execution_service,
             session_backend=session_backend,
             environment_service=environment_service,
+            executor_runtime_coordinator=executor_runtime_coordinator,
         )
+        self._executor_runtime_coordinator = executor_runtime_coordinator
         self._sync_query_execution_service(
             session_backend=session_backend,
             conversation_compaction_service=conversation_compaction_service,
@@ -845,11 +849,22 @@ class KernelTurnExecutor:
             query_execution_service=self._query_execution_service,
             session_backend=self._session_backend,
             environment_service=self._environment_service,
+            executor_runtime_coordinator=self._executor_runtime_coordinator,
         )
         self._sync_main_brain_orchestrator(
             session_backend=self._session_backend,
             query_execution_service=self._query_execution_service,
             environment_service=self._environment_service,
+        )
+
+    def set_executor_runtime_coordinator(
+        self,
+        executor_runtime_coordinator: AssignmentExecutorRuntimeCoordinator | None,
+    ) -> None:
+        self._executor_runtime_coordinator = executor_runtime_coordinator
+        self._maybe_call_main_brain_orchestrator(
+            "set_executor_runtime_coordinator",
+            executor_runtime_coordinator,
         )
 
     def set_restart_callback(self, restart_callback: Callable[[], Any] | None) -> None:
@@ -919,6 +934,10 @@ class KernelTurnExecutor:
         self._maybe_call_main_brain_orchestrator(
             "set_environment_service",
             environment_service,
+        )
+        self._maybe_call_main_brain_orchestrator(
+            "set_executor_runtime_coordinator",
+            self._executor_runtime_coordinator,
         )
 
     def _maybe_call_query_execution_service(self, method_name: str, *args: Any) -> None:

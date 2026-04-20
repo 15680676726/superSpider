@@ -142,19 +142,26 @@ Status notes in this section supersede the unchecked historical checklist items 
 - `Task 2`: Partially completed via `3c2327c`. The formal executor runtime records/service and focused state tests landed, but the planned bridge work in `models_external_runtime.py` and `external_runtime_service.py` is still pending.
 - `Task 3`: Partially completed via `d772861`. The first generic executor protocol taxonomy and focused contract tests landed, but the broader refactor across `external_adapter_execution.py`, `external_runtime_execution.py`, and `project_donor_contracts.py` is still pending.
 - `Task 4`: Completed via `155c6b6`. `executor_runtime_port.py`, the Codex protocol shim, the Codex adapter, and adapter tests are in tree.
-- `Task 5`: Partially completed. Commit `a73cace` landed `executor_event_ingest_service.py` plus `tests/kernel/test_executor_event_ingest_service.py`, and the current worktree also contains coordinator/orchestrator wiring groundwork. The full `Assignment -> ExecutorRuntime -> Event -> Evidence/Report` mainline is still not landed end-to-end, so Task 5 is not complete.
-- `Task 6`: Partial groundwork only. The current worktree contains Runtime Center executor-runtime-first query/projection changes and focused tests, but that cutover is not yet landed on `main`, and actor-runtime-first truth is not retired.
-- `Task 7`: Pending. Verification/cleanup for the executor cutover remains blocked on landing and stabilizing Tasks 5-6.
+- `Task 5`: Completed at `L1 + L2` in the current worktree. The executor path now covers normalized event ingest, event -> evidence/report writeback, structured agent-report persistence, runtime coordination payloads, and background event drain from the executor port. Remaining boundaries: no formal persisted `ExecutorEventRecord` truth object yet, and no `L3`/`L4` runtime proof.
+- `Task 6`: Partially completed. Runtime Center now prefers executor-runtime truth for external-runtime list/detail projection, query bootstrap threads the executor runtime service, and the frontend prefers executor runtime ids in the read model. Remaining boundaries: actor-runtime-first truth is not retired, and overview/control surfaces still keep legacy actor paths.
+- `Task 7`: Partially completed. Focused executor-track verification and `MCP/skill` guardrail regression are now available, and deferred-retirement docs can be updated against real code. Remaining boundaries: no `default regression`, `L3 live smoke`, or `L4 long soak`.
 - Current focused regression evidence:
-  - Landed checkpoint:
-    - `PYTHONPATH=src python -m pytest tests/state/test_executor_runtime_service.py tests/capabilities/test_executor_runtime_contracts.py tests/capabilities/test_executor_runtime_execution.py tests/adapters/test_codex_app_server_adapter.py tests/kernel/test_executor_event_ingest_service.py -q`
-    - Result: `23 passed in 4.49s`
+  - Executor cutover focused regression:
+    - `PYTHONPATH=src python -m pytest tests/adapters/test_codex_app_server_adapter.py tests/capabilities/test_executor_runtime_contracts.py tests/capabilities/test_executor_runtime_execution.py tests/state/test_executor_runtime_service.py tests/state/test_agent_report_service_structured_write.py tests/kernel/test_executor_event_ingest_service.py tests/kernel/test_executor_event_writeback_service.py tests/kernel/test_main_brain_executor_runtime_integration.py tests/app/test_runtime_center_executor_runtime_projection.py tests/app/test_runtime_center_executor_runtime_bootstrap.py tests/app/test_executor_event_writeback_bootstrap.py tests/app/test_runtime_bootstrap_helpers.py tests/app/test_runtime_execution_provider_wiring.py tests/app/test_runtime_bootstrap_split.py tests/app/test_runtime_center_external_runtime_api.py -q`
+    - Result: `89 passed in 32.96s`
     - Acceptance boundary: `L1 + L2`
-  - Current worktree groundwork only:
-    - `PYTHONPATH=src python -m pytest tests/kernel/test_main_brain_executor_runtime_integration.py tests/app/test_runtime_center_executor_runtime_projection.py -q`
-    - Result: `5 passed in 12.09s`
+  - Main-brain orchestrator sanity:
+    - `PYTHONPATH=src python -m pytest tests/kernel/test_main_brain_orchestrator.py -q`
+    - Result: `6 passed in 7.11s`
     - Acceptance boundary: `L1 + L2`
-    - Scope note: this second command covers in-progress, uncommitted Task 5/6 groundwork and must not be treated as landed cutover proof
+  - Frontend focused regression:
+    - `npm --prefix console test -- src/pages/RuntimeCenter/viewHelpers.test.tsx`
+    - Result: `12 passed`
+    - Acceptance boundary: `L1 + L2`
+  - Guardrail regression for `MCP/skill` install/search/evolution:
+    - `PYTHONPATH=src python -m pytest tests/capabilities/test_capability_discovery.py tests/capabilities/test_install_templates.py tests/app/test_capability_skill_service.py tests/test_skill_service.py tests/test_skills_cmd.py tests/capabilities/test_mcp_registry_cache.py tests/app/test_mcp_runtime_contract.py tests/test_mcp_resilience.py tests/predictions/test_skill_trial_service.py tests/predictions/test_skill_candidate_service.py -q`
+    - Result: `103 passed in 48.21s`
+    - Acceptance boundary: `L1 + L2`
   - Not run: `default regression`, `L3 live smoke`, `L4 long soak`
 
 ---

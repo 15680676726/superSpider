@@ -142,6 +142,8 @@ from ..workflows import WorkflowTemplateService
 from .channels.weixin_ilink.runtime_state import WeixinILinkRuntimeState
 from .mcp import MCPClientManager
 from .runtime_bootstrap_execution import (
+    build_executor_event_writeback_service,
+    build_executor_runtime_coordination as build_executor_runtime_coordination_components,
     build_runtime_execution_stack as build_runtime_execution_stack_components,
 )
 from .runtime_bootstrap_domains import build_runtime_domain_services
@@ -344,6 +346,7 @@ def _build_query_services(
     environment_service: EnvironmentService,
     runtime_provider: object | None,
     external_runtime_service: object | None = None,
+    executor_runtime_service: object | None = None,
     weixin_ilink_runtime_state: object | None = None,
 ) -> tuple[
     RuntimeCenterStateQueryService,
@@ -373,6 +376,7 @@ def _build_query_services(
         human_assist_task_service=human_assist_task_service,
         environment_service=environment_service,
         external_runtime_service=external_runtime_service,
+        executor_runtime_service=executor_runtime_service,
         weixin_ilink_runtime_state=weixin_ilink_runtime_state,
         runtime_provider=runtime_provider,
     )
@@ -536,6 +540,11 @@ def build_runtime_bootstrap(
         repository=repositories.external_runtime_repository,
     )
     _reconcile_external_runtime_truth(external_runtime_service)
+    executor_runtime_service, executor_runtime_coordinator = build_executor_runtime_coordination_components(
+        assignment_service=None,
+        external_runtime_service=external_runtime_service,
+        project_root=str(WORKING_DIR),
+    )
     weixin_ilink_runtime_state = WeixinILinkRuntimeState()
 
     provider_manager = ProviderManager()
@@ -572,6 +581,7 @@ def build_runtime_bootstrap(
         environment_service=environment_service,
         runtime_provider=runtime_provider,
         external_runtime_service=external_runtime_service,
+        executor_runtime_service=executor_runtime_service,
         weixin_ilink_runtime_state=weixin_ilink_runtime_state,
     )
     knowledge_graph_service = KnowledgeGraphService(
@@ -657,6 +667,7 @@ def build_runtime_bootstrap(
         kernel_tool_bridge=kernel_tool_bridge,
         actor_mailbox_service=actor_mailbox_service,
         actor_supervisor=actor_supervisor,
+        executor_runtime_coordinator=executor_runtime_coordinator,
     )
     if callable(configure_exception_absorption):
         configure_exception_absorption(
@@ -671,7 +682,17 @@ def build_runtime_bootstrap(
     backlog_service = domain_services.backlog_service
     operating_cycle_service = domain_services.operating_cycle_service
     assignment_service = domain_services.assignment_service
+    executor_runtime_coordinator.set_assignment_service(assignment_service)
     agent_report_service = domain_services.agent_report_service
+    executor_event_writeback_service = build_executor_event_writeback_service(
+        evidence_ledger=evidence_ledger,
+        assignment_service=assignment_service,
+        agent_report_service=agent_report_service,
+        runtime_event_bus=runtime_event_bus,
+    )
+    executor_runtime_coordinator.set_executor_event_writeback_service(
+        executor_event_writeback_service,
+    )
     media_service = domain_services.media_service
     industry_service = domain_services.industry_service
     set_dispatcher_industry_service = getattr(kernel_dispatcher, "set_industry_service", None)
@@ -845,5 +866,8 @@ def build_runtime_bootstrap(
         actor_worker=actor_worker,
         actor_supervisor=actor_supervisor,
         external_runtime_service=external_runtime_service,
+        executor_runtime_service=executor_runtime_service,
+        executor_runtime_coordinator=executor_runtime_coordinator,
+        executor_event_writeback_service=executor_event_writeback_service,
         weixin_ilink_runtime_state=weixin_ilink_runtime_state,
     )

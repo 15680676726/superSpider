@@ -2,6 +2,8 @@
 """Canonical execution-runtime projection helpers for Runtime Center read surfaces."""
 from __future__ import annotations
 
+from typing import Any
+
 from .models import RuntimeKnowledgeWritebackSummary
 from .projection_utils import (
     dict_from_value,
@@ -350,6 +352,32 @@ def host_twin_active_blocker_family(host_twin: dict[str, object] | None) -> str 
     return first_non_empty(host_twin.get("blocker_family"), host_twin.get("blocker_summary"))
 
 
+def serialize_executor_runtime_record(
+    record: Any,
+    *,
+    route_prefix: str = "/api/runtime-center/external-runtimes",
+) -> dict[str, object]:
+    model_dump = getattr(record, "model_dump", None)
+    payload = model_dump(mode="json") if callable(model_dump) else None
+    if not isinstance(payload, dict):
+        payload = {}
+    runtime_id = first_non_empty(payload.get("runtime_id"))
+    executor_id = first_non_empty(payload.get("executor_id"))
+    protocol_kind = first_non_empty(payload.get("protocol_kind"))
+    scope_kind = first_non_empty(payload.get("scope_kind"))
+    status = first_non_empty(payload.get("runtime_status"), payload.get("status")) or "unknown"
+    payload["status"] = status
+    payload["runtime_status"] = status
+    payload["kind"] = "executor-runtime"
+    payload["title"] = executor_id or runtime_id or "executor-runtime"
+    payload["summary"] = " / ".join(
+        part for part in (protocol_kind, scope_kind, status) if part
+    ) or "executor runtime"
+    if runtime_id:
+        payload["route"] = f"{route_prefix}/{runtime_id}"
+    return payload
+
+
 def build_host_twin_summary(
     host_twin: dict[str, object] | None,
     *,
@@ -582,5 +610,6 @@ __all__ = [
     "host_twin_trusted_anchor",
     "host_twin_writable_surface_label",
     "resolve_canonical_host_identity",
+    "serialize_executor_runtime_record",
     "summarize_execution_knowledge_writeback",
 ]

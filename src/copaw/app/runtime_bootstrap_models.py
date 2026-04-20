@@ -30,6 +30,8 @@ if TYPE_CHECKING:
         KernelTurnExecutor,
         TaskDelegationService,
     )
+    from ..kernel.runtime_coordination import AssignmentExecutorRuntimeCoordinator
+    from ..kernel.executor_event_writeback_service import ExecutorEventWritebackService
     from ..learning import LearningService
     from ..memory import (
         ConversationCompactionService,
@@ -53,6 +55,7 @@ if TYPE_CHECKING:
         OperatingLaneService,
     )
     from ..state.agent_experience_service import AgentExperienceMemoryService
+    from ..state.executor_runtime_service import ExecutorRuntimeService
     from ..state.knowledge_service import StateKnowledgeService
     from ..state.reporting_service import StateReportingService
     from ..state.strategy_memory_service import StateStrategyMemoryService
@@ -309,6 +312,9 @@ class RuntimeBootstrap:
     actor_worker: ActorWorker
     actor_supervisor: ActorSupervisor
     external_runtime_service: Any | None = None
+    executor_runtime_service: ExecutorRuntimeService | None = None
+    executor_runtime_coordinator: AssignmentExecutorRuntimeCoordinator | None = None
+    executor_event_writeback_service: ExecutorEventWritebackService | None = None
     weixin_ilink_runtime_state: Any | None = None
     research_session_service: Any | None = None
     buddy_onboarding_service: BuddyOnboardingService | None = None

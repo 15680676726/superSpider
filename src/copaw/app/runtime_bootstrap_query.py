@@ -157,6 +157,7 @@ def build_runtime_query_services(
     human_assist_task_service: object | None = None,
     environment_service: EnvironmentService | None = None,
     external_runtime_service: object | None = None,
+    executor_runtime_service: object | None = None,
     weixin_ilink_runtime_state: object | None = None,
     runtime_provider: object | None = None,
 ) -> RuntimeQueryServices:
@@ -185,6 +186,7 @@ def build_runtime_query_services(
         human_assist_task_service=human_assist_task_service,
         environment_service=environment_service,
         external_runtime_service=external_runtime_service,
+        executor_runtime_service=executor_runtime_service,
         weixin_ilink_runtime_state=weixin_ilink_runtime_state,
         memory_activation_service=None,
     )

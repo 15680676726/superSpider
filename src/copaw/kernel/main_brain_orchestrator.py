@@ -28,6 +28,7 @@ from .query_execution_writeback import (
     ChatWritebackDecisionModelTimeoutError,
     ChatWritebackDecisionModelUnavailableError,
 )
+from .runtime_coordination import AssignmentExecutorRuntimeCoordinator
 
 logger = logging.getLogger(__name__)
 
@@ -275,6 +276,7 @@ class MainBrainOrchestrator:
         environment_coordinator: MainBrainEnvironmentCoordinator | None = None,
         recovery_coordinator: MainBrainRecoveryCoordinator | None = None,
         result_committer: MainBrainResultCommitter | None = None,
+        executor_runtime_coordinator: AssignmentExecutorRuntimeCoordinator | None = None,
     ) -> None:
         self._query_execution_service = query_execution_service
         self._session_backend = session_backend
@@ -286,6 +288,7 @@ class MainBrainOrchestrator:
         )
         self._recovery_coordinator = recovery_coordinator or MainBrainRecoveryCoordinator()
         self._result_committer = result_committer or MainBrainResultCommitter()
+        self._executor_runtime_coordinator = executor_runtime_coordinator
 
     def set_query_execution_service(
         self,
@@ -308,6 +311,12 @@ class MainBrainOrchestrator:
         resolver: Callable[..., Awaitable[MainBrainIntakeContract | None]] | None,
     ) -> None:
         self._intake_contract_resolver = resolver or resolve_request_main_brain_intake_contract
+
+    def set_executor_runtime_coordinator(
+        self,
+        coordinator: AssignmentExecutorRuntimeCoordinator | None,
+    ) -> None:
+        self._executor_runtime_coordinator = coordinator
 
     def resolve_cognitive_surface(
         self,
@@ -397,6 +406,27 @@ class MainBrainOrchestrator:
                 kernel_task_id=kernel_task_id,
             ),
         )
+        runtime_coordination = _timed(
+            "executor_runtime.coordinate",
+            lambda: self._coordinate_executor_runtime(
+                request=request,
+                msgs=msgs,
+                intake_contract=intake_contract,
+            ),
+        )
+        if runtime_coordination:
+            runtime_context = _safe_mapping(
+                getattr(request, "_copaw_main_brain_runtime_context", None),
+            )
+            runtime_context.update(runtime_coordination)
+            try:
+                setattr(request, "_copaw_main_brain_runtime_context", runtime_context)
+            except Exception:
+                logger.debug("Failed to attach executor runtime coordination")
+            try:
+                setattr(request, "_copaw_executor_runtime_coordination", runtime_coordination)
+            except Exception:
+                logger.debug("Failed to attach executor runtime coordination payload")
         cognitive_surface = _timed(
             "resolve_cognitive_surface",
             lambda: self.resolve_cognitive_surface(request=request),
@@ -552,6 +582,26 @@ class MainBrainOrchestrator:
             " ".join(f"{key}={value:.2f}s" for key, value in timings.items()),
         )
         return contract
+
+    def _coordinate_executor_runtime(
+        self,
+        *,
+        request: Any,
+        msgs: list[Any],
+        intake_contract: MainBrainIntakeContract | None,
+    ) -> dict[str, Any] | None:
+        coordinator = self._executor_runtime_coordinator
+        if coordinator is None:
+            return None
+        try:
+            return coordinator.coordinate_assignment_runtime(
+                request=request,
+                msgs=msgs,
+                intake_contract=intake_contract,
+            )
+        except Exception:
+            logger.debug("Executor runtime coordination failed during orchestration", exc_info=True)
+            return None
 
     async def _execute_envelope_stream(
         self,

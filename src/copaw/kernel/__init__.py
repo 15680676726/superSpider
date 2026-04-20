@@ -20,6 +20,7 @@ __all__ = [
     "BuddyDomainCapabilityGrowthService",
     "BuddyProjectionService",
     "DEFAULT_AGENTS",
+    "ExecutorEventWritebackService",
     "GovernanceBatchResult",
     "GovernanceService",
     "GovernanceStatus",
@@ -62,6 +63,10 @@ _EXPORTS = {
     ),
     "BuddyProjectionService": (".buddy_projection_service", "BuddyProjectionService"),
     "DEFAULT_AGENTS": (".agent_profile", "DEFAULT_AGENTS"),
+    "ExecutorEventWritebackService": (
+        ".executor_event_writeback_service",
+        "ExecutorEventWritebackService",
+    ),
     "GovernanceBatchResult": (".governance", "GovernanceBatchResult"),
     "GovernanceService": (".governance", "GovernanceService"),
     "GovernanceStatus": (".governance", "GovernanceStatus"),

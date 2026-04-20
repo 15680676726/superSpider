@@ -117,6 +117,8 @@ def _executor_runtime_from_external(
 ) -> ExecutorRuntimeInstanceRecord:
     metadata = dict(record.metadata or {})
     compat = dict(metadata.pop(_EXECUTOR_RUNTIME_METADATA_KEY, {}) or {})
+    if compat:
+        metadata["executor_runtime_managed"] = True
     return ExecutorRuntimeInstanceRecord(
         runtime_id=record.runtime_id,
         executor_id=str(
@@ -183,11 +185,19 @@ class ExecutorRuntimeService:
     ) -> ModelInvocationPolicyRecord | None:
         return self._model_policies.get(policy_id)
 
-    def get_runtime(self, runtime_id: str) -> ExecutorRuntimeInstanceRecord | None:
+    def get_runtime(
+        self,
+        runtime_id: str,
+        *,
+        formal_only: bool = False,
+    ) -> ExecutorRuntimeInstanceRecord | None:
         record = self._external_runtime_service.get_runtime(runtime_id)
         if record is None:
             return None
-        return _executor_runtime_from_external(record)
+        runtime = _executor_runtime_from_external(record)
+        if formal_only and not self.is_formal_runtime(runtime):
+            return None
+        return runtime
 
     def list_runtimes(
         self,
@@ -196,6 +206,7 @@ class ExecutorRuntimeService:
         assignment_id: str | None = None,
         role_id: str | None = None,
         runtime_status: str | None = None,
+        formal_only: bool = False,
     ) -> list[ExecutorRuntimeInstanceRecord]:
         records = self._external_runtime_service.list_runtimes(
             capability_id=_executor_capability_id(executor_id) if executor_id else None,
@@ -203,6 +214,8 @@ class ExecutorRuntimeService:
         items = [_executor_runtime_from_external(item) for item in records]
         filtered: list[ExecutorRuntimeInstanceRecord] = []
         for item in items:
+            if formal_only and not self.is_formal_runtime(item):
+                continue
             if assignment_id is not None and item.assignment_id != assignment_id:
                 continue
             if role_id is not None and item.role_id != role_id:
@@ -211,6 +224,11 @@ class ExecutorRuntimeService:
                 continue
             filtered.append(item)
         return filtered
+
+    @staticmethod
+    def is_formal_runtime(runtime: ExecutorRuntimeInstanceRecord) -> bool:
+        metadata = dict(runtime.metadata or {})
+        return bool(metadata.get("executor_runtime_managed"))
 
     def create_or_reuse_runtime(
         self,

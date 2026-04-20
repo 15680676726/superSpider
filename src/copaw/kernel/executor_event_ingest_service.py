@@ -36,15 +36,33 @@ def _string_list(value: object | None) -> list[str]:
     return [text] if text is not None else []
 
 
+def _merge_string_lists(*values: object | None) -> list[str]:
+    merged: list[str] = []
+    for value in values:
+        for item in _string_list(value):
+            if item not in merged:
+                merged.append(item)
+    return merged
+
+
 @dataclass(slots=True)
 class ExecutorEventIngestContext:
     runtime_id: str
     executor_id: str
     assignment_id: str
     task_id: str | None = None
+    goal_id: str | None = None
+    lane_id: str | None = None
+    cycle_id: str | None = None
+    work_context_id: str | None = None
     industry_instance_id: str | None = None
     thread_id: str | None = None
     turn_id: str | None = None
+    environment_ref: str | None = None
+    control_thread_id: str | None = None
+    chat_writeback_channel: str | None = None
+    requested_surfaces: list[str] = field(default_factory=list)
+    assignment_evidence_ids: list[str] = field(default_factory=list)
     owner_agent_id: str | None = None
     owner_role_id: str | None = None
     assignment_title: str | None = None
@@ -108,12 +126,11 @@ class ExecutorEventIngestService:
             summary=self._build_event_summary(event=event, context=context, payload=payload),
             payload=payload,
             raw_method=event.raw_method,
-            metadata={
-                **dict(context.metadata),
-                "industry_instance_id": context.industry_instance_id,
-                "owner_agent_id": context.owner_agent_id,
-                "owner_role_id": context.owner_role_id,
-            },
+            metadata=self._build_metadata(
+                context=context,
+                event=event,
+                payload=payload,
+            ),
         )
         evidence_payload = self._build_evidence_payload(
             context=context,
@@ -206,12 +223,14 @@ class ExecutorEventIngestService:
             "task_id": context.task_id,
             "actor_ref": f"executor:{context.executor_id}",
             "capability_ref": f"executor:{context.executor_id}",
-            "environment_ref": None,
+            "environment_ref": self._resolve_environment_ref(context=context, payload=payload),
             "risk_level": context.risk_level,
             "kind": evidence_kind,
             "action_summary": action_summary,
             "result_summary": result_summary,
             "status": "recorded",
+            "input_digest": _first_text(payload.get("input_digest")),
+            "output_digest": _first_text(payload.get("output_digest")),
             "metadata": self._build_metadata(
                 context=context,
                 event=event,
@@ -246,7 +265,11 @@ class ExecutorEventIngestService:
         return {
             "industry_instance_id": industry_instance_id,
             "assignment_id": _text(context.assignment_id),
+            "goal_id": _text(context.goal_id),
+            "lane_id": _text(context.lane_id),
+            "cycle_id": _text(context.cycle_id),
             "task_id": _text(context.task_id),
+            "work_context_id": _text(context.work_context_id),
             "owner_agent_id": _text(context.owner_agent_id),
             "owner_role_id": _text(context.owner_role_id),
             "report_kind": "executor-terminal",
@@ -260,8 +283,11 @@ class ExecutorEventIngestService:
             "status": "recorded",
             "result": result,
             "risk_level": context.risk_level,
-            "evidence_ids": [],
-            "decision_ids": [],
+            "evidence_ids": self._resolve_report_evidence_ids(
+                context=context,
+                payload=payload,
+            ),
+            "decision_ids": self._resolve_report_decision_ids(payload=payload),
             "metadata": self._build_metadata(
                 context=context,
                 event=event,
@@ -319,9 +345,17 @@ class ExecutorEventIngestService:
         event: ExecutorNormalizedEvent,
         payload: Mapping[str, Any],
     ) -> dict[str, Any]:
+        environment_ref = self._resolve_environment_ref(context=context, payload=payload)
+        control_thread_id = self._resolve_control_thread_id(context=context, payload=payload)
+        requested_surfaces = self._resolve_requested_surfaces(context=context, payload=payload)
         return {
             **dict(context.metadata),
             "assignment_id": context.assignment_id,
+            "task_id": context.task_id,
+            "goal_id": context.goal_id,
+            "lane_id": context.lane_id,
+            "cycle_id": context.cycle_id,
+            "work_context_id": context.work_context_id,
             "executor_id": context.executor_id,
             "executor_runtime_id": context.runtime_id,
             "executor_thread_id": _first_text(payload.get("thread_id"), context.thread_id),
@@ -333,7 +367,73 @@ class ExecutorEventIngestService:
             "industry_instance_id": context.industry_instance_id,
             "owner_agent_id": context.owner_agent_id,
             "owner_role_id": context.owner_role_id,
+            "environment_ref": environment_ref,
+            "control_thread_id": control_thread_id,
+            "chat_writeback_channel": _text(context.chat_writeback_channel),
+            "requested_surfaces": requested_surfaces,
         }
+
+    def _resolve_environment_ref(
+        self,
+        *,
+        context: ExecutorEventIngestContext,
+        payload: Mapping[str, Any],
+    ) -> str | None:
+        return _first_text(
+            payload.get("environment_ref"),
+            payload.get("session_environment_ref"),
+            context.environment_ref,
+        )
+
+    def _resolve_control_thread_id(
+        self,
+        *,
+        context: ExecutorEventIngestContext,
+        payload: Mapping[str, Any],
+    ) -> str | None:
+        return _first_text(
+            payload.get("control_thread_id"),
+            payload.get("session_id"),
+            context.control_thread_id,
+        )
+
+    def _resolve_requested_surfaces(
+        self,
+        *,
+        context: ExecutorEventIngestContext,
+        payload: Mapping[str, Any],
+    ) -> list[str]:
+        return _merge_string_lists(
+            context.requested_surfaces,
+            payload.get("requested_surfaces"),
+            payload.get("seat_requested_surfaces"),
+            payload.get("chat_writeback_requested_surfaces"),
+        )
+
+    def _resolve_report_evidence_ids(
+        self,
+        *,
+        context: ExecutorEventIngestContext,
+        payload: Mapping[str, Any],
+    ) -> list[str]:
+        return _merge_string_lists(
+            context.assignment_evidence_ids,
+            payload.get("evidence_ids"),
+            payload.get("linked_evidence_ids"),
+            payload.get("supporting_evidence_ids"),
+            payload.get("source_evidence_ids"),
+        )
+
+    def _resolve_report_decision_ids(
+        self,
+        *,
+        payload: Mapping[str, Any],
+    ) -> list[str]:
+        return _merge_string_lists(
+            payload.get("decision_ids"),
+            payload.get("linked_decision_ids"),
+            payload.get("supporting_decision_ids"),
+        )
 
 
 __all__ = [

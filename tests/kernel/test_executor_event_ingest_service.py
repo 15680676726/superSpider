@@ -16,9 +16,18 @@ def _context(**overrides: object) -> ExecutorEventIngestContext:
         "executor_id": "codex",
         "assignment_id": "assignment-1",
         "task_id": "task-1",
+        "goal_id": "goal-1",
+        "lane_id": "lane-1",
+        "cycle_id": "cycle-1",
         "industry_instance_id": "industry-1",
         "thread_id": "thread-1",
         "turn_id": "turn-1",
+        "work_context_id": "work-context-1",
+        "environment_ref": "session:console:industry:industry-1",
+        "control_thread_id": "industry-chat:industry-1:execution-core",
+        "chat_writeback_channel": "console",
+        "requested_surfaces": ["browser", "file_docs"],
+        "assignment_evidence_ids": ["evidence-existing-1"],
         "owner_agent_id": "agent-1",
         "owner_role_id": "role-1",
         "assignment_title": "Ship Task 5",
@@ -218,3 +227,77 @@ def test_ingest_unknown_event_keeps_generic_event_without_secondary_payloads() -
     assert result.event_record.summary == "Executor still running"
     assert result.evidence_payload is None
     assert result.report_payload is None
+
+
+def test_ingest_terminal_event_projects_writeback_ready_report_fields() -> None:
+    service = ExecutorEventIngestService()
+    result = service.ingest_event(
+        context=_context(),
+        event=ExecutorNormalizedEvent(
+            event_type="task_completed",
+            source_type="turn",
+            payload={
+                "summary": "Executor finished assignment successfully.",
+                "evidence_ids": ["evidence-existing-1", "evidence-new-2"],
+                "decision_ids": ["decision-1"],
+                "requested_surfaces": ["browser", "desktop"],
+                "control_thread_id": "industry-chat:industry-1:execution-core",
+            },
+            raw_method="turn/completed",
+        ),
+    )
+
+    assert result.report_payload is not None
+    assert result.report_payload["goal_id"] == "goal-1"
+    assert result.report_payload["lane_id"] == "lane-1"
+    assert result.report_payload["cycle_id"] == "cycle-1"
+    assert result.report_payload["work_context_id"] == "work-context-1"
+    assert result.report_payload["evidence_ids"] == [
+        "evidence-existing-1",
+        "evidence-new-2",
+    ]
+    assert result.report_payload["decision_ids"] == ["decision-1"]
+    assert result.report_payload["metadata"]["environment_ref"] == (
+        "session:console:industry:industry-1"
+    )
+    assert result.report_payload["metadata"]["control_thread_id"] == (
+        "industry-chat:industry-1:execution-core"
+    )
+    assert result.report_payload["metadata"]["chat_writeback_channel"] == "console"
+    assert result.report_payload["metadata"]["requested_surfaces"] == [
+        "browser",
+        "file_docs",
+        "desktop",
+    ]
+    assert result.event_record.metadata["work_context_id"] == "work-context-1"
+    assert result.event_record.metadata["goal_id"] == "goal-1"
+
+
+def test_ingest_evidence_event_projects_environment_and_digests() -> None:
+    service = ExecutorEventIngestService()
+    result = service.ingest_event(
+        context=_context(),
+        event=ExecutorNormalizedEvent(
+            event_type="evidence_emitted",
+            source_type="commandExecution",
+            payload={
+                "command": "pytest tests/kernel/test_executor_event_ingest_service.py -q",
+                "exit_code": 0,
+                "status": "completed",
+                "input_digest": "input-sha",
+                "output_digest": "output-sha",
+            },
+            raw_method="item/completed",
+        ),
+    )
+
+    assert result.evidence_payload is not None
+    assert result.evidence_payload["environment_ref"] == (
+        "session:console:industry:industry-1"
+    )
+    assert result.evidence_payload["input_digest"] == "input-sha"
+    assert result.evidence_payload["output_digest"] == "output-sha"
+    assert result.evidence_payload["metadata"]["work_context_id"] == "work-context-1"
+    assert result.evidence_payload["metadata"]["control_thread_id"] == (
+        "industry-chat:industry-1:execution-core"
+    )
