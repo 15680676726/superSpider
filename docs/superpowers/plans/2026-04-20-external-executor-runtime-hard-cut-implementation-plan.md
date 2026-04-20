@@ -162,6 +162,7 @@ Old local actor runtime = retirement target
 GitHub/donor intake = executor runtime provider intake only
 single-runtime + role-routed modes both supported
 model invocation = unified governance object
+ExecutorRuntime != MCP != skill
 ```
 
 - [ ] **Step 4: Update transition and deprecation docs**
@@ -180,6 +181,7 @@ Required content:
   - Runtime Center donor 读面
   - donor-first 旧 specs/contracts
   - donor-first 测试与 TASK_STATUS 口径
+- 显式写清 `ExecutorRuntime / MCP / skill` 三者边界，避免后续继续混层
 
 - [ ] **Step 5: Commit docs sync**
 

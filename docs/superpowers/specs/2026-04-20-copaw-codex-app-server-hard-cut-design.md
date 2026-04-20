@@ -109,6 +109,28 @@ CoPaw 负责：
 - 角色级、任务级是否允许覆盖默认模型
 - 模型调用证据和成本统计如何回流主脑
 
+### 1.6 `ExecutorRuntime` 与 `MCP / skill` 的边界
+
+这一层必须写死，不能继续混。
+
+- `External Executor Runtime`
+  - 指 `Codex / Hermes / future executors` 这类完整执行体
+  - 它们替代的是本地多 agent 执行位
+  - 它们是 `Assignment -> execution -> event -> evidence/report` 的正式承载体
+- `MCP`
+  - 是执行体或主脑可调用的工具/外部能力接入方式
+  - 它不是执行体本身
+  - 它不能替代 thread / turn / lifecycle / event stream 这类 executor control plane
+- `skill`
+  - 是执行体内部的工作方法、提示组织或能力增强
+  - 它不是正式执行接缝，也不是正式真相对象
+
+正式原则：
+
+- CoPaw 对外接入的一级对象是 `ExecutorProvider / ExecutorRuntime`
+- `MCP / skill` 只能作为执行体内部可用能力或 workflow 附属层
+- 后续任何实现都不允许再把“接入一个 skill/MCP”表述成“接入一个执行体”
+
 ---
 
 ## 2. 架构分层
@@ -147,6 +169,12 @@ CoPaw 负责：
 - 接收事件流
 - 转发审批请求
 - 输出标准化事件到 CoPaw
+
+说明：
+
+- `ExecutorAdapter` 对接的是执行体控制面
+- 它不是 `MCP adapter`
+- 也不是 `skill loader`
 
 ### 2.4 External Executor Runtime
 

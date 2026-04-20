@@ -65,6 +65,10 @@
   - `role-routed`
     - 不同职业绑定不同执行体
 - 模型调用必须进入统一治理，不能完全散落在各执行体私有配置中
+- 当前正式边界还需要写死：
+  - `External Executor Runtime` 不是 `MCP`
+  - `External Executor Runtime` 也不是 `skill`
+  - `MCP/skill` 只能作为执行体内部工具层或 workflow 增强层存在
 - 当前已明确的实现级缺口包括：
   - `models_external_runtime.py` 仍不足以表达 executor thread/turn truth
   - `external_adapter_contracts.py` / `external_adapter_execution.py` 仍不足以表达 app-server/event-stream 控制面
