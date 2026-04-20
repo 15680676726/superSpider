@@ -521,6 +521,27 @@ export interface RuntimeResearchSessionSurface {
   updated_at?: string | null;
 }
 
+export interface RuntimeResearchRetrievalHit {
+  source_kind?: string | null;
+  provider_kind?: string | null;
+  hit_kind?: string | null;
+  ref?: string | null;
+  normalized_ref?: string | null;
+  title?: string | null;
+  snippet?: string | null;
+  why_matched?: string | null;
+}
+
+export interface RuntimeResearchRetrievalSummary {
+  intent?: string | null;
+  requested_sources?: string[] | null;
+  mode_sequence?: string[] | null;
+  coverage?: Record<string, number> | null;
+  selected_hits?: RuntimeResearchRetrievalHit[] | null;
+  dropped_hits?: RuntimeResearchRetrievalHit[] | null;
+  trace?: Array<Record<string, unknown>> | null;
+}
+
 export interface RuntimeCenterResearchResponse {
   id?: string | null;
   status?: string | null;
@@ -531,6 +552,7 @@ export interface RuntimeCenterResearchResponse {
   updated_at?: string | null;
   session?: RuntimeResearchSessionSurface | null;
   latest_round?: RuntimeResearchRoundSummary | null;
+  retrieval?: RuntimeResearchRetrievalSummary | null;
 }
 
 export interface RuntimeMainBrainMeta {

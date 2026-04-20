@@ -25,6 +25,25 @@ export interface ResearchSourceSummary {
   snippet: string | null;
 }
 
+export interface ResearchRetrievalHitSummary {
+  id: string;
+  sourceKind: string | null;
+  providerKind: string | null;
+  hitKind: string | null;
+  title: string;
+  ref: string;
+  whyMatched: string | null;
+}
+
+export interface ResearchRetrievalSummary {
+  intent: string | null;
+  requestedSources: string[];
+  modeSequence: string[];
+  coverage: Record<string, number>;
+  selectedHits: ResearchRetrievalHitSummary[];
+  droppedHits: ResearchRetrievalHitSummary[];
+}
+
 export interface ResearchWritebackTruthSummary {
   status: string | null;
   statusLabel: string;
@@ -48,6 +67,7 @@ export interface ResearchSessionSummary {
   sources: ResearchSourceSummary[];
   gaps: string[];
   conflicts: string[];
+  retrieval: ResearchRetrievalSummary | null;
   writebackTruth: ResearchWritebackTruthSummary | null;
 }
 
@@ -200,6 +220,19 @@ function normalizeRoundLabel(roundCount: number): string {
   return `第 ${roundCount} 轮`;
 }
 
+function numberRecord(value: unknown): Record<string, number> {
+  if (!isRecord(value)) {
+    return {};
+  }
+  return Object.entries(value).reduce<Record<string, number>>((acc, [key, entry]) => {
+    const numeric = firstNumber(entry);
+    if (numeric !== null) {
+      acc[key] = numeric;
+    }
+    return acc;
+  }, {});
+}
+
 export function normalizeResearchSessionSummary(
   payload: RuntimeCenterResearchResponse | null | undefined,
 ): ResearchSessionSummary | null {
@@ -247,6 +280,33 @@ export function normalizeResearchSessionSummary(
   })).filter((item) => item.sourceRef || item.title);
   const gaps = textList(root.gaps, session?.gaps);
   const conflicts = textList(root.conflicts, session?.conflicts);
+  const retrievalRecord = firstRecord(root.retrieval, session?.retrieval);
+  const retrieval = retrievalRecord
+    ? {
+        intent: firstText(retrievalRecord.intent),
+        requestedSources: textList(retrievalRecord.requested_sources),
+        modeSequence: textList(retrievalRecord.mode_sequence),
+        coverage: numberRecord(retrievalRecord.coverage),
+        selectedHits: recordList(retrievalRecord.selected_hits).map((item, index) => ({
+          id: firstText(item.ref, item.normalized_ref, item.title) ?? `selected-hit-${index + 1}`,
+          sourceKind: firstText(item.source_kind),
+          providerKind: firstText(item.provider_kind),
+          hitKind: firstText(item.hit_kind),
+          title: normalizeDisplayChinese(firstText(item.title, item.ref) ?? "Unnamed hit"),
+          ref: firstText(item.ref, item.normalized_ref) ?? "",
+          whyMatched: firstText(item.why_matched),
+        })).filter((item) => item.ref),
+        droppedHits: recordList(retrievalRecord.dropped_hits).map((item, index) => ({
+          id: firstText(item.ref, item.normalized_ref, item.title) ?? `dropped-hit-${index + 1}`,
+          sourceKind: firstText(item.source_kind),
+          providerKind: firstText(item.provider_kind),
+          hitKind: firstText(item.hit_kind),
+          title: normalizeDisplayChinese(firstText(item.title, item.ref) ?? "Unnamed hit"),
+          ref: firstText(item.ref, item.normalized_ref) ?? "",
+          whyMatched: firstText(item.why_matched),
+        })).filter((item) => item.ref),
+      }
+    : null;
   const writebackStatus = firstText(writebackRecord?.status);
   const writebackTruth = writebackRecord || writebackTarget
     ? {
@@ -268,6 +328,7 @@ export function normalizeResearchSessionSummary(
     sources.length === 0 &&
     gaps.length === 0 &&
     conflicts.length === 0 &&
+    retrieval == null &&
     writebackTruth == null
   ) {
     return null;
@@ -299,6 +360,7 @@ export function normalizeResearchSessionSummary(
     sources,
     gaps,
     conflicts,
+    retrieval,
     writebackTruth,
   };
 }

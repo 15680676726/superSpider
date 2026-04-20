@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+from pathlib import Path
+
+from copaw.retrieval import RetrievalFacade, RetrievalHit, RetrievalPlan, RetrievalQuery, RetrievalRun
 from copaw.research.source_collection.contracts import (
     CollectedSource,
     ResearchAdapterResult,
@@ -177,3 +180,98 @@ def test_service_infers_default_search_adapter_when_requested_sources_missing() 
 
     assert result.route.requested_sources == ["search"]
     assert calls == ["search"]
+
+
+def test_service_uses_retrieval_facade_for_local_repo_without_legacy_adapter() -> None:
+    service = SourceCollectionService(
+        adapters={},
+        retrieval_facade=RetrievalFacade(workspace_root=Path(__file__).resolve().parents[2]),
+    )
+
+    result = service.collect(
+        brief=ResearchBrief(
+            owner_agent_id="writer-agent",
+            supervisor_agent_id="main-brain",
+            industry_instance_id="industry-1",
+            work_context_id="ctx-1",
+            goal="trace the source collection frontdoor",
+            question="run_source_collection_frontdoor",
+            why_needed="find the real runtime bootstrap chain",
+            done_when="the frontdoor implementation file is identified",
+            collection_mode_hint="light",
+        ),
+        owner_agent_id="writer-agent",
+        requested_sources=["local_repo"],
+    )
+
+    assert result.route.mode == "light"
+    assert result.collected_sources
+    assert result.collected_sources[0].source_kind == "local_repo"
+    assert result.collected_sources[0].metadata["provider_kind"] in {"exact", "symbol", "semantic"}
+    assert result.retrieval_runs
+
+
+def test_service_prefers_retrieval_snippet_over_title_for_finding_summary() -> None:
+    class _StubRetrievalFacade:
+        def can_handle(self, source_kind: str) -> bool:
+            return source_kind == "web_page"
+
+        def retrieve(
+            self,
+            *,
+            question: str,
+            goal: str,
+            requested_sources: list[str],
+            latest_required: bool = False,
+            metadata=None,
+        ) -> RetrievalRun:
+            return RetrievalRun(
+                query=RetrievalQuery(
+                    question=question,
+                    goal=goal,
+                    intent="lookup",
+                    requested_sources=list(requested_sources),
+                ),
+                plan=RetrievalPlan(
+                    intent="lookup",
+                    source_sequence=list(requested_sources),
+                    mode_sequence=["exact"],
+                ),
+                selected_hits=[
+                    RetrievalHit(
+                        source_kind="web_page",
+                        provider_kind="metadata",
+                        hit_kind="page",
+                        ref="https://example.com/pricing",
+                        normalized_ref="https://example.com/pricing",
+                        title="Pricing",
+                        snippet="基础套餐 299 元 / 月",
+                        why_matched="metadata payload",
+                    )
+                ],
+            )
+
+    service = SourceCollectionService(
+        adapters={},
+        retrieval_facade=_StubRetrievalFacade(),
+    )
+
+    result = service.collect(
+        brief=ResearchBrief(
+            owner_agent_id="writer-agent",
+            supervisor_agent_id="main-brain",
+            industry_instance_id="industry-1",
+            work_context_id="ctx-1",
+            goal="查官网定价",
+            question="官网定价是多少",
+            why_needed="主脑要做价格对比",
+            done_when="拿到官网价格和来源",
+            collection_mode_hint="light",
+            metadata={"web_page": {"url": "https://example.com/pricing"}},
+        ),
+        owner_agent_id="writer-agent",
+        requested_sources=["web_page"],
+    )
+
+    assert result.findings
+    assert result.findings[0].summary == "基础套餐 299 元 / 月"

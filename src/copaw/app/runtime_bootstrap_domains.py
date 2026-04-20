@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 import re
 from typing import Any
 from uuid import uuid4
@@ -51,6 +52,7 @@ from ..research.source_collection import SourceCollectionService
 from ..research.source_collection.adapters import build_source_collection_adapters
 from ..research.source_collection.contracts import ResearchBrief
 from ..research.source_collection.routing import route_collection_mode
+from ..retrieval import RetrievalFacade
 from ..providers.runtime_provider_facade import ProviderRuntimeSurface
 from ..routines import RoutineService
 from ..sop_kernel import FixedSopService
@@ -231,6 +233,9 @@ class SourceCollectionFrontdoorService:
         self._heavy_research_service = heavy_research_service
         self._source_collection_service = SourceCollectionService(
             adapters=build_source_collection_adapters(),
+            retrieval_facade=RetrievalFacade(
+                workspace_root=Path(__file__).resolve().parents[3],
+            ),
         )
         self.research_session_repository = research_session_repository
         self.report_repository = report_repository
@@ -544,6 +549,11 @@ class SourceCollectionFrontdoorService:
             source.model_dump(mode="json")
             for source in list(collection.collected_sources or [])
         ]
+        retrieval_payloads = [
+            self._serialize_retrieval_run_payload(run)
+            for run in list(collection.retrieval_runs or [])
+        ]
+        retrieval_payloads = [payload for payload in retrieval_payloads if payload]
         now = _utc_now()
         session_id = f"research-session:{uuid4().hex}"
         round_evidence_ids: list[str] = []
@@ -563,6 +573,11 @@ class SourceCollectionFrontdoorService:
                 sources_payload=sources_payload,
                 evidence_id=evidence_id,
             )
+        session_metadata = dict(metadata)
+        round_metadata: dict[str, Any] = {}
+        if retrieval_payloads:
+            session_metadata["retrieval"] = retrieval_payloads[0]
+            round_metadata["retrieval"] = retrieval_payloads[0]
         session = ResearchSessionRecord(
             id=session_id,
             provider="source-collection",
@@ -582,7 +597,7 @@ class SourceCollectionFrontdoorService:
             open_questions=list(collection.gaps or []),
             brief=brief_payload,
             conflicts=list(collection.conflicts or []),
-            metadata=metadata,
+            metadata=session_metadata,
             created_at=now,
             updated_at=now,
             completed_at=now,
@@ -620,7 +635,7 @@ class SourceCollectionFrontdoorService:
             remaining_gaps=list(collection.gaps or []),
             decision="stop",
             evidence_ids=round_evidence_ids,
-            metadata={},
+            metadata=round_metadata,
             created_at=now,
             updated_at=now,
         )
@@ -681,6 +696,37 @@ class SourceCollectionFrontdoorService:
             gaps=list(collection.gaps or []),
             final_report_id=report_id,
         )
+
+    def _serialize_retrieval_run_payload(
+        self,
+        run: object | None,
+    ) -> dict[str, Any]:
+        if run is None:
+            return {}
+        model_dump = getattr(run, "model_dump", None)
+        payload = model_dump(mode="json") if callable(model_dump) else {}
+        if not isinstance(payload, dict):
+            return {}
+        return {
+            "query": _mapping(payload.get("query")),
+            "plan": _mapping(payload.get("plan")),
+            "selected_hits": [
+                _mapping(item)
+                for item in list(payload.get("selected_hits") or [])
+                if _mapping(item)
+            ],
+            "dropped_hits": [
+                _mapping(item)
+                for item in list(payload.get("dropped_hits") or [])
+                if _mapping(item)
+            ],
+            "coverage_summary": _mapping(payload.get("coverage_summary")),
+            "trace": [
+                _mapping(item)
+                for item in list(payload.get("trace") or [])
+                if _mapping(item)
+            ],
+        }
 
     def _append_light_evidence(
         self,

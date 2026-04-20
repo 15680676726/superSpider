@@ -865,6 +865,18 @@
     - persistence/read-model：session-level `brief / conflicts / writeback_truth`、round-level `sources / findings / conflicts / gaps / writeback_truth` 已正式持久化；`/runtime-center/research` 现已优先读取这些 formal projection，而不是继续优先吃 metadata fallback
     - writeback boundary：heavy `summarize_session()` 继续复用 report + knowledge summary writeback；`StateKnowledgeService.ingest_research_session(...)` 与 `KnowledgeWritebackService.build_research_session_writeback(...)` 已作为 heavy/light 共用 builder；light inline collection 现在也会在 live frontdoor 上自动写 dedicated `EvidenceRecord`，并自动把 report / knowledge / graph writeback 真写回
     - Runtime Center：`/runtime-center/research` 与 cockpit research card 已正式暴露 `brief / findings / sources / gaps / conflicts / writeback_truth`
+  - `2026-04-20` searching upgrade phase-1 已落地：
+    - 正式新增 `retrieval substrate`：`src/copaw/retrieval/` 现已落地 `RetrievalQuery / RetrievalPlan / RetrievalHit / RetrievalRun / RepositoryIndexSnapshot / CodeSymbolRecord`
+    - 当前 canonical 接线：`SourceCollectionFrontdoorService -> SourceCollectionService -> RetrievalFacade`；`route_collection_mode(...)` 继续只负责 `light/heavy` 分流，`RetrievalPlanner` 只负责检索策略，不再混成同一层职责
+    - 当前 retrieval phase-1 source seam：`local_repo / github / search / web_page`；本地仓库已补 `exact / symbol / semantic` retrieval，GitHub/Web 已补 object/discover/read/credibility/freshness seam
+    - retrieval cache/index 当前明确只属于可重建检索层，不属于 formal truth；正式写链仍然是 `ResearchSessionRecord / ResearchSessionRoundRecord / EvidenceRecord / report / knowledge / graph writeback`
+    - `/runtime-center/research` 当前已继续暴露 retrieval read surface：`intent / requested_sources / mode_sequence / coverage / selected_hits / dropped_hits / trace`；但 `brief / findings / sources / gaps / conflicts / writeback_truth` 仍保持 top-level formal projection 优先，retrieval trace 只作为解释层
+    - `artifact-followup` 与 heavy `BaiduPageResearchService` 当前边界保持不变；searching retrieval substrate 不会把 heavy owner 回退成单一 light collector
+    - fresh verification：
+      - `L1/L2 backend`：`PYTHONPATH=src python -m pytest tests/retrieval/test_retrieval_contracts.py tests/retrieval/test_retrieval_planner.py tests/retrieval/test_retrieval_ranking.py tests/retrieval/test_local_repo_retrieval.py tests/retrieval/test_github_retrieval.py tests/retrieval/test_web_retrieval.py tests/research/test_source_collection_service.py tests/research/test_source_collection_adapters.py tests/app/test_source_collection_frontdoor_service.py tests/app/test_runtime_center_research_surface.py tests/app/test_runtime_center_research_retrieval_surface.py -q` -> `49 passed`
+      - `L2 frontend`：`npm --prefix console test -- src/pages/RuntimeCenter/researchHelpers.test.ts src/pages/RuntimeCenter/MainBrainCockpitPanel.retrieval.test.tsx src/pages/RuntimeCenter/MainBrainCockpitPanel.test.tsx src/pages/RuntimeCenter/useRuntimeCenter.test.ts` -> `23 passed`
+      - `L3 live smoke`：`COPAW_RUN_SEARCHING_LIVE_SMOKE=1 PYTHONPATH=src python -m pytest tests/app/test_searching_live_contract.py -q -rs` -> `2 passed`
+      - `L4 soak`：`COPAW_RUN_SEARCHING_SOAK=1 PYTHONPATH=src python -m pytest tests/app/test_searching_soak_contract.py -q -rs` -> `2 passed`
   - 当前边界补充：
     - `2026-04-18` 文档纠偏：此前这里把 source collection 的 writeback / adapter 落地口径写得过窄；现已收正为“formal session/round truth 已闭环，heavy + light writeback 已闭环，provider adapter seam 已落到 `collect_via_baidu_page(...)`，phase-1 light adapters 已补成 live collector”
     - 这轮 fresh regression 已证明 typed contracts / routing / synthesis / frontdoor / Runtime Center 读面 / provider fallback 在 `L1/L2` 层收口

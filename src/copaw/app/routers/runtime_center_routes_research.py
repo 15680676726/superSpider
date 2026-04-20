@@ -8,6 +8,7 @@ from .runtime_center_payloads import (
     serialize_runtime_research_conflicts,
     serialize_runtime_research_findings,
     serialize_runtime_research_gaps,
+    serialize_runtime_research_retrieval,
     serialize_runtime_research_sources,
     serialize_runtime_research_writeback_truth,
 )
@@ -111,6 +112,10 @@ async def get_runtime_research(
         round_payload=round_payload,
         brief_payload=brief_payload,
     )
+    retrieval_payload = serialize_runtime_research_retrieval(
+        session_payload=session_payload,
+        round_payload=round_payload,
+    )
     latest_status = (
         (serialized_round or {}).get("response_summary")
         or (serialized_round or {}).get("status")
@@ -123,6 +128,7 @@ async def get_runtime_research(
             "sources": sources_payload,
             "gaps": gaps_payload,
             "conflicts": conflicts_payload,
+            "retrieval": retrieval_payload,
         }
     return {
         **serialized_session,
@@ -133,6 +139,7 @@ async def get_runtime_research(
         "gaps": gaps_payload,
         "conflicts": conflicts_payload,
         "writeback_truth": writeback_truth_payload,
+        "retrieval": retrieval_payload,
         "session": {
             **serialized_session,
             "latest_status": latest_status,
@@ -142,6 +149,7 @@ async def get_runtime_research(
             "gaps": gaps_payload,
             "conflicts": conflicts_payload,
             "writeback_truth": writeback_truth_payload,
+            "retrieval": retrieval_payload,
         },
         "latest_round": serialized_round,
     }

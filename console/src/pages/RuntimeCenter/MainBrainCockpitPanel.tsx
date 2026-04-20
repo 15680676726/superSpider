@@ -204,6 +204,7 @@ function ResearchSummarySection({
   const sources = researchSummary.sources ?? [];
   const gaps = researchSummary.gaps ?? [];
   const conflicts = researchSummary.conflicts ?? [];
+  const retrieval = researchSummary.retrieval ?? null;
   const writebackTruth = researchSummary.writebackTruth ?? null;
 
   return (
@@ -278,6 +279,36 @@ function ResearchSummarySection({
               </li>
             ))}
           </ul>
+        </div>
+      ) : null}
+
+      {retrieval ? (
+        <div className={styles.approvalReasonBlock}>
+          <div className={styles.approvalLabel}>检索摘要</div>
+          {retrieval.intent ? (
+            <p className={styles.approvalText}>
+              {normalizeDisplayChinese(retrieval.intent)}
+            </p>
+          ) : null}
+          {retrieval.requestedSources.length > 0 ? (
+            <p className={styles.approvalText}>
+              {normalizeDisplayChinese(retrieval.requestedSources.join(" / "))}
+            </p>
+          ) : null}
+          {retrieval.modeSequence.length > 0 ? (
+            <p className={styles.approvalText}>
+              {normalizeDisplayChinese(retrieval.modeSequence.join(" -> "))}
+            </p>
+          ) : null}
+          {retrieval.selectedHits.length > 0 ? (
+            <ul className={styles.stageSummaryList}>
+              {retrieval.selectedHits.map((item) => (
+                <li key={item.id} className={styles.stageSummaryListItem}>
+                  {normalizeDisplayChinese(item.title)}
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
       ) : null}
 

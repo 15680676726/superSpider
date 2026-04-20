@@ -61,6 +61,47 @@ def _runtime_mapping_list(value: object | None) -> list[dict[str, object]]:
     return normalized
 
 
+def serialize_surface_learning_payload(
+    *,
+    payload: object | None,
+    live_graph: dict[str, object] | None = None,
+    latest_evidence: list[object] | None = None,
+) -> dict[str, object] | None:
+    projection = _model_dump_or_dict(payload)
+    if projection is None:
+        return None
+    active_twins = _runtime_mapping_list(projection.get("active_twins"))
+    active_playbook = _runtime_mapping(projection.get("active_playbook"))
+    reward_ranking = _runtime_mapping_list(projection.get("reward_ranking"))
+    evidence_payloads = _runtime_mapping_list(latest_evidence)
+    return {
+        "scope_level": _runtime_non_empty_str(projection.get("scope_level"))
+        or _runtime_non_empty_str(projection.get("scope_type"))
+        or "work_context",
+        "scope_id": _runtime_non_empty_str(projection.get("scope_id")) or "runtime",
+        "version": projection.get("version"),
+        "updated_at": projection.get("updated_at"),
+        "live_graph": dict(live_graph or {}),
+        "latest_evidence": evidence_payloads,
+        "active_twins": [
+            {
+                "twin_id": _runtime_non_empty_str(item.get("twin_id")),
+                "capability_name": _runtime_non_empty_str(item.get("capability_name")) or "",
+                "capability_kind": _runtime_non_empty_str(item.get("capability_kind")) or "",
+                "surface_kind": _runtime_non_empty_str(item.get("surface_kind")) or "",
+                "summary": _runtime_non_empty_str(item.get("summary")) or "",
+                "risk_level": _runtime_non_empty_str(item.get("risk_level")) or "auto",
+                "version": item.get("version"),
+                "updated_at": item.get("updated_at"),
+            }
+            for item in active_twins
+            if _runtime_non_empty_str(item.get("capability_name"))
+        ],
+        "active_playbook": active_playbook or None,
+        "reward_ranking": reward_ranking,
+    }
+
+
 def _runtime_text_list(*values: object | None) -> list[str]:
     deduped: list[str] = []
     seen: set[str] = set()
@@ -318,6 +359,66 @@ def serialize_runtime_research_writeback_truth(
         "scope_type": scope_type,
         "scope_id": scope_id,
         "report_id": report_id,
+    }
+
+
+def serialize_runtime_research_retrieval(
+    *,
+    session_payload: dict[str, object],
+    round_payload: dict[str, object],
+) -> dict[str, object] | None:
+    session_metadata = _runtime_mapping(session_payload.get("metadata"))
+    round_metadata = _runtime_mapping(round_payload.get("metadata"))
+    payload = (
+        _runtime_mapping(round_metadata.get("retrieval"))
+        or _runtime_mapping(session_metadata.get("retrieval"))
+    )
+    if not payload:
+        return None
+    query_payload = _runtime_mapping(payload.get("query"))
+    plan_payload = _runtime_mapping(payload.get("plan"))
+    selected_hits = _runtime_mapping_list(payload.get("selected_hits"))
+    dropped_hits = _runtime_mapping_list(payload.get("dropped_hits"))
+    coverage_summary = _runtime_mapping(payload.get("coverage_summary"))
+    trace_payload = _runtime_mapping_list(payload.get("trace"))
+    return {
+        "intent": _runtime_non_empty_str(query_payload.get("intent"))
+        or _runtime_non_empty_str(plan_payload.get("intent")),
+        "requested_sources": _runtime_text_list(
+            query_payload.get("requested_sources"),
+            plan_payload.get("source_sequence"),
+        ),
+        "mode_sequence": _runtime_text_list(plan_payload.get("mode_sequence")),
+        "coverage": coverage_summary,
+        "selected_hits": [
+            {
+                "source_kind": _runtime_non_empty_str(item.get("source_kind")) or "",
+                "provider_kind": _runtime_non_empty_str(item.get("provider_kind")) or "",
+                "hit_kind": _runtime_non_empty_str(item.get("hit_kind")) or "",
+                "ref": _runtime_non_empty_str(item.get("ref")) or "",
+                "normalized_ref": _runtime_non_empty_str(item.get("normalized_ref"))
+                or _runtime_non_empty_str(item.get("ref"))
+                or "",
+                "title": _runtime_non_empty_str(item.get("title")) or "",
+                "snippet": _runtime_non_empty_str(item.get("snippet")) or "",
+                "why_matched": _runtime_non_empty_str(item.get("why_matched")) or "",
+            }
+            for item in selected_hits
+            if _runtime_non_empty_str(item.get("ref"))
+        ],
+        "dropped_hits": [
+            {
+                "source_kind": _runtime_non_empty_str(item.get("source_kind")) or "",
+                "provider_kind": _runtime_non_empty_str(item.get("provider_kind")) or "",
+                "hit_kind": _runtime_non_empty_str(item.get("hit_kind")) or "",
+                "ref": _runtime_non_empty_str(item.get("ref")) or "",
+                "title": _runtime_non_empty_str(item.get("title")) or "",
+                "why_matched": _runtime_non_empty_str(item.get("why_matched")) or "",
+            }
+            for item in dropped_hits
+            if _runtime_non_empty_str(item.get("ref"))
+        ],
+        "trace": trace_payload,
     }
 
 
