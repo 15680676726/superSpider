@@ -26,6 +26,8 @@
   - 本地 `actor_worker / actor_supervisor / actor_mailbox / delegation` 已明确成为退役目标；后续要由统一 `ExecutorRuntime` 接缝替代，而不是继续演化本地多 agent runtime
   - `Codex App Server` 是第一条正式控制面，但不是唯一控制面；后续 `Hermes` 与其他执行体也必须映射回同一套 `ExecutorRuntime` 对象和同一套 operator 读面
   - 旧 GitHub/open-source donor 安装前门后续不再以“任意项目导入”为正式目标，而要收口成“executor runtime provider intake”
+  - `capability-market` 里现存的 `project donor / project-package / adapter / runtime-component` 心智必须补 supersede：这些只允许作为 compatibility/acquisition taxonomy 继续存在，不得继续代表 active executor runtime taxonomy
+  - `Runtime Center /capabilities/donors` 与 `/external-runtimes*` 也必须拆清“候选供给面”和“当前活动执行体”两条读链
   - operator/runtime API 后续必须支持：
     - 全局默认执行体
     - 按职业绑定执行体

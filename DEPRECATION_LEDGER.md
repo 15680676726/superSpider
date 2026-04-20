@@ -236,6 +236,27 @@
   - 先把正式派单链切到 executor runtime
   - 再删除旧 delegation 执行分支
 
+### 3.1.5 donor-first 外接项目产品面：`/capability-market/projects/install*`、`project donor` taxonomy、Runtime Center donor 读面
+
+- 当前状态：`frozen`
+- 问题：
+  - 这套产品面仍保留“任意 GitHub 项目 donor / project-package / adapter / runtime-component”心智
+  - 与新方向“只对接受控执行体 runtime provider”冲突
+  - Runtime Center 里 donor 候选供给面和 active executor 读面仍未彻底拆开
+- 目标替代：
+  - `ExecutorProvider`
+  - `ExecutorRuntimeInstance`
+  - `RoleExecutorBinding`
+  - `ModelInvocationPolicy`
+- 删除阶段：`external-executor hard-cut`
+- 删除前提：
+  - executor provider intake 已有正式入口
+  - donor/state/runtime center 旧读面已标注 compatibility 或完成拆分
+- 删除方式：
+  - 先给 donor-first 路由、文档、测试补 `compatibility/acquisition-only` 标记
+  - 再把 active execution 语义迁出
+  - 最后删除不再需要的 project-donor 产品壳
+
 ---
 
 ## 3.2 状态与真相源

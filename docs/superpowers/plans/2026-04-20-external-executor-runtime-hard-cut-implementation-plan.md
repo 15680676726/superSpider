@@ -173,6 +173,13 @@ Required content:
 - `external_runtime / external_adapter / donor` assets marked as rename-and-reuse assets
 - 7 个当前代码级缺口写入 spec/plan 风险段
 - 统一执行体选择模式和模型治理口径写入文档
+- 旧 donor/project 体系的 6 类显式收口项写入 spec/ledger：
+  - `/capability-market/projects/install*`
+  - `project-package / adapter / runtime-component`
+  - donor state/service/trust/trial/retirement
+  - Runtime Center donor 读面
+  - donor-first 旧 specs/contracts
+  - donor-first 测试与 TASK_STATUS 口径
 
 - [ ] **Step 5: Commit docs sync**
 
@@ -648,6 +655,7 @@ git commit -m "docs: record executor runtime cutover verification"
 - Do not invent a second memory or runtime truth chain inside external executors.
 - Do not keep local actor runtime and executor runtime as long-lived peers after cutover.
 - Do not let “arbitrary project donor install” continue masquerading as executor-runtime intake after the new seam lands.
+- Do not leave the old donor-first product surfaces undocumented; every retained donor/project surface must be labeled `compatibility` or explicitly narrowed to executor providers.
 
 ---
 

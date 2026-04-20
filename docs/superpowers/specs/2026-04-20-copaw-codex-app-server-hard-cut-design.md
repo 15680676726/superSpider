@@ -668,6 +668,28 @@ V1 第一版统一采用 `open_default`。
 - 必须把模型调用治理纳入主脑正式对象，不允许每个执行体各自变成黑箱
 - 必须先完成 generic executor seam，再退役本地 actor runtime
 
+### 11.2.1 旧 donor / 外接项目体系必须显式收口的内容
+
+这部分不能只靠“以后别这么想”处理，必须在实现和删旧台账里显式收口。
+
+1. `项目安装前门` 收口
+   - 旧 `/capability-market/projects/install*` 不应继续作为“任意 GitHub 项目导入”的 canonical product surface
+   - 后续要么退役，要么降为 compatibility alias，并明确只接受 executor runtime provider
+2. `taxonony` 收口
+   - `project-package / adapter / runtime-component` 不应继续作为执行层一级产品语义
+   - 执行层正式语义应收口成 `ExecutorProvider / control_surface_kind / protocol_surface_kind / workspace_contract_kind`
+3. `donor state/service` 收口
+   - `CapabilityDonorService / DonorPackageService / CapabilityPortfolioService / donor trust/trial/retirement`
+   - 不能继续直接代表执行层主链；要么降为 acquisition/governance 子系统，要么缩窄成 executor provider governance
+4. `Runtime Center donor 读面` 收口
+   - `/runtime-center/capabilities/donors` 与 `/runtime-center/external-runtimes*`
+   - 必须区分“候选供给面”和“当前活动执行体”，不能继续混在同一条执行主链里
+5. `旧 donor contract/spec` 收口
+   - `project_donor_contracts.py` 及 `2026-04-04/04-06` donor-first 设计
+   - 必须补 supersede 或 compatibility 边界，避免继续被理解成 active executor mainline
+6. `命名与测试口径` 收口
+   - donor-first 测试、task status 和记述文档必须显式标注“这是 compatibility/acquisition 方向，不再是执行层正式方向”
+
 ### 11.3 Phase 2 方向
 
 在 V1 主链稳定后，再逐步追加：

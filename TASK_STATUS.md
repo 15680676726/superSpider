@@ -73,6 +73,12 @@
   - `query_execution_runtime.py` 仍把本地工具和旧 agent runtime 硬写进执行前门
   - `delegation_service.py` 仍承担正式派单链
   - `models_agents_runtime.py` 仍是完整 persisted truth，而新 executor truth 还没补齐
+- 当前还没彻底收口的 donor-first 遗留包括：
+  - `/capability-market/projects/install*`
+  - `project-package / adapter / runtime-component`
+  - donor trust/trial/portfolio state
+  - Runtime Center donor/external-runtime 双读面
+  - donor-first 旧 specs / tests / TASK_STATUS 口径
 
 ## 1.1.1 `2026-04-07` Buddy 领域能力阶段收口补充
 
