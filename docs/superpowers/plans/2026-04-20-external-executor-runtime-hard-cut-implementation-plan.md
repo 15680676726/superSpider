@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 把 CoPaw 收口成“上层主脑框架 + 可插拔外部执行 runtime”架构，先接通 `Codex App Server`，再退役本地多 agent 执行脑。
+**Goal:** 把 CoPaw 收口成“上层主脑框架 + 可插拔外部执行 runtime”架构，先接通 `Codex App Server`，再把本地多 agent 执行脑退役为历史层，同时为 `Hermes` 和其他开源执行体保留同一条正式接缝。
 
-**Architecture:** 保留 `MainBrain / Memory / Knowledge / Assignment / Evidence / Report / Runtime Center` 这条正式真相链，不再让 CoPaw 自己维护浏览器/桌面/文档执行脑。复用现有 `external_runtime / external_adapter / donor` 资产，统一改造成 `ExecutorRuntime` 接入层；第一适配器是 `Codex App Server`，后续可扩展到其他开源智能体 runtime。
+**Architecture:** 保留 `MainBrain / Memory / Knowledge / Assignment / Evidence / Report / Runtime Center` 这条正式真相链，不再让 CoPaw 自己维护浏览器/桌面/文档执行脑。复用现有 `external_runtime / external_adapter / donor` 资产，统一改造成 `ExecutorRuntime` 接入层；把旧 GitHub/open-source donor intake 收口成“只接受控执行体 runtime provider”的正式入口。第一适配器是 `Codex App Server`，后续可扩展到 `Hermes` 与其他开源智能体 runtime；执行体既可全局统一，也可按职业绑定，同时模型调用必须进入统一治理。
 
 **Tech Stack:** Python 3.12, FastAPI, SQLite state store, pytest, Codex App Server protocol, Runtime Center frontend
 
@@ -31,13 +31,25 @@
   - `src/copaw/capabilities/external_adapter_execution.py`
   - `src/copaw/capabilities/external_runtime_execution.py`
   - `src/copaw/capabilities/project_donor_contracts.py`
-- 当前文档刚新增了一个偏 `Codex-only` 的硬切 spec：
+- 当前硬切 spec 已改为 generic external executor runtime 方向：
   - `docs/superpowers/specs/2026-04-20-copaw-codex-app-server-hard-cut-design.md`
 - 当前最终方向已经收口成：
   - `CoPaw = 主脑框架`
   - `ExecutorRuntime = 可插拔外部执行层`
   - `Codex = 第一适配器，不是唯一适配器`
+  - `Hermes/others = 后续适配器，不单独再造第二套执行主链`
+  - 旧 GitHub/open-source donor intake 要收口成 `executor runtime provider intake`
+  - 系统必须支持 `single-runtime` 和 `role-routed` 两种执行体绑定模式
+  - 模型调用必须有统一治理对象，而不是完全散落在外部执行体内部
 - 第一阶段不删除浏览器/桌面/文档底座代码，只把它们从正式执行脑降级为待退役遗留层。
+- 当前代码已经确认的 7 个硬缺口，必须在实现中显式对齐：
+  - `models_external_runtime.py` 仍是 capability-centric，不足以表达 executor thread/turn truth
+  - `external_adapter_contracts.py` / `external_adapter_execution.py` 仍只覆盖 request-response，不覆盖 app-server/event-stream/thread-turn
+  - `runtime_bootstrap_execution.py` / `runtime_service_graph.py` 仍把 actor runtime 硬装进启动栈
+  - Runtime Center 与主脑上下文仍以 actor runtime 为一等读面
+  - `query_execution_runtime.py` 仍把本地工具和 agent runtime 仓库硬写进执行前门
+  - `delegation_service.py` 实际上仍承担正式派单链，不能直接物理删除
+  - `models_agents_runtime.py` 仍是完整 persisted truth，而新 executor 侧 formal records 尚未补齐
 
 ---
 
@@ -127,9 +139,9 @@
 - Modify: `API_TRANSITION_MAP.md`
 - Modify: `DEPRECATION_LEDGER.md`
 
-- [ ] **Step 1: Write a failing architecture contract test note in the plan**
+- [ ] **Step 1: Write a failing architecture contract guard note in the plan**
 
-Add a checklist note to the modified spec stating that the previous `Codex-only` wording is obsolete if it still implies `browser/desktop/document` are deleted before a generic executor layer exists.
+Add a checklist note to the modified spec stating that future edits must not regress back to `Codex-only` wording or to “arbitrary donor project intake” wording.
 
 - [ ] **Step 2: Review the current spec and mark the exact sections to revise**
 
@@ -147,6 +159,9 @@ ExecutorRuntime = pluggable external executor runtime seam
 Codex = first adapter
 Hermes/others = future adapters
 Old local actor runtime = retirement target
+GitHub/donor intake = executor runtime provider intake only
+single-runtime + role-routed modes both supported
+model invocation = unified governance object
 ```
 
 - [ ] **Step 4: Update transition and deprecation docs**
@@ -156,6 +171,8 @@ Required content:
 - old local actor runtime marked as retired target
 - old browser/desktop/document execution surfaces marked as deferred retirement
 - `external_runtime / external_adapter / donor` assets marked as rename-and-reuse assets
+- 7 个当前代码级缺口写入 spec/plan 风险段
+- 统一执行体选择模式和模型治理口径写入文档
 
 - [ ] **Step 5: Commit docs sync**
 
@@ -190,21 +207,23 @@ def test_executor_runtime_instance_records_executor_kind_and_scope():
 ```
 
 ```python
-def test_executor_runtime_service_reuses_active_runtime_for_same_scope():
-    service = ExecutorRuntimeService(repository=repo)
-    first = service.create_or_reuse_runtime(
-        executor_id="codex",
-        protocol_kind="app_server",
-        scope_kind="assignment",
-        assignment_id="assign-1",
+def test_role_executor_binding_routes_role_to_provider():
+    binding = RoleExecutorBindingRecord(
+        role_id="backend-engineer",
+        executor_provider_id="codex-app-server",
+        selection_mode="role-routed",
     )
-    second = service.create_or_reuse_runtime(
-        executor_id="codex",
-        protocol_kind="app_server",
-        scope_kind="assignment",
-        assignment_id="assign-1",
+    assert binding.executor_provider_id == "codex-app-server"
+```
+
+```python
+def test_model_invocation_policy_supports_runtime_owned_mode():
+    policy = ModelInvocationPolicyRecord(
+        policy_id="default",
+        ownership_mode="runtime_owned",
+        default_model_ref="gpt-5-codex",
     )
-    assert second.runtime_id == first.runtime_id
+    assert policy.ownership_mode == "runtime_owned"
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -237,6 +256,9 @@ Required methods:
 - `create_or_reuse_runtime(...)`
 - `mark_runtime_ready(...)`
 - `mark_runtime_stopped(...)`
+- `resolve_executor_provider(...)`
+- `resolve_role_executor_binding(...)`
+- `resolve_model_invocation_policy(...)`
 
 - [ ] **Step 5: Run tests to verify they pass**
 
@@ -250,6 +272,7 @@ Implementation note:
 
 - keep `ExternalCapabilityRuntimeInstanceRecord` readable during transition
 - add translation helpers or aliases so new executor runtime logic can reuse the same repository patterns
+- keep provider/runtime intake reusable, but no longer model it as arbitrary project donor install
 
 - [ ] **Step 7: Commit the formal executor runtime layer**
 
@@ -303,10 +326,12 @@ Required additions:
 - `app_server`
 - `event_stream`
 - `thread_turn_control`
+- `runtime_provider`
 
 Required rule:
 
 - a runtime is only formal if it exposes controllable lifecycle plus event return path
+- GitHub/open-source intake only enters this layer if it resolves to a formal executor runtime provider contract
 
 - [ ] **Step 4: Rename donor-oriented helpers in code and docstrings**
 
@@ -321,6 +346,7 @@ Required outcome:
 
 - `Codex` can land as `app_server`
 - future `Hermes` can land as `api / sdk / cli_runtime` depending on its real protocol surface
+- arbitrary GitHub repo that lacks formal runtime contract cannot become a first-class executor provider
 
 - [ ] **Step 6: Run tests to verify they pass**
 
@@ -398,6 +424,7 @@ Minimum support:
 - start turn
 - consume event stream
 - normalize into CoPaw event types
+- surface runtime-owned model metadata when available
 
 - [ ] **Step 6: Run tests to verify they pass**
 
@@ -469,7 +496,8 @@ Required mappings:
 Required flow:
 
 - create assignment
-- select executor runtime
+- select executor runtime via global default or role binding
+- resolve model invocation policy
 - ensure runtime binding
 - start assignment turn
 - subscribe/ingest events
@@ -480,6 +508,7 @@ Required rule:
 
 - no second task truth source
 - no free-floating “Codex said X” chat text as runtime truth
+- no per-runtime hidden model routing that bypasses formal policy visibility
 
 - [ ] **Step 6: Run tests to verify they pass**
 
@@ -541,6 +570,7 @@ Required outcome:
 - show executor runtime status
 - show thread/turn binding
 - keep assignment/evidence/report views intact
+- stop showing actor runtime as the primary execution truth once executor runtime truth exists
 
 - [ ] **Step 4: Deactivate old actor runtime code paths**
 
@@ -598,6 +628,8 @@ Required note:
 - old actor runtime retired or retirement-started
 - executor runtime seam landed
 - Codex first adapter landed
+- provider intake retargeted toward executor runtimes
+- role-routed binding and model governance objects landed or explicitly marked pending
 - browser/desktop/document local execution layer still pending final delete
 
 - [ ] **Step 5: Commit verification and cleanup**
@@ -615,6 +647,7 @@ git commit -m "docs: record executor runtime cutover verification"
 - Do not build Hermes integration in the same phase.
 - Do not invent a second memory or runtime truth chain inside external executors.
 - Do not keep local actor runtime and executor runtime as long-lived peers after cutover.
+- Do not let “arbitrary project donor install” continue masquerading as executor-runtime intake after the new seam lands.
 
 ---
 
@@ -624,6 +657,7 @@ This plan is complete only when all of the following are true:
 
 - `Assignment -> ExecutorRuntime -> Event -> Evidence/Report` mainline works
 - `Codex App Server` is the first working executor adapter
+- `ExecutorProvider / RoleExecutorBinding / ModelInvocationPolicy` formal objects exist
 - Runtime Center reads executor runtime truth instead of retired actor runtime truth
 - old local actor runtime stops being the active execution path
 - deferred local browser/desktop/document execution layers are explicitly recorded for later deletion

@@ -1,22 +1,24 @@
-# CoPaw Codex App Server Hard-Cut Design
+# CoPaw External Executor Runtime Hard-Cut Design
 日期：`2026-04-20`
 
 ---
 
 ## 0. 目标
 
-本次设计不是继续增强 CoPaw 现有本地多 agent 执行器，也不是把 Codex 当成普通插件挂在旧执行链后面。
+本次设计不是继续增强 CoPaw 现有本地多 agent 执行器，也不是把某一个外部智能体当成普通插件挂在旧执行链后面。
 
 本次设计要完成的是一条明确的硬切路线：
 
 - `CoPaw` 保留主脑、记忆、战略、派工、审批、证据与回流真相
 - 现有本地多执行位 runtime 退役
-- 多个受控 `Codex` 执行体替代现有多 agent 执行层
-- 底层控制面统一收敛到 `Codex App Server`
+- 多个受控外部执行体替代现有多 agent 执行层
+- 对外接入面从“任意开源项目 donor”收口成“受控执行体 runtime provider”
+- 第一适配器是 `Codex App Server`
+- 后续允许接入 `Hermes` 与其他具备正式控制面的开源智能体 runtime
 
 一句话目标：
 
-> 把 CoPaw 从“自带本地多执行器的主脑系统”升级成“以 App Server 为底层控制协议、以 Codex 为标准执行体、以 CoPaw 为唯一真相源和唯一监工”的长期执行载体。
+> 把 CoPaw 从“自带本地多执行器的主脑系统”升级成“以上层主脑为唯一真相源、以下层可插拔执行体为统一执行层”的长期执行框架。
 
 ---
 
@@ -26,27 +28,36 @@
 
 本次选定路线为：
 
-- `CoPaw MainBrain -> CodexRuntimePort -> AppServerAdapter -> Codex`
+- `CoPaw MainBrain -> ExecutorRuntimePort -> ExecutorAdapter -> External Executor Runtime`
 
 不选：
 
 - `纯 MCP` 作为主控总线
 - `Desktop App` 作为长期底层
 - 继续演化本地 `actor_worker / actor_supervisor / delegation execution`
+- 继续把 GitHub / donor intake 当成“任意项目接入面”
+
+正式口径：
+
+- `Codex App Server` 是第一条已确认的正式控制面
+- `Codex` 是第一适配器，不是唯一适配器
+- `Hermes` 与其他执行体只要满足 formal control surface，就应能接入同一条 `ExecutorRuntimePort`
 
 ### 1.2 根本判断
 
-CoPaw 不直接“调用 Codex 的某个工具函数”。
+CoPaw 不直接“调用某个智能体的某个工具函数”。
 
 CoPaw 负责：
 
 - 创建和恢复执行体
 - 下发正式任务
+- 选择执行体
 - 选择执行策略
+- 选择模型调用策略
 - 接收事件和证据
 - 决定继续、插话、停止或收尾
 
-Codex 负责：
+外部执行体负责：
 
 - 在受控项目内制定执行 plan
 - 执行命令、修改文件、调用 MCP
@@ -54,7 +65,7 @@ Codex 负责：
 
 一句话边界：
 
-> CoPaw 管理 Codex 执行体；Codex 在主脑监管下执行具体动作。
+> CoPaw 管理执行体；外部智能体在主脑监管下执行具体动作。
 
 ### 1.3 V1 总策略
 
@@ -75,6 +86,29 @@ Codex 负责：
 - 保留全事件记录
 - 保留一键停止能力
 
+### 1.4 执行体选择模式
+
+系统必须同时支持两种模式：
+
+- `single-runtime mode`
+  - 所有执行位统一绑定同一种执行体，例如全部使用 `Codex`
+- `role-routed mode`
+  - 不同职业或不同任务类型绑定不同执行体，例如研发用 `Codex`，其他职业用 `Hermes`
+
+这两种模式都必须通过同一条 `ExecutorRuntimePort` 和同一套正式真相对象承载，不能再长出第二套 runtime 主链。
+
+### 1.5 模型调用统一治理
+
+执行体接入后，模型调用不能继续散落在各 runtime 私有配置里失控演化。
+
+必须保留一层主脑可见的统一治理：
+
+- 哪个执行体默认使用什么模型
+- 哪些模型由执行体自己管理
+- 哪些模型由 CoPaw 统一下发
+- 角色级、任务级是否允许覆盖默认模型
+- 模型调用证据和成本统计如何回流主脑
+
 ---
 
 ## 2. 架构分层
@@ -93,7 +127,7 @@ Codex 负责：
 
 主脑仍然是唯一长期战略中心。
 
-### 2.2 CodexRuntimePort
+### 2.2 ExecutorRuntimePort
 
 新增 CoPaw 内部统一执行接口。
 
@@ -102,33 +136,34 @@ Codex 负责：
 - 对外提供“创建执行体、恢复执行体、启动 turn、停止 turn、读取状态”的统一语义
 - 隔离上层业务与下层 App Server 协议
 - 为未来替换底层实现保留接口位
+- 为多执行体路由和统一模型治理保留接口位
 
-### 2.3 AppServerAdapter
+### 2.3 ExecutorAdapter
 
 新增底层适配器，负责：
 
-- 对接 `Codex App Server`
-- 管理 thread 和 turn 生命周期
+- 对接具体执行体控制面，例如 `Codex App Server`
+- 管理 thread / turn 或 runtime-native lifecycle
 - 接收事件流
 - 转发审批请求
 - 输出标准化事件到 CoPaw
 
-### 2.4 Codex Thread / Turn
+### 2.4 External Executor Runtime
 
-Codex 的 thread/turn 是真实执行单元。
+外部执行体的 thread/turn 或等价 runtime unit 是真实执行单元。
 
 它们不是主脑真相源，只是执行过程载体。
 
-### 2.5 Project Workspace
+### 2.5 Executor Workspace
 
-每个 Codex 执行体绑定一个项目目录。
+每个执行体绑定一个项目目录或等价 workspace。
 
 项目目录承载：
 
 - 角色合同投影
 - 角色手册
 - 项目说明
-- 项目级 Codex 配置
+- runtime-specific 配置
 - skills
 - 计划、汇报、证据与运行态文件
 
@@ -168,17 +203,20 @@ V1 最小新增对象如下：
 - `RoleContract`
 - `ProjectProfile`
 - `ExecutionPolicy`
-- `CodexThreadBinding`
-- `CodexTurnRecord`
-- `CodexEventRecord`
+- `ExecutorProvider`
+- `RoleExecutorBinding`
+- `ModelInvocationPolicy`
+- `ExecutorThreadBinding`
+- `ExecutorTurnRecord`
+- `ExecutorEventRecord`
 
 V1 最小新增模块如下：
 
-- `src/copaw/kernel/codex_runtime_port.py`
-- `src/copaw/adapters/codex/app_server_adapter.py`
-- `src/copaw/state/models_codex_runtime.py`
-- `src/copaw/state/codex_runtime_service.py`
-- `src/copaw/kernel/codex_event_ingest_service.py`
+- `src/copaw/kernel/executor_runtime_port.py`
+- `src/copaw/adapters/executors/codex_app_server_adapter.py`
+- `src/copaw/state/models_executor_runtime.py`
+- `src/copaw/state/executor_runtime_service.py`
+- `src/copaw/kernel/executor_event_ingest_service.py`
 - `src/copaw/compiler/role_contract_projection.py`
 
 ---
@@ -209,7 +247,7 @@ V1 最小字段建议：
 
 ### 4.2 ProjectProfile
 
-描述一个 Codex 项目的结构映射。
+描述某个执行体 workspace 的结构映射。
 
 V1 最小字段建议：
 
@@ -242,21 +280,77 @@ V1 语义：
 - 默认自动放行
 - 暂不按职业做细粒度差异化治理
 
-### 4.4 CodexThreadBinding
+### 4.4 ExecutorProvider
 
-描述角色/项目与 Codex thread 的绑定关系。
+描述可接入的外部执行体 provider。
+
+V1 最小字段建议：
+
+- `provider_id`
+- `provider_kind`
+- `runtime_family`
+- `control_surface_kind`
+- `install_source_kind`
+- `source_ref`
+- `default_protocol_kind`
+- `status`
+
+边界：
+
+- 它代表“可治理的执行体 runtime”
+- 不再代表“任意 GitHub donor 项目”
+
+### 4.5 RoleExecutorBinding
+
+描述角色或任务类型如何选择执行体。
 
 V1 最小字段建议：
 
 - `binding_id`
 - `role_id`
+- `executor_provider_id`
+- `selection_mode`
+- `project_profile_id`
+- `execution_policy_id`
+- `status`
+
+### 4.6 ModelInvocationPolicy
+
+描述模型调用统一治理口径。
+
+V1 最小字段建议：
+
+- `policy_id`
+- `ownership_mode`
+- `default_model_ref`
+- `role_overrides`
+- `task_overrides_allowed`
+- `cost_tracking_mode`
+- `status`
+
+说明：
+
+- `ownership_mode` 至少支持：
+  - `runtime_owned`
+  - `copaw_managed`
+  - `hybrid`
+
+### 4.7 ExecutorThreadBinding
+
+描述角色/项目与执行体 thread 的绑定关系。
+
+V1 最小字段建议：
+
+- `binding_id`
+- `role_id`
+- `executor_provider_id`
 - `project_profile_id`
 - `thread_id`
 - `runtime_status`
 - `last_turn_id`
 - `last_seen_at`
 
-### 4.5 CodexTurnRecord
+### 4.8 ExecutorTurnRecord
 
 描述某次正式执行回合。
 
@@ -271,9 +365,9 @@ V1 最小字段建议：
 - `completed_at`
 - `summary`
 
-### 4.6 CodexEventRecord
+### 4.9 ExecutorEventRecord
 
-描述 App Server 原始事件的归档对象。
+描述外部执行体原始事件的归档对象。
 
 V1 最小字段建议：
 
@@ -286,9 +380,9 @@ V1 最小字段建议：
 
 派生关系：
 
-- `Assignment` 触发 `CodexTurnRecord`
-- `CodexEventRecord` 派生 `EvidenceRecord`
-- `CodexEventRecord` 汇总生成 `AgentReport`
+- `Assignment` 触发 `ExecutorTurnRecord`
+- `ExecutorEventRecord` 派生 `EvidenceRecord`
+- `ExecutorEventRecord` 汇总生成 `AgentReport`
 
 ---
 
@@ -360,15 +454,18 @@ V1 最小字段建议：
 
 ## 6. 项目目录规范
 
-每个 Codex 项目先统一成以下最小模板：
+每个执行体项目先统一成以下最小模板：
 
 ```text
-<codex-project>/
+<executor-project>/
   AGENTS.md
   ROLE.md
   PROJECT.md
-  .codex/
-    config.toml
+  executors/
+    codex/
+      config.toml
+    hermes/
+      config.toml
   .agents/
     skills/
       copaw-worker-core/
@@ -383,7 +480,7 @@ V1 最小字段建议：
 - `AGENTS.md`：主脑合同投影
 - `ROLE.md`：详细角色定义
 - `PROJECT.md`：项目背景与完成定义
-- `.codex/`：项目级 Codex 配置
+- `executors/`：runtime-specific 配置；`Codex` 第一版实际落在 `executors/codex/`
 - `.agents/skills/`：工作方法增强层
 - `plans/`：计划草案和阶段计划
 - `reports/`：阶段汇报、日报、周报
@@ -396,15 +493,15 @@ V1 最小字段建议：
 
 ### 7.1 基本原则
 
-协议必须采用事件驱动，而不是让主脑和 Codex 自由聊天。
+协议必须采用事件驱动，而不是让主脑和外部执行体自由聊天。
 
 原则如下：
 
 - 主脑发任务
-- Codex 发事件
+- 执行体发事件
 - 主脑按事件决定继续、插话、停机或收尾
 
-### 7.2 主脑到 Codex
+### 7.2 主脑到执行体
 
 V1 只保留 4 类业务语义：
 
@@ -420,7 +517,7 @@ V1 只保留 4 类业务语义：
 - turn steer
 - stop / interrupt
 
-### 7.3 Codex 到主脑
+### 7.3 执行体到主脑
 
 V1 规范化事件集：
 
@@ -441,6 +538,11 @@ V1 规范化事件集：
 - `mcpToolCall` -> `evidence_emitted`
 - `turn/completed` -> `task_completed`
 - `turn/failed` -> `task_failed`
+
+说明：
+
+- 上述示例来自 `Codex App Server`
+- 其他执行体必须适配到同一套规范化事件集，不能把 runtime-native 事件直接暴露成第二套业务真相
 
 ### 7.4 主脑回复策略
 
@@ -463,7 +565,7 @@ V1 只有以下情况必须回复：
 
 正式真相是：
 
-- `CodexEventRecord`
+- `ExecutorEventRecord`
 - `EvidenceRecord`
 - `AgentReport`
 
@@ -504,20 +606,21 @@ V1 第一版统一采用 `open_default`。
 
 1. 用户给主脑一个执行任务
 2. 主脑创建 `Assignment`
-3. 主脑生成或更新 `AGENTS.md / ROLE.md / PROJECT.md`
-4. `CodexRuntimePort` 创建或恢复 thread
-5. `AppServerAdapter` 发起 `turn/start`
-6. Codex 先产出 `plan`
-7. Codex 真执行改动
-8. App Server 事件持续回流
-9. CoPaw 生成 `EvidenceRecord` 与 `AgentReport`
-10. 主脑决定继续或停止
+3. 主脑根据全局默认或角色绑定选择执行体
+4. 主脑生成或更新 `AGENTS.md / ROLE.md / PROJECT.md`
+5. `ExecutorRuntimePort` 创建或恢复 thread
+6. 第一适配器通过 `Codex App Server` 发起 `turn/start`
+7. 执行体先产出 `plan`
+8. 执行体真执行改动
+9. 事件持续回流
+10. CoPaw 生成 `EvidenceRecord` 与 `AgentReport`
+11. 主脑决定继续或停止
 
 这条链跑通，就证明：
 
-- `Codex` 可以替代现有本地多执行位执行层
+- 外部执行体可以替代现有本地多执行位执行层
 - `CoPaw` 可以保留主脑真相链
-- `App Server` 可以承担长期底层控制面
+- `Codex App Server` 可以作为第一条长期控制面
 
 ---
 
@@ -533,6 +636,7 @@ V1 第一版统一采用 `open_default`。
 - 多职业并发调度优化
 - 桌面/浏览器/文档三套环境治理细分
 - 完整日报/周报自动化体系
+- 第二个执行体的真正落地适配
 
 第一阶段只证明主链，不追求功能大全。
 
@@ -540,13 +644,31 @@ V1 第一版统一采用 `open_default`。
 
 ## 11. 风险与后续阶段
 
-### 11.1 主要风险
+### 11.1 当前代码已发现的 7 个主要风险
 
-- App Server 事件归一化不稳会导致 Evidence/Report 派生混乱
-- 项目合同层与主脑真相层边界不清会重新长出双真相
-- 过早引入复杂职业和环境治理会拖慢主链验证
+1. 现有外部 runtime 真相模型仍是 capability-centric，不足以表达执行体 thread/turn 主链  
+   代码锚点：`src/copaw/state/models_external_runtime.py`
+2. 现有 external adapter taxonomy 只支持 `mcp/http/sdk` 请求响应，不足以表达 `app_server / event stream / thread-turn control`  
+   代码锚点：`src/copaw/capabilities/external_adapter_contracts.py`、`src/copaw/capabilities/external_adapter_execution.py`
+3. 应用 bootstrap 仍把 `ActorMailboxService / ActorWorker / ActorSupervisor` 当正式执行底座硬接  
+   代码锚点：`src/copaw/app/runtime_bootstrap_execution.py`、`src/copaw/app/runtime_service_graph.py`
+4. Runtime Center 与主脑上下文仍是 actor-first 读面，尚未收口成 generic executor 读面  
+   代码锚点：`src/copaw/app/routers/runtime_center_dependencies.py`、`src/copaw/app/runtime_center/models.py`、`src/copaw/kernel/main_brain_chat_service.py`
+5. `query_execution_runtime` 仍把本地 browser/desktop/document/file/shell tool 与 agent runtime 仓库写死在执行前门  
+   代码锚点：`src/copaw/kernel/query_execution_runtime.py`
+6. `TaskDelegationService` 不只是便利层，而是 child-task/mailbox/run-once 的正式派单链，不能直接物理删除  
+   代码锚点：`src/copaw/kernel/delegation_service.py`
+7. 旧本地 actor runtime 已有完整 persisted truth chain，但新执行体侧还没有同等级 formal object chain  
+   代码锚点：`src/copaw/state/models_agents_runtime.py`
 
-### 11.2 Phase 2 方向
+### 11.2 架构级纠偏要求
+
+- 必须把旧 GitHub donor/open-source intake 收口成“只接执行体 runtime provider”的正式入口
+- 必须支持“全局统一执行体”和“按职业路由不同执行体”两种模式
+- 必须把模型调用治理纳入主脑正式对象，不允许每个执行体各自变成黑箱
+- 必须先完成 generic executor seam，再退役本地 actor runtime
+
+### 11.3 Phase 2 方向
 
 在 V1 主链稳定后，再逐步追加：
 
@@ -555,6 +677,9 @@ V1 第一版统一采用 `open_default`。
 - skill/MCP 治理状态机
 - 角色差异化能力治理
 - 更丰富的 Runtime Center 可见面
+- 第二、第三执行体适配器
+- 统一执行体市场 / provider registry
+- 更细的模型成本、策略、路由治理
 
 ---
 
@@ -562,8 +687,10 @@ V1 第一版统一采用 `open_default`。
 
 本次设计的正式结论如下：
 
-1. `Codex App Server` 是 CoPaw 长期执行层的正式底层控制面
-2. `Codex` 替代现有本地多 agent 执行器，而不是替代 CoPaw 主脑
-3. `CoPaw` 继续保留唯一主脑、唯一正式真相链和唯一监工职责
-4. 第一版采用 `open_default`，优先跑通“主脑派工 -> Codex 执行 -> 事件回流 -> 主脑收尾”的真实闭环
-5. 后续能力扩展优先通过 `AGENTS.md / ROLE.md / skill / MCP / ProjectProfile` 演进，而不是继续发明本地执行器
+1. `CoPaw` 的长期定位是“主脑框架 + 可插拔外部执行层”，不是 `Codex-only` 产品
+2. 被替换的是本地多 agent 执行层，不是 CoPaw 主脑
+3. `Codex App Server` 是第一条正式控制面，但不是唯一控制面
+4. 外部项目 / donor intake 必须收口成“执行体 runtime provider intake”，不再继续以“任意项目接入”为目标
+5. 系统必须支持“全部执行位统一一种执行体”与“不同职业绑定不同执行体”两种模式
+6. 模型调用必须进入主脑统一治理，而不是完全散落在各执行体私有配置中
+7. 第一版采用 `open_default`，优先跑通“主脑派工 -> 执行体执行 -> 事件回流 -> 主脑收尾”的真实闭环

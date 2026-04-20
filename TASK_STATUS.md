@@ -50,6 +50,30 @@
 - 如果 live 或 soak 没跑，必须明确写“没跑”和原因；不允许默认省略。
 - 统一口径以仓库根目录 `UNIFIED_ACCEPTANCE_STANDARD.md` 为准；本文件里的阶段状态记录以后都按该文档表达完成度。
 
+## 1.0.1 `2026-04-20` 外部执行体 hard-cut 方向补充
+
+- 当前新方向已经收口为：
+  - `CoPaw = 主脑框架`
+  - `External Executor Runtime = 可插拔执行层`
+  - 被替换的是本地多 agent 执行层，不是主脑
+- 旧 GitHub/open-source donor 接入面不再以“任意项目接入”为正式目标，后续要收口成“只接执行体 runtime provider”
+- 第一适配器是 `Codex App Server`
+- 后续允许接入 `Hermes` 与其他具备正式控制面的开源智能体 runtime
+- 系统必须同时支持：
+  - `single-runtime`
+    - 所有执行位统一用一个执行体
+  - `role-routed`
+    - 不同职业绑定不同执行体
+- 模型调用必须进入统一治理，不能完全散落在各执行体私有配置中
+- 当前已明确的实现级缺口包括：
+  - `models_external_runtime.py` 仍不足以表达 executor thread/turn truth
+  - `external_adapter_contracts.py` / `external_adapter_execution.py` 仍不足以表达 app-server/event-stream 控制面
+  - bootstrap/runtime service graph 仍把 actor runtime 硬接为正式执行底座
+  - Runtime Center 与主脑上下文仍是 actor-first 读面
+  - `query_execution_runtime.py` 仍把本地工具和旧 agent runtime 硬写进执行前门
+  - `delegation_service.py` 仍承担正式派单链
+  - `models_agents_runtime.py` 仍是完整 persisted truth，而新 executor truth 还没补齐
+
 ## 1.1.1 `2026-04-07` Buddy 领域能力阶段收口补充
 
 - Buddy 当前成长阶段的正式真相已从关系经验切到 active `BuddyDomainCapabilityRecord`

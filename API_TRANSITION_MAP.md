@@ -22,6 +22,15 @@
   - 上位正式目标改为 `Intent-Native Universal Carrier`
   - execution-side 正式框架改为 `Symbiotic Host Runtime`
   - `Seat Runtime / Host Companion Session / Workspace Graph / Host Event` 必须继续映射回统一 `state / evidence / capability / environment`
+- `2026-04-20` 外部执行体补充：
+  - 本地 `actor_worker / actor_supervisor / actor_mailbox / delegation` 已明确成为退役目标；后续要由统一 `ExecutorRuntime` 接缝替代，而不是继续演化本地多 agent runtime
+  - `Codex App Server` 是第一条正式控制面，但不是唯一控制面；后续 `Hermes` 与其他执行体也必须映射回同一套 `ExecutorRuntime` 对象和同一套 operator 读面
+  - 旧 GitHub/open-source donor 安装前门后续不再以“任意项目导入”为正式目标，而要收口成“executor runtime provider intake”
+  - operator/runtime API 后续必须支持：
+    - 全局默认执行体
+    - 按职业绑定执行体
+    - 统一模型调用治理
+  - Runtime Center、Chat、`/industry`、AgentWorkbench 不允许各自发明第二套 executor 状态或模型路由真相
 - `2026-04-07` Buddy 补充：
   - `POST /buddy/onboarding/direction-transition-preview` 已成为换方向时的正式 preview 前门，返回 `recommended_action + archived_matches + current_domain`
   - `POST /buddy/onboarding/confirm-direction` 不再只是写 `GrowthTarget`，还要显式确认 `capability_action` 并切换 active `BuddyDomainCapabilityRecord`
@@ -153,6 +162,9 @@
     每种 surface 各自发明 readiness/handoff/recovery 语义
   - 后续还应统一管理 `Seat Runtime`、`Host Companion Session`、workspace composition、
     以及 host-event-to-recovery 入口
+- `ExecutorRuntimeService`
+  - 管理外部执行体 provider、runtime instance、thread/turn binding、规范化事件与模型治理
+  - 统一承接 `Codex / Hermes / future executors`，而不是让每个执行体各自拥有第二套 operator API
 - `DecisionService`
   - 待确认请求、审批结果、治理记录
 - `HumanAssistTaskService`

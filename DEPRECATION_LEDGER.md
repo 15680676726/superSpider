@@ -194,7 +194,47 @@
   - 核心运行状态不再在 `app.state` 中散落托管
 - 删除方式：
   - 不一定整体删除
-  - 但必须移除“内核事实源”地位
+- 但必须移除“内核事实源”地位
+
+### 3.1.3 本地多 agent 执行脑：`actor_worker / actor_supervisor / actor_mailbox / models_agents_runtime`
+
+- 当前状态：`frozen`
+- 问题：
+  - 这套对象和服务正在承载本地多执行位正式真相
+  - 与新方向“外部执行体替代本地多 agent 执行层”直接冲突
+- 目标替代：
+  - `ExecutorProvider`
+  - `ExecutorRuntimeInstance`
+  - `ExecutorThreadBinding`
+  - `ExecutorTurnRecord`
+  - `ExecutorEventRecord`
+- 删除阶段：`external-executor hard-cut`
+- 删除前提：
+  - `ExecutorRuntime` 主链已跑通
+  - Runtime Center 已改读 executor runtime truth
+  - 新写链已不再写入 actor runtime 真相
+- 删除方式：
+  - 先停新写
+  - 再把 actor runtime 降为 `read-only-compat`
+  - 最后物理删除
+
+### 3.1.4 `src/copaw/kernel/delegation_service.py`
+
+- 当前状态：`frozen`
+- 问题：
+  - 它不是普通工具层，而是 child-task / mailbox / run-once 的正式派单链
+  - 如不先补 `Assignment -> ExecutorRuntime -> Event -> Evidence/Report` 主链，直接删除会断派工
+- 目标替代：
+  - `MainBrainOrchestrator`
+  - `ExecutorRuntimePort`
+  - `ExecutorEventIngestService`
+- 删除阶段：`external-executor hard-cut`
+- 删除前提：
+  - assignment 已能直接派发到 executor runtime
+  - evidence/report 回流主链已稳定
+- 删除方式：
+  - 先把正式派单链切到 executor runtime
+  - 再删除旧 delegation 执行分支
 
 ---
 

@@ -1,5 +1,19 @@
 # DATA_MODEL_DRAFT.md
 
+`2026-04-20` supplement:
+- CoPaw 后续要把本地多 agent 执行层硬切成统一 `External Executor Runtime` 接缝
+- 外部执行体只负责执行，不得成为第二主脑、第二记忆中心或第二长期战略中心
+- GitHub/open-source donor intake 后续只允许把“具备正式控制面的执行体 runtime provider”纳入正式模型；不再把任意仓库本身当成第一类执行对象
+- 新增的正式对象应至少包括：
+  - `ExecutorProvider`
+  - `RoleExecutorBinding`
+  - `ModelInvocationPolicy`
+  - `ExecutorRuntimeInstance`
+  - `ExecutorThreadBinding`
+  - `ExecutorTurnRecord`
+  - `ExecutorEventRecord`
+- `ExecutorEventRecord` 必须继续回映到既有 `Assignment / EvidenceRecord / AgentReport` 主链，不允许形成第二套业务真相
+
 `2026-03-26` supplement:
 - `docs/superpowers/specs/2026-03-26-agent-body-grid-computer-runtime.md` is an execution-side supplement only
 - it must not replace the formal object model in this draft
@@ -141,6 +155,13 @@
 - `CapabilityMount`
 - `EnvironmentMount`
 - `SessionMount`
+- `ExecutorProvider`
+- `RoleExecutorBinding`
+- `ModelInvocationPolicy`
+- `ExecutorRuntimeInstance`
+- `ExecutorThreadBinding`
+- `ExecutorTurnRecord`
+- `ExecutorEventRecord`
 - `EvidenceRecord`
 - `DecisionRequest`
 - `Patch`
@@ -183,6 +204,13 @@
 - `RuntimeFrame`
 - `EnvironmentMount`
 - `SessionMount`
+- `ExecutorProvider`
+- `RoleExecutorBinding`
+- `ModelInvocationPolicy`
+- `ExecutorRuntimeInstance`
+- `ExecutorThreadBinding`
+- `ExecutorTurnRecord`
+- `ExecutorEventRecord`
 - `EvidenceRecord`
 - `DecisionRequest`
 - `Patch`
