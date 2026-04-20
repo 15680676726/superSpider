@@ -1894,6 +1894,64 @@ CREATE INDEX IF NOT EXISTS idx_memory_structure_proposals_scope
 CREATE INDEX IF NOT EXISTS idx_memory_structure_proposals_status
     ON memory_structure_proposals(status, updated_at DESC);
 
+CREATE TABLE IF NOT EXISTS surface_capability_twins (
+    twin_id TEXT PRIMARY KEY,
+    scope_level TEXT NOT NULL,
+    scope_id TEXT NOT NULL,
+    capability_name TEXT NOT NULL,
+    capability_kind TEXT NOT NULL DEFAULT 'action',
+    surface_kind TEXT NOT NULL DEFAULT '',
+    summary TEXT NOT NULL DEFAULT '',
+    entry_conditions_json TEXT NOT NULL DEFAULT '[]',
+    entry_regions_json TEXT NOT NULL DEFAULT '[]',
+    required_state_signals_json TEXT NOT NULL DEFAULT '[]',
+    probe_steps_json TEXT NOT NULL DEFAULT '[]',
+    execution_steps_json TEXT NOT NULL DEFAULT '[]',
+    result_signals_json TEXT NOT NULL DEFAULT '[]',
+    failure_modes_json TEXT NOT NULL DEFAULT '[]',
+    risk_level TEXT NOT NULL DEFAULT 'auto',
+    evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+    source_transition_refs_json TEXT NOT NULL DEFAULT '[]',
+    source_discovery_refs_json TEXT NOT NULL DEFAULT '[]',
+    version INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'active',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_surface_capability_twins_scope
+    ON surface_capability_twins(scope_level, scope_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_surface_capability_twins_status
+    ON surface_capability_twins(scope_level, scope_id, status, version DESC, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_surface_capability_twins_capability
+    ON surface_capability_twins(scope_level, scope_id, capability_name, status, version DESC, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS surface_playbooks (
+    playbook_id TEXT PRIMARY KEY,
+    twin_id TEXT,
+    scope_level TEXT NOT NULL,
+    scope_id TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    capability_names_json TEXT NOT NULL DEFAULT '[]',
+    recommended_steps_json TEXT NOT NULL DEFAULT '[]',
+    probe_steps_json TEXT NOT NULL DEFAULT '[]',
+    execution_steps_json TEXT NOT NULL DEFAULT '[]',
+    success_signals_json TEXT NOT NULL DEFAULT '[]',
+    blocker_signals_json TEXT NOT NULL DEFAULT '[]',
+    evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+    version INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'active',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_surface_playbooks_scope
+    ON surface_playbooks(scope_level, scope_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_surface_playbooks_status
+    ON surface_playbooks(scope_level, scope_id, status, version DESC, updated_at DESC);
+
 CREATE TABLE IF NOT EXISTS capability_candidates (
     candidate_id TEXT PRIMARY KEY,
     donor_id TEXT,
@@ -2600,6 +2658,8 @@ def _ensure_state_schema_ready(conn: sqlite3.Connection) -> None:
         "memory_continuity_details",
         "research_sessions",
         "research_session_rounds",
+        "surface_capability_twins",
+        "surface_playbooks",
     }
     if (
         current_version == STATE_SCHEMA_VERSION

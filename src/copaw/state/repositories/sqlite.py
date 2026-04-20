@@ -73,3 +73,7 @@ from .sqlite_memory import (
 )
 from .sqlite_memory_sleep import SqliteMemorySleepRepository
 from .sqlite_research import SqliteResearchSessionRepository
+from .sqlite_surface_learning import (
+    SqliteSurfaceCapabilityTwinRepository,
+    SqliteSurfacePlaybookRepository,
+)

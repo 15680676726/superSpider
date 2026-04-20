@@ -5,6 +5,24 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from copaw.app.routers import router as root_router
+from copaw.kernel.agent_profile import AgentProfile
+from copaw.learning.surface_reward_service import SurfaceRewardService
+from copaw.state import (
+    AssignmentRecord,
+    IndustryInstanceRecord,
+    OperatingLaneRecord,
+    SQLiteStateStore,
+    StrategyMemoryRecord,
+)
+from copaw.state.models_surface_learning import SurfaceCapabilityTwinRecord, SurfacePlaybookRecord
+from copaw.state.repositories import (
+    SqliteAssignmentRepository,
+    SqliteIndustryInstanceRepository,
+    SqliteOperatingLaneRepository,
+    SqliteStrategyMemoryRepository,
+    SqliteSurfaceCapabilityTwinRepository,
+    SqliteSurfacePlaybookRepository,
+)
 
 
 def build_app() -> FastAPI:
@@ -189,3 +207,140 @@ def test_goal_detail_stays_the_only_public_goals_frontdoor_method() -> None:
     assert client.post("/goals/goal-1/detail", json={"title": "forbidden"}).status_code == 405
     assert client.patch("/goals/goal-1/detail", json={"title": "forbidden"}).status_code == 405
     assert client.delete("/goals/goal-1/detail").status_code == 405
+
+
+def test_surface_reward_ranking_prefers_formal_goal_context_over_playbook_order(tmp_path) -> None:
+    state_store = SQLiteStateStore(tmp_path / "surface-reward.db")
+    twin_repository = SqliteSurfaceCapabilityTwinRepository(state_store)
+    playbook_repository = SqliteSurfacePlaybookRepository(state_store)
+    strategy_repository = SqliteStrategyMemoryRepository(state_store)
+    industry_instance_repository = SqliteIndustryInstanceRepository(state_store)
+    operating_lane_repository = SqliteOperatingLaneRepository(state_store)
+    assignment_repository = SqliteAssignmentRepository(state_store)
+    industry_instance_repository.upsert_instance(
+        IndustryInstanceRecord(
+            instance_id="industry-surface",
+            label="Surface reward industry",
+            summary="Reward ranking test",
+            owner_scope="industry-surface-owner",
+            status="running",
+        ),
+    )
+    strategy_repository.upsert_strategy(
+        StrategyMemoryRecord(
+            strategy_id="strategy:reward",
+            scope_type="industry",
+            scope_id="industry-surface",
+            industry_instance_id="industry-surface",
+            title="Revenue strategy",
+            mission="Publish revenue-generating listings first.",
+            current_focuses=["publish listing"],
+            priority_order=["publish listing", "improve conversion"],
+            evidence_requirements=["published confirmation"],
+        ),
+    )
+    operating_lane_repository.upsert_lane(
+        OperatingLaneRecord(
+            id="lane:publishing",
+            industry_instance_id="industry-surface",
+            lane_key="publishing",
+            title="Publishing lane",
+            summary="Push approved listings live.",
+            owner_agent_id="agent:publisher",
+            metadata={"evidence_expectations": ["published confirmation"]},
+        ),
+    )
+    assignment_repository.upsert_assignment(
+        AssignmentRecord(
+            id="assignment:reward",
+            industry_instance_id="industry-surface",
+            lane_id="lane:publishing",
+            owner_agent_id="agent:publisher",
+            title="Publish the highest-priority listing",
+            summary="Do not waste time on archive actions.",
+            metadata={"success_criteria": ["published confirmation"]},
+        ),
+    )
+    twin_repository.upsert(
+        SurfaceCapabilityTwinRecord(
+            twin_id="twin:archive",
+            scope_level="work_context",
+            scope_id="work-surface-1",
+            capability_name="archive_listing",
+            capability_kind="action",
+            surface_kind="browser",
+            summary="Archive a listing.",
+            execution_steps=["open archive dialog", "confirm archive"],
+            result_signals=["archived confirmation"],
+            version=1,
+            status="active",
+        ),
+    )
+    twin_repository.upsert(
+        SurfaceCapabilityTwinRecord(
+            twin_id="twin:publish",
+            scope_level="work_context",
+            scope_id="work-surface-1",
+            capability_name="publish_listing",
+            capability_kind="action",
+            surface_kind="browser",
+            summary="Publish a listing.",
+            execution_steps=["open publish dialog", "confirm publish"],
+            result_signals=["published confirmation"],
+            version=1,
+            status="active",
+        ),
+    )
+    playbook_repository.upsert(
+        SurfacePlaybookRecord(
+            playbook_id="playbook:1",
+            scope_level="work_context",
+            scope_id="work-surface-1",
+            twin_id="twin:archive",
+            summary="Current surface actions",
+            capability_names=["archive_listing", "publish_listing"],
+            recommended_steps=["archive first", "publish second"],
+            execution_steps=["archive", "publish"],
+            success_signals=["published confirmation"],
+            version=1,
+            status="active",
+        ),
+    )
+    reward_service = SurfaceRewardService(
+        surface_capability_twin_repository=twin_repository,
+        surface_playbook_repository=playbook_repository,
+        strategy_memory_repository=strategy_repository,
+        operating_lane_repository=operating_lane_repository,
+        assignment_repository=assignment_repository,
+        agent_profile_service=type(
+            "_AgentProfileService",
+            (),
+            {
+                "get_agent": staticmethod(
+                    lambda agent_id: AgentProfile(
+                        agent_id=str(agent_id),
+                        name="Publisher",
+                        role_name="Publisher",
+                        role_summary="Ships live listings.",
+                        mission="Publish listings and verify they are live.",
+                        evidence_expectations=["published confirmation"],
+                    )
+                )
+            },
+        )(),
+    )
+
+    projection = reward_service.refresh_reward_ranking(
+        scope_level="work_context",
+        scope_id="work-surface-1",
+        industry_instance_id="industry-surface",
+        lane_id="lane:publishing",
+        assignment_id="assignment:reward",
+        owner_agent_id="agent:publisher",
+    )
+
+    assert [item.capability_name for item in projection.ranking[:2]] == [
+        "publish_listing",
+        "archive_listing",
+    ]
+    assert projection.ranking[0].score > projection.ranking[1].score

@@ -1728,6 +1728,36 @@
 
 ---
 
+### 3.3.11 `2026-04-20` active surface state graph / twin / reward chain closure
+
+- 对应文档：
+  - `docs/superpowers/specs/2026-04-19-active-surface-state-graph-capability-twin-and-reward-engine-design.md`
+  - `docs/superpowers/plans/2026-04-19-active-surface-state-graph-capability-twin-and-reward-engine-implementation-plan.md`
+- 当前这条线已经完成的正式对象与主链：
+  - `Task 1-4` 已完成：`surface_graph / probe / discovery / transition` 已接到 browser / document / desktop 正式 execution contract，并通过统一 `EvidenceRecord.kind` 写入 `surface-probe / surface-discovery / surface-transition`
+  - `Task 5` 已完成：`SurfaceCapabilityTwinRecord / SurfacePlaybookRecord`、对应 SQLite schema / repository、runtime bootstrap projection 已落地
+  - `Task 6` 已完成：`transition/discovery -> twin/playbook -> reward` 正式写链已接入 `LearningService`，并在写入后 `mark_dirty(...)` 对应 scope snapshot
+  - `Task 7` 已完成：query prompt、main-brain scope snapshot、Runtime Center memory / knowledge 后端读链已统一读取 active playbook / reward ranking / latest surface evidence
+  - `Task 8` 已完成：Knowledge 全量读面、Runtime Center 摘要读面和 stale-response 防护已落到正式前端读面与测试
+  - `Task 9` 已完成：新增 gated `tests/app/test_surface_graph_live_smoke.py` 与 `tests/app/test_surface_graph_soak.py`，不再拿不存在的 live 命令冒充验收
+- 本轮 fresh verification 口径：
+  - `L1/L2` backend：
+    - `python -m pytest tests/environments/test_browser_surface_execution.py tests/environments/test_document_desktop_surface_execution.py tests/evidence/test_ledger.py tests/state/test_state_store_migration.py tests/state/test_sqlite_repositories.py tests/state/test_surface_learning_repository.py tests/kernel/test_memory_recall_integration.py tests/kernel/test_main_brain_chat_service.py tests/kernel/test_main_brain_scope_snapshot_service.py tests/app/test_learning_api.py tests/app/test_runtime_center_knowledge_api.py tests/app/test_runtime_center_memory_api.py tests/app/test_runtime_center_surface_learning_api.py tests/app/test_phase2_read_surface_unification.py tests/app/test_surface_graph_live_smoke.py tests/app/test_surface_graph_soak.py -q -rs`
+    - 当前结果：`215 passed, 4 skipped`
+  - `L1/L2` console：
+    - `cmd /c npm --prefix console test -- src/pages/Knowledge/index.test.tsx src/pages/RuntimeCenter/useRuntimeCenter.test.ts src/pages/RuntimeCenter/MainBrainCockpitPanel.test.tsx`
+    - 当前结果：`34 passed`
+  - `L3` live smoke：
+    - `$env:COPAW_RUN_SURFACE_GRAPH_LIVE_SMOKE='1'; python -m pytest tests/app/test_surface_graph_live_smoke.py -q -rs`
+    - 当前结果：`4 passed`
+  - `L4` long soak：
+    - `$env:COPAW_RUN_SURFACE_GRAPH_SOAK='1'; python -m pytest tests/app/test_surface_graph_soak.py -q -rs`
+    - 当前结果：`2 passed`
+- 当前诚实边界：
+  - 这代表 `2026-04-19 active surface state graph / capability twin / reward engine` 这条 spec，按当前 implementation plan 已闭环到 `L1 + L2 + L3 + L4`
+  - 这不等于“任意职业 agent / 任意页面 / 任意窗口 的统一高层 planner 已全部完成”
+  - document / desktop 这轮完成的是 shared substrate + graph/probe/transition/twin/reward/read-chain 闭环，不应外推成所有职业场景都已做完
+
 ## 9. 给下一位 agent 的一句话提醒
 
 先确认你现在做的是哪条收口线：

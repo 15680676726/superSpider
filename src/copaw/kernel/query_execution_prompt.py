@@ -97,6 +97,50 @@ def _truth_first_profile_lines(
     ]
 
 
+def _surface_learning_mapping(value: object | None) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    return {}
+
+
+def _surface_learning_prompt_lines(snapshot: dict[str, Any] | None) -> list[str]:
+    payload = dict(snapshot or {})
+    if not payload:
+        return []
+    lines: list[str] = []
+    active_playbook = _surface_learning_mapping(payload.get("active_playbook"))
+    if active_playbook:
+        lines.append("# Surface Learning Playbook")
+        summary = _first_non_empty(active_playbook.get("summary"))
+        if summary is not None:
+            lines.append(f"- Summary: {summary}")
+        capability_names = _string_list(active_playbook.get("capability_names"))
+        if capability_names:
+            lines.append(f"- Capabilities: {', '.join(capability_names)}")
+        for step in _string_list(active_playbook.get("recommended_steps"))[:3]:
+            lines.append(f"- Step: {step}")
+    reward_ranking = payload.get("reward_ranking")
+    if isinstance(reward_ranking, list) and reward_ranking:
+        if lines:
+            lines.append("")
+        lines.append("# Surface Reward Ranking")
+        for item in reward_ranking[:3]:
+            ranking_item = _surface_learning_mapping(item)
+            capability_name = _first_non_empty(ranking_item.get("capability_name"))
+            if capability_name is None:
+                continue
+            score = ranking_item.get("score")
+            reasons = _string_list(ranking_item.get("reasons"))
+            score_text = f"{float(score):.1f}" if isinstance(score, (int, float)) else str(score or "")
+            summary = f"- {capability_name}"
+            if score_text:
+                summary = f"{summary} ({score_text})"
+            if reasons:
+                summary = f"{summary}: {', '.join(reasons[:2])}"
+            lines.append(summary)
+    return lines
+
+
 class _QueryExecutionPromptMixin:
     def _assert_bound_chat_context(
         self,
@@ -1680,6 +1724,25 @@ class _QueryExecutionPromptMixin:
         latest_entries = list(truth_first_snapshot.get("latest_entries") or [])
         history_entries = list(truth_first_snapshot.get("history_entries") or [])
         truth_first_profile = dict(truth_first_snapshot.get("profile") or {})
+        surface_learning_snapshot = {}
+        resolve_surface_learning_scope = getattr(
+            surface_service,
+            "resolve_surface_learning_scope",
+            None,
+        )
+        if callable(resolve_surface_learning_scope) and resolved_scope_type and resolved_scope_id:
+            try:
+                surface_learning_snapshot = dict(
+                    resolve_surface_learning_scope(
+                        scope_type=resolved_scope_type,
+                        scope_id=resolved_scope_id,
+                        owner_agent_id=owner_agent_id,
+                        industry_instance_id=industry_instance_id,
+                    )
+                    or {},
+                )
+            except Exception:
+                surface_learning_snapshot = {}
         if truth_first_entries or truth_first_profile:
             display_latest_entries = list(latest_entries or [])
             display_history_entries = list(history_entries or [])
@@ -1705,6 +1768,11 @@ class _QueryExecutionPromptMixin:
                 lines.append("")
                 lines.append("# Truth-First Memory History")
                 lines.extend(_knowledge_line(chunk) for chunk in display_history_entries[:2])
+        surface_learning_lines = _surface_learning_prompt_lines(surface_learning_snapshot)
+        if surface_learning_lines:
+            if lines:
+                lines.append("")
+            lines.extend(surface_learning_lines)
         activated_neurons = list(getattr(activation_result, "activated_neurons", []) or [])
         dependency_paths = _path_guidance_lines(
             getattr(activation_result, "dependency_paths", None),

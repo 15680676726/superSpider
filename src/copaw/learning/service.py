@@ -15,6 +15,8 @@ from .patch_service import LearningPatchService
 from .proposal_service import LearningProposalService
 from .runtime_bindings import LearningRuntimeBindings
 from .runtime_core import LearningRuntimeCore
+from .surface_capability_service import SurfaceCapabilityService
+from .surface_reward_service import SurfaceRewardService
 
 
 class LearningService:
@@ -42,6 +44,9 @@ class LearningService:
         self._patch_service = LearningPatchService(self._core)
         self._growth_service = LearningGrowthService(self._core)
         self._acquisition_service = LearningAcquisitionService(self._core)
+        self._surface_capability_service: SurfaceCapabilityService | None = None
+        self._surface_reward_service: SurfaceRewardService | None = None
+        self._scope_snapshot_service: object | None = None
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._core, name)
@@ -72,6 +77,10 @@ class LearningService:
 
     def set_agent_profile_service(self, agent_profile_service: object | None) -> None:
         self._core.set_agent_profile_service(agent_profile_service)
+        if self._surface_reward_service is not None:
+            self._surface_reward_service.set_agent_profile_service(
+                agent_profile_service,
+            )
 
     def set_experience_memory_service(
         self,
@@ -81,6 +90,134 @@ class LearningService:
 
     def set_runtime_event_bus(self, runtime_event_bus: object | None) -> None:
         self._core.set_runtime_event_bus(runtime_event_bus)
+
+    def set_scope_snapshot_service(self, scope_snapshot_service: object | None) -> None:
+        self._scope_snapshot_service = scope_snapshot_service
+
+    def configure_surface_learning(
+        self,
+        *,
+        surface_capability_twin_repository,
+        surface_playbook_repository,
+        strategy_memory_repository,
+        operating_lane_repository,
+        assignment_repository,
+        scope_snapshot_service: object | None = None,
+    ) -> None:
+        self._surface_capability_service = SurfaceCapabilityService(
+            surface_capability_twin_repository=surface_capability_twin_repository,
+            surface_playbook_repository=surface_playbook_repository,
+        )
+        self._surface_reward_service = SurfaceRewardService(
+            surface_capability_twin_repository=surface_capability_twin_repository,
+            surface_playbook_repository=surface_playbook_repository,
+            strategy_memory_repository=strategy_memory_repository,
+            operating_lane_repository=operating_lane_repository,
+            assignment_repository=assignment_repository,
+            agent_profile_service=self._core._agent_profile_service,
+        )
+        self._scope_snapshot_service = scope_snapshot_service
+
+    def ingest_surface_evidence(
+        self,
+        *,
+        task,
+        evidence,
+    ):
+        if self._surface_capability_service is None or self._surface_reward_service is None:
+            raise RuntimeError("Surface learning is not configured.")
+        result = self._surface_capability_service.ingest_surface_evidence(
+            task=task,
+            evidence=evidence,
+        )
+        reward_projection = self._surface_reward_service.refresh_reward_ranking(
+            scope_level=result.scope_level,
+            scope_id=result.scope_id,
+            industry_instance_id=self._scope_metadata_value(
+                result.active_playbook,
+                result.active_twin,
+                key="industry_instance_id",
+            ),
+            lane_id=self._scope_metadata_value(
+                result.active_playbook,
+                result.active_twin,
+                key="lane_id",
+            ),
+            assignment_id=self._scope_metadata_value(
+                result.active_playbook,
+                result.active_twin,
+                key="assignment_id",
+            ),
+            owner_agent_id=self._scope_metadata_value(
+                result.active_playbook,
+                result.active_twin,
+                key="owner_agent_id",
+            ),
+        )
+        self._mark_surface_scope_dirty(
+            scope_level=result.scope_level,
+            scope_id=result.scope_id,
+        )
+        return result.model_copy(
+            update={
+                "reward_ranking": reward_projection.ranking,
+                "context_signals": reward_projection.context_signals,
+            },
+        )
+
+    def get_surface_learning_scope(
+        self,
+        *,
+        scope_level: str,
+        scope_id: str,
+        industry_instance_id: str | None = None,
+        lane_id: str | None = None,
+        assignment_id: str | None = None,
+        owner_agent_id: str | None = None,
+    ):
+        if self._surface_capability_service is None or self._surface_reward_service is None:
+            raise RuntimeError("Surface learning is not configured.")
+        projection = self._surface_capability_service.build_scope_projection(
+            scope_level=scope_level,
+            scope_id=scope_id,
+        )
+        if projection is None:
+            return None
+        primary_twin = projection.active_twins[0] if projection.active_twins else None
+        reward_projection = self._surface_reward_service.refresh_reward_ranking(
+            scope_level=scope_level,
+            scope_id=scope_id,
+            industry_instance_id=industry_instance_id
+            or self._scope_metadata_value(
+                projection.active_playbook,
+                primary_twin,
+                key="industry_instance_id",
+            ),
+            lane_id=lane_id
+            or self._scope_metadata_value(
+                projection.active_playbook,
+                primary_twin,
+                key="lane_id",
+            ),
+            assignment_id=assignment_id
+            or self._scope_metadata_value(
+                projection.active_playbook,
+                primary_twin,
+                key="assignment_id",
+            ),
+            owner_agent_id=owner_agent_id
+            or self._scope_metadata_value(
+                projection.active_playbook,
+                primary_twin,
+                key="owner_agent_id",
+            ),
+        )
+        return projection.model_copy(
+            update={
+                "reward_ranking": reward_projection.ranking,
+                "context_signals": reward_projection.context_signals,
+            },
+        )
 
     def list_proposals(
         self,
@@ -270,6 +407,43 @@ class LearningService:
 
     async def run_industry_acquisition_cycle(self, **kwargs) -> dict[str, object]:
         return await self._acquisition_service.run_industry_acquisition_cycle(**kwargs)
+
+    def _mark_surface_scope_dirty(
+        self,
+        *,
+        scope_level: str,
+        scope_id: str,
+    ) -> None:
+        marker = getattr(self._scope_snapshot_service, "mark_scope_dirty", None)
+        if callable(marker):
+            marker(scope_level=scope_level, scope_id=scope_id)
+            return
+        marker = getattr(self._scope_snapshot_service, "mark_dirty", None)
+        if callable(marker):
+            if scope_level == "work_context":
+                marker(work_context_id=scope_id)
+                return
+            if scope_level in {"industry", "industry_scope"}:
+                marker(industry_instance_id=scope_id)
+                return
+            if scope_level in {"agent", "role_scope"}:
+                marker(agent_id=scope_id)
+                return
+            marker()
+
+    @staticmethod
+    def _scope_metadata_value(*records: object | None, key: str) -> str | None:
+        for record in records:
+            metadata = getattr(record, "metadata", None)
+            if not isinstance(metadata, dict):
+                continue
+            value = metadata.get(key)
+            if not isinstance(value, str):
+                continue
+            candidate = value.strip()
+            if candidate:
+                return candidate
+        return None
 
 
 __all__ = ["LearningService"]

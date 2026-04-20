@@ -288,6 +288,35 @@ def test_runtime_frame_surface_projection_schema_column_exists(tmp_path) -> None
         assert "surface_projection_json" in _column_names(conn, "runtime_frames")
 
 
+def test_surface_learning_schema_tables_and_indexes_exist(tmp_path) -> None:
+    store = SQLiteStateStore(tmp_path / "surface-learning.db")
+    store.initialize()
+
+    with sqlite3.connect(store.path) as conn:
+        assert "surface_capability_twins" in _table_names(conn)
+        assert "surface_playbooks" in _table_names(conn)
+        assert {
+            "scope_level",
+            "scope_id",
+            "status",
+            "version",
+            "updated_at",
+        }.issubset(_column_names(conn, "surface_capability_twins"))
+        assert {
+            "scope_level",
+            "scope_id",
+            "status",
+            "version",
+            "updated_at",
+        }.issubset(_column_names(conn, "surface_playbooks"))
+        assert {
+            "idx_surface_capability_twins_scope",
+            "idx_surface_capability_twins_status",
+            "idx_surface_playbooks_scope",
+            "idx_surface_playbooks_status",
+        }.issubset(_index_names(conn))
+
+
 def test_sqlite_state_store_initializes_buddy_contract_schema_without_clarify_columns(
     tmp_path,
 ) -> None:

@@ -15,20 +15,34 @@ from copaw.capabilities import CapabilityService
 from copaw.capabilities.install_templates import InstallTemplateExampleRunRecord
 from copaw.config.config import MCPClientConfig
 from copaw.evidence import EvidenceLedger
+from copaw.evidence.models import EvidenceRecord
 from copaw.industry import (
     IndustryBootstrapInstallResult,
     IndustryProfile,
     IndustryRoleBlueprint,
     IndustryTeamBlueprint,
 )
-from copaw.kernel import KernelDispatcher, KernelTaskStore
+from copaw.kernel import AgentProfile, KernelDispatcher, KernelTask, KernelTaskStore
 from copaw.learning import LearningEngine, LearningService, PatchExecutor
 from copaw.learning.runtime_bindings import LearningRuntimeBindings
-from copaw.state import SQLiteStateStore, WorkflowTemplateRecord
+from copaw.state import (
+    AssignmentRecord,
+    IndustryInstanceRecord,
+    OperatingLaneRecord,
+    SQLiteStateStore,
+    StrategyMemoryRecord,
+    WorkflowTemplateRecord,
+)
 from copaw.state.repositories import (
     SqliteAgentProfileOverrideRepository,
+    SqliteAssignmentRepository,
     SqliteDecisionRequestRepository,
     SqliteGoalOverrideRepository,
+    SqliteIndustryInstanceRepository,
+    SqliteOperatingLaneRepository,
+    SqliteStrategyMemoryRepository,
+    SqliteSurfaceCapabilityTwinRepository,
+    SqliteSurfacePlaybookRepository,
     SqliteTaskRepository,
     SqliteTaskRuntimeRepository,
     SqliteWorkflowRunRepository,
@@ -79,6 +93,7 @@ def _build_learning_app(tmp_path) -> FastAPI:
     learning_service.set_kernel_dispatcher(kernel_dispatcher)
     app.state.learning_service = learning_service
     app.state.learning_engine = learning_service.engine
+    app.state.state_store = state_store
     app.state.capability_service = capability_service
     app.state.kernel_dispatcher = kernel_dispatcher
     app.state.agent_profile_override_repository = agent_profile_override_repository
@@ -1313,3 +1328,167 @@ def test_runtime_center_decision_routes_reject_acquisition_without_legacy_propos
     assert reject_payload["proposal"]["status"] == "rejected"
     assert reject_payload["proposal"]["id"] == proposal_id
     assert reject_payload["kernel_result"]["phase"] == "cancelled"
+
+
+def test_learning_service_surface_transition_refreshes_twin_playbook_and_surface_learning_api(
+    tmp_path,
+) -> None:
+    app = _build_learning_app(tmp_path)
+    service = app.state.learning_service
+    state_store = app.state.state_store
+    twin_repository = SqliteSurfaceCapabilityTwinRepository(state_store)
+    playbook_repository = SqliteSurfacePlaybookRepository(state_store)
+    strategy_repository = SqliteStrategyMemoryRepository(state_store)
+    industry_instance_repository = SqliteIndustryInstanceRepository(state_store)
+    operating_lane_repository = SqliteOperatingLaneRepository(state_store)
+    assignment_repository = SqliteAssignmentRepository(state_store)
+    industry_instance_repository.upsert_instance(
+        IndustryInstanceRecord(
+            instance_id="industry-surface",
+            label="Surface industry",
+            summary="surface learning test",
+            owner_scope="industry-surface-owner",
+            status="running",
+        ),
+    )
+    strategy_repository.upsert_strategy(
+        StrategyMemoryRecord(
+            strategy_id="strategy:surface-work-1",
+            scope_type="industry",
+            scope_id="industry-surface",
+            industry_instance_id="industry-surface",
+            title="Publishing strategy",
+            mission="Ship publishable outputs quickly.",
+            current_focuses=["publish listing"],
+            priority_order=["publish listing", "verify outcome"],
+            evidence_requirements=["published confirmation"],
+        ),
+    )
+    operating_lane_repository.upsert_lane(
+        OperatingLaneRecord(
+            id="lane:publishing",
+            industry_instance_id="industry-surface",
+            lane_key="publishing",
+            title="Publishing lane",
+            summary="Push ready drafts into published state.",
+            owner_agent_id="agent:publisher",
+            metadata={"evidence_expectations": ["published confirmation"]},
+        ),
+    )
+    assignment_repository.upsert_assignment(
+        AssignmentRecord(
+            id="assignment:publish-1",
+            industry_instance_id="industry-surface",
+            lane_id="lane:publishing",
+            owner_agent_id="agent:publisher",
+            title="Publish the spring listing",
+            summary="Use the publish path, then confirm the listing is visible.",
+            metadata={"success_criteria": ["published confirmation"]},
+        ),
+    )
+    service.set_agent_profile_service(
+        SimpleNamespace(
+            get_agent=lambda agent_id: AgentProfile(
+                agent_id=str(agent_id),
+                name="Publisher",
+                role_name="Publisher",
+                role_summary="Turns drafts into live listings.",
+                mission="Publish listings and verify live visibility.",
+                evidence_expectations=["published confirmation"],
+            ),
+        ),
+    )
+    service.configure_surface_learning(
+        surface_capability_twin_repository=twin_repository,
+        surface_playbook_repository=playbook_repository,
+        strategy_memory_repository=strategy_repository,
+        operating_lane_repository=operating_lane_repository,
+        assignment_repository=assignment_repository,
+    )
+
+    first_result = service.ingest_surface_evidence(
+        task=KernelTask(
+            id="ktask:surface-1",
+            title="Publish listing",
+            owner_agent_id="agent:publisher",
+            work_context_id="work-surface-1",
+            payload={
+                "industry_instance_id": "industry-surface",
+                "lane_id": "lane:publishing",
+                "assignment_id": "assignment:publish-1",
+            },
+        ),
+        evidence=EvidenceRecord(
+            task_id="ktask:surface-1",
+            actor_ref="tool:browser_use",
+            risk_level="auto",
+            kind="surface-discovery",
+            action_summary="discover publish action",
+            result_summary="publish control discovered",
+            metadata={
+                "candidate_capability": "publish_listing",
+                "surface_kind": "browser",
+                "region_ref": "toolbar",
+                "label": "Publish",
+            },
+        ),
+    )
+    second_result = service.ingest_surface_evidence(
+        task=KernelTask(
+            id="ktask:surface-2",
+            title="Publish listing",
+            owner_agent_id="agent:publisher",
+            work_context_id="work-surface-1",
+            payload={
+                "industry_instance_id": "industry-surface",
+                "lane_id": "lane:publishing",
+                "assignment_id": "assignment:publish-1",
+            },
+        ),
+        evidence=EvidenceRecord(
+            task_id="ktask:surface-2",
+            actor_ref="tool:browser_use",
+            risk_level="auto",
+            kind="surface-transition",
+            action_summary="publish listing",
+            result_summary="publish moved the page into live state",
+            metadata={
+                "surface_kind": "browser",
+                "target_slot": "publish_listing",
+                "verification": {"verified": True},
+                "transition": {
+                    "changed_nodes": ["result:published-state"],
+                    "new_blockers": [],
+                    "resolved_blockers": ["blocker:draft-only"],
+                    "result_summary": "publish changed 1 node(s), added 0 blocker(s), resolved 1 blocker(s)",
+                },
+            },
+        ),
+    )
+
+    active_twins = twin_repository.list_by_scope(
+        scope_level="work_context",
+        scope_id="work-surface-1",
+        status="active",
+    )
+    all_twins = twin_repository.list_by_scope(
+        scope_level="work_context",
+        scope_id="work-surface-1",
+        status=None,
+    )
+    assert first_result.active_twin.capability_name == "publish_listing"
+    assert second_result.active_twin.capability_name == "publish_listing"
+    assert len(active_twins) == 1
+    assert active_twins[0].version == 2
+    assert {item.status for item in all_twins} == {"active", "superseded"}
+    assert second_result.active_playbook.capability_names == ["publish_listing"]
+
+    client = TestClient(app)
+    response = client.get("/learning/surface/scopes/work_context/work-surface-1")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["scope_level"] == "work_context"
+    assert payload["scope_id"] == "work-surface-1"
+    assert payload["active_playbook"]["capability_names"] == ["publish_listing"]
+    assert payload["reward_ranking"][0]["capability_name"] == "publish_listing"

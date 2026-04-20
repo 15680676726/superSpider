@@ -95,6 +95,17 @@ def build_runtime_execution_stack(
         evidence_ledger=evidence_ledger,
         runtime_event_bus=runtime_event_bus,
     )
+    if (
+        repositories.surface_capability_twin_repository is not None
+        and repositories.surface_playbook_repository is not None
+    ):
+        learning_service.configure_surface_learning(
+            surface_capability_twin_repository=repositories.surface_capability_twin_repository,
+            surface_playbook_repository=repositories.surface_playbook_repository,
+            strategy_memory_repository=repositories.strategy_memory_repository,
+            operating_lane_repository=repositories.operating_lane_repository,
+            assignment_repository=repositories.assignment_repository,
+        )
     governance_service = governance_service_cls(
         control_repository=repositories.governance_control_repository,
         decision_request_repository=repositories.decision_request_repository,
@@ -111,6 +122,7 @@ def build_runtime_execution_stack(
         evidence_ledger=evidence_ledger,
         runtime_event_bus=runtime_event_bus,
         work_context_service=work_context_service,
+        learning_service=learning_service,
     )
     kernel_tool_bridge = kernel_tool_bridge_cls(
         task_store=kernel_task_store,

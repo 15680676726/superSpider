@@ -64,6 +64,10 @@ from ..models_memory import (
     WorkContextMemoryOverlayRecord,
 )
 from ..models_research import ResearchSessionRecord, ResearchSessionRoundRecord
+from ..models_surface_learning import (
+    SurfaceCapabilityTwinRecord,
+    SurfacePlaybookRecord,
+)
 from ..models_work_context import WorkContextRecord
 
 
@@ -1700,4 +1704,76 @@ class BaseMemorySleepRepository(ABC):
         self,
         record: MemoryStructureProposalRecord,
     ) -> MemoryStructureProposalRecord:
+        raise NotImplementedError
+
+
+class BaseSurfaceCapabilityTwinRepository(ABC):
+    """Abstract repository for learned surface capability twins."""
+
+    @abstractmethod
+    def get_twin(self, twin_id: str) -> Optional[SurfaceCapabilityTwinRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_twins(
+        self,
+        *,
+        scope_level: str | None = None,
+        scope_id: str | None = None,
+        capability_name: str | None = None,
+        status: str | None = None,
+        limit: int | None = None,
+    ) -> list[SurfaceCapabilityTwinRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_active_twins(
+        self,
+        *,
+        scope_level: str,
+        scope_id: str,
+        limit: int | None = None,
+    ) -> list[SurfaceCapabilityTwinRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upsert_twin(
+        self,
+        record: SurfaceCapabilityTwinRecord,
+    ) -> SurfaceCapabilityTwinRecord:
+        raise NotImplementedError
+
+
+class BaseSurfacePlaybookRepository(ABC):
+    """Abstract repository for active per-scope surface playbooks."""
+
+    @abstractmethod
+    def get_playbook(self, playbook_id: str) -> Optional[SurfacePlaybookRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_active_playbook(
+        self,
+        *,
+        scope_level: str,
+        scope_id: str,
+    ) -> Optional[SurfacePlaybookRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_playbooks(
+        self,
+        *,
+        scope_level: str | None = None,
+        scope_id: str | None = None,
+        status: str | None = None,
+        limit: int | None = None,
+    ) -> list[SurfacePlaybookRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upsert_playbook(
+        self,
+        record: SurfacePlaybookRecord,
+    ) -> SurfacePlaybookRecord:
         raise NotImplementedError

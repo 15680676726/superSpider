@@ -1275,6 +1275,67 @@ def test_main_brain_chat_service_scope_snapshot_prefers_overlay_profile_surface(
     assert "industry-profile:industry-1:v1" in context_prompt
 
 
+def test_main_brain_chat_service_scope_snapshot_includes_surface_learning_summary():
+    class _MemorySurfaceService:
+        def resolve_truth_first_scope_snapshot(self, **kwargs):
+            _ = kwargs
+            return {
+                "entries": [],
+                "latest_entries": [],
+                "history_entries": [],
+                "profile": {},
+            }
+
+        def resolve_surface_learning_scope(self, **kwargs):
+            assert kwargs["scope_type"] == "work_context"
+            assert kwargs["scope_id"] == "ctx-surface"
+            return {
+                "scope_level": "work_context",
+                "scope_id": "ctx-surface",
+                "version": 2,
+                "active_playbook": {
+                    "summary": "Publish the current listing and verify it is live.",
+                    "capability_names": ["publish_listing"],
+                    "recommended_steps": ["Open publish dialog", "Confirm publish"],
+                    "success_signals": ["published confirmation"],
+                },
+                "reward_ranking": [
+                    {
+                        "capability_name": "publish_listing",
+                        "score": 14.0,
+                    }
+                ],
+            }
+
+    service = MainBrainChatService(
+        session_backend=_FakeSessionBackend(),
+        memory_recall_service=_TruthFirstMemoryRecallService(),
+        memory_surface_service=_MemorySurfaceService(),
+        model_factory=lambda: _StaticResponseModel("ok"),
+    )
+    request = SimpleNamespace(
+        session_id="sess-surface-learning",
+        user_id="user-surface-learning",
+        industry_instance_id=None,
+        work_context_id="ctx-surface",
+        agent_id="ops-agent",
+    )
+
+    prompt_messages = service._build_prompt_messages(  # pylint: disable=protected-access
+        request=request,
+        query="Use the publish path.",
+        prior_messages=[],
+        current_messages=[],
+    )
+
+    context_prompt = prompt_messages[1]["content"]
+    assert "## Surface Learning Playbook" in context_prompt
+    assert "publish_listing" in context_prompt
+    assert "Confirm publish" in context_prompt
+    assert "## Surface Reward Ranking" in context_prompt
+    assert "14.0" in context_prompt
+
+
 @pytest.mark.asyncio
 async def test_main_brain_chat_service_skips_lexical_recall_for_short_followup_turns_and_reuses_cached_context():
     recall_service = _TruthFirstMemoryRecallService()
@@ -2049,6 +2110,87 @@ async def test_main_brain_chat_service_rebuilds_scope_snapshot_after_dirty_mark(
 
     snapshot_service = service._scope_snapshot_service  # pylint: disable=protected-access
     assert snapshot_service.calls == ["work-context-1", "work-context-1"]
+
+
+@pytest.mark.asyncio
+async def test_main_brain_chat_service_rebuilds_surface_learning_snapshot_after_dirty_mark():
+    class _VersionedMemorySurfaceService:
+        def __init__(self) -> None:
+            self.version = 1
+
+        def resolve_truth_first_scope_snapshot(self, **kwargs):
+            _ = kwargs
+            return {
+                "entries": [],
+                "latest_entries": [],
+                "history_entries": [],
+                "profile": {},
+            }
+
+        def resolve_surface_learning_scope(self, **kwargs):
+            _ = kwargs
+            return {
+                "scope_level": "work_context",
+                "scope_id": "work-context-1",
+                "version": self.version,
+                "active_playbook": {
+                    "summary": f"Playbook v{self.version}",
+                    "capability_names": [f"publish_listing_v{self.version}"],
+                    "recommended_steps": [f"step-v{self.version}"],
+                    "success_signals": ["published confirmation"],
+                },
+                "reward_ranking": [
+                    {
+                        "capability_name": f"publish_listing_v{self.version}",
+                        "score": float(self.version),
+                    }
+                ],
+            }
+
+    backend = _FakeSessionBackend()
+    surface_service = _VersionedMemorySurfaceService()
+    model = _PromptCapturingResponseModel("ok")
+    service = MainBrainChatService(
+        session_backend=backend,
+        memory_recall_service=_TruthFirstMemoryRecallService(),
+        memory_surface_service=surface_service,
+        model_factory=lambda: model,
+    )
+    request = SimpleNamespace(
+        session_id="sess-surface-dirty",
+        user_id="user-surface-dirty",
+        industry_instance_id=None,
+        work_context_id="work-context-1",
+        agent_id="ops-agent",
+    )
+
+    _ = [
+        item
+        async for item in service.execute_stream(
+            msgs=[Msg(name="user", role="user", content="turn one")],
+            request=request,
+        )
+    ]
+    first_context_prompt = "\n\n".join(
+        str(item.get("content") or "")
+        for item in model.calls[0]
+    )
+    surface_service.version = 2
+    service.mark_scope_snapshot_dirty(work_context_id="work-context-1")
+    _ = [
+        item
+        async for item in service.execute_stream(
+            msgs=[Msg(name="user", role="user", content="turn two")],
+            request=request,
+        )
+    ]
+    second_context_prompt = "\n\n".join(
+        str(item.get("content") or "")
+        for item in model.calls[1]
+    )
+
+    assert "publish_listing_v1" in first_context_prompt
+    assert "publish_listing_v2" in second_context_prompt
 
 
 @pytest.mark.asyncio

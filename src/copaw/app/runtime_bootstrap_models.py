@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -96,6 +97,8 @@ if TYPE_CHECKING:
         SqliteRuntimeFrameRepository,
         SqliteRoutineRunRepository,
         SqliteScheduleRepository,
+        SqliteSurfaceCapabilityTwinRepository,
+        SqliteSurfacePlaybookRepository,
         SqliteStrategyMemoryRepository,
         SqliteTaskRepository,
         SqliteTaskRuntimeRepository,
@@ -165,10 +168,47 @@ class RuntimeRepositories:
     prediction_signal_repository: SqlitePredictionSignalRepository
     prediction_recommendation_repository: SqlitePredictionRecommendationRepository
     prediction_review_repository: SqlitePredictionReviewRepository
-    research_session_repository: SqliteResearchSessionRepository
-    automation_loop_runtime_repository: SqliteAutomationLoopRuntimeRepository
-    session_mount_repository: SessionMountRepository
+    research_session_repository: SqliteResearchSessionRepository | None = None
+    automation_loop_runtime_repository: SqliteAutomationLoopRuntimeRepository | None = None
+    session_mount_repository: SessionMountRepository | None = None
     external_runtime_repository: Any | None = None
+    surface_capability_twin_repository: SqliteSurfaceCapabilityTwinRepository | None = None
+    surface_playbook_repository: SqliteSurfacePlaybookRepository | None = None
+
+
+@dataclass(slots=True)
+class SurfaceCapabilityTwinSummary:
+    twin_id: str
+    capability_name: str
+    capability_kind: str
+    surface_kind: str
+    summary: str
+    risk_level: str
+    version: int
+    updated_at: datetime | None
+
+
+@dataclass(slots=True)
+class SurfacePlaybookSummary:
+    playbook_id: str
+    twin_id: str | None
+    summary: str
+    capability_names: list[str]
+    recommended_steps: list[str]
+    execution_steps: list[str]
+    success_signals: list[str]
+    version: int
+    updated_at: datetime | None
+
+
+@dataclass(slots=True)
+class SurfaceLearningBootstrapProjection:
+    scope_level: str
+    scope_id: str
+    version: int | None
+    updated_at: datetime | None
+    active_twins: list[SurfaceCapabilityTwinSummary] = field(default_factory=list)
+    active_playbook: SurfacePlaybookSummary | None = None
 
 
 @dataclass(slots=True)

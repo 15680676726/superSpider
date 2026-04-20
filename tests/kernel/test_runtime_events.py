@@ -99,6 +99,61 @@ def test_kernel_task_store_append_evidence_preserves_explicit_kind(tmp_path) -> 
     assert records[0].kind == "surface-transition"
 
 
+def test_kernel_task_store_append_evidence_triggers_surface_learning_ingest(
+    tmp_path,
+) -> None:
+    class _FakeLearningService:
+        def __init__(self) -> None:
+            self.calls: list[tuple[KernelTask, EvidenceRecord]] = []
+
+        def ingest_surface_evidence(
+            self,
+            *,
+            task: KernelTask,
+            evidence: EvidenceRecord,
+        ) -> None:
+            self.calls.append((task, evidence))
+
+    state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    task_repository = SqliteTaskRepository(state_store)
+    task_runtime_repository = SqliteTaskRuntimeRepository(state_store)
+    evidence_ledger = EvidenceLedger(tmp_path / "evidence.sqlite3")
+    learning_service = _FakeLearningService()
+    task_store = KernelTaskStore(
+        task_repository=task_repository,
+        task_runtime_repository=task_runtime_repository,
+        evidence_ledger=evidence_ledger,
+        learning_service=learning_service,
+    )
+
+    task = KernelTask(
+        id="task-surface-transition-ingest",
+        title="Surface transition ingest",
+        capability_ref="tool:browser_use",
+        owner_agent_id="ops-agent",
+        work_context_id="work-surface-1",
+        risk_level="auto",
+    )
+    task_store.upsert(task)
+    record = task_store.append_evidence(
+        task,
+        action_summary="record surface transition",
+        result_summary="browser moved into published state",
+        kind="surface-transition",
+        metadata={
+            "evidence_kind": "surface-transition",
+            "target_slot": "publish_listing",
+        },
+    )
+
+    assert record is not None
+    assert len(learning_service.calls) == 1
+    ingested_task, ingested_evidence = learning_service.calls[0]
+    assert ingested_task.id == task.id
+    assert ingested_evidence.id == record.id
+    assert ingested_evidence.kind == "surface-transition"
+
+
 def test_kernel_task_store_review_transition_emits_runtime_event(tmp_path) -> None:
     state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
     task_repository = SqliteTaskRepository(state_store)

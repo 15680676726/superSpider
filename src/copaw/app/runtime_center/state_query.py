@@ -1339,6 +1339,70 @@ class RuntimeCenterStateQueryService:
     def set_learning_service(self, learning_service: object | None) -> None:
         self._learning_service = learning_service
 
+    def get_surface_learning_scope(
+        self,
+        *,
+        scope_type: str,
+        scope_id: str,
+        task_id: str | None = None,
+        work_context_id: str | None = None,
+        agent_id: str | None = None,
+        industry_instance_id: str | None = None,
+        owner_agent_id: str | None = None,
+        limit: int = 3,
+    ) -> dict[str, object] | None:
+        getter = getattr(self._learning_service, "get_surface_learning_scope", None)
+        if not callable(getter):
+            raise RuntimeCenterReadModelUnavailableError(
+                "Surface learning read chain is not wired into Runtime Center state queries.",
+            )
+        scope_level = {
+            "work_context": "work_context",
+            "industry": "industry_scope",
+            "agent": "role_scope",
+        }.get(str(scope_type or "").strip())
+        normalized_scope_id = str(scope_id or "").strip()
+        if scope_level is None or not normalized_scope_id:
+            return None
+        projection = getter(
+            scope_level=scope_level,
+            scope_id=normalized_scope_id,
+            industry_instance_id=industry_instance_id,
+            owner_agent_id=owner_agent_id or agent_id,
+        )
+        if projection is None:
+            return None
+        model_dump = getattr(projection, "model_dump", None)
+        payload = (
+            model_dump(mode="json")
+            if callable(model_dump)
+            else dict(projection)
+            if isinstance(projection, dict)
+            else None
+        )
+        if not isinstance(payload, dict):
+            return None
+        payload["scope_type"] = scope_type
+        payload["scope_id"] = normalized_scope_id
+        payload["live_graph"] = self._build_surface_live_graph_summary(
+            scope_type=scope_type,
+            scope_id=normalized_scope_id,
+            task_id=task_id,
+            work_context_id=work_context_id,
+            agent_id=agent_id,
+            industry_instance_id=industry_instance_id,
+        )
+        payload["latest_evidence"] = self._list_recent_surface_evidence(
+            scope_type=scope_type,
+            scope_id=normalized_scope_id,
+            task_id=task_id,
+            work_context_id=work_context_id,
+            agent_id=agent_id,
+            industry_instance_id=industry_instance_id,
+            limit=limit,
+        )
+        return payload
+
     def set_agent_profile_service(self, agent_profile_service: object | None) -> None:
         self._agent_profile_service = agent_profile_service
 
@@ -1350,6 +1414,110 @@ class RuntimeCenterStateQueryService:
 
     def get_decision_request(self, decision_id: str) -> dict[str, object] | None:
         return self._goal_decision_projector.get_decision_request(decision_id)
+
+    def _build_surface_live_graph_summary(
+        self,
+        *,
+        scope_type: str,
+        scope_id: str,
+        task_id: str | None,
+        work_context_id: str | None,
+        agent_id: str | None,
+        industry_instance_id: str | None,
+    ) -> dict[str, object]:
+        if self._runtime_frame_repository is None:
+            return {}
+        tasks = self._task_repository.list_tasks(
+            task_ids=[task_id] if task_id else None,
+            work_context_id=scope_id if scope_type == "work_context" else work_context_id,
+            owner_agent_id=scope_id if scope_type == "agent" else agent_id,
+            industry_instance_id=(
+                scope_id if scope_type == "industry" else industry_instance_id
+            ),
+            limit=12,
+        )
+        latest_frame = None
+        for task in tasks:
+            frames = self._runtime_frame_repository.list_frames(task.id, limit=1)
+            if not frames:
+                continue
+            frame = frames[0]
+            if latest_frame is None or frame.created_at > latest_frame.created_at:
+                latest_frame = frame
+        projection = (
+            dict(getattr(latest_frame, "surface_projection", {}) or {})
+            if latest_frame is not None
+            else {}
+        )
+        if not projection:
+            return {}
+        return {
+            "surface_kind": str(projection.get("surface_kind") or "").strip(),
+            "confidence": float(projection.get("confidence") or 0.0),
+            "region_count": len(projection.get("regions") or []),
+            "control_count": len(projection.get("controls") or []),
+            "result_count": len(projection.get("results") or []),
+            "blocker_count": len(projection.get("blockers") or []),
+            "entity_count": len(projection.get("entities") or []),
+            "relation_count": len(projection.get("relations") or []),
+        }
+
+    def _list_recent_surface_evidence(
+        self,
+        *,
+        scope_type: str,
+        scope_id: str,
+        task_id: str | None,
+        work_context_id: str | None,
+        agent_id: str | None,
+        industry_instance_id: str | None,
+        limit: int,
+    ) -> list[dict[str, object]]:
+        if self._evidence_ledger is None:
+            return []
+        matched: list[dict[str, object]] = []
+        for record in self._evidence_ledger.list_recent(limit=max(20, limit * 20)):
+            if str(getattr(record, "kind", "") or "").strip() not in {
+                "surface-probe",
+                "surface-discovery",
+                "surface-transition",
+            }:
+                continue
+            metadata = dict(getattr(record, "metadata", {}) or {})
+            if task_id and str(getattr(record, "task_id", "") or "").strip() != task_id:
+                continue
+            if scope_type == "work_context":
+                candidate_scope_id = str(
+                    metadata.get("work_context_id") or work_context_id or "",
+                ).strip()
+                if candidate_scope_id != scope_id:
+                    continue
+            elif scope_type == "agent":
+                candidate_scope_id = str(
+                    metadata.get("trace_owner_agent_id") or agent_id or "",
+                ).strip()
+                if candidate_scope_id != scope_id:
+                    continue
+            elif scope_type == "industry":
+                candidate_scope_id = str(
+                    metadata.get("industry_instance_id") or industry_instance_id or "",
+                ).strip()
+                if candidate_scope_id != scope_id:
+                    continue
+            payload = serialize_evidence_record(record)
+            matched.append(
+                {
+                    "id": payload.get("id"),
+                    "kind": payload.get("kind"),
+                    "action_summary": payload.get("action_summary"),
+                    "result_summary": payload.get("result_summary"),
+                    "created_at": payload.get("created_at"),
+                    "task_id": payload.get("task_id"),
+                }
+            )
+            if len(matched) >= limit:
+                break
+        return matched
 
     def _collect_related_patches(
         self,

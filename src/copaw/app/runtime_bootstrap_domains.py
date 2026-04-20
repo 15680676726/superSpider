@@ -43,6 +43,7 @@ from ..memory import (
     MemoryRecallService,
     MemoryReflectionService,
     MemoryRetainService,
+    MemorySurfaceService,
     MemorySleepService,
 )
 from ..memory.knowledge_writeback_service import KnowledgeWritebackService
@@ -1247,6 +1248,11 @@ def build_runtime_domain_services(
     capability_service.set_actor_mailbox_service(actor_mailbox_service)
     capability_service.set_actor_supervisor(actor_supervisor)
     environment_service.set_kernel_dispatcher(kernel_dispatcher)
+    memory_surface_service = MemorySurfaceService(
+        memory_recall_service=memory_recall_service,
+        conversation_compaction_service=conversation_compaction_service,
+        surface_learning_provider=learning_service,
+    )
 
     query_execution_service = KernelQueryExecutionService(
         session_backend=session_backend,
@@ -1263,6 +1269,7 @@ def build_runtime_domain_services(
         prediction_service=prediction_service,
         knowledge_service=knowledge_service,
         memory_recall_service=memory_recall_service,
+        memory_surface_service=memory_surface_service,
         memory_activation_service=memory_activation_service,
         actor_mailbox_service=actor_mailbox_service,
         agent_runtime_repository=repositories.agent_runtime_repository,
@@ -1277,6 +1284,7 @@ def build_runtime_domain_services(
         industry_service=industry_service,
         agent_profile_service=agent_profile_service,
         memory_recall_service=memory_recall_service,
+        memory_surface_service=memory_surface_service,
         actor_supervisor=actor_supervisor,
         model_factory=runtime_provider.get_active_chat_model,
     )

@@ -79,10 +79,12 @@ class MemorySurfaceService:
         memory_recall_service: Any | None = None,
         memory_sleep_service: Any | None = None,
         conversation_compaction_service: Any | None = None,
+        surface_learning_provider: Any | None = None,
     ) -> None:
         self._memory_recall_service = memory_recall_service
         self._memory_sleep_service = memory_sleep_service
         self._conversation_compaction_service = conversation_compaction_service
+        self._surface_learning_provider = surface_learning_provider
 
     def set_memory_recall_service(self, memory_recall_service: Any | None) -> None:
         self._memory_recall_service = memory_recall_service
@@ -96,11 +98,58 @@ class MemorySurfaceService:
     ) -> None:
         self._conversation_compaction_service = conversation_compaction_service
 
+    def set_surface_learning_provider(
+        self,
+        surface_learning_provider: Any | None,
+    ) -> None:
+        self._surface_learning_provider = surface_learning_provider
+
     def has_truth_first_surface(self) -> bool:
         return self._memory_recall_service is not None
 
     def has_private_memory_surface(self) -> bool:
         return self._conversation_compaction_service is not None
+
+    def resolve_surface_learning_scope(
+        self,
+        *,
+        scope_type: str,
+        scope_id: str,
+        owner_agent_id: str | None = None,
+        industry_instance_id: str | None = None,
+    ) -> dict[str, Any]:
+        provider = self._surface_learning_provider
+        getter = getattr(provider, "get_surface_learning_scope", None)
+        if not callable(getter):
+            return {}
+        scope_level = {
+            "work_context": "work_context",
+            "industry": "industry_scope",
+            "agent": "role_scope",
+        }.get(str(scope_type or "").strip())
+        normalized_scope_id = str(scope_id or "").strip()
+        if scope_level is None or not normalized_scope_id:
+            return {}
+        try:
+            payload = getter(
+                scope_level=scope_level,
+                scope_id=normalized_scope_id,
+                industry_instance_id=industry_instance_id,
+                owner_agent_id=owner_agent_id,
+            )
+        except Exception:
+            logger.debug("Memory surface surface-learning resolve failed", exc_info=True)
+            return {}
+        if isinstance(payload, dict):
+            return dict(payload)
+        model_dump = getattr(payload, "model_dump", None)
+        if callable(model_dump):
+            try:
+                data = model_dump(mode="json")
+            except Exception:
+                return {}
+            return dict(data) if isinstance(data, dict) else {}
+        return {}
 
     def resolve_truth_first_scope_snapshot(
         self,

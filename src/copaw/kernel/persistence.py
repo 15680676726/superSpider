@@ -7,6 +7,7 @@ while evidence and confirmation requests flow through the shared ledgers.
 """
 from __future__ import annotations
 
+import inspect
 import json
 from datetime import datetime, timezone
 from typing import Any
@@ -45,6 +46,7 @@ class KernelTaskStore:
         evidence_ledger: EvidenceLedger | None = None,
         runtime_event_bus: Any | None = None,
         work_context_service: WorkContextService | None = None,
+        learning_service: object | None = None,
     ) -> None:
         self._task_repository = task_repository
         self._task_runtime_repository = task_runtime_repository
@@ -53,6 +55,7 @@ class KernelTaskStore:
         self._evidence_ledger = evidence_ledger
         self._runtime_event_bus = runtime_event_bus
         self._work_context_service = work_context_service
+        self._learning_service = learning_service
 
     def upsert(
         self,
@@ -397,6 +400,7 @@ class KernelTaskStore:
     ) -> EvidenceRecord | None:
         if self._evidence_ledger is None:
             return None
+        task_payload = task.payload if isinstance(task.payload, dict) else {}
         merged_metadata = {
             **(metadata or {}),
             "trace_id": task.trace_id,
@@ -404,6 +408,12 @@ class KernelTaskStore:
             "trace_owner_agent_id": task.owner_agent_id,
             "work_context_id": task.work_context_id,
         }
+        for key in ("industry_instance_id", "lane_id", "assignment_id"):
+            value = task_payload.get(key)
+            if isinstance(value, str):
+                normalized = value.strip()
+                if normalized:
+                    merged_metadata[key] = normalized
         record = self._evidence_ledger.append(
             EvidenceRecord(
                 task_id=task.id,
@@ -433,7 +443,26 @@ class KernelTaskStore:
                 "status": status,
             },
         )
+        self._ingest_surface_learning(task=task, record=record)
         return record
+
+    def _ingest_surface_learning(
+        self,
+        *,
+        task: KernelTask,
+        record: EvidenceRecord,
+    ) -> None:
+        evidence_kind = str(record.kind or "").strip().lower()
+        if evidence_kind not in {"surface-discovery", "surface-transition"}:
+            return
+        ingestor = getattr(self._learning_service, "ingest_surface_evidence", None)
+        if not callable(ingestor):
+            return
+        result = ingestor(task=task, evidence=record)
+        if inspect.isawaitable(result):
+            raise RuntimeError(
+                "Learning surface ingest must be synchronous inside KernelTaskStore.",
+            )
 
     def _resolve_task_work_context(
         self,

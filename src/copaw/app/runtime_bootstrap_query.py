@@ -19,7 +19,12 @@ from ..memory import (
 from ..state.agent_experience_service import AgentExperienceMemoryService
 from ..state.knowledge_service import StateKnowledgeService
 from ..state.strategy_memory_service import StateStrategyMemoryService
-from .runtime_bootstrap_models import RuntimeRepositories
+from .runtime_bootstrap_models import (
+    RuntimeRepositories,
+    SurfaceCapabilityTwinSummary,
+    SurfaceLearningBootstrapProjection,
+    SurfacePlaybookSummary,
+)
 from .runtime_center import (
     RuntimeCenterEvidenceQueryService,
     RuntimeCenterStateQueryService,
@@ -39,6 +44,82 @@ RuntimeQueryServices: TypeAlias = tuple[
     Any | None,
     AgentExperienceMemoryService,
 ]
+
+
+def build_surface_learning_bootstrap_projection(
+    *,
+    repositories: RuntimeRepositories,
+    scope_level: str,
+    scope_id: str,
+    twin_limit: int | None = 5,
+) -> SurfaceLearningBootstrapProjection | None:
+    twin_repository = getattr(repositories, "surface_capability_twin_repository", None)
+    playbook_repository = getattr(repositories, "surface_playbook_repository", None)
+    if twin_repository is None and playbook_repository is None:
+        return None
+    active_twins = (
+        twin_repository.get_active_twins(
+            scope_level=scope_level,
+            scope_id=scope_id,
+            limit=twin_limit,
+        )
+        if twin_repository is not None
+        else []
+    )
+    active_playbook = (
+        playbook_repository.get_active_playbook(
+            scope_level=scope_level,
+            scope_id=scope_id,
+        )
+        if playbook_repository is not None
+        else None
+    )
+    if not active_twins and active_playbook is None:
+        return None
+    version_candidates = [record.version for record in active_twins]
+    updated_candidates = [
+        record.updated_at
+        for record in active_twins
+        if record.updated_at is not None
+    ]
+    if active_playbook is not None:
+        version_candidates.append(active_playbook.version)
+        if active_playbook.updated_at is not None:
+            updated_candidates.append(active_playbook.updated_at)
+    return SurfaceLearningBootstrapProjection(
+        scope_level=scope_level,
+        scope_id=scope_id,
+        version=max(version_candidates) if version_candidates else None,
+        updated_at=max(updated_candidates) if updated_candidates else None,
+        active_twins=[
+            SurfaceCapabilityTwinSummary(
+                twin_id=record.twin_id,
+                capability_name=record.capability_name,
+                capability_kind=record.capability_kind,
+                surface_kind=record.surface_kind,
+                summary=record.summary,
+                risk_level=record.risk_level,
+                version=record.version,
+                updated_at=record.updated_at,
+            )
+            for record in active_twins
+        ],
+        active_playbook=(
+            SurfacePlaybookSummary(
+                playbook_id=active_playbook.playbook_id,
+                twin_id=active_playbook.twin_id,
+                summary=active_playbook.summary,
+                capability_names=list(active_playbook.capability_names),
+                recommended_steps=list(active_playbook.recommended_steps),
+                execution_steps=list(active_playbook.execution_steps),
+                success_signals=list(active_playbook.success_signals),
+                version=active_playbook.version,
+                updated_at=active_playbook.updated_at,
+            )
+            if active_playbook is not None
+            else None
+        ),
+    )
 
 
 def _resolve_memory_activation_service_cls() -> type[Any] | None:

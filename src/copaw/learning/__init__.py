@@ -19,6 +19,7 @@ from .service import LearningService
 from .runtime_bindings import LearningRuntimeBindings
 from .executor import PatchExecutor
 from .storage import LearningStorageError, SqliteLearningStore
+from .surface_reward_service import SurfaceRewardService
 
 __all__ = [
     "CapabilityAcquisitionProposal",
@@ -39,5 +40,6 @@ __all__ = [
     "PatchStatus",
     "Proposal",
     "ProposalStatus",
+    "SurfaceRewardService",
     "SqliteLearningStore",
 ]

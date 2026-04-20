@@ -16,6 +16,10 @@ from uuid import uuid4
 from pydantic import BaseModel, Field
 
 from ..industry.models import IndustryBootstrapInstallItem, IndustryBootstrapInstallResult
+from ..state.models_surface_learning import (
+    SurfaceCapabilityTwinRecord,
+    SurfacePlaybookRecord,
+)
 
 
 PatchKind = Literal[
@@ -184,3 +188,53 @@ class OnboardingRun(BaseModel):
     updated_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
     )
+
+
+class SurfaceRewardRankItem(BaseModel):
+    """Goal-conditioned ranking item derived from formal scope context."""
+
+    twin_id: str
+    capability_name: str
+    surface_kind: str = ""
+    summary: str = ""
+    score: float = 0.0
+    reasons: list[str] = Field(default_factory=list)
+    version: int = 1
+    updated_at: datetime | None = None
+
+
+class SurfaceRewardProjection(BaseModel):
+    """Derived reward ranking for one surface-learning scope."""
+
+    scope_level: str
+    scope_id: str
+    version: int | None = None
+    updated_at: datetime | None = None
+    ranking: list[SurfaceRewardRankItem] = Field(default_factory=list)
+    context_signals: list[str] = Field(default_factory=list)
+
+
+class SurfaceLearningScopeProjection(BaseModel):
+    """Unified read model for active twins, playbook, and reward ranking."""
+
+    scope_level: str
+    scope_id: str
+    version: int | None = None
+    updated_at: datetime | None = None
+    active_twins: list[SurfaceCapabilityTwinRecord] = Field(default_factory=list)
+    active_playbook: SurfacePlaybookRecord | None = None
+    reward_ranking: list[SurfaceRewardRankItem] = Field(default_factory=list)
+    context_signals: list[str] = Field(default_factory=list)
+
+
+class SurfaceLearningIngestResult(BaseModel):
+    """Result returned after one surface evidence ingest refresh."""
+
+    scope_level: str
+    scope_id: str
+    version: int | None = None
+    updated_at: datetime | None = None
+    active_twin: SurfaceCapabilityTwinRecord
+    active_playbook: SurfacePlaybookRecord | None = None
+    reward_ranking: list[SurfaceRewardRankItem] = Field(default_factory=list)
+    context_signals: list[str] = Field(default_factory=list)

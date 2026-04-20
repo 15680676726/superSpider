@@ -44,6 +44,8 @@ from ..state.repositories import (
     SqliteRoutineRunRepository,
     SqliteRuntimeFrameRepository,
     SqliteScheduleRepository,
+    SqliteSurfaceCapabilityTwinRepository,
+    SqliteSurfacePlaybookRepository,
     SqliteStrategyMemoryRepository,
     SqliteTaskRepository,
     SqliteTaskRuntimeRepository,
@@ -114,6 +116,12 @@ def build_runtime_repositories(state_store: SQLiteStateStore) -> RuntimeReposito
         ),
         session_mount_repository=SessionMountRepository(state_store),
         external_runtime_repository=SqliteExternalCapabilityRuntimeRepository(
+            state_store,
+        ),
+        surface_capability_twin_repository=SqliteSurfaceCapabilityTwinRepository(
+            state_store,
+        ),
+        surface_playbook_repository=SqliteSurfacePlaybookRepository(
             state_store,
         ),
     )

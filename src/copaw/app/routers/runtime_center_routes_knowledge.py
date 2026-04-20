@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from .runtime_center_shared_core import *  # noqa: F401,F403
+from .runtime_center_payloads import serialize_surface_learning_payload
 
 
 @router.get("/knowledge/documents", response_model=list[dict[str, object]])
@@ -131,6 +132,43 @@ async def import_knowledge_document(
         for chunk in result.get("chunks", [])
     ]
     return result
+
+
+@router.get("/knowledge/surface", response_model=dict[str, object])
+async def get_surface_learning_knowledge_payload(
+    request: Request,
+    response: Response,
+    scope_type: Literal["industry", "agent", "work_context"],
+    scope_id: str,
+    task_id: str | None = None,
+    work_context_id: str | None = None,
+    agent_id: str | None = None,
+    industry_instance_id: str | None = None,
+    owner_agent_id: str | None = None,
+    limit: int = 3,
+) -> dict[str, object]:
+    apply_runtime_center_surface_headers(response, surface="runtime-center")
+    state_query_service = _get_state_query_service(request)
+    payload = state_query_service.get_surface_learning_scope(
+        scope_type=scope_type,
+        scope_id=scope_id,
+        task_id=task_id,
+        work_context_id=work_context_id,
+        agent_id=agent_id,
+        industry_instance_id=industry_instance_id,
+        owner_agent_id=owner_agent_id,
+        limit=limit,
+    )
+    if payload is None:
+        raise HTTPException(404, detail="Surface learning scope not found")
+    serialized = serialize_surface_learning_payload(
+        payload=payload,
+        live_graph=payload.get("live_graph") if isinstance(payload, dict) else None,
+        latest_evidence=payload.get("latest_evidence") if isinstance(payload, dict) else None,
+    )
+    if serialized is None:
+        raise HTTPException(404, detail="Surface learning scope not found")
+    return serialized
 
 
 @router.get("/knowledge/{chunk_id}", response_model=dict[str, object])

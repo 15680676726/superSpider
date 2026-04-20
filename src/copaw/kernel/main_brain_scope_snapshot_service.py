@@ -134,6 +134,34 @@ class MainBrainScopeSnapshotService:
             scope_cache_hit=scope_cache_hit,
         )
 
+    def mark_scope_dirty(
+        self,
+        *,
+        scope_level: str | None = None,
+        scope_id: str | None = None,
+    ) -> None:
+        if not scope_level or not scope_id:
+            for entry in self._scope_snapshot_cache.values():
+                entry.dirty = True
+            return
+        normalized_level = str(scope_level).strip().lower()
+        normalized_id = str(scope_id).strip()
+        if not normalized_id:
+            for entry in self._scope_snapshot_cache.values():
+                entry.dirty = True
+            return
+        candidate_keys = {normalized_id}
+        if normalized_level in {"industry", "industry_scope"}:
+            candidate_keys.add(f"industry:{normalized_id}")
+        if normalized_level in {"agent", "role_scope"}:
+            candidate_keys.add(f"agent:{normalized_id}")
+        if normalized_level in {"global", "runtime"}:
+            candidate_keys.add("global:runtime")
+        for key in candidate_keys:
+            entry = self._scope_snapshot_cache.get(key)
+            if entry is not None:
+                entry.dirty = True
+
     def mark_dirty(
         self,
         *,
@@ -142,21 +170,17 @@ class MainBrainScopeSnapshotService:
         agent_id: str | None = None,
     ) -> None:
         if not any((work_context_id, industry_instance_id, agent_id)):
-            for entry in self._scope_snapshot_cache.values():
-                entry.dirty = True
+            self.mark_scope_dirty(scope_level=None, scope_id=None)
             return
-        candidate_keys = {
-            str(work_context_id or "").strip(),
-            f"industry:{str(industry_instance_id or '').strip()}",
-            f"agent:{str(agent_id or '').strip()}",
-            "global:runtime",
-        }
-        for key in candidate_keys:
-            if not key:
-                continue
-            entry = self._scope_snapshot_cache.get(key)
-            if entry is not None:
-                entry.dirty = True
+        if work_context_id:
+            self.mark_scope_dirty(scope_level="work_context", scope_id=work_context_id)
+        if industry_instance_id:
+            self.mark_scope_dirty(
+                scope_level="industry_scope",
+                scope_id=industry_instance_id,
+            )
+        if agent_id:
+            self.mark_scope_dirty(scope_level="agent", scope_id=agent_id)
 
     def _call_builder(self, builder: Callable[..., str], **kwargs: Any) -> str:
         if self._owner is not None:

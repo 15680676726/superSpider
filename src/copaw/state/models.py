@@ -119,6 +119,10 @@ from .models_research import (
     ResearchSessionRecord,
     ResearchSessionRoundRecord,
 )
+from .models_surface_learning import (
+    SurfaceCapabilityTwinRecord,
+    SurfacePlaybookRecord,
+)
 from .models_reporting import (
     LaneBudgetRecord,
     MetricRecord,
@@ -244,6 +248,8 @@ __all__ = [
     "StrategicUncertaintyRecord",
     "StrategyMemoryRecord",
     "StrategyTriggerRuleRecord",
+    "SurfaceCapabilityTwinRecord",
+    "SurfacePlaybookRecord",
     "StrategyMemoryStatus",
     "StrategyScopeType",
     "TaskRecord",

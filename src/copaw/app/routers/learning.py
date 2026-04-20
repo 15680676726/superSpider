@@ -114,6 +114,32 @@ async def create_proposal(
     return proposal.model_dump(mode="json")
 
 
+@router.get("/surface/scopes/{scope_level}/{scope_id}", response_model=dict[str, object])
+async def get_surface_learning_scope(
+    service: LearningServiceDep,
+    scope_level: str,
+    scope_id: str,
+    industry_instance_id: str | None = Query(default=None),
+    lane_id: str | None = Query(default=None),
+    assignment_id: str | None = Query(default=None),
+    owner_agent_id: str | None = Query(default=None),
+) -> dict[str, object]:
+    try:
+        projection = service.get_surface_learning_scope(
+            scope_level=scope_level,
+            scope_id=scope_id,
+            industry_instance_id=industry_instance_id,
+            lane_id=lane_id,
+            assignment_id=assignment_id,
+            owner_agent_id=owner_agent_id,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(503, detail=str(exc)) from exc
+    if projection is None:
+        raise HTTPException(404, detail="Surface learning scope not found")
+    return projection.model_dump(mode="json")
+
+
 @router.post("/proposals/{proposal_id}/accept", response_model=dict[str, object])
 async def accept_proposal(
     service: LearningServiceDep,

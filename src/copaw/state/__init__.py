@@ -89,6 +89,10 @@ from .models_research import (
     ResearchSessionRecord,
     ResearchSessionRoundRecord,
 )
+from .models_surface_learning import (
+    SurfaceCapabilityTwinRecord,
+    SurfacePlaybookRecord,
+)
 from .models_work_context import WorkContextRecord
 from .work_context_service import WorkContextService
 from .human_assist_task_service import (
@@ -200,6 +204,8 @@ __all__ = [
     "StrategicUncertaintyRecord",
     "StrategyMemoryRecord",
     "StrategyTriggerRuleRecord",
+    "SurfaceCapabilityTwinRecord",
+    "SurfacePlaybookRecord",
     "TaskRecord",
     "TaskRuntimeRecord",
     "WorkContextRecord",

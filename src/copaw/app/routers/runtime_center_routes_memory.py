@@ -5,6 +5,7 @@ from collections import Counter
 
 from .runtime_center_shared_core import *  # noqa: F401,F403
 from .runtime_center_dependencies import _get_memory_activation_service, _list_memory_relation_views
+from .runtime_center_payloads import serialize_surface_learning_payload
 from ..runtime_center.models import RuntimeActivationSummary
 from ..runtime_center.projection_utils import string_list_from_values
 
@@ -482,12 +483,48 @@ def _build_memory_operator_surface_payload(
         if callable(resolve_scope_overlay) and resolved_scope_type and resolved_scope_id
         else {}
     )
+    surface_learning_payload = None
+    state_query_service = getattr(request.app.state, "state_query_service", None)
+    get_surface_learning_scope = getattr(
+        state_query_service,
+        "get_surface_learning_scope",
+        None,
+    )
+    if callable(get_surface_learning_scope) and resolved_scope_type and resolved_scope_id:
+        try:
+            surface_learning = get_surface_learning_scope(
+                scope_type=resolved_scope_type,
+                scope_id=resolved_scope_id,
+                task_id=task_id,
+                work_context_id=work_context_id,
+                agent_id=agent_id,
+                industry_instance_id=industry_instance_id,
+                owner_agent_id=owner_agent_id,
+                limit=3,
+            )
+        except Exception:
+            surface_learning = None
+        if surface_learning is not None:
+            surface_learning_payload = serialize_surface_learning_payload(
+                payload=surface_learning,
+                live_graph=(
+                    surface_learning.get("live_graph")
+                    if isinstance(surface_learning, dict)
+                    else None
+                ),
+                latest_evidence=(
+                    surface_learning.get("latest_evidence")
+                    if isinstance(surface_learning, dict)
+                    else None
+                ),
+            )
     return {
         "scope_type": resolved_scope_type or "global",
         "scope_id": resolved_scope_id or "runtime",
         "query": normalized_query or None,
         "activation": activation_payload,
         "sleep": dict(sleep_payload or {}) if isinstance(sleep_payload, dict) else {},
+        "surface_learning": surface_learning_payload,
         "relation_count": len(relation_payloads),
         "relation_kind_counts": dict(relation_kind_counts),
         "relations": relation_payloads,

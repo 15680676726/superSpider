@@ -482,6 +482,84 @@ def test_query_execution_prompt_prefers_overlay_profile_surface_for_prompt_conte
     assert "# Truth-First Lexical Recall" in joined
 
 
+def test_query_execution_prompt_reads_surface_learning_playbook_and_reward() -> None:
+    class _SurfaceAwareMemorySurfaceService:
+        def resolve_truth_first_scope_snapshot(self, **kwargs):
+            _ = kwargs
+            return {
+                "entries": [],
+                "latest_entries": [],
+                "history_entries": [],
+                "profile": {},
+            }
+
+        def resolve_surface_learning_scope(self, **kwargs):
+            assert kwargs["scope_type"] == "work_context"
+            assert kwargs["scope_id"] == "ctx-media-ops"
+            return {
+                "scope_level": "work_context",
+                "scope_id": "ctx-media-ops",
+                "version": 4,
+                "updated_at": datetime.now(UTC),
+                "active_twins": [
+                    {
+                        "twin_id": "twin:publish",
+                        "capability_name": "publish_listing",
+                        "capability_kind": "action",
+                        "surface_kind": "browser",
+                        "summary": "Publish the listing from the current browser surface.",
+                        "risk_level": "auto",
+                        "version": 4,
+                        "updated_at": datetime.now(UTC),
+                    }
+                ],
+                "active_playbook": {
+                    "playbook_id": "playbook:publish",
+                    "summary": "Publish the listing and verify the result.",
+                    "capability_names": ["publish_listing"],
+                    "recommended_steps": ["Open publish dialog", "Confirm publish"],
+                    "execution_steps": ["Open publish dialog", "Confirm publish"],
+                    "success_signals": ["published confirmation"],
+                    "version": 4,
+                    "updated_at": datetime.now(UTC),
+                },
+                "reward_ranking": [
+                    {
+                        "twin_id": "twin:publish",
+                        "capability_name": "publish_listing",
+                        "surface_kind": "browser",
+                        "summary": "Publish the listing from the current browser surface.",
+                        "score": 18.0,
+                        "reasons": ["assignment+12.0", "strategy+6.0"],
+                        "version": 4,
+                        "updated_at": datetime.now(UTC),
+                    }
+                ],
+            }
+
+    service = KernelQueryExecutionService(
+        session_backend=object(),
+        memory_recall_service=_OverlayAwarePromptRecallService(),
+        memory_surface_service=_SurfaceAwareMemorySurfaceService(),
+    )
+
+    lines = service._build_retrieved_knowledge_lines(
+        msgs=["Use the publish path and verify the result."],
+        owner_agent_id="copaw-agent-runner",
+        industry_instance_id="industry-1",
+        industry_role_id="execution-core",
+        owner_scope="runtime",
+        work_context_id="ctx-media-ops",
+    )
+
+    joined = "\n".join(lines)
+    assert "# Surface Learning Playbook" in joined
+    assert "publish_listing" in joined
+    assert "Open publish dialog" in joined
+    assert "# Surface Reward Ranking" in joined
+    assert "18.0" in joined
+
+
 def test_query_execution_prompt_keeps_truth_first_scope_priority_with_activation() -> None:
     recall_service = _CapturingMemoryRecallService()
     activation_service = _FakeMemoryActivationService()

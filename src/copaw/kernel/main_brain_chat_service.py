@@ -848,6 +848,58 @@ def _format_truth_first_profile(
     )
 
 
+def _surface_learning_text_list(value: object | None) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    items: list[str] = []
+    for item in value:
+        text = str(item or "").strip()
+        if text:
+            items.append(text)
+    return items
+
+
+def _format_surface_learning_snapshot(snapshot: dict[str, Any] | None) -> str | None:
+    payload = dict(snapshot or {})
+    if not payload:
+        return None
+    lines: list[str] = []
+    active_playbook = (
+        dict(payload.get("active_playbook"))
+        if isinstance(payload.get("active_playbook"), dict)
+        else {}
+    )
+    if active_playbook:
+        lines.append("## Surface Learning Playbook")
+        summary = _first_non_empty(active_playbook.get("summary"))
+        if summary is not None:
+            lines.append(f"- Summary: {_clip_text(summary, limit=160)}")
+        capability_names = _surface_learning_text_list(
+            active_playbook.get("capability_names"),
+        )
+        if capability_names:
+            lines.append(f"- Capabilities: {', '.join(capability_names)}")
+        for step in _surface_learning_text_list(active_playbook.get("recommended_steps"))[:3]:
+            lines.append(f"- Step: {_clip_text(step, limit=120)}")
+    reward_ranking = payload.get("reward_ranking")
+    if isinstance(reward_ranking, list) and reward_ranking:
+        if lines:
+            lines.append("")
+        lines.append("## Surface Reward Ranking")
+        for item in reward_ranking[:3]:
+            ranking_item = dict(item) if isinstance(item, dict) else {}
+            capability_name = _first_non_empty(ranking_item.get("capability_name"))
+            if capability_name is None:
+                continue
+            score = ranking_item.get("score")
+            score_text = f"{float(score):.1f}" if isinstance(score, (int, float)) else ""
+            line = f"- {capability_name}"
+            if score_text:
+                line = f"{line} ({score_text})"
+            lines.append(line)
+    return "\n".join(lines) if lines else None
+
+
 def _merge_system_prompt_messages(
     prompt_messages: list[dict[str, str]],
 ) -> list[dict[str, str]]:
@@ -2348,11 +2400,40 @@ class MainBrainChatService:
         latest_entries = list(snapshot.get("latest_entries") or [])
         history_entries = list(snapshot.get("history_entries") or [])
         profile = dict(snapshot.get("profile") or {})
+        resolve_surface_learning_scope = getattr(
+            self._memory_surface_service,
+            "resolve_surface_learning_scope",
+            None,
+        )
+        surface_learning_snapshot = (
+            dict(
+                resolve_surface_learning_scope(
+                    scope_type=scope_type,
+                    scope_id=scope_id,
+                    owner_agent_id=owner_agent_id,
+                    industry_instance_id=str(
+                        getattr(request, "industry_instance_id", "") or "",
+                    ).strip()
+                    or None,
+                )
+                or {},
+            )
+            if callable(resolve_surface_learning_scope)
+            else {}
+        )
+        surface_learning_block = _format_surface_learning_snapshot(
+            surface_learning_snapshot,
+        )
         return "\n".join(
             [
-                f"## Truth-First Memory Profile\n{_format_truth_first_profile(scope_type=scope_type, scope_id=scope_id, entries=entries, profile=profile)}",
-                f"## Truth-First Memory Latest Facts\n{_format_truth_first_entry_lines(latest_entries, limit=2)}",
-                f"## Truth-First Memory History\n{_format_truth_first_entry_lines(history_entries, limit=2)}",
+                block
+                for block in [
+                    f"## Truth-First Memory Profile\n{_format_truth_first_profile(scope_type=scope_type, scope_id=scope_id, entries=entries, profile=profile)}",
+                    f"## Truth-First Memory Latest Facts\n{_format_truth_first_entry_lines(latest_entries, limit=2)}",
+                    f"## Truth-First Memory History\n{_format_truth_first_entry_lines(history_entries, limit=2)}",
+                    surface_learning_block,
+                ]
+                if block
             ],
         )
 
