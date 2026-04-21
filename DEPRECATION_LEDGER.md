@@ -263,6 +263,10 @@
 - `2026-04-21` 状态补充：
   - actor runtime 前端/路由侧虽然已降到 `read-only-compat`，但 `delegation_service.py` 的正式派单地位并未在本轮变化
   - 因此 delegation 仍是 external-executor hard-cut 的后续删除项，而不是本轮已完成删除项
+  - execution-core baseline capability、industry compiler baseline、query runtime 默认 system capability allowlist、prompt capability projection 与 delegation-first prompt 文案，现已全部停止把 `system:delegate_task` 当 execution-core 默认正式能力暴露
+  - `capabilities/sources/system.py` 已把 `system:delegate_task` 明确标记为 local child-task delegation compatibility alias
+  - focused compatibility regression 仍证明显式 `system:delegate_task` / `TaskDelegationService` 链可以工作；因此本条目当前状态继续保持 `frozen`，不能误写成 `read-only-compat` 或 `ready-to-delete`
+  - 删除前提不变：必须先让 assignment formal execution backend 完整收口到 executor runtime，再删除本地 delegation 执行分支
 
 ### 3.1.5 donor-first 外接项目产品面：`/capability-market/projects/install*`、`project donor` taxonomy、Runtime Center donor 读面
 

@@ -132,7 +132,7 @@ def test_agent_profile_service_backfills_industry_baseline_capabilities(tmp_path
     assert "system:dispatch_query" in (execution_core.capabilities or [])
     assert "system:dispatch_goal" not in (execution_core.capabilities or [])
     assert "system:dispatch_active_goals" not in (execution_core.capabilities or [])
-    assert "system:delegate_task" in (execution_core.capabilities or [])
+    assert "system:delegate_task" not in (execution_core.capabilities or [])
     assert "system:apply_role" in (execution_core.capabilities or [])
     assert "system:discover_capabilities" in (execution_core.capabilities or [])
     assert "tool:edit_file" in (execution_core.capabilities or [])
@@ -514,8 +514,8 @@ def test_agent_profile_service_builds_prompt_capability_projection(tmp_path) -> 
     projection = service.get_prompt_capability_projection("industry-execution-core-ops")
 
     assert projection is not None
-    assert projection["effective_count"] == 9
-    assert projection["bucket_counts"]["system_dispatch"] >= 2
+    assert projection["effective_count"] == 8
+    assert projection["bucket_counts"]["system_dispatch"] >= 1
     assert projection["bucket_counts"]["system_governance"] >= 2
     assert projection["bucket_counts"]["tools"] == 5
     assert {item["label"] for item in projection["tools"]} == {

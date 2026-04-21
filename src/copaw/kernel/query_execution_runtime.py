@@ -2776,7 +2776,6 @@ class _QueryExecutionRuntimeMixin(
             "system:apply_role",
             "system:discover_capabilities",
             "system:dispatch_query",
-            "system:delegate_task",
         }
         filtered_system_capability_ids = {
             capability_id

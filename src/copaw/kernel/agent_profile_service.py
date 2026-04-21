@@ -48,7 +48,6 @@ PLATFORM_SYSTEM_AGENT_IDS = frozenset(
 )
 _EXECUTION_CORE_CONTROL_CAPABILITIES = [
     "system:dispatch_query",
-    "system:delegate_task",
     "system:apply_role",
     "system:discover_capabilities",
 ]
@@ -857,10 +856,7 @@ class AgentProfileService:
             else _infer_capability_source_kind(capability_id)
         )
         if normalized_source_kind == "system":
-            if capability_id in {
-                "system:dispatch_query",
-                "system:delegate_task",
-            }:
+            if capability_id == "system:dispatch_query":
                 return "system_dispatch"
             return "system_governance"
         if normalized_source_kind == "tool":

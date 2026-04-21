@@ -33,6 +33,11 @@
 ## 2026-04-21 Status Snapshot
 
 - `Task 2`: still partial. `models_external_runtime.py` / `external_runtime_service.py` bridge helpers were not advanced in this closure slice.
+- `Task 2`: additional partial closure now landed for delegation default-surface demotion:
+  - execution-core baseline capability no longer exposes `system:delegate_task` by default
+  - query runtime default system capability allowlist no longer auto-mounts `delegate_task` for execution-core turns
+  - query prompt / capability projection / capability registry now describe `delegate_task` as a legacy compatibility path instead of a primary execution path
+  - `TaskDelegationService` itself still exists and is not retired
 - `Task 3`: partial overall, but actor-runtime demotion slice is now landed in the current worktree:
   - actor mutation and actor capability mutation routes were removed from `runtime_center_routes_actor.py`
   - actor payloads now advertise `read-only-compat`
@@ -42,6 +47,10 @@
 - `Task 7`: fresh `L1 + L2` evidence now exists for actor compatibility backend/frontend slices and `console` build, but not for `default regression`, `L3`, or `L4`.
 
 ## Fresh Verification
+
+- `python -m pytest tests/kernel/test_agent_profile_service.py tests/kernel/query_execution_environment_parts/lifecycle.py tests/kernel/query_execution_environment_parts/dispatch.py tests/kernel/test_assignment_envelope.py tests/app/test_capabilities_execution.py tests/app/test_runtime_center_task_delegation_api.py -q`
+  - `130 passed in 88.04s`
+  - Acceptance: `L1 + L2`
 
 - `PYTHONPATH=src python -m pytest tests/app/test_runtime_center_actor_api.py -q`
   - `8 passed in 37.69s`
@@ -59,6 +68,7 @@
 ## Remaining Boundaries
 
 - `delegation_service.py` is still not retired.
+- `delegate_task` is no longer a default execution-core surface, but it still exists as an explicit compatibility capability.
 - donor/provider compatibility boundaries were not advanced in this closure slice.
 - `default regression`, `live smoke`, and `long soak` remain unrun.
 - This plan must not be cited as proof of `L3/L4` closure or full external-executor hard-cut completion.

@@ -853,10 +853,7 @@ def _prompt_capability_bucket(
     source_kind: str,
 ) -> str:
     if source_kind == "system":
-        if capability_id in {
-            "system:dispatch_query",
-            "system:delegate_task",
-        }:
+        if capability_id == "system:dispatch_query":
             return "system_dispatch"
         return "system_governance"
     if source_kind == "tool":

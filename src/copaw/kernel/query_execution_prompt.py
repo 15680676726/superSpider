@@ -1240,7 +1240,7 @@ class _QueryExecutionPromptMixin:
         lines = [
             "- Delegation-first policy is active for this turn because specialist teammates are available.",
             "- Direct tools are disabled on the control core for this turn. Delegate one concrete subtask to a named specialist instead.",
-            "- When using dispatch_query or delegate_task, include target_agent_id, target_role_id, or target_role_name explicitly; do not leave the target implicit.",
+            "- When using dispatch_query, include target_agent_id, target_role_id, or target_role_name explicitly; do not leave the target implicit.",
             "- Delegation stays available, but first compare reports, detect conflicts/holes, and own the operator-facing synthesis for this turn.",
             f"- Candidate teammates: {delegation_guard.teammate_summary()}",
         ]
@@ -1572,7 +1572,7 @@ class _QueryExecutionPromptMixin:
             )
         if "system:delegate_task" in capability_ids:
             lines.append(
-                "- Task delegation is mounted; use it to assign work to a specific teammate from the team roster and include their agent_id or role_id.",
+                "- Legacy task delegation compatibility is mounted; prefer dispatch_query or the executor-runtime path unless an older local actor flow explicitly requires delegate_task.",
             )
         if "system:apply_role" in capability_ids:
             lines.append(

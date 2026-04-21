@@ -60,7 +60,6 @@ _BUSINESS_ALLOWED_CAPABILITIES = [
 _ROLE_BASELINE_CAPABILITIES = {
     EXECUTION_CORE_ROLE_ID: [
     "system:dispatch_query",
-    "system:delegate_task",
     "system:apply_role",
     "system:discover_capabilities",
     ],

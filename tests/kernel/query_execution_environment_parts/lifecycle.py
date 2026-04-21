@@ -569,7 +569,6 @@ def test_query_execution_service_uses_agent_profile_and_capability_graph(
     } == {
         "discover_capabilities",
         "dispatch_query",
-        "delegate_task",
         "apply_role",
     }
     assert "Role: 白泽执行中枢" in agent.kwargs["prompt_appendix"]
@@ -625,7 +624,17 @@ def test_query_execution_service_uses_agent_profile_and_capability_graph(
     assert "Capability discovery is mounted" in agent.kwargs["prompt_appendix"]
     assert "Goal dispatch is mounted" not in agent.kwargs["prompt_appendix"]
     assert "Focused sub-query dispatch is mounted" in agent.kwargs["prompt_appendix"]
+    assert "Task delegation is mounted" not in agent.kwargs["prompt_appendix"]
     assert "Governed role/capability assignment is mounted" in agent.kwargs["prompt_appendix"]
+    assert (
+        "When using dispatch_query or delegate_task, include target_agent_id"
+        not in agent.kwargs["prompt_appendix"]
+    )
+    assert (
+        "When using dispatch_query, include target_agent_id, target_role_id, or "
+        "target_role_name explicitly; do not leave the target implicit."
+        in agent.kwargs["prompt_appendix"]
+    )
     assert "Shell execution runs on the current Windows host." in agent.kwargs["prompt_appendix"]
     assert "Prefer PowerShell or other Windows-native commands first." in agent.kwargs[
         "prompt_appendix"

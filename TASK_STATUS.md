@@ -195,6 +195,40 @@
   - `/capability-market/projects/install*` / donor-provider compatibility 边界未在本轮继续推进
   - 因此 external-executor hard-cut 当前仍只能写到 `L1 + L2`，不能写成 `L3/L4` 已闭环
 
+## 1.0.4 `2026-04-21` delegation default-surface compatibility demotion
+
+- 当前工作树继续把 `Task 2 / Step 4` 往前推了一个默认暴露面收口切片，但这次没有物理删除 `delegation_service.py`：
+  - `src/copaw/kernel/agent_profile_service.py`
+    - execution-core baseline capability 已移除 `system:delegate_task`
+    - prompt capability projection 不再把 `delegate_task` 计入默认 dispatch bucket
+  - `src/copaw/industry/compiler.py`
+    - execution-core 行业 baseline capability 已移除 `system:delegate_task`
+  - `src/copaw/kernel/query_execution_runtime.py`
+    - execution-core query runtime 的默认 system capability allowlist 已移除 `system:delegate_task`
+  - `src/copaw/kernel/query_execution_prompt.py`
+    - delegation-first prompt 不再把 `dispatch_query / delegate_task` 并列成默认动作
+    - 若显式挂载 `delegate_task`，prompt 现在会把它描述为 legacy compatibility path，而不是正式首选执行链
+  - `src/copaw/kernel/query_execution_tools.py`
+    - `delegate_task` tool docstring 已同步成 compatibility 口径
+  - `src/copaw/capabilities/sources/system.py`
+    - `system:delegate_task` 已明确标记为 local child-task delegation compatibility alias
+- 当前能诚实表述的结论：
+  - execution-core 默认不再把 `delegate_task` 当正式一等能力暴露给 query runtime / prompt / capability projection
+  - `TaskDelegationService` 仍然存在，且显式 `system:delegate_task` / runtime-center focused compatibility tests 继续可用
+  - 这证明 delegation default-surface demotion slice 到了 `L1 + L2`
+  - 这不等于 `delegation_service.py` 已退役，更不等于 assignment formal execution backend 已完全切离本地 actor compatibility chain
+- 当前 fresh focused regression 证据：
+  - Delegation default-surface + compatibility focused regression：
+    - 命令：`python -m pytest tests/kernel/test_agent_profile_service.py tests/kernel/query_execution_environment_parts/lifecycle.py tests/kernel/query_execution_environment_parts/dispatch.py tests/kernel/test_assignment_envelope.py tests/app/test_capabilities_execution.py tests/app/test_runtime_center_task_delegation_api.py -q`
+    - 结果：`130 passed in 88.04s`
+    - 验收层级：`L1 + L2`
+- 当前仍然明确未完成：
+  - `delegation_service.py` 仍承担显式 compatibility delegation 写链，尚未物理退役
+  - `default regression`：未跑
+  - `live smoke`：未跑
+  - `long soak`：未跑
+  - 因此 external-executor hard-cut 当前仍只能写到 `L1 + L2`
+
 ## 1.1.1 `2026-04-07` Buddy 领域能力阶段收口补充
 
 - Buddy 当前成长阶段的正式真相已从关系经验切到 active `BuddyDomainCapabilityRecord`

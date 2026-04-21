@@ -65,9 +65,9 @@ def test_query_execution_service_resolves_agent_from_request_agent_id_and_indust
     } == {
         "discover_capabilities",
         "dispatch_query",
-        "delegate_task",
         "apply_role",
     }
+    assert "Task delegation is mounted" not in agent.kwargs["prompt_appendix"]
 
 
 def test_query_execution_service_system_dispatch_tools_execute_via_kernel_dispatcher() -> None:

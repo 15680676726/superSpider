@@ -424,7 +424,7 @@ class _QueryExecutionToolsMixin:
                 parent_task_id: str | None = None,
                 execute: bool = False,
             ) -> ToolResponse:
-                """Delegate a focused task to another agent via the kernel delegation service."""
+                """Delegate a focused task through the legacy local delegation compatibility path."""
                 normalized_prompt = str(prompt_text or "").strip()
                 if not normalized_prompt:
                     return _json_tool_response(
