@@ -6,15 +6,29 @@ from typing import Any
 
 from .external_runtime_service import ExternalCapabilityRuntimeService
 from .models_executor_runtime import (
+    ExecutionPolicyRecord,
+    ExecutorEventRecord,
     ExecutorProviderRecord,
     ExecutorRuntimeInstanceRecord,
+    ExecutorThreadBindingRecord,
+    ExecutorTurnRecord,
     ModelInvocationPolicyRecord,
+    ProjectProfileRecord,
+    RoleContractRecord,
     RoleExecutorBindingRecord,
 )
 from .models_external_runtime import ExternalCapabilityRuntimeInstanceRecord
+from .repositories.base import BaseExecutorRuntimeRepository
+from .repositories.sqlite_executor_runtime import SqliteExecutorRuntimeRepository
+from .store import SQLiteStateStore
 
 _EXECUTOR_RUNTIME_METADATA_KEY = "executor_runtime"
 _ACTIVE_RUNTIME_STATUSES = {"starting", "restarting", "ready", "degraded"}
+_TERMINAL_RUNTIME_STATUSES = {"completed", "stopped", "failed", "orphaned"}
+_TERMINAL_TURN_STATUS_BY_EVENT = {
+    "task_completed": "completed",
+    "task_failed": "failed",
+}
 
 
 def _utc_now() -> datetime:
@@ -67,19 +81,47 @@ def _compat_scope(
         assignment = _text(assignment_id)
         if assignment is None:
             raise ValueError("assignment scope requires assignment_id")
-        return ("session", {"session_mount_id": f"assignment:{assignment}", "work_context_id": None, "environment_ref": None})
+        return (
+            "session",
+            {
+                "session_mount_id": f"assignment:{assignment}",
+                "work_context_id": None,
+                "environment_ref": None,
+            },
+        )
     if scope_kind == "role":
         role = _text(role_id)
         if role is None:
             raise ValueError("role scope requires role_id")
-        return ("work_context", {"session_mount_id": None, "work_context_id": f"role:{role}", "environment_ref": None})
+        return (
+            "work_context",
+            {
+                "session_mount_id": None,
+                "work_context_id": f"role:{role}",
+                "environment_ref": None,
+            },
+        )
     if scope_kind == "project":
         project = _text(project_profile_id)
         if project is None:
             raise ValueError("project scope requires project_profile_id")
-        return ("work_context", {"session_mount_id": None, "work_context_id": f"project:{project}", "environment_ref": None})
+        return (
+            "work_context",
+            {
+                "session_mount_id": None,
+                "work_context_id": f"project:{project}",
+                "environment_ref": None,
+            },
+        )
     if scope_kind == "session":
-        return ("session", {"session_mount_id": f"runtime:{_text(role_id) or 'session'}", "work_context_id": None, "environment_ref": None})
+        return (
+            "session",
+            {
+                "session_mount_id": f"runtime:{_text(role_id) or 'session'}",
+                "work_context_id": None,
+                "environment_ref": None,
+            },
+        )
     raise ValueError(f"Unsupported executor scope_kind: {scope_kind}")
 
 
@@ -141,21 +183,92 @@ def _executor_runtime_from_external(
     )
 
 
+def _coerce_state_store(
+    external_runtime_service: ExternalCapabilityRuntimeService,
+    *,
+    explicit_store: SQLiteStateStore | None,
+) -> SQLiteStateStore | None:
+    if explicit_store is not None:
+        return explicit_store
+    repository = getattr(external_runtime_service, "_repository", None)
+    store = getattr(repository, "_store", None)
+    return store if isinstance(store, SQLiteStateStore) else None
+
+
 class ExecutorRuntimeService:
     def __init__(
         self,
         *,
         external_runtime_service: ExternalCapabilityRuntimeService,
+        state_store: SQLiteStateStore | None = None,
+        repository: BaseExecutorRuntimeRepository | None = None,
     ) -> None:
         self._external_runtime_service = external_runtime_service
+        resolved_store = _coerce_state_store(
+            external_runtime_service,
+            explicit_store=state_store,
+        )
+        self._repository = repository or (
+            SqliteExecutorRuntimeRepository(resolved_store)
+            if resolved_store is not None
+            else None
+        )
+        self._role_contracts: dict[str, RoleContractRecord] = {}
+        self._project_profiles: dict[str, ProjectProfileRecord] = {}
+        self._execution_policies: dict[str, ExecutionPolicyRecord] = {}
         self._providers: dict[str, ExecutorProviderRecord] = {}
         self._role_bindings: dict[str, RoleExecutorBindingRecord] = {}
         self._model_policies: dict[str, ModelInvocationPolicyRecord] = {}
+        self._thread_bindings: dict[str, ExecutorThreadBindingRecord] = {}
+        self._turn_records: dict[str, ExecutorTurnRecord] = {}
+        self._event_records: dict[str, ExecutorEventRecord] = {}
+
+    def upsert_role_contract(self, record: RoleContractRecord) -> RoleContractRecord:
+        repository = self._repository
+        if repository is not None:
+            return repository.upsert_role_contract(record)
+        self._role_contracts[record.role_id] = record
+        return record
+
+    def resolve_role_contract(self, role_id: str) -> RoleContractRecord | None:
+        repository = self._repository
+        if repository is not None:
+            return repository.get_role_contract(role_id)
+        return self._role_contracts.get(role_id)
+
+    def upsert_project_profile(self, record: ProjectProfileRecord) -> ProjectProfileRecord:
+        repository = self._repository
+        if repository is not None:
+            return repository.upsert_project_profile(record)
+        self._project_profiles[record.project_profile_id] = record
+        return record
+
+    def resolve_project_profile(self, project_profile_id: str) -> ProjectProfileRecord | None:
+        repository = self._repository
+        if repository is not None:
+            return repository.get_project_profile(project_profile_id)
+        return self._project_profiles.get(project_profile_id)
+
+    def upsert_execution_policy(self, record: ExecutionPolicyRecord) -> ExecutionPolicyRecord:
+        repository = self._repository
+        if repository is not None:
+            return repository.upsert_execution_policy(record)
+        self._execution_policies[record.policy_id] = record
+        return record
+
+    def resolve_execution_policy(self, policy_id: str) -> ExecutionPolicyRecord | None:
+        repository = self._repository
+        if repository is not None:
+            return repository.get_execution_policy(policy_id)
+        return self._execution_policies.get(policy_id)
 
     def upsert_executor_provider(
         self,
         provider: ExecutorProviderRecord,
     ) -> ExecutorProviderRecord:
+        repository = self._repository
+        if repository is not None:
+            return repository.upsert_executor_provider(provider)
         self._providers[provider.provider_id] = provider
         return provider
 
@@ -163,6 +276,9 @@ class ExecutorRuntimeService:
         self,
         binding: RoleExecutorBindingRecord,
     ) -> RoleExecutorBindingRecord:
+        repository = self._repository
+        if repository is not None:
+            return repository.upsert_role_executor_binding(binding)
         self._role_bindings[binding.role_id] = binding
         return binding
 
@@ -170,19 +286,57 @@ class ExecutorRuntimeService:
         self,
         policy: ModelInvocationPolicyRecord,
     ) -> ModelInvocationPolicyRecord:
+        repository = self._repository
+        if repository is not None:
+            return repository.upsert_model_invocation_policy(policy)
         self._model_policies[policy.policy_id] = policy
         return policy
 
     def resolve_executor_provider(self, provider_id: str) -> ExecutorProviderRecord | None:
+        repository = self._repository
+        if repository is not None:
+            return repository.get_executor_provider(provider_id)
         return self._providers.get(provider_id)
 
+    def list_executor_providers(
+        self,
+        *,
+        status: str | None = None,
+        limit: int | None = None,
+    ) -> list[ExecutorProviderRecord]:
+        repository = self._repository
+        if repository is not None:
+            return repository.list_executor_providers(
+                status=status,
+                limit=limit,
+            )
+        items = list(self._providers.values())
+        if status is not None:
+            items = [item for item in items if item.status == status]
+        items.sort(
+            key=lambda item: (
+                item.updated_at or item.created_at,
+                item.created_at,
+            ),
+            reverse=True,
+        )
+        if isinstance(limit, int) and limit > 0:
+            return items[:limit]
+        return items
+
     def resolve_role_executor_binding(self, role_id: str) -> RoleExecutorBindingRecord | None:
+        repository = self._repository
+        if repository is not None:
+            return repository.get_role_executor_binding(role_id)
         return self._role_bindings.get(role_id)
 
     def resolve_model_invocation_policy(
         self,
         policy_id: str,
     ) -> ModelInvocationPolicyRecord | None:
+        repository = self._repository
+        if repository is not None:
+            return repository.get_model_invocation_policy(policy_id)
         return self._model_policies.get(policy_id)
 
     def get_runtime(
@@ -268,13 +422,22 @@ class ExecutorRuntimeService:
                 metadata=metadata,
             ),
         )
-        return _executor_runtime_from_external(record)
+        runtime = _executor_runtime_from_external(record)
+        if thread_id is not None:
+            self._sync_thread_binding(
+                runtime=runtime,
+                thread_id=thread_id,
+                last_turn_id=None,
+                metadata=metadata,
+            )
+        return runtime
 
     def mark_runtime_ready(
         self,
         runtime_id: str,
         *,
         thread_id: str | None = None,
+        turn_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> ExecutorRuntimeInstanceRecord:
         current = self._external_runtime_service.get_runtime(runtime_id)
@@ -284,7 +447,10 @@ class ExecutorRuntimeService:
         updated = self._external_runtime_service.mark_runtime_ready(
             runtime_id,
             metadata=_executor_metadata(
-                executor_id=str(compat.get("executor_id") or _executor_id_from_capability_id(current.capability_id)),
+                executor_id=str(
+                    compat.get("executor_id")
+                    or _executor_id_from_capability_id(current.capability_id)
+                ),
                 protocol_kind=str(compat.get("protocol_kind") or "unknown"),
                 scope_kind=str(compat.get("scope_kind") or "assignment"),
                 assignment_id=_text(compat.get("assignment_id")),
@@ -295,7 +461,23 @@ class ExecutorRuntimeService:
                 metadata=metadata,
             ),
         )
-        return _executor_runtime_from_external(updated)
+        runtime = _executor_runtime_from_external(updated)
+        binding = self._sync_thread_binding(
+            runtime=runtime,
+            thread_id=_text(thread_id) or runtime.thread_id,
+            last_turn_id=turn_id,
+            metadata=metadata,
+        )
+        if binding is not None and turn_id is not None:
+            self._sync_turn_record(
+                binding=binding,
+                runtime=runtime,
+                turn_id=turn_id,
+                turn_status="running",
+                summary=None,
+                metadata=metadata,
+            )
+        return runtime
 
     def mark_runtime_stopped(
         self,
@@ -308,12 +490,19 @@ class ExecutorRuntimeService:
         if current is None:
             raise KeyError(f"Runtime '{runtime_id}' not found")
         compat = dict(current.metadata.get(_EXECUTOR_RUNTIME_METADATA_KEY, {}) or {})
-        normalized_status = status if status in _ACTIVE_RUNTIME_STATUSES | {"completed", "stopped", "failed", "orphaned"} else "stopped"
+        normalized_status = (
+            status
+            if status in _ACTIVE_RUNTIME_STATUSES | _TERMINAL_RUNTIME_STATUSES
+            else "stopped"
+        )
         updated = self._external_runtime_service.mark_runtime_stopped(
             runtime_id,
             status=normalized_status,
             metadata=_executor_metadata(
-                executor_id=str(compat.get("executor_id") or _executor_id_from_capability_id(current.capability_id)),
+                executor_id=str(
+                    compat.get("executor_id")
+                    or _executor_id_from_capability_id(current.capability_id)
+                ),
                 protocol_kind=str(compat.get("protocol_kind") or "unknown"),
                 scope_kind=str(compat.get("scope_kind") or "assignment"),
                 assignment_id=_text(compat.get("assignment_id")),
@@ -324,4 +513,327 @@ class ExecutorRuntimeService:
                 metadata=metadata,
             ),
         )
-        return _executor_runtime_from_external(updated)
+        runtime = _executor_runtime_from_external(updated)
+        for binding in self.list_thread_bindings(runtime_id=runtime_id):
+            updated_binding = binding.model_copy(
+                update={
+                    "runtime_status": normalized_status,
+                    "last_seen_at": _utc_now(),
+                    "metadata": _merge_metadata(binding.metadata, metadata),
+                    "updated_at": _utc_now(),
+                }
+            )
+            self._store_thread_binding(updated_binding)
+        return runtime
+
+    def list_thread_bindings(
+        self,
+        *,
+        runtime_id: str | None = None,
+        thread_id: str | None = None,
+        role_id: str | None = None,
+        assignment_id: str | None = None,
+        limit: int | None = None,
+    ) -> list[ExecutorThreadBindingRecord]:
+        repository = self._repository
+        if repository is not None:
+            return repository.list_thread_bindings(
+                runtime_id=runtime_id,
+                thread_id=thread_id,
+                role_id=role_id,
+                assignment_id=assignment_id,
+                limit=limit,
+            )
+        items = list(self._thread_bindings.values())
+        filtered = [
+            item
+            for item in items
+            if (runtime_id is None or item.runtime_id == runtime_id)
+            and (thread_id is None or item.thread_id == thread_id)
+            and (role_id is None or item.role_id == role_id)
+            and (assignment_id is None or item.assignment_id == assignment_id)
+        ]
+        filtered.sort(
+            key=lambda item: (
+                item.updated_at or item.created_at,
+                item.created_at,
+            ),
+            reverse=True,
+        )
+        if isinstance(limit, int) and limit > 0:
+            return filtered[:limit]
+        return filtered
+
+    def list_turn_records(
+        self,
+        *,
+        runtime_id: str | None = None,
+        thread_id: str | None = None,
+        assignment_id: str | None = None,
+        turn_id: str | None = None,
+        limit: int | None = None,
+    ) -> list[ExecutorTurnRecord]:
+        repository = self._repository
+        if repository is not None:
+            return repository.list_turn_records(
+                runtime_id=runtime_id,
+                thread_id=thread_id,
+                assignment_id=assignment_id,
+                turn_id=turn_id,
+                limit=limit,
+            )
+        items = list(self._turn_records.values())
+        filtered = [
+            item
+            for item in items
+            if (runtime_id is None or item.runtime_id == runtime_id)
+            and (thread_id is None or item.thread_id == thread_id)
+            and (assignment_id is None or item.assignment_id == assignment_id)
+            and (turn_id is None or item.turn_id == turn_id)
+        ]
+        filtered.sort(
+            key=lambda item: (
+                item.updated_at or item.created_at,
+                item.created_at,
+            ),
+            reverse=True,
+        )
+        if isinstance(limit, int) and limit > 0:
+            return filtered[:limit]
+        return filtered
+
+    def list_event_records(
+        self,
+        *,
+        runtime_id: str | None = None,
+        thread_id: str | None = None,
+        assignment_id: str | None = None,
+        turn_id: str | None = None,
+        event_type: str | None = None,
+        limit: int | None = None,
+    ) -> list[ExecutorEventRecord]:
+        repository = self._repository
+        if repository is not None:
+            return repository.list_event_records(
+                runtime_id=runtime_id,
+                thread_id=thread_id,
+                assignment_id=assignment_id,
+                turn_id=turn_id,
+                event_type=event_type,
+                limit=limit,
+            )
+        items = list(self._event_records.values())
+        filtered = [
+            item
+            for item in items
+            if (runtime_id is None or item.runtime_id == runtime_id)
+            and (thread_id is None or item.thread_id == thread_id)
+            and (assignment_id is None or item.assignment_id == assignment_id)
+            and (turn_id is None or item.turn_id == turn_id)
+            and (event_type is None or item.event_type == event_type)
+        ]
+        filtered.sort(key=lambda item: item.created_at, reverse=True)
+        if isinstance(limit, int) and limit > 0:
+            return filtered[:limit]
+        return filtered
+
+    def record_event(
+        self,
+        *,
+        runtime_id: str,
+        assignment_id: str | None,
+        thread_id: str | None,
+        turn_id: str | None,
+        event_type: str,
+        source_type: str,
+        payload: dict[str, Any] | None,
+        summary: str,
+        raw_method: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> ExecutorEventRecord:
+        runtime = self.get_runtime(runtime_id)
+        if runtime is None:
+            raise KeyError(f"Runtime '{runtime_id}' not found")
+        resolved_thread_id = _text(thread_id) or runtime.thread_id
+        binding = self._sync_thread_binding(
+            runtime=runtime,
+            thread_id=resolved_thread_id,
+            last_turn_id=turn_id,
+            metadata=metadata,
+        )
+        turn_record = None
+        if binding is not None and turn_id is not None:
+            turn_status = _TERMINAL_TURN_STATUS_BY_EVENT.get(event_type, "running")
+            turn_record = self._sync_turn_record(
+                binding=binding,
+                runtime=runtime,
+                turn_id=turn_id,
+                turn_status=turn_status,
+                summary=summary if turn_status in {"completed", "failed"} else None,
+                metadata=metadata,
+            )
+        event_record = ExecutorEventRecord(
+            runtime_id=runtime_id,
+            turn_record_id=turn_record.turn_record_id if turn_record is not None else None,
+            assignment_id=_text(assignment_id) or runtime.assignment_id,
+            thread_id=resolved_thread_id,
+            turn_id=_text(turn_id),
+            event_type=event_type,
+            source_type=source_type,
+            summary=str(summary or "").strip(),
+            payload=dict(payload or {}),
+            raw_method=_text(raw_method),
+            metadata=dict(metadata or {}),
+        )
+        stored = self._store_event_record(event_record)
+        terminal_runtime_status = _TERMINAL_TURN_STATUS_BY_EVENT.get(event_type)
+        if terminal_runtime_status is not None:
+            runtime = self.mark_runtime_stopped(
+                runtime_id,
+                status=terminal_runtime_status,
+                metadata={"last_event_type": event_type, **dict(metadata or {})},
+            )
+            if binding is not None:
+                self._sync_thread_binding(
+                    runtime=runtime,
+                    thread_id=resolved_thread_id,
+                    last_turn_id=turn_id,
+                    metadata=metadata,
+                )
+        return stored
+
+    def _store_thread_binding(
+        self,
+        record: ExecutorThreadBindingRecord,
+    ) -> ExecutorThreadBindingRecord:
+        repository = self._repository
+        if repository is not None:
+            return repository.upsert_thread_binding(record)
+        self._thread_bindings[record.binding_id] = record
+        return record
+
+    def _store_turn_record(self, record: ExecutorTurnRecord) -> ExecutorTurnRecord:
+        repository = self._repository
+        if repository is not None:
+            return repository.upsert_turn_record(record)
+        self._turn_records[record.turn_record_id] = record
+        return record
+
+    def _store_event_record(self, record: ExecutorEventRecord) -> ExecutorEventRecord:
+        repository = self._repository
+        if repository is not None:
+            return repository.upsert_event_record(record)
+        self._event_records[record.event_id] = record
+        return record
+
+    def _sync_thread_binding(
+        self,
+        *,
+        runtime: ExecutorRuntimeInstanceRecord,
+        thread_id: str | None,
+        last_turn_id: str | None,
+        metadata: dict[str, Any] | None,
+    ) -> ExecutorThreadBindingRecord | None:
+        resolved_thread_id = _text(thread_id)
+        if resolved_thread_id is None:
+            return None
+        existing = next(
+            iter(
+                self.list_thread_bindings(
+                    runtime_id=runtime.runtime_id,
+                    thread_id=resolved_thread_id,
+                    limit=1,
+                )
+            ),
+            None,
+        )
+        now = _utc_now()
+        if existing is None:
+            record = ExecutorThreadBindingRecord(
+                runtime_id=runtime.runtime_id,
+                role_id=runtime.role_id,
+                executor_provider_id=runtime.executor_id,
+                project_profile_id=runtime.project_profile_id,
+                assignment_id=runtime.assignment_id,
+                thread_id=resolved_thread_id,
+                runtime_status=runtime.runtime_status,
+                last_turn_id=_text(last_turn_id),
+                last_seen_at=now,
+                metadata=dict(metadata or {}),
+            )
+        else:
+            record = existing.model_copy(
+                update={
+                    "role_id": runtime.role_id or existing.role_id,
+                    "executor_provider_id": runtime.executor_id,
+                    "project_profile_id": runtime.project_profile_id or existing.project_profile_id,
+                    "assignment_id": runtime.assignment_id or existing.assignment_id,
+                    "thread_id": resolved_thread_id,
+                    "runtime_status": runtime.runtime_status,
+                    "last_turn_id": _text(last_turn_id) or existing.last_turn_id,
+                    "last_seen_at": now,
+                    "metadata": _merge_metadata(existing.metadata, metadata),
+                    "updated_at": now,
+                }
+            )
+        return self._store_thread_binding(record)
+
+    def _sync_turn_record(
+        self,
+        *,
+        binding: ExecutorThreadBindingRecord,
+        runtime: ExecutorRuntimeInstanceRecord,
+        turn_id: str,
+        turn_status: str,
+        summary: str | None,
+        metadata: dict[str, Any] | None,
+    ) -> ExecutorTurnRecord:
+        existing = next(
+            iter(
+                self.list_turn_records(
+                    runtime_id=runtime.runtime_id,
+                    turn_id=turn_id,
+                    limit=1,
+                )
+            ),
+            None,
+        )
+        now = _utc_now()
+        started_at = (
+            existing.started_at
+            if existing is not None and existing.started_at is not None
+            else now
+        )
+        completed_at = (
+            now
+            if turn_status in {"completed", "failed", "stopped"}
+            else (existing.completed_at if existing is not None else None)
+        )
+        if existing is None:
+            record = ExecutorTurnRecord(
+                runtime_id=runtime.runtime_id,
+                thread_binding_id=binding.binding_id,
+                assignment_id=runtime.assignment_id,
+                thread_id=binding.thread_id,
+                turn_id=turn_id,
+                turn_status=turn_status,
+                started_at=started_at,
+                completed_at=completed_at,
+                summary=_text(summary),
+                metadata=dict(metadata or {}),
+            )
+        else:
+            record = existing.model_copy(
+                update={
+                    "thread_binding_id": binding.binding_id,
+                    "assignment_id": runtime.assignment_id or existing.assignment_id,
+                    "thread_id": binding.thread_id,
+                    "turn_status": turn_status,
+                    "started_at": started_at,
+                    "completed_at": completed_at,
+                    "summary": _text(summary) or existing.summary,
+                    "metadata": _merge_metadata(existing.metadata, metadata),
+                    "updated_at": now,
+                }
+            )
+        return self._store_turn_record(record)

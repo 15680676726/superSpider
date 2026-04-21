@@ -54,6 +54,20 @@
   - selected `L3` smoke now passes for runtime front-door / Runtime Center readback
   - selected `L4` soak now passes for `3` repeated long-chain cycles across `phase_next_autonomy_smoke + runtime_canonical_flow_e2e + operator_runtime_e2e`
 
+## 2026-04-21 Late Closure Update
+
+- This plan is now historical and must not be treated as the latest state snapshot.
+- Subsequent same-day closure landed the two previously open hard items:
+  - formal assignment execution now short-circuits to executor runtime from `src/copaw/kernel/main_brain_orchestrator.py` instead of falling back to local `query_execution_service.execute_stream(...)`
+  - `src/copaw/kernel/delegation_service.py` is no longer the primary assignment execution backend; it remains only as an explicit compatibility child-task path and now marks child-run metadata with `execution_source = delegation-compat`
+  - formal provider inventory/intake now exists through:
+    - `GET /capability-market/executor-providers/search`
+    - `POST /capability-market/executor-providers/install`
+  - Runtime Center state query and executor runtime repository now expose formal provider inventory read paths
+- The latest truthful state lives in:
+  - `TASK_STATUS.md` section `1.0.7`
+  - `DEPRECATION_LEDGER.md` entries `3.1.4` and `3.1.5`
+
 ## Fresh Verification
 
 - `python -m pytest tests/kernel/test_agent_profile_service.py tests/kernel/query_execution_environment_parts/lifecycle.py tests/kernel/query_execution_environment_parts/dispatch.py tests/kernel/test_assignment_envelope.py tests/app/test_capabilities_execution.py tests/app/test_runtime_center_task_delegation_api.py -q`
@@ -99,9 +113,9 @@
 
 ## Remaining Boundaries
 
-- `delegation_service.py` is still not retired.
+- `delegation_service.py` is no longer the formal assignment execution backend, but it still exists as an explicit compatibility capability/backend and has not been physically deleted.
 - `delegate_task` is no longer a default execution-core surface, but it still exists as an explicit compatibility capability.
-- donor/provider compatibility boundaries are now more explicit at the route/projection/metadata layer, but formal `ExecutorProvider` intake still has not replaced the donor/project install front door.
+- formal `ExecutorProvider` intake is now landed, but donor/project compatibility surfaces and donor taxonomy retirement are still not physically deleted.
 - selected `default regression`, `L3`, and `L4` evidence now exist for the `2026-04-21` closure slices, but this still does not prove full external-executor hard-cut completion.
 - `live external-provider smoke` and full-repo soak remain unrun.
-- This plan must not be cited as proof that formal `ExecutorProvider` intake, persisted `ExecutorEventRecord`, or delegation retirement are fully complete.
+- This plan must not be cited as proof that the entire external-executor hard-cut is fully complete; use the newer status/deprecation docs for the latest boundary statement.

@@ -267,6 +267,11 @@
   - `capabilities/sources/system.py` 已把 `system:delegate_task` 明确标记为 local child-task delegation compatibility alias
   - focused compatibility regression 仍证明显式 `system:delegate_task` / `TaskDelegationService` 链可以工作；因此本条目当前状态继续保持 `frozen`，不能误写成 `read-only-compat` 或 `ready-to-delete`
   - 删除前提不变：必须先让 assignment formal execution backend 完整收口到 executor runtime，再删除本地 delegation 执行分支
+- `2026-04-21` 最终收口补充：
+  - `src/copaw/kernel/main_brain_orchestrator.py` 现在会在 formal assignment + executor runtime coordination 成功时直接返回 executor-runtime ack stream，不再继续把同一条 assignment 落回本地 `query_execution_service.execute_stream(...)`
+  - 因此 `delegation_service.py` 已不再是 primary assignment execution backend；formal assignment write path 现在锚定到 `Assignment -> ExecutorRuntime -> Event -> Evidence/Report`
+  - `delegation_service.py` 仍保留为显式 compatibility child-task backend，且 child-task / mailbox / experience metadata 现统一标记 `execution_source = delegation-compat`
+  - 当前状态因此仍保持 `frozen`：formal-backend retirement 已完成，但物理删除与显式 compatibility capability 退役尚未完成
 
 ### 3.1.5 donor-first 外接项目产品面：`/capability-market/projects/install*`、`project donor` taxonomy、Runtime Center donor 读面
 
@@ -299,6 +304,13 @@
     - `/capability-market/projects/search`、`/projects/install*` 与 Runtime Center donor/package projection 现都会返回同一 compatibility 标记，避免再被误读成 canonical executor-provider surface
     - Runtime Center donor/package projection 也已兼容 dict-backed service payload，避免 donor 读面只因 projection 形态不同就静默掉数据
   - 但这仍只是 compatibility 标记收口，不是 formal executor provider intake 完整替代；本条目状态因此继续保持 `frozen`
+- `2026-04-21` 最终收口补充：
+  - `src/copaw/app/routers/capability_market.py` 已新增：
+    - `GET /capability-market/executor-providers/search`
+    - `POST /capability-market/executor-providers/install`
+  - `src/copaw/app/runtime_center/state_query.py` / `src/copaw/state/executor_runtime_service.py` / executor runtime repository 现已支持 formal provider inventory read path
+  - 因此 formal `ExecutorProvider / control_surface_kind / default_protocol_kind` intake 已落地，donor/project install 不再是唯一也不再是假装 canonical 的 executor intake 前门
+  - 但 donor/project product shell、donor state/trust/trial/retirement taxonomy 与 compatibility/acquisition-only 路由仍在；本条目因此继续保持 `frozen`，不得误写成“donor-first 产品面已删除”
 
 ### 3.1.6 本地 browser 执行层：`src/copaw/agents/tools/browser_control.py`、`src/copaw/capabilities/browser_runtime.py`、`src/copaw/environments/surface_execution/browser/service.py`
 

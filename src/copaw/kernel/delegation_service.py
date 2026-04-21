@@ -27,6 +27,7 @@ _ACTIVE_TASK_STATUSES = frozenset(
 _INFLIGHT_TASK_STATUSES = frozenset({"queued", "running", "waiting", "blocked", "needs-confirm"})
 _INFLIGHT_RUNTIME_STATUSES = frozenset({"active", "hydrating", "waiting-confirm"})
 _INFLIGHT_RUNTIME_PHASES = frozenset({"risk-check", "executing", "waiting-confirm"})
+_DELEGATION_COMPAT_EXECUTION_SOURCE = "delegation-compat"
 
 
 class DelegationError(ValueError):
@@ -275,11 +276,7 @@ class TaskDelegationService:
                         "industry_instance_id": industry_instance_id,
                         "industry_role_id": industry_role_id or resolution.role_id,
                         "assignment_id": getattr(parent_task, "assignment_id", None),
-                        "execution_source": (
-                            "assignment"
-                            if getattr(parent_task, "assignment_id", None)
-                            else "delegation"
-                        ),
+                        "execution_source": _DELEGATION_COMPAT_EXECUTION_SOURCE,
                         "access_mode": access_mode,
                         "lease_class": lease_class,
                         "writer_lock_scope": writer_lock_scope,
@@ -456,9 +453,7 @@ class TaskDelegationService:
                 "trace_id": child_task.trace_id,
                 "parent_task_id": child_task.parent_task_id,
                 "assignment_id": payload.get("assignment_id"),
-                "execution_source": (
-                    "assignment" if payload.get("assignment_id") else "delegation"
-                ),
+                "execution_source": _DELEGATION_COMPAT_EXECUTION_SOURCE,
             },
         )
         remember(
@@ -796,7 +791,7 @@ class TaskDelegationService:
         lease_class: str | None,
         writer_lock_scope: str | None,
     ) -> dict[str, object]:
-        execution_source = "assignment" if _non_empty_text(assignment_id) else "delegation"
+        execution_source = _DELEGATION_COMPAT_EXECUTION_SOURCE
 
         def _apply_execution_envelope(base_payload: dict[str, object]) -> dict[str, object]:
             payload_meta = dict(base_payload.get("meta") or {})

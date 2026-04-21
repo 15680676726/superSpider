@@ -13,6 +13,8 @@ from copaw.capabilities.sources.external_packages import list_external_package_c
 from copaw.config.config import Config, ExternalCapabilityPackageConfig
 from copaw.kernel import KernelResult
 from copaw.state import ExternalCapabilityRuntimeService, SQLiteStateStore
+from copaw.state.executor_runtime_service import ExecutorRuntimeService
+from copaw.state.models_executor_runtime import ExecutorProviderRecord
 from copaw.state.repositories import (
     SqliteDecisionRequestRepository,
     SqliteExternalCapabilityRuntimeRepository,
@@ -98,6 +100,17 @@ def _build_runtime_center_app(tmp_path) -> tuple[TestClient, ExternalCapabilityR
     return TestClient(app), runtime_service
 
 
+def _build_executor_runtime_service(
+    state_store: SQLiteStateStore,
+) -> ExecutorRuntimeService:
+    runtime_repository = SqliteExternalCapabilityRuntimeRepository(state_store)
+    external_runtime_service = ExternalCapabilityRuntimeService(repository=runtime_repository)
+    return ExecutorRuntimeService(
+        external_runtime_service=external_runtime_service,
+        state_store=state_store,
+    )
+
+
 def test_runtime_center_lists_external_runtimes(tmp_path) -> None:
     client, runtime_service = _build_runtime_center_app(tmp_path)
     runtime = runtime_service.create_or_reuse_service_runtime(
@@ -135,6 +148,34 @@ def test_runtime_center_returns_external_runtime_detail(tmp_path) -> None:
     payload = response.json()
     assert payload["runtime"]["runtime_id"] == runtime.runtime_id
     assert payload["runtime"]["capability_id"] == "runtime:flask"
+
+
+def test_runtime_center_state_query_lists_formal_executor_provider_inventory(
+    tmp_path,
+) -> None:
+    client, _runtime_service = _build_runtime_center_app(tmp_path)
+    query_service = client.app.state.state_query_service
+    state_store = SQLiteStateStore(tmp_path / "state.db")
+    executor_runtime_service = _build_executor_runtime_service(state_store)
+    executor_runtime_service.upsert_executor_provider(
+        ExecutorProviderRecord(
+            provider_id="codex-app-server",
+            provider_kind="external-executor",
+            runtime_family="codex",
+            control_surface_kind="app_server",
+            install_source_kind="catalog",
+            source_ref="codex://app-server",
+            default_protocol_kind="app_server",
+        )
+    )
+    query_service._executor_runtime_service = executor_runtime_service
+
+    payload = query_service.list_executor_providers(limit=5)
+
+    assert len(payload) == 1
+    assert payload[0]["provider_id"] == "codex-app-server"
+    assert payload[0]["control_surface_kind"] == "app_server"
+    assert payload[0]["formal_surface"] is True
 
 
 def test_runtime_center_start_action_omits_null_runtime_id(tmp_path, monkeypatch) -> None:

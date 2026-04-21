@@ -305,8 +305,60 @@
     - 验收层级：`selected L4`
 - 当前能诚实表述的结论：
   - actor-runtime `read-only-compat`、delegation default-surface demotion、以及 donor/project compatibility demotion 这三个 `2026-04-21` 收口 slice 现在都已具备 `L1 + L2 + default regression + selected L3 + selected L4`
-  - 这不等于整套 external-executor hard-cut 已终态完成，更不等于 formal `ExecutorProvider` intake / persisted `ExecutorEventRecord` / `delegation_service.py` retirement 已全部收口
+  - 这不等于整套 external-executor hard-cut 已终态完成；同日后续 formal assignment cutover / formal provider intake 收口见 `1.0.7`
   - `live external-provider smoke` 与 full-repo soak 仍未在这轮执行，不得混写成“所有真实外部执行链都已验证”
+
+## 1.0.7 `2026-04-21` external-executor hard-cut 最终收口补充（formal assignment cutover + formal provider intake）
+
+- 本轮继续补完的两条剩余硬项：
+  - `Task 2 / delegation_service formal-backend retirement slice`
+    - `src/copaw/kernel/main_brain_orchestrator.py`
+      - 当请求已形成 formal assignment 且 `executor_runtime_coordinator` 成功给出 runtime coordination 时，orchestrator 现在会直接返回 executor-runtime ack stream，不再继续把同一条 assignment 落回本地 `query_execution_service.execute_stream(...)`
+      - 这意味着 formal assignment write path 现在优先走 `Assignment -> ExecutorRuntime -> Event -> Evidence/Report`，而不是再由本地 query execution 形成第二条执行主链
+    - `src/copaw/kernel/delegation_service.py`
+      - 显式 compatibility child-task delegation 现在统一带 `execution_source = delegation-compat`
+      - `assignment_id` 仍会继续透传给 child-task / mailbox / experience continuity，但 compatibility child-run 不再把自己标成 formal `assignment` backend
+  - `Task 4 / formal ExecutorProvider intake`
+    - `src/copaw/app/routers/capability_market.py`
+      - 新增 formal provider inventory/intake 前门：
+        - `GET /capability-market/executor-providers/search`
+        - `POST /capability-market/executor-providers/install`
+      - active write/read vocabulary 现以 `ExecutorProvider / control_surface_kind / default_protocol_kind` 为正式执行层词汇
+    - `src/copaw/app/runtime_center/state_query.py`
+      - 新增 `list_executor_providers(...)` formal provider inventory projection
+    - `src/copaw/state/executor_runtime_service.py`
+      - 新增 `list_executor_providers(...)`
+    - `src/copaw/state/repositories/base.py` / `src/copaw/state/repositories/sqlite_executor_runtime.py`
+      - 新增 persisted provider inventory 查询能力
+- 当前能诚实表述的结论：
+  - formal assignment execution backend 已切到 executor runtime；`delegation_service.py` 不再是 primary assignment execution backend
+  - `delegation_service.py` 文件本身仍保留为显式 compatibility child-task path，因此这是“formal-backend retirement 已完成”，不是“物理删除已完成”
+  - formal `ExecutorProvider` intake 现在已经存在，donor/project install 不再是唯一也不再是假装 canonical 的 executor intake 前门
+  - donor/project compatibility/acquisition-only 产品壳仍然存在，因此这不等于 donor taxonomy / donor state/trust/trial/retirement 已全部删除
+- 当前 fresh focused regression 证据：
+  - focused regression：
+    - 命令：`python -m pytest tests/state/test_executor_runtime_service.py tests/kernel/test_executor_event_ingest_service.py tests/kernel/test_executor_event_writeback_service.py tests/kernel/test_main_brain_executor_runtime_integration.py tests/kernel/test_assignment_envelope.py tests/kernel/test_task_execution_projection.py tests/app/test_runtime_center_task_delegation_api.py tests/app/test_runtime_center_external_runtime_api.py tests/app/test_capability_market_api.py -q`
+    - 结果：`107 passed in 112.79s`
+    - 验收层级：`L1 + L2`
+  - `default regression`：
+    - 命令：`python scripts/run_p0_runtime_terminal_gate.py`
+    - 结果：后端主链回归 `361 passed in 280.11s`；长跑与删旧回归 `84 passed in 416.80s`；前台定向回归 `21 passed`；控制台构建 `vite build` 通过
+    - 验收层级：`L2`
+  - `L3` live smoke：
+    - 命令：`PYTHONPATH=src python -m pytest tests/app/test_runtime_canonical_flow_e2e.py tests/app/test_operator_runtime_e2e.py -q`
+    - 结果：`16 passed in 107.09s`
+    - 命令：`PYTHONPATH=src python -m pytest tests/app/test_phase_next_autonomy_smoke.py -q -k "runtime_center or runtime_center_overview or canonical_flow or operator or chat_run or long_run_smoke"`
+    - 结果：`4 passed, 7 deselected in 42.07s`
+    - 验收层级：`L3`
+  - `L4` long soak：
+    - 命令：`PYTHONPATH=src python -m pytest tests/app/test_phase_next_autonomy_smoke.py tests/app/test_runtime_canonical_flow_e2e.py tests/app/test_operator_runtime_e2e.py -q`
+    - 结果：连续 `3` 轮分别为 `27 passed in 192.20s`、`27 passed in 190.88s`、`27 passed in 191.87s`
+    - 验收层级：`selected L4`
+- 当前仍然明确未完成：
+  - `delegation_service.py` 仍作为显式 compatibility child-task backend 存在，尚未物理删除
+  - actor runtime 仍在启动图中保留 compatibility 生命周期，不得混写成“本地 actor runtime 已完全删除”
+  - donor/project state/trust/trial/retirement 全量 taxonomy 仍未全部退役；`/capability-market/projects/install*` 仍然保留 compatibility/acquisition-only 前门
+  - `live external-provider smoke` 仍未对新 formal provider intake 做专项真实外部链路验证，不得混写成“所有 provider intake 都已 live 验证”
 
 ## 1.1.1 `2026-04-07` Buddy 领域能力阶段收口补充
 

@@ -170,6 +170,7 @@ class AssignmentExecutorRuntimeCoordinator:
         executor_runtime_service: object | None,
     ) -> None:
         self._executor_runtime_service = executor_runtime_service
+        self._sync_writeback_runtime_service()
 
     def set_executor_runtime_port(
         self,
@@ -182,6 +183,7 @@ class AssignmentExecutorRuntimeCoordinator:
         executor_event_writeback_service: ExecutorEventWritebackService | None,
     ) -> None:
         self._executor_event_writeback_service = executor_event_writeback_service
+        self._sync_writeback_runtime_service()
 
     def set_default_executor_provider_id(self, provider_id: str | None) -> None:
         self._default_executor_provider_id = _text(provider_id)
@@ -191,6 +193,14 @@ class AssignmentExecutorRuntimeCoordinator:
 
     def set_project_root(self, project_root: str | None) -> None:
         self._project_root = _text(project_root)
+
+    def _sync_writeback_runtime_service(self) -> None:
+        writeback_service = self._executor_event_writeback_service
+        if writeback_service is None:
+            return
+        setter = getattr(writeback_service, "set_executor_runtime_service", None)
+        if callable(setter):
+            setter(self._executor_runtime_service)
 
     def coordinate_assignment_runtime(
         self,

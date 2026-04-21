@@ -235,10 +235,12 @@ def build_executor_event_writeback_service(
     assignment_service: object | None,
     agent_report_service: object | None,
     runtime_event_bus: RuntimeEventBus | None = None,
+    executor_runtime_service: ExecutorRuntimeService | None = None,
 ) -> ExecutorEventWritebackService:
     return ExecutorEventWritebackService(
         evidence_ledger=evidence_ledger,
         assignment_service=assignment_service,
         agent_report_service=agent_report_service,
         runtime_event_bus=runtime_event_bus,
+        executor_runtime_service=executor_runtime_service,
     )

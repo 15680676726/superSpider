@@ -31,6 +31,13 @@ from .query_execution_writeback import (
 from .runtime_coordination import AssignmentExecutorRuntimeCoordinator
 
 logger = logging.getLogger(__name__)
+_EXECUTOR_RUNTIME_STREAM_TERMINAL_STATUSES = {
+    "ready",
+    "selection-unavailable",
+    "runtime-service-unavailable",
+    "port-unavailable",
+    "start-failed",
+}
 
 
 def _should_propagate_main_brain_intake_error(exc: Exception) -> bool:
@@ -607,11 +614,45 @@ class MainBrainOrchestrator:
         self,
         envelope: MainBrainExecutionEnvelope,
     ) -> AsyncIterator[tuple[Msg, bool]]:
+        executor_runtime_msg = self._build_executor_runtime_stream_message(
+            request=envelope.request,
+        )
+        if executor_runtime_msg is not None:
+            yield executor_runtime_msg, True
+            return
         service = self._query_execution_service
         if service is None:
             raise RuntimeError("MainBrainOrchestrator requires a query execution service")
         async for msg, last in service.execute_stream(**envelope.execution_kwargs):
             yield msg, last
+
+    def _build_executor_runtime_stream_message(
+        self,
+        *,
+        request: Any,
+    ) -> Msg | None:
+        runtime_coordination = _safe_mapping(
+            getattr(request, "_copaw_executor_runtime_coordination", None),
+        )
+        if not runtime_coordination:
+            return None
+        assignment_id = str(runtime_coordination.get("assignment_id") or "").strip()
+        status = str(runtime_coordination.get("status") or "").strip()
+        if not assignment_id or status not in _EXECUTOR_RUNTIME_STREAM_TERMINAL_STATUSES:
+            return None
+        executor_runtime = _safe_mapping(runtime_coordination.get("executor_runtime"))
+        provider_id = str(executor_runtime.get("provider_id") or "").strip()
+        if status == "ready":
+            content = (
+                f"Assignment '{assignment_id}' was routed to executor runtime "
+                f"'{provider_id or 'external-executor'}'."
+            )
+        else:
+            content = (
+                f"Assignment '{assignment_id}' could not start on the formal executor runtime "
+                f"({status})."
+            )
+        return Msg(name="assistant", role="assistant", content=content)
 
 __all__ = [
     "MainBrainExecutionEnvelope",

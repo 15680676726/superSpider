@@ -137,9 +137,10 @@ def test_delegate_task_inherits_assignment_execution_envelope(tmp_path) -> None:
     payload_meta = metadata["payload"]["meta"]
     assert metadata["payload"]["assignment_id"] == "assignment-1"
     assert payload_meta["assignment_id"] == "assignment-1"
-    assert payload_meta["execution_source"] == "assignment"
+    assert payload_meta["execution_source"] == "delegation-compat"
 
     mailbox_item = mailbox_repository.get_item(result["mailbox_id"])
     assert mailbox_item is not None
     assert mailbox_item.metadata["assignment_id"] == "assignment-1"
+    assert mailbox_item.metadata["execution_source"] == "delegation-compat"
     assert mailbox_item.payload["payload"]["assignment_id"] == "assignment-1"

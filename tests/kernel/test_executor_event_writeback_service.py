@@ -8,7 +8,11 @@ from copaw.evidence import EvidenceLedger
 from copaw.kernel.executor_event_ingest_service import ExecutorEventIngestContext
 from copaw.kernel.executor_event_writeback_service import ExecutorEventWritebackService
 from copaw.kernel.executor_runtime_port import ExecutorNormalizedEvent
+from copaw.state import SQLiteStateStore
+from copaw.state.executor_runtime_service import ExecutorRuntimeService
+from copaw.state.external_runtime_service import ExternalCapabilityRuntimeService
 from copaw.state.models_goals_tasks import AgentReportRecord
+from copaw.state.repositories import SqliteExternalCapabilityRuntimeRepository
 
 
 def _context(**overrides: object) -> ExecutorEventIngestContext:
@@ -73,6 +77,16 @@ class _FakeReportService:
     ) -> None:
         _ = previous_report
         self._projected_ids.append(report.id)
+
+
+def _build_executor_runtime_service(tmp_path) -> ExecutorRuntimeService:
+    store = SQLiteStateStore(tmp_path / "state.db")
+    repository = SqliteExternalCapabilityRuntimeRepository(store)
+    external_runtime_service = ExternalCapabilityRuntimeService(repository=repository)
+    return ExecutorRuntimeService(
+        external_runtime_service=external_runtime_service,
+        state_store=store,
+    )
 
 
 def test_writeback_records_evidence_and_attaches_it_to_assignment() -> None:
@@ -161,3 +175,73 @@ def test_writeback_records_terminal_report_with_evidence_ids() -> None:
     events = runtime_event_bus.list_events()
     assert events[-1].payload["report_id"] == report.id
     assert report_service._repository.get_report(report.id) == report
+
+
+def test_writeback_persists_executor_event_records_into_formal_runtime_truth(
+    tmp_path,
+) -> None:
+    evidence_ledger = EvidenceLedger()
+    assignment_service = _FakeAssignmentService()
+    report_service = _FakeReportService()
+    runtime_event_bus = RuntimeEventBus()
+    executor_runtime_service = _build_executor_runtime_service(tmp_path)
+    runtime = executor_runtime_service.create_or_reuse_runtime(
+        executor_id="codex-app-server",
+        protocol_kind="app_server",
+        scope_kind="assignment",
+        assignment_id="assignment-1",
+        role_id="role-1",
+    )
+    executor_runtime_service.mark_runtime_ready(
+        runtime.runtime_id,
+        thread_id="thread-1",
+        turn_id="turn-1",
+    )
+    service = ExecutorEventWritebackService(
+        evidence_ledger=evidence_ledger,
+        assignment_service=assignment_service,
+        agent_report_service=report_service,
+        runtime_event_bus=runtime_event_bus,
+        executor_runtime_service=executor_runtime_service,
+    )
+
+    service.ingest_and_writeback(
+        context=_context(runtime_id=runtime.runtime_id),
+        event=ExecutorNormalizedEvent(
+            event_type="evidence_emitted",
+            source_type="fileChange",
+            payload={
+                "thread_id": "thread-1",
+                "turn_id": "turn-1",
+                "path": "src/copaw/kernel/runtime_coordination.py",
+                "change_type": "modified",
+                "summary": "Wired executor runtime coordination",
+            },
+            raw_method="item/completed",
+        ),
+    )
+    service.ingest_and_writeback(
+        context=_context(runtime_id=runtime.runtime_id),
+        event=ExecutorNormalizedEvent(
+            event_type="task_completed",
+            source_type="turn",
+            payload={
+                "thread_id": "thread-1",
+                "turn_id": "turn-1",
+                "summary": "Executor finished assignment successfully.",
+            },
+            raw_method="turn/completed",
+        ),
+    )
+
+    stored_events = executor_runtime_service.list_event_records(thread_id="thread-1")
+    stored_turns = executor_runtime_service.list_turn_records(thread_id="thread-1")
+
+    assert [item.event_type for item in stored_events] == [
+        "task_completed",
+        "evidence_emitted",
+    ]
+    assert stored_events[0].runtime_id == runtime.runtime_id
+    assert stored_events[0].turn_id == "turn-1"
+    assert stored_turns[0].turn_status == "completed"
+    assert stored_turns[0].summary == "Executor finished assignment successfully."

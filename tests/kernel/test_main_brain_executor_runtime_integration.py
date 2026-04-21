@@ -216,7 +216,8 @@ async def test_main_brain_orchestrator_starts_executor_runtime_for_assignment(
     ]
 
     assert len(streamed) == 1
-    assert query_execution_service.calls[0]["request"] is request
+    assert query_execution_service.calls == []
+    assert "executor runtime" in streamed[0][0].get_text_content().lower()
     assert executor_port.start_calls == [
         {
             "assignment_id": "assign-1",
@@ -343,6 +344,7 @@ async def test_main_brain_orchestrator_attaches_executor_runtime_event_writeback
     ]
 
     assert len(streamed) == 1
+    assert query_execution_service.calls == []
     runtime_context = getattr(request, "_copaw_main_brain_runtime_context")
     assert runtime_context["assignment_id"] == "assign-1"
     assert runtime_context["task_id"] == "task-assign-1"
@@ -504,6 +506,7 @@ async def test_main_brain_orchestrator_drains_executor_events_into_evidence_and_
     ]
 
     assert len(streamed) == 1
+    assert query_execution_service.calls == []
     deadline = time.time() + 1.0
     while time.time() < deadline and not report_repository.records:
         time.sleep(0.01)
@@ -516,6 +519,14 @@ async def test_main_brain_orchestrator_drains_executor_events_into_evidence_and_
     assert report.assignment_id == "assign-1"
     assert report.result == "completed"
     assert evidence[0].id in report.evidence_ids
+    stored_events = executor_runtime_service.list_event_records(thread_id="thread-1")
+    stored_turns = executor_runtime_service.list_turn_records(thread_id="thread-1")
+    assert [item.event_type for item in stored_events] == [
+        "task_completed",
+        "evidence_emitted",
+    ]
+    assert stored_turns[0].turn_status == "completed"
+    assert stored_turns[0].summary == "Executor finished assignment successfully."
     runtimes = executor_runtime_service.list_runtimes(assignment_id="assign-1", formal_only=True)
     while time.time() < deadline and (not runtimes or runtimes[0].runtime_status != "completed"):
         time.sleep(0.01)

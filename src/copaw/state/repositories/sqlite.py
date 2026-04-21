@@ -49,6 +49,9 @@ from .sqlite_runtime_automation import (
 from .sqlite_external_runtimes import (
     SqliteExternalCapabilityRuntimeRepository,
 )
+from .sqlite_executor_runtime import (
+    SqliteExecutorRuntimeRepository,
+)
 from .sqlite_industry import (
     SqliteAgentReportRepository,
     SqliteAssignmentRepository,

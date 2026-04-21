@@ -97,6 +97,12 @@ from ...discovery.models import DiscoveryHit, NormalizedDiscoveryHit
 from ...discovery.provider_search import search_github_repository_donors
 from ...kernel import KernelTask
 from ...state import SQLiteStateStore
+from ...state.executor_runtime_service import ExecutorRuntimeService
+from ...state.models_executor_runtime import (
+    ExecutorProviderRecord,
+    ModelInvocationPolicyRecord,
+    RoleExecutorBindingRecord,
+)
 from ...state.skill_candidate_service import CapabilityCandidateService
 from ...state.skill_lifecycle_decision_service import SkillLifecycleDecisionService
 from ...state.skill_trial_service import SkillTrialService
@@ -286,6 +292,46 @@ class CapabilityMarketProjectCandidate(BaseModel):
     formal_surface: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
     routes: dict[str, str] = Field(default_factory=dict)
+
+
+class CapabilityMarketExecutorProviderCandidate(BaseModel):
+    provider_id: str
+    provider_kind: str = "external-executor"
+    runtime_family: str
+    control_surface_kind: str
+    default_protocol_kind: str = "unknown"
+    install_source_kind: str | None = None
+    source_ref: str | None = None
+    status: str = "active"
+    formal_surface: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    routes: dict[str, str] = Field(default_factory=dict)
+
+
+class CapabilityMarketExecutorProviderInstallRequest(BaseModel):
+    provider_id: str
+    runtime_family: str
+    control_surface_kind: str
+    default_protocol_kind: str = "unknown"
+    install_source_kind: str | None = None
+    source_ref: str | None = None
+    actor: str = Field(default="copaw-operator")
+    role_id: str | None = None
+    selection_mode: Literal["single-runtime", "role-routed", "task-routed", "manual"] = (
+        "role-routed"
+    )
+    project_profile_id: str | None = None
+    execution_policy_id: str | None = None
+    model_policy_id: str | None = None
+    default_model_ref: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class CapabilityMarketExecutorProviderInstallResponse(BaseModel):
+    installed: bool = True
+    provider: CapabilityMarketExecutorProviderCandidate
+    binding: dict[str, Any] | None = None
+    model_policy: dict[str, Any] | None = None
 
 
 class CapabilityMarketMCPCreateRequest(BaseModel):
@@ -500,6 +546,15 @@ class CapabilityMarketInstallTemplateInstallResponse(BaseModel):
 
 def _get_capability_service(request: Request) -> CapabilityService:
     return _shared_get_capability_service(request)
+
+
+def _get_executor_runtime_service(
+    request: Request,
+) -> ExecutorRuntimeService:
+    service = getattr(request.app.state, "executor_runtime_service", None)
+    if isinstance(service, ExecutorRuntimeService):
+        return service
+    raise HTTPException(503, detail="Executor runtime service is not available")
 
 
 def _get_capability_candidate_service(
@@ -745,6 +800,31 @@ def _market_error_status(detail: str) -> int:
     ):
         return 502
     return 400
+
+
+def _serialize_executor_provider_candidate(
+    payload: Mapping[str, object] | ExecutorProviderRecord,
+) -> CapabilityMarketExecutorProviderCandidate:
+    serialized = (
+        dict(payload)
+        if isinstance(payload, Mapping)
+        else payload.model_dump(mode="json")
+    )
+    return CapabilityMarketExecutorProviderCandidate(
+        provider_id=str(serialized.get("provider_id") or ""),
+        provider_kind=str(serialized.get("provider_kind") or "external-executor"),
+        runtime_family=str(serialized.get("runtime_family") or ""),
+        control_surface_kind=str(serialized.get("control_surface_kind") or ""),
+        default_protocol_kind=str(serialized.get("default_protocol_kind") or "unknown"),
+        install_source_kind=str(serialized.get("install_source_kind") or "").strip() or None,
+        source_ref=str(serialized.get("source_ref") or "").strip() or None,
+        status=str(serialized.get("status") or "active"),
+        formal_surface=True,
+        metadata=dict(serialized.get("metadata") or {}),
+        routes={
+            "install": "/api/capability-market/executor-providers/install",
+        },
+    )
 
 
 def _unwrap_market_mutation_result(result: dict[str, Any]) -> dict[str, Any]:
@@ -3053,6 +3133,8 @@ async def get_capability_market_overview(request: Request) -> dict[str, object]:
             "curated_install": "/api/capability-market/curated-catalog/install",
             "hub_search": "/api/capability-market/hub/search",
             "hub_install": "/api/capability-market/hub/install",
+            "executor_provider_search": "/api/capability-market/executor-providers/search",
+            "executor_provider_install": "/api/capability-market/executor-providers/install",
             "project_search": "/api/capability-market/projects/search",
             "project_install": "/api/capability-market/projects/install",
             "candidate_list": "/api/runtime-center/capabilities/candidates",
@@ -4253,3 +4335,102 @@ async def search_market_project_donors(
         for hit in hits
         if str(hit.candidate_source_ref or "").strip()
     ]
+
+
+@router.get(
+    "/executor-providers/search",
+    response_model=list[CapabilityMarketExecutorProviderCandidate],
+)
+async def search_market_executor_providers(
+    request: Request,
+    q: str = Query(default=""),
+    limit: int = Query(default=20, ge=1, le=100),
+) -> list[CapabilityMarketExecutorProviderCandidate]:
+    normalized_query = str(q or "").strip().lower()
+    state_query_service = getattr(request.app.state, "state_query_service", None)
+    query_lister = getattr(state_query_service, "list_executor_providers", None)
+    if callable(query_lister):
+        payloads = [
+            dict(item)
+            for item in query_lister(status="active", limit=limit)
+            if isinstance(item, Mapping)
+        ]
+    else:
+        service = _get_executor_runtime_service(request)
+        payloads = [
+            item.model_dump(mode="json")
+            for item in service.list_executor_providers(status="active", limit=limit)
+        ]
+    results: list[CapabilityMarketExecutorProviderCandidate] = []
+    for payload in payloads:
+        haystack = " ".join(
+            [
+                str(payload.get("provider_id") or ""),
+                str(payload.get("runtime_family") or ""),
+                str(payload.get("control_surface_kind") or ""),
+                str(payload.get("default_protocol_kind") or ""),
+                str(payload.get("source_ref") or ""),
+            ]
+        ).lower()
+        if normalized_query and normalized_query not in haystack:
+            continue
+        results.append(_serialize_executor_provider_candidate(payload))
+    return results[:limit]
+
+
+@router.post(
+    "/executor-providers/install",
+    response_model=CapabilityMarketExecutorProviderInstallResponse,
+    status_code=201,
+)
+async def install_market_executor_provider(
+    request: Request,
+    payload: CapabilityMarketExecutorProviderInstallRequest,
+) -> CapabilityMarketExecutorProviderInstallResponse:
+    service = _get_executor_runtime_service(request)
+    provider = service.upsert_executor_provider(
+        ExecutorProviderRecord(
+            provider_id=str(payload.provider_id).strip(),
+            provider_kind="external-executor",
+            runtime_family=str(payload.runtime_family).strip(),
+            control_surface_kind=str(payload.control_surface_kind).strip(),
+            install_source_kind=str(payload.install_source_kind or "").strip() or None,
+            source_ref=str(payload.source_ref or "").strip() or None,
+            default_protocol_kind=str(payload.default_protocol_kind or "unknown").strip()
+            or "unknown",
+            metadata=dict(payload.metadata or {}),
+        )
+    )
+    binding_payload: dict[str, Any] | None = None
+    model_policy_payload: dict[str, Any] | None = None
+    role_id = str(payload.role_id or "").strip() or None
+    model_policy_id = str(payload.model_policy_id or "").strip() or None
+    if payload.default_model_ref and model_policy_id is None:
+        model_policy_id = f"{provider.provider_id}:default-model-policy"
+    if model_policy_id is not None:
+        model_policy = service.upsert_model_invocation_policy(
+            ModelInvocationPolicyRecord(
+                policy_id=model_policy_id,
+                ownership_mode="runtime_owned",
+                default_model_ref=str(payload.default_model_ref or "").strip() or None,
+            )
+        )
+        model_policy_payload = model_policy.model_dump(mode="json")
+    if role_id is not None:
+        binding = service.upsert_role_executor_binding(
+            RoleExecutorBindingRecord(
+                role_id=role_id,
+                executor_provider_id=provider.provider_id,
+                selection_mode=payload.selection_mode,
+                project_profile_id=str(payload.project_profile_id or "").strip() or None,
+                execution_policy_id=str(payload.execution_policy_id or "").strip() or None,
+                model_policy_id=model_policy_id,
+            )
+        )
+        binding_payload = binding.model_dump(mode="json")
+    return CapabilityMarketExecutorProviderInstallResponse(
+        installed=True,
+        provider=_serialize_executor_provider_candidate(provider),
+        binding=binding_payload,
+        model_policy=model_policy_payload,
+    )

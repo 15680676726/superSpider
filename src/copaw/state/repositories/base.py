@@ -43,6 +43,17 @@ from ..models import (
     WorkflowTemplateRecord,
 )
 from ..models_external_runtime import ExternalCapabilityRuntimeInstanceRecord
+from ..models_executor_runtime import (
+    ExecutionPolicyRecord,
+    ExecutorEventRecord,
+    ExecutorProviderRecord,
+    ExecutorThreadBindingRecord,
+    ExecutorTurnRecord,
+    ModelInvocationPolicyRecord,
+    ProjectProfileRecord,
+    RoleContractRecord,
+    RoleExecutorBindingRecord,
+)
 from ..models_knowledge import KnowledgeChunkRecord
 from ..models_memory import (
     IndustryMemoryProfileRecord,
@@ -344,6 +355,135 @@ class BaseExternalCapabilityRuntimeRepository(ABC):
 
     @abstractmethod
     def delete_runtime(self, runtime_id: str) -> bool:
+        raise NotImplementedError
+
+
+class BaseExecutorRuntimeRepository(ABC):
+    @abstractmethod
+    def get_role_contract(self, role_id: str) -> Optional[RoleContractRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upsert_role_contract(self, record: RoleContractRecord) -> RoleContractRecord:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_project_profile(self, project_profile_id: str) -> Optional[ProjectProfileRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upsert_project_profile(
+        self,
+        record: ProjectProfileRecord,
+    ) -> ProjectProfileRecord:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_execution_policy(self, policy_id: str) -> Optional[ExecutionPolicyRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upsert_execution_policy(
+        self,
+        record: ExecutionPolicyRecord,
+    ) -> ExecutionPolicyRecord:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_executor_provider(self, provider_id: str) -> Optional[ExecutorProviderRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upsert_executor_provider(
+        self,
+        record: ExecutorProviderRecord,
+    ) -> ExecutorProviderRecord:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_executor_providers(
+        self,
+        *,
+        status: str | None = None,
+        limit: int | None = None,
+    ) -> list[ExecutorProviderRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_role_executor_binding(self, role_id: str) -> Optional[RoleExecutorBindingRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upsert_role_executor_binding(
+        self,
+        record: RoleExecutorBindingRecord,
+    ) -> RoleExecutorBindingRecord:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_model_invocation_policy(
+        self,
+        policy_id: str,
+    ) -> Optional[ModelInvocationPolicyRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upsert_model_invocation_policy(
+        self,
+        record: ModelInvocationPolicyRecord,
+    ) -> ModelInvocationPolicyRecord:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_thread_bindings(
+        self,
+        *,
+        runtime_id: str | None = None,
+        thread_id: str | None = None,
+        role_id: str | None = None,
+        assignment_id: str | None = None,
+        limit: int | None = None,
+    ) -> list[ExecutorThreadBindingRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upsert_thread_binding(
+        self,
+        record: ExecutorThreadBindingRecord,
+    ) -> ExecutorThreadBindingRecord:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_turn_records(
+        self,
+        *,
+        runtime_id: str | None = None,
+        thread_id: str | None = None,
+        assignment_id: str | None = None,
+        turn_id: str | None = None,
+        limit: int | None = None,
+    ) -> list[ExecutorTurnRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upsert_turn_record(self, record: ExecutorTurnRecord) -> ExecutorTurnRecord:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_event_records(
+        self,
+        *,
+        runtime_id: str | None = None,
+        thread_id: str | None = None,
+        assignment_id: str | None = None,
+        turn_id: str | None = None,
+        event_type: str | None = None,
+        limit: int | None = None,
+    ) -> list[ExecutorEventRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upsert_event_record(self, record: ExecutorEventRecord) -> ExecutorEventRecord:
         raise NotImplementedError
 
 

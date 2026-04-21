@@ -689,6 +689,7 @@ def build_runtime_bootstrap(
         assignment_service=assignment_service,
         agent_report_service=agent_report_service,
         runtime_event_bus=runtime_event_bus,
+        executor_runtime_service=executor_runtime_service,
     )
     executor_runtime_coordinator.set_executor_event_writeback_service(
         executor_event_writeback_service,

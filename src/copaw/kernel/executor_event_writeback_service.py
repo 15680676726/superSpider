@@ -6,6 +6,7 @@ from typing import Any, Mapping, Sequence
 
 from ..evidence import EvidenceLedger, EvidenceRecord
 from ..state.models_goals_tasks import AgentReportRecord
+from ..state.executor_runtime_service import ExecutorRuntimeService
 from .executor_event_ingest_service import (
     ExecutorEventIngestContext,
     ExecutorEventIngestResult,
@@ -67,12 +68,20 @@ class ExecutorEventWritebackService:
         assignment_service: object | None = None,
         agent_report_service: object | None = None,
         runtime_event_bus: object | None = None,
+        executor_runtime_service: ExecutorRuntimeService | None = None,
     ) -> None:
         self._ingest_service = ingest_service or ExecutorEventIngestService()
         self._evidence_ledger = evidence_ledger
         self._assignment_service = assignment_service
         self._agent_report_service = agent_report_service
         self._runtime_event_bus = runtime_event_bus
+        self._executor_runtime_service = executor_runtime_service
+
+    def set_executor_runtime_service(
+        self,
+        executor_runtime_service: ExecutorRuntimeService | None,
+    ) -> None:
+        self._executor_runtime_service = executor_runtime_service
 
     def ingest_and_writeback(
         self,
@@ -84,6 +93,7 @@ class ExecutorEventWritebackService:
             context=context,
             event=event,
         )
+        self._record_executor_event(ingest_result=ingest_result)
         evidence_record = self._record_evidence(
             payload=ingest_result.evidence_payload,
             assignment_id=context.assignment_id,
@@ -113,6 +123,28 @@ class ExecutorEventWritebackService:
             },
         )
         return result
+
+    def _record_executor_event(
+        self,
+        *,
+        ingest_result: ExecutorEventIngestResult,
+    ) -> None:
+        runtime_service = self._executor_runtime_service
+        if runtime_service is None:
+            return
+        event_record = ingest_result.event_record
+        runtime_service.record_event(
+            runtime_id=event_record.runtime_id,
+            assignment_id=event_record.assignment_id,
+            thread_id=event_record.thread_id,
+            turn_id=event_record.turn_id,
+            event_type=event_record.event_type,
+            source_type=event_record.source_type,
+            payload=event_record.payload,
+            summary=event_record.summary,
+            raw_method=event_record.raw_method,
+            metadata=event_record.metadata,
+        )
 
     def _record_evidence(
         self,

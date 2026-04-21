@@ -64,10 +64,18 @@ from copaw.state import (
     TaskRecord,
     TaskRuntimeRecord,
 )
+from copaw.state.executor_runtime_service import ExecutorRuntimeService
+from copaw.state.external_runtime_service import ExternalCapabilityRuntimeService
+from copaw.state.models_executor_runtime import (
+    ExecutorProviderRecord,
+    ModelInvocationPolicyRecord,
+    RoleExecutorBindingRecord,
+)
 from copaw.state.skill_candidate_service import CapabilityCandidateService
 from copaw.state.skill_trial_service import SkillTrialService
 from copaw.state.repositories import (
     SqliteDecisionRequestRepository,
+    SqliteExternalCapabilityRuntimeRepository,
     SqliteRuntimeFrameRepository,
     SqliteScheduleRepository,
     SqliteTaskRepository,
@@ -583,6 +591,15 @@ def _submit_project_install_and_wait(
     assert status_payload is not None
     assert result_payload is not None
     return accepted_payload, status_payload, result_payload
+
+
+def _build_executor_runtime_service(state_store: SQLiteStateStore) -> ExecutorRuntimeService:
+    runtime_repository = SqliteExternalCapabilityRuntimeRepository(state_store)
+    external_runtime_service = ExternalCapabilityRuntimeService(repository=runtime_repository)
+    return ExecutorRuntimeService(
+        external_runtime_service=external_runtime_service,
+        state_store=state_store,
+    )
 
 
 def test_capability_market_assignment_uses_lifecycle_contract_for_replace_mode() -> None:
@@ -1839,6 +1856,85 @@ def test_capability_market_project_search_returns_installable_github_donors(
     )
     assert payload[0]["metadata"]["formal_surface"] is False
     assert payload[0]["routes"]["install"] == "/api/capability-market/projects/install"
+
+
+def test_capability_market_executor_provider_search_returns_formal_provider_inventory(
+    tmp_path,
+) -> None:
+    app = build_runtime_app(tmp_path)
+    executor_runtime_service = _build_executor_runtime_service(app.state.state_store)
+    executor_runtime_service.upsert_executor_provider(
+        ExecutorProviderRecord(
+            provider_id="codex-app-server",
+            provider_kind="external-executor",
+            runtime_family="codex",
+            control_surface_kind="app_server",
+            install_source_kind="catalog",
+            source_ref="codex://app-server",
+            default_protocol_kind="app_server",
+            metadata={"display_name": "Codex App Server"},
+        )
+    )
+    app.state.executor_runtime_service = executor_runtime_service
+    client = TestClient(app)
+
+    response = client.get(
+        "/capability-market/executor-providers/search",
+        params={"q": "codex", "limit": 5},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload) == 1
+    assert payload[0]["provider_id"] == "codex-app-server"
+    assert payload[0]["runtime_family"] == "codex"
+    assert payload[0]["control_surface_kind"] == "app_server"
+    assert payload[0]["default_protocol_kind"] == "app_server"
+    assert payload[0]["formal_surface"] is True
+    assert payload[0]["routes"]["install"] == "/api/capability-market/executor-providers/install"
+
+
+def test_capability_market_executor_provider_install_persists_formal_provider_intake(
+    tmp_path,
+) -> None:
+    app = build_runtime_app(tmp_path)
+    executor_runtime_service = _build_executor_runtime_service(app.state.state_store)
+    app.state.executor_runtime_service = executor_runtime_service
+    client = TestClient(app)
+
+    response = client.post(
+        "/capability-market/executor-providers/install",
+        json={
+            "provider_id": "codex-app-server",
+            "runtime_family": "codex",
+            "control_surface_kind": "app_server",
+            "default_protocol_kind": "app_server",
+            "install_source_kind": "catalog",
+            "source_ref": "codex://app-server",
+            "role_id": "execution-core",
+            "selection_mode": "role-routed",
+            "model_policy_id": "codex-default",
+            "default_model_ref": "gpt-5-codex",
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["provider"]["provider_id"] == "codex-app-server"
+    assert payload["provider"]["formal_surface"] is True
+    assert payload["binding"]["role_id"] == "execution-core"
+    assert payload["binding"]["executor_provider_id"] == "codex-app-server"
+    assert payload["model_policy"]["policy_id"] == "codex-default"
+    assert payload["model_policy"]["default_model_ref"] == "gpt-5-codex"
+    stored_provider = executor_runtime_service.resolve_executor_provider("codex-app-server")
+    assert stored_provider is not None
+    assert stored_provider.control_surface_kind == "app_server"
+    stored_binding = executor_runtime_service.resolve_role_executor_binding("execution-core")
+    assert stored_binding is not None
+    assert stored_binding.executor_provider_id == "codex-app-server"
+    stored_policy = executor_runtime_service.resolve_model_invocation_policy("codex-default")
+    assert stored_policy is not None
+    assert stored_policy.default_model_ref == "gpt-5-codex"
 
 
 def test_capability_market_project_install_unwraps_kernel_output_payload(

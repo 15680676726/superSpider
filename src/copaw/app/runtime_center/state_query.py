@@ -403,6 +403,26 @@ class RuntimeCenterStateQueryService:
             payload.append(serialized)
         return payload
 
+    def list_executor_providers(
+        self,
+        *,
+        status: str | None = None,
+        limit: int | None = 20,
+    ) -> list[dict[str, object]]:
+        service = getattr(self, "_executor_runtime_service", None)
+        lister = getattr(service, "list_executor_providers", None)
+        if not callable(lister):
+            return []
+        items = lister(status=status, limit=limit)
+        payload: list[dict[str, object]] = []
+        for item in items:
+            serialized = self._mapping_payload(item)
+            if not serialized:
+                continue
+            serialized["formal_surface"] = True
+            payload.append(serialized)
+        return payload
+
     def list_channel_runtimes(self) -> list[dict[str, object]]:
         runtime_state = getattr(self, "_weixin_ilink_runtime_state", None)
         snapshot = getattr(runtime_state, "snapshot", None)

@@ -230,6 +230,165 @@ CREATE INDEX IF NOT EXISTS idx_external_runtime_scope
 CREATE INDEX IF NOT EXISTS idx_external_runtime_owner
     ON external_capability_runtime_instances(owner_agent_id, updated_at DESC);
 
+CREATE TABLE IF NOT EXISTS executor_role_contracts (
+    role_id TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    responsibilities_json TEXT NOT NULL DEFAULT '[]',
+    planning_contract TEXT NOT NULL DEFAULT '',
+    reporting_contract TEXT NOT NULL DEFAULT '',
+    escalation_rules_json TEXT NOT NULL DEFAULT '[]',
+    default_skill_set_json TEXT NOT NULL DEFAULT '[]',
+    default_project_profile TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS executor_project_profiles (
+    project_profile_id TEXT PRIMARY KEY,
+    root_path TEXT NOT NULL,
+    agents_md_path TEXT,
+    role_md_path TEXT,
+    project_md_path TEXT,
+    skill_root TEXT,
+    runtime_root TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS executor_execution_policies (
+    policy_id TEXT PRIMARY KEY,
+    policy_name TEXT NOT NULL,
+    sandbox_mode TEXT NOT NULL DEFAULT 'use_default',
+    approval_mode TEXT NOT NULL DEFAULT 'never',
+    network_mode TEXT NOT NULL DEFAULT 'enabled',
+    notes TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'active',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS executor_providers (
+    provider_id TEXT PRIMARY KEY,
+    provider_kind TEXT NOT NULL DEFAULT 'external-executor',
+    runtime_family TEXT NOT NULL,
+    control_surface_kind TEXT NOT NULL,
+    install_source_kind TEXT,
+    source_ref TEXT,
+    default_protocol_kind TEXT NOT NULL DEFAULT 'unknown',
+    status TEXT NOT NULL DEFAULT 'active',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS executor_role_bindings (
+    binding_id TEXT NOT NULL,
+    role_id TEXT PRIMARY KEY,
+    executor_provider_id TEXT NOT NULL,
+    selection_mode TEXT NOT NULL DEFAULT 'role-routed',
+    project_profile_id TEXT,
+    execution_policy_id TEXT,
+    model_policy_id TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS executor_model_invocation_policies (
+    policy_id TEXT PRIMARY KEY,
+    ownership_mode TEXT NOT NULL DEFAULT 'runtime_owned',
+    default_model_ref TEXT,
+    role_overrides_json TEXT NOT NULL DEFAULT '{}',
+    task_overrides_allowed INTEGER NOT NULL DEFAULT 0,
+    cost_tracking_mode TEXT NOT NULL DEFAULT 'runtime-native',
+    status TEXT NOT NULL DEFAULT 'active',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS executor_thread_bindings (
+    binding_id TEXT PRIMARY KEY,
+    runtime_id TEXT NOT NULL,
+    role_id TEXT,
+    executor_provider_id TEXT NOT NULL,
+    project_profile_id TEXT,
+    assignment_id TEXT,
+    thread_id TEXT NOT NULL,
+    runtime_status TEXT NOT NULL DEFAULT 'starting',
+    last_turn_id TEXT,
+    last_seen_at TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_executor_thread_bindings_thread
+    ON executor_thread_bindings(thread_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_executor_thread_bindings_runtime
+    ON executor_thread_bindings(runtime_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_executor_thread_bindings_assignment
+    ON executor_thread_bindings(assignment_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS executor_turn_records (
+    turn_record_id TEXT PRIMARY KEY,
+    runtime_id TEXT NOT NULL,
+    thread_binding_id TEXT NOT NULL,
+    assignment_id TEXT,
+    thread_id TEXT,
+    turn_id TEXT NOT NULL,
+    turn_status TEXT NOT NULL DEFAULT 'queued',
+    started_at TEXT,
+    completed_at TEXT,
+    summary TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY(thread_binding_id) REFERENCES executor_thread_bindings(binding_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_executor_turn_records_thread
+    ON executor_turn_records(thread_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_executor_turn_records_runtime
+    ON executor_turn_records(runtime_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_executor_turn_records_assignment
+    ON executor_turn_records(assignment_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_executor_turn_records_turn
+    ON executor_turn_records(turn_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS executor_event_records (
+    event_id TEXT PRIMARY KEY,
+    runtime_id TEXT NOT NULL,
+    turn_record_id TEXT,
+    assignment_id TEXT,
+    thread_id TEXT,
+    turn_id TEXT,
+    event_type TEXT NOT NULL,
+    source_type TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    raw_method TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(turn_record_id) REFERENCES executor_turn_records(turn_record_id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_executor_event_records_thread
+    ON executor_event_records(thread_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_executor_event_records_runtime
+    ON executor_event_records(runtime_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_executor_event_records_assignment
+    ON executor_event_records(assignment_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_executor_event_records_turn
+    ON executor_event_records(turn_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS tasks (
     id TEXT PRIMARY KEY,
     goal_id TEXT,
@@ -2654,6 +2813,15 @@ def _ensure_state_schema_ready(conn: sqlite3.Connection) -> None:
     required_tables = {
         "agent_runtimes",
         "automation_loop_runtimes",
+        "executor_role_contracts",
+        "executor_project_profiles",
+        "executor_execution_policies",
+        "executor_providers",
+        "executor_role_bindings",
+        "executor_model_invocation_policies",
+        "executor_thread_bindings",
+        "executor_turn_records",
+        "executor_event_records",
         "memory_industry_slot_preferences",
         "memory_continuity_details",
         "research_sessions",
