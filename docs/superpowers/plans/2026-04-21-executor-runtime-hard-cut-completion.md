@@ -1,0 +1,64 @@
+# Executor Runtime Hard-Cut Completion Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Finish executor-runtime hard-cut `Task 2/3/6/7` so the remaining bridge, contract, Runtime Center, and verification gaps are closed with current evidence.
+
+**Architecture:** Reuse the existing `ExecutorRuntimeService` and Codex adapter path, but finish the compatibility bridge on top of `ExternalCapabilityRuntimeService`, tighten executor-provider contract boundaries so donor/project install paths cannot masquerade as formal executor runtimes, and cut Runtime Center read surfaces over to executor-runtime-first while leaving actor-runtime endpoints in explicit compatibility mode only. Verification follows `UNIFIED_ACCEPTANCE_STANDARD.md`: focused regression first, then default regression, then selected `L3` smoke and `L4` soak.
+
+**Tech Stack:** Python 3.12, FastAPI, SQLite state store, pytest, Runtime Center frontend, Codex App Server protocol shim
+
+---
+
+## Scope
+
+- `Task 1`: verify still complete; do not reopen unless code or docs prove regression.
+- `Task 2`: finish `models_external_runtime.py` / `external_runtime_service.py` bridge helpers.
+- `Task 3`: finish executor-runtime contract cutover in:
+  - `src/copaw/capabilities/external_adapter_execution.py`
+  - `src/copaw/capabilities/external_runtime_execution.py`
+  - `src/copaw/capabilities/project_donor_contracts.py`
+- `Task 6`: finish executor-runtime-first Runtime Center read path and push actor runtime to explicit compatibility status.
+- `Task 7`: produce fresh focused/default/L3/L4 evidence and update:
+  - `TASK_STATUS.md`
+  - `DEPRECATION_LEDGER.md`
+
+## Guardrails
+
+- No new parallel truth source for executor state.
+- No new active path that routes arbitrary donor/project installs into formal executor-provider truth.
+- Actor runtime compatibility routes may remain only if clearly no longer primary execution truth.
+- Completion claims must state exact acceptance layer and remaining boundaries if any command cannot be run.
+
+## 2026-04-21 Status Snapshot
+
+- `Task 2`: still partial. `models_external_runtime.py` / `external_runtime_service.py` bridge helpers were not advanced in this closure slice.
+- `Task 3`: partial overall, but actor-runtime demotion slice is now landed in the current worktree:
+  - actor mutation and actor capability mutation routes were removed from `runtime_center_routes_actor.py`
+  - actor payloads now advertise `read-only-compat`
+  - RuntimeExecutionStrip / AgentWorkbench no longer expose actor pause/resume/cancel/retry controls
+  - capability governance now uses the agent formal surface only
+- `Task 6`: improved. Runtime Center / Agent Workbench actor surfaces now read as compatibility-only instead of looking canonical.
+- `Task 7`: fresh `L1 + L2` evidence now exists for actor compatibility backend/frontend slices and `console` build, but not for `default regression`, `L3`, or `L4`.
+
+## Fresh Verification
+
+- `PYTHONPATH=src python -m pytest tests/app/test_runtime_center_actor_api.py -q`
+  - `8 passed in 37.69s`
+  - Acceptance: `L1 + L2`
+- `PYTHONPATH=src python -m pytest tests/app/test_runtime_center_actor_api.py tests/app/test_runtime_center_external_runtime_api.py tests/app/test_runtime_center_executor_runtime_projection.py tests/app/test_runtime_center_executor_runtime_bootstrap.py -q`
+  - `17 passed in 56.78s`
+  - Acceptance: `L1 + L2`
+- `npm --prefix console test -- src/components/RuntimeExecutionStrip.test.tsx src/components/RuntimeExecutionLauncher.test.tsx src/pages/AgentWorkbench/runtimePanels.test.tsx src/pages/AgentWorkbench/useAgentWorkbench.test.tsx src/pages/AgentWorkbench/index.test.tsx`
+  - `13 passed`
+  - Acceptance: `L1 + L2`
+- `npm --prefix console run build`
+  - passed
+  - Acceptance: `L1 + L2`
+
+## Remaining Boundaries
+
+- `delegation_service.py` is still not retired.
+- donor/provider compatibility boundaries were not advanced in this closure slice.
+- `default regression`, `live smoke`, and `long soak` remain unrun.
+- This plan must not be cited as proof of `L3/L4` closure or full external-executor hard-cut completion.

@@ -111,15 +111,10 @@ export default function AgentWorkbenchPage() {
     agentDetailError,
     industryDetailError,
     capabilityActionKey,
-    actorActionKey,
     refresh,
     refreshAgentDetail,
     submitGovernedCapabilityAssignment,
     resolveCapabilityDecision,
-    pauseActorRuntime,
-    resumeActorRuntime,
-    retryActorMailboxRuntime,
-    cancelActorRuntime,
   } = useAgentWorkbench({
     industryInstanceId: requestedIndustryId,
   });
@@ -476,14 +471,7 @@ export default function AgentWorkbenchPage() {
                     onResolveDecision={resolveCapabilityDecision}
                   />
                 ) : null}
-                <ActorRuntimePanel
-                  detail={displayedAgentDetail}
-                  actorActionKey={actorActionKey}
-                  onPauseActor={pauseActorRuntime}
-                  onResumeActor={resumeActorRuntime}
-                  onRetryMailbox={retryActorMailboxRuntime}
-                  onCancelActor={cancelActorRuntime}
-                />
+                <ActorRuntimePanel detail={displayedAgentDetail} />
               </>
             ),
           },

@@ -238,7 +238,6 @@ function CapabilityGovernancePanel({
       reason?: string | null;
       use_recommended?: boolean;
     },
-    options?: { requireActor?: boolean },
   ) => Promise<{
     submitted?: boolean;
     updated?: boolean;
@@ -257,7 +256,6 @@ function CapabilityGovernancePanel({
   ) => Promise<Record<string, unknown>>;
 }) {
   const surface = detail?.capability_surface ?? null;
-  const requireActor = Boolean(detail?.runtime);
   const [mode, setMode] = React.useState<"replace" | "merge">("replace");
   const [selectedCapabilities, setSelectedCapabilities] = React.useState<string[]>([]);
   const [reason, setReason] = React.useState("");
@@ -296,7 +294,6 @@ function CapabilityGovernancePanel({
           reason: reason || null,
           use_recommended: useRecommended,
         },
-        { requireActor },
       );
       if (result.result?.phase === "waiting-confirm") {
         const decisionId = result.result.decision_request_id || result.decision?.id;
@@ -505,7 +502,7 @@ function CapabilityGovernancePanel({
           <Button className="baize-btn"
             loading={
               capabilityActionKey ===
-              `govern:${requireActor ? "actor" : "agent"}:${agent.agent_id}`
+              `govern:agent:${agent.agent_id}`
             }
             onClick={() => void handleGovernedSubmit(true)}
           >
@@ -516,7 +513,7 @@ function CapabilityGovernancePanel({
             disabled={selectedCapabilities.length === 0}
             loading={
               capabilityActionKey ===
-              `govern:${requireActor ? "actor" : "agent"}:${agent.agent_id}`
+              `govern:agent:${agent.agent_id}`
             }
             onClick={() => void handleGovernedSubmit(false)}
           >

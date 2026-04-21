@@ -511,6 +511,47 @@ export interface RuntimeResearchRoundSummary {
   updated_at?: string | null;
 }
 
+export interface RuntimeResearchBriefSurface {
+  goal?: string | null;
+  question?: string | null;
+  why_needed?: string | null;
+  done_when?: string | null;
+  requested_sources?: string[] | null;
+  writeback_target?: Record<string, unknown> | null;
+}
+
+export interface RuntimeResearchFindingSurface {
+  finding_id?: string | null;
+  id?: string | null;
+  finding_type?: string | null;
+  type?: string | null;
+  summary?: string | null;
+  value?: string | null;
+  supporting_source_ids?: string[] | null;
+  supporting_evidence_ids?: string[] | null;
+}
+
+export interface RuntimeResearchSourceSurface {
+  source_id?: string | null;
+  id?: string | null;
+  source_kind?: string | null;
+  kind?: string | null;
+  collection_action?: string | null;
+  source_ref?: string | null;
+  url?: string | null;
+  title?: string | null;
+  label?: string | null;
+  snippet?: string | null;
+  summary?: string | null;
+}
+
+export interface RuntimeResearchWritebackSurface {
+  status?: string | null;
+  scope_type?: string | null;
+  scope_id?: string | null;
+  report_id?: string | null;
+}
+
 export interface RuntimeResearchSessionSurface {
   id?: string | null;
   status?: string | null;
@@ -519,6 +560,9 @@ export interface RuntimeResearchSessionSurface {
   waiting_login?: boolean | null;
   latest_status?: string | null;
   updated_at?: string | null;
+  brief?: RuntimeResearchBriefSurface | null;
+  writeback_target?: Record<string, unknown> | null;
+  writeback_truth?: RuntimeResearchWritebackSurface | null;
 }
 
 export interface RuntimeResearchRetrievalHit {
@@ -550,6 +594,13 @@ export interface RuntimeCenterResearchResponse {
   waiting_login?: boolean | null;
   latest_status?: string | null;
   updated_at?: string | null;
+  brief?: RuntimeResearchBriefSurface | null;
+  findings?: RuntimeResearchFindingSurface[] | null;
+  sources?: RuntimeResearchSourceSurface[] | null;
+  gaps?: string[] | null;
+  conflicts?: string[] | null;
+  writeback_target?: Record<string, unknown> | null;
+  writeback_truth?: RuntimeResearchWritebackSurface | null;
   session?: RuntimeResearchSessionSurface | null;
   latest_round?: RuntimeResearchRoundSummary | null;
   retrieval?: RuntimeResearchRetrievalSummary | null;
@@ -888,53 +939,4 @@ export const runtimeCenterApi = {
 
   getLatestRecoveryReport: () =>
     request<StartupRecoverySummary>("/runtime-center/recovery/latest"),
-
-  pauseActorRuntime: (
-    agentId: string,
-    body: { actor?: string; reason?: string | null } = {},
-  ) =>
-    request<Record<string, unknown>>(
-      `/runtime-center/actors/${encodeURIComponent(agentId)}/pause`,
-      {
-        method: "POST",
-        body: JSON.stringify(body),
-      },
-    ),
-
-  resumeActorRuntime: (
-    agentId: string,
-    body: { actor?: string } = {},
-  ) =>
-    request<Record<string, unknown>>(
-      `/runtime-center/actors/${encodeURIComponent(agentId)}/resume`,
-      {
-        method: "POST",
-        body: JSON.stringify(body),
-      },
-    ),
-
-  retryActorMailboxRuntime: (
-    agentId: string,
-    mailboxId: string,
-    body: { actor?: string } = {},
-  ) =>
-    request<Record<string, unknown>>(
-      `/runtime-center/actors/${encodeURIComponent(agentId)}/retry/${encodeURIComponent(mailboxId)}`,
-      {
-        method: "POST",
-        body: JSON.stringify(body),
-      },
-    ),
-
-  cancelActorRuntime: (
-    agentId: string,
-    body: { actor?: string; task_id?: string | null } = {},
-  ) =>
-    request<Record<string, unknown>>(
-      `/runtime-center/actors/${encodeURIComponent(agentId)}/cancel`,
-      {
-        method: "POST",
-        body: JSON.stringify(body),
-      },
-    ),
 };

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, request } from "../api";
+import { request } from "../api";
 import {
   buildActorPulseItems,
   compareActorPriority,
@@ -189,7 +189,6 @@ export function useRuntimeExecutionPulse(
   options: UseRuntimeExecutionPulseOptions = {},
 ) {
   const {
-    actor = "runtime-surface",
     maxItems = 4,
     preferredAgentId = null,
     autoLoad = true,
@@ -199,7 +198,6 @@ export function useRuntimeExecutionPulse(
   const [items, setItems] = useState<ActorPulseItem[]>([]);
   const [loading, setLoading] = useState(Boolean(autoLoad && active));
   const [error, setError] = useState<string | null>(null);
-  const [actorBusyKey, setActorBusyKey] = useState<string | null>(null);
   const itemsRef = useRef<ActorPulseItem[]>([]);
   const loadPulseRef = useRef<((force?: boolean) => Promise<void> | void) | null>(null);
   const reloadTimerRef = useRef<number | null>(null);
@@ -386,71 +384,10 @@ export function useRuntimeExecutionPulse(
     };
   }, [active, enableEvents, schedulePendingReload]);
 
-  const mutateActorRuntime = useCallback(
-    async (
-      key: string,
-      task: () => Promise<Record<string, unknown>>,
-    ) => {
-      setActorBusyKey(key);
-      try {
-        await task();
-        await loadPulse(true);
-      } finally {
-        setActorBusyKey(null);
-      }
-    },
-    [loadPulse],
-  );
-
-  const pauseActor = useCallback(
-    async (agentId: string, reason?: string | null) => {
-      await mutateActorRuntime(
-        `actor:pause:${agentId}`,
-        () =>
-          api.pauseActorRuntime(agentId, {
-            actor,
-            reason: reason ?? undefined,
-          }),
-      );
-    },
-    [actor, mutateActorRuntime],
-  );
-
-  const resumeActor = useCallback(
-    async (agentId: string) => {
-      await mutateActorRuntime(
-        `actor:resume:${agentId}`,
-        () =>
-          api.resumeActorRuntime(agentId, {
-            actor,
-          }),
-      );
-    },
-    [actor, mutateActorRuntime],
-  );
-
-  const cancelActor = useCallback(
-    async (agentId: string, taskId?: string | null) => {
-      await mutateActorRuntime(
-        `actor:cancel:${agentId}:${taskId ?? "all"}`,
-        () =>
-          api.cancelActorRuntime(agentId, {
-            actor,
-            task_id: taskId ?? undefined,
-          }),
-      );
-    },
-    [actor, mutateActorRuntime],
-  );
-
   return {
     items,
     loading,
     error,
-    actorBusyKey,
     reloadPulse: () => loadPulse(true),
-    pauseActor,
-    resumeActor,
-    cancelActor,
   };
 }

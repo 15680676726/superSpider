@@ -10,10 +10,6 @@ vi.mock("../hooks/useRuntimeExecutionPulse", () => ({
     items: [],
     loading: false,
     error: null,
-    actorBusyKey: null,
-    pauseActor: vi.fn(),
-    resumeActor: vi.fn(),
-    cancelActor: vi.fn(),
   })),
 }));
 
@@ -75,10 +71,6 @@ describe("RuntimeExecutionStrip", () => {
       ],
       loading: false,
       error: null,
-      actorBusyKey: null,
-      pauseActor: vi.fn(),
-      resumeActor: vi.fn(),
-      cancelActor: vi.fn(),
     };
 
     render(
@@ -97,5 +89,9 @@ describe("RuntimeExecutionStrip", () => {
       "title",
       `证据：${latestEvidenceSummary}`,
     );
+    expect(screen.getByText(/只读兼容视图/i)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /暂停/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /恢复/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /取消当前任务/i })).toBeNull();
   });
 });

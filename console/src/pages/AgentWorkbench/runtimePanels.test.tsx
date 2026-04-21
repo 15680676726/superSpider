@@ -1,23 +1,15 @@
 // @vitest-environment jsdom
 
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { agentWorkbenchText, runtimeCenterText } from "./copy";
+import { agentWorkbenchText } from "./copy";
 import { ActorRuntimePanel } from "./sections/runtimePanels";
 
 describe("runtimePanels", () => {
   it("renders the extracted actor runtime panel through the section module", () => {
-    const pauseLabelPattern = new RegExp(
-      runtimeCenterText.actionPause.split("").join("\\s*"),
-    );
-    const resumeLabelPattern = new RegExp(
-      runtimeCenterText.actionResume.split("").join("\\s*"),
-    );
-
     render(
       <ActorRuntimePanel
-        actorActionKey={null}
         detail={{
           agent: {
             agent_id: "agent-1",
@@ -64,22 +56,19 @@ describe("runtimePanels", () => {
             environment_count: 0,
           },
         } as never}
-        onCancelActor={vi.fn()}
-        onPauseActor={vi.fn()}
-        onResumeActor={vi.fn()}
-        onRetryMailbox={vi.fn()}
       />,
     );
 
     expect(screen.getByText(agentWorkbenchText.actorRuntimeTitle)).toBeTruthy();
-    expect(screen.getByRole("button", { name: pauseLabelPattern })).toBeTruthy();
-    expect(screen.getByRole("button", { name: resumeLabelPattern })).toBeTruthy();
+    expect(screen.getByText(/只读兼容视图/i)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /暂停/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /恢复/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /取消/i })).toBeNull();
   });
 
   it("shows host coordination facts from host_twin projection for active runtime environment", () => {
     render(
       <ActorRuntimePanel
-        actorActionKey={null}
         detail={{
           agent: {
             agent_id: "agent-1",
@@ -159,10 +148,6 @@ describe("runtimePanels", () => {
             environment_count: 1,
           },
         } as never}
-        onCancelActor={vi.fn()}
-        onPauseActor={vi.fn()}
-        onResumeActor={vi.fn()}
-        onRetryMailbox={vi.fn()}
       />,
     );
 

@@ -27,10 +27,6 @@ describe("RuntimeExecutionLauncher", () => {
       items: [],
       loading: false,
       error: null,
-      actorBusyKey: null,
-      pauseActor: vi.fn(),
-      resumeActor: vi.fn(),
-      cancelActor: vi.fn(),
     });
   });
 

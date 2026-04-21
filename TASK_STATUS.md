@@ -150,6 +150,51 @@
   - actor runtime 仍未降到 `read-only-compat`
   - browser / desktop / document 本地执行层仍是后续退役目标，而不是本轮已删除项
 
+## 1.0.3 `2026-04-21` 外部执行体 hard-cut actor-runtime `read-only-compat` 收口
+
+- 当前工作树新增收口：
+  - `src/copaw/app/routers/runtime_center_routes_actor.py` 已删除 actor mutation / actor capability mutation 路由：
+    - `/runtime-center/actors/{agent_id}/pause`
+    - `/runtime-center/actors/{agent_id}/resume`
+    - `/runtime-center/actors/{agent_id}/retry/{mailbox_id}`
+    - `/runtime-center/actors/{agent_id}/cancel`
+    - `/runtime-center/actors/{agent_id}/capabilities`
+    - `/runtime-center/actors/{agent_id}/capabilities/governed`
+  - `src/copaw/app/routers/runtime_center_payloads.py` 现把 actor runtime payload 显式标记为：
+    - `compatibility_mode = read-only-compat`
+    - `formal_surface = false`
+    - `agent_capabilities_route = /api/runtime-center/agents/{agent_id}/capabilities`
+  - `src/copaw/kernel/agent_profile_service.py` 的 capability surface 已删除 `actor_governed_assign` / `actor_direct_assign`，只保留 agent formal 写路由。
+  - `console/src/components/RuntimeExecutionStrip.tsx`、`console/src/pages/AgentWorkbench/sections/runtimePanels.tsx`、`console/src/pages/AgentWorkbench/useAgentWorkbench.ts`、`console/src/api/modules/runtimeCenter.ts` 已删除 actor pause/resume/cancel/retry 控制 affordance 与前端 mutation helper；Agent Workbench capability governance 统一只走 `/runtime-center/agents/{agent_id}/capabilities*`。
+- 当前能诚实表述的结论：
+  - actor runtime 在 Runtime Center / Agent Workbench 这条前端-后端链上已降为 `read-only-compat`
+  - 这证明 Task 6 的 actor compatibility demotion slice 已到 `L1 + L2`
+  - 这不等于整个 external-executor hard-cut 已完成，更不等于 `delegation_service.py` / donor-provider 边界已全部删除
+- 当前 fresh focused regression 证据：
+  - Actor compatibility backend：
+    - 命令：`PYTHONPATH=src python -m pytest tests/app/test_runtime_center_actor_api.py -q`
+    - 结果：`8 passed in 37.69s`
+    - 验收层级：`L1 + L2`
+  - Runtime Center executor/actor focused regression：
+    - 命令：`PYTHONPATH=src python -m pytest tests/app/test_runtime_center_actor_api.py tests/app/test_runtime_center_external_runtime_api.py tests/app/test_runtime_center_executor_runtime_projection.py tests/app/test_runtime_center_executor_runtime_bootstrap.py -q`
+    - 结果：`17 passed in 56.78s`
+    - 验收层级：`L1 + L2`
+  - Frontend actor compatibility focused regression：
+    - 命令：`npm --prefix console test -- src/components/RuntimeExecutionStrip.test.tsx src/components/RuntimeExecutionLauncher.test.tsx src/pages/AgentWorkbench/runtimePanels.test.tsx src/pages/AgentWorkbench/useAgentWorkbench.test.tsx src/pages/AgentWorkbench/index.test.tsx`
+    - 结果：`13 passed`
+    - 验收层级：`L1 + L2`
+  - Frontend build regression：
+    - 命令：`npm --prefix console run build`
+    - 结果：`tsc -b && vite build` 通过
+    - 验收层级：`L1 + L2`
+- 当前仍然明确未完成：
+  - `default regression`：未跑
+  - `live smoke`：未跑
+  - `long soak`：未跑
+  - `delegation_service.py` 仍未退役
+  - `/capability-market/projects/install*` / donor-provider compatibility 边界未在本轮继续推进
+  - 因此 external-executor hard-cut 当前仍只能写到 `L1 + L2`，不能写成 `L3/L4` 已闭环
+
 ## 1.1.1 `2026-04-07` Buddy 领域能力阶段收口补充
 
 - Buddy 当前成长阶段的正式真相已从关系经验切到 active `BuddyDomainCapabilityRecord`

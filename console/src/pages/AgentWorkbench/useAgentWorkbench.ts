@@ -606,9 +606,7 @@ export interface AgentCapabilitySurface {
     detail?: string;
     actor_detail?: string;
     governed_assign?: string;
-    actor_governed_assign?: string;
     direct_assign?: string;
-    actor_direct_assign?: string;
   };
 }
 
@@ -691,7 +689,6 @@ export function useAgentWorkbench(options: AgentWorkbenchOptions = {}) {
   const [agentDetailError, setAgentDetailError] = useState<string | null>(null);
   const [industryDetailError, setIndustryDetailError] = useState<string | null>(null);
   const [capabilityActionKey, setCapabilityActionKey] = useState<string | null>(null);
-  const [actorActionKey, setActorActionKey] = useState<string | null>(null);
   const selectedIndustryInstanceId =
     selectedAgent?.industry_instance_id?.trim() || industryInstanceId;
 
@@ -851,37 +848,13 @@ export function useAgentWorkbench(options: AgentWorkbenchOptions = {}) {
     selectedAgent,
   ]);
 
-  const refreshActorSurface = useCallback(
-    async (agentId: string) => {
-      await Promise.all([
-        fetchDashboard(),
-        fetchAgentDetail(agentId),
-        refreshIndustryDetail(
-          selectedIndustryInstanceId,
-          agents.find((item) => item.agent_id === agentId) || selectedAgent,
-        ),
-      ]);
-    },
-    [
-      agents,
-      fetchAgentDetail,
-      fetchDashboard,
-      refreshIndustryDetail,
-      selectedAgent,
-      selectedIndustryInstanceId,
-    ],
-  );
-
   const submitGovernedCapabilityAssignment = useCallback(
     async (
       agentId: string,
       payload: GovernedCapabilityAssignmentRequest,
-      options?: { requireActor?: boolean },
     ) => {
-      const route = options?.requireActor
-        ? `/runtime-center/actors/${encodeURIComponent(agentId)}/capabilities/governed`
-        : `/runtime-center/agents/${encodeURIComponent(agentId)}/capabilities/governed`;
-      const actionKey = `govern:${options?.requireActor ? "actor" : "agent"}:${agentId}`;
+      const route = `/runtime-center/agents/${encodeURIComponent(agentId)}/capabilities/governed`;
+      const actionKey = `govern:agent:${agentId}`;
       setCapabilityActionKey(actionKey);
       try {
         const result = await request<GovernedCapabilityAssignmentResult>(route, {
@@ -931,76 +904,6 @@ export function useAgentWorkbench(options: AgentWorkbenchOptions = {}) {
     [fetchAgentDetail, fetchDashboard, selectedAgent?.agent_id],
   );
 
-  const pauseActorRuntime = useCallback(
-    async (agentId: string, reason?: string | null) => {
-      const actionKey = `actor:pause:${agentId}`;
-      setActorActionKey(actionKey);
-      try {
-        const result = await api.pauseActorRuntime(agentId, {
-          actor: "agent-workbench",
-          reason: reason ?? undefined,
-        });
-        await refreshActorSurface(agentId);
-        return result;
-      } finally {
-        setActorActionKey(null);
-      }
-    },
-    [refreshActorSurface],
-  );
-
-  const resumeActorRuntime = useCallback(
-    async (agentId: string) => {
-      const actionKey = `actor:resume:${agentId}`;
-      setActorActionKey(actionKey);
-      try {
-        const result = await api.resumeActorRuntime(agentId, {
-          actor: "agent-workbench",
-        });
-        await refreshActorSurface(agentId);
-        return result;
-      } finally {
-        setActorActionKey(null);
-      }
-    },
-    [refreshActorSurface],
-  );
-
-  const retryActorMailboxRuntime = useCallback(
-    async (agentId: string, mailboxId: string) => {
-      const actionKey = `actor:retry:${agentId}:${mailboxId}`;
-      setActorActionKey(actionKey);
-      try {
-        const result = await api.retryActorMailboxRuntime(agentId, mailboxId, {
-          actor: "agent-workbench",
-        });
-        await refreshActorSurface(agentId);
-        return result;
-      } finally {
-        setActorActionKey(null);
-      }
-    },
-    [refreshActorSurface],
-  );
-
-  const cancelActorRuntime = useCallback(
-    async (agentId: string, taskId?: string | null) => {
-      const actionKey = `actor:cancel:${agentId}:${taskId ?? "all"}`;
-      setActorActionKey(actionKey);
-      try {
-        const result = await api.cancelActorRuntime(agentId, {
-          actor: "agent-workbench",
-          task_id: taskId ?? undefined,
-        });
-        await refreshActorSurface(agentId);
-        return result;
-      } finally {
-        setActorActionKey(null);
-      }
-    },
-    [refreshActorSurface],
-  );
-
   return {
     agents,
     selectedAgent,
@@ -1018,16 +921,11 @@ export function useAgentWorkbench(options: AgentWorkbenchOptions = {}) {
     agentDetailError,
     industryDetailError,
     capabilityActionKey,
-    actorActionKey,
     refresh,
     refreshAgentDetail,
     refreshIndustryDetail,
     submitGovernedCapabilityAssignment,
     resolveCapabilityDecision,
-    pauseActorRuntime,
-    resumeActorRuntime,
-    retryActorMailboxRuntime,
-    cancelActorRuntime,
   };
 }
 

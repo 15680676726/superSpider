@@ -216,11 +216,14 @@ def test_runtime_center_actor_read_routes(tmp_path) -> None:
     actors = list_response.json()
     assert len(actors) == 2
     assert actors[0]["routes"]["detail"].startswith("/api/runtime-center/actors/")
+    assert actors[0]["compatibility_mode"] == "read-only-compat"
+    assert "governed_capabilities" not in actors[0]["routes"]
 
     detail_response = client.get("/runtime-center/actors/agent-1")
     assert detail_response.status_code == 200
     detail = detail_response.json()
     assert detail["runtime"]["agent_id"] == "agent-1"
+    assert detail["runtime"]["compatibility_mode"] == "read-only-compat"
     assert detail["capability_surface"]["default_mode"] == "governed"
     assert "system:dispatch_query" in detail["capability_surface"]["recommended_capabilities"]
     assert detail["stats"]["mailbox_count"] == 1
@@ -308,55 +311,49 @@ def test_runtime_center_actor_focus_supports_async_review_lookup(tmp_path) -> No
     assert focus["review"]["status"] == "reviewing"
 
 
-def test_runtime_center_actor_control_routes(tmp_path) -> None:
-    app, mailbox_service, supervisor, item = _build_actor_app(tmp_path)
+def test_runtime_center_actor_mutation_routes_are_retired(tmp_path) -> None:
+    app, _mailbox_service, _supervisor, item = _build_actor_app(tmp_path)
     client = TestClient(app)
 
     pause_response = client.post(
         "/runtime-center/actors/agent-1/pause",
         json={"reason": "manual hold"},
     )
-    assert pause_response.status_code == 200
-    assert pause_response.json()["paused"] is True
-    assert pause_response.json()["runtime"]["desired_state"] == "paused"
-    assert pause_response.json()["runtime"]["runtime_status"] == "paused"
-
     resume_response = client.post("/runtime-center/actors/agent-1/resume")
-    assert resume_response.status_code == 200
-    assert resume_response.json()["resumed"] is True
-    assert resume_response.json()["runtime"]["desired_state"] == "active"
-    assert resume_response.json()["runtime"]["runtime_status"] == "queued"
-    assert supervisor.calls == ["agent-1"]
-
-    mailbox_service.fail_item(
-        item.id,
-        error_summary="Need operator retry.",
-        retryable=False,
-        task_id="task-1",
-    )
     retry_response = client.post(f"/runtime-center/actors/agent-1/retry/{item.id}")
-    assert retry_response.status_code == 200
-    assert retry_response.json()["retried"] is True
-    assert retry_response.json()["mailbox"]["status"] == "queued"
-    assert retry_response.json()["runtime"]["queue_depth"] == 1
-    assert supervisor.calls == ["agent-1", "agent-1"]
-
     cancel_response = client.post(
         "/runtime-center/actors/agent-1/cancel",
         json={"task_id": "task-1"},
     )
-    assert cancel_response.status_code == 200
-    assert cancel_response.json()["cancelled"] is True
-    assert cancel_response.json()["result"]["output"]["cancelled_mailbox_ids"] == [item.id]
-    assert cancel_response.json()["runtime"]["queue_depth"] == 0
+    assign_capabilities_response = client.put(
+        "/runtime-center/actors/agent-1/capabilities",
+        json={
+            "capabilities": ["tool:send_file_to_user"],
+            "mode": "replace",
+        },
+    )
+    govern_capabilities_response = client.post(
+        "/runtime-center/actors/agent-1/capabilities/governed",
+        json={
+            "capabilities": ["tool:send_file_to_user"],
+            "mode": "replace",
+        },
+    )
+
+    assert pause_response.status_code == 404
+    assert resume_response.status_code == 404
+    assert retry_response.status_code == 404
+    assert cancel_response.status_code == 404
+    assert assign_capabilities_response.status_code == 405
+    assert govern_capabilities_response.status_code == 404
 
 
-def test_runtime_center_actor_capability_assignment_route(tmp_path) -> None:
+def test_runtime_center_actor_capability_assignment_route_uses_agent_surface(tmp_path) -> None:
     app, _mailbox_service, _supervisor, _item = _build_actor_app(tmp_path)
     client = TestClient(app)
 
     response = client.put(
-        "/runtime-center/actors/agent-1/capabilities",
+        "/runtime-center/agents/agent-1/capabilities",
         json={
             "capabilities": ["tool:send_file_to_user"],
             "mode": "replace",
@@ -371,6 +368,8 @@ def test_runtime_center_actor_capability_assignment_route(tmp_path) -> None:
     assert "tool:send_file_to_user" in payload["agent"]["capabilities"]
     assert "system:dispatch_query" in payload["agent"]["capabilities"]
     assert payload["runtime"]["routes"]["capabilities"] == "/api/runtime-center/actors/agent-1/capabilities"
+    assert "governed_capabilities" not in payload["runtime"]["routes"]
+    assert payload["runtime"]["agent_capabilities_route"] == "/api/runtime-center/agents/agent-1/capabilities"
 
     override = app.state.agent_profile_override_repository.get_override("agent-1")
     assert override is not None
@@ -405,9 +404,11 @@ def test_runtime_center_actor_capability_surface_and_governed_assignment(tmp_pat
     assert surface["default_mode"] == "governed"
     assert "system:dispatch_query" in surface["baseline_capabilities"]
     assert surface["routes"]["governed_assign"] == "/api/runtime-center/agents/agent-1/capabilities/governed"
+    assert "actor_governed_assign" not in surface["routes"]
+    assert "actor_direct_assign" not in surface["routes"]
 
     govern_response = client.post(
-        "/runtime-center/actors/agent-1/capabilities/governed",
+        "/runtime-center/agents/agent-1/capabilities/governed",
         json={
             "capabilities": ["tool:send_file_to_user"],
             "mode": "replace",
@@ -429,6 +430,8 @@ def test_runtime_center_actor_capability_surface_and_governed_assignment(tmp_pat
     assert refreshed_surface.status_code == 200
     refreshed_payload = refreshed_surface.json()
     assert refreshed_payload["pending_decisions"] == []
+    assert "actor_governed_assign" not in refreshed_payload["routes"]
+    assert "actor_direct_assign" not in refreshed_payload["routes"]
     assert "tool:send_file_to_user" in refreshed_payload["effective_capabilities"]
     lifecycle_tasks = _list_lifecycle_kernel_tasks(app)
     assert len(lifecycle_tasks) == 1

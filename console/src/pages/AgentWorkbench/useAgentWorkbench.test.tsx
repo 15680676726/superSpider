@@ -147,4 +147,34 @@ describe("useAgentWorkbench", () => {
       }),
     );
   });
+
+  it("routes actor-backed capability governance through the agent surface", async () => {
+    const { result } = renderHook(() => useAgentWorkbench());
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await result.current.submitGovernedCapabilityAssignment("agent-1", {
+      capabilities: ["tool:send_file_to_user"],
+      mode: "replace",
+      reason: "read-only actor compatibility cutover",
+    });
+
+    expect(requestMock).toHaveBeenCalledWith(
+      "/runtime-center/agents/agent-1/capabilities/governed",
+      expect.objectContaining({
+        method: "POST",
+      }),
+    );
+  });
+
+  it("does not expose retired actor runtime mutation helpers", async () => {
+    const { result } = renderHook(() => useAgentWorkbench());
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    const hookState = result.current as Record<string, unknown>;
+    expect(hookState.pauseActorRuntime).toBeUndefined();
+    expect(hookState.resumeActorRuntime).toBeUndefined();
+    expect(hookState.retryActorMailboxRuntime).toBeUndefined();
+    expect(hookState.cancelActorRuntime).toBeUndefined();
+  });
 });

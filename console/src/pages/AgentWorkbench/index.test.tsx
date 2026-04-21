@@ -153,15 +153,10 @@ function createWorkbenchState(overrides: Record<string, unknown> = {}) {
     agentDetailError: null,
     industryDetailError: null,
     capabilityActionKey: null,
-    actorActionKey: null,
     refresh: vi.fn(),
     refreshAgentDetail: vi.fn(),
     submitGovernedCapabilityAssignment: vi.fn(),
     resolveCapabilityDecision: vi.fn(),
-    pauseActorRuntime: vi.fn(),
-    resumeActorRuntime: vi.fn(),
-    retryActorMailboxRuntime: vi.fn(),
-    cancelActorRuntime: vi.fn(),
     ...overrides,
   };
 }

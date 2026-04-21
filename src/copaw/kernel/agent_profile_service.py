@@ -550,9 +550,7 @@ class AgentProfileService:
                 "detail": f"/api/runtime-center/agents/{agent_id}/capabilities",
                 "actor_detail": f"/api/runtime-center/actors/{agent_id}/capabilities",
                 "governed_assign": f"/api/runtime-center/agents/{agent_id}/capabilities/governed",
-                "actor_governed_assign": f"/api/runtime-center/actors/{agent_id}/capabilities/governed",
                 "direct_assign": f"/api/runtime-center/agents/{agent_id}/capabilities",
-                "actor_direct_assign": f"/api/runtime-center/actors/{agent_id}/capabilities",
             },
         }
 

@@ -1,17 +1,14 @@
 import {
-  Button,
   Card,
   List,
   Space,
   Tag,
   Typography,
-  message,
 } from "antd";
 import { ThunderboltOutlined } from "@ant-design/icons";
 
 import {
   agentWorkbenchText,
-  commonText,
   getLeaseKindLabel,
   getPhaseLabel,
   getStatusLabel,
@@ -52,24 +49,13 @@ function pickRuntimeEnvironment(detail: AgentDetail): EnvironmentItem | null {
 
 export function ActorRuntimePanel({
   detail,
-  actorActionKey,
-  onPauseActor,
-  onResumeActor,
-  onRetryMailbox,
-  onCancelActor,
 }: {
   detail: AgentDetail | null;
-  actorActionKey: string | null;
-  onPauseActor: (agentId: string) => Promise<unknown>;
-  onResumeActor: (agentId: string) => Promise<unknown>;
-  onRetryMailbox: (agentId: string, mailboxId: string) => Promise<unknown>;
-  onCancelActor: (agentId: string, taskId?: string | null) => Promise<unknown>;
 }) {
   if (!detail) {
     return null;
   }
   const runtime = detail.runtime;
-  const agentId = detail.agent.agent_id;
   const runtimeEnvironment = pickRuntimeEnvironment(detail);
   const hostContract = runtimeEnvironment?.host_contract ?? null;
   const seatRuntime = runtimeEnvironment?.seat_runtime ?? null;
@@ -111,10 +97,6 @@ export function ActorRuntimePanel({
   const seatSelectionPolicy =
     coordination?.seat_selection_policy || seatRuntime?.seat_selection_policy || null;
   const schedulerAction = coordination?.recommended_scheduler_action || null;
-  const currentTaskId = runtime?.current_task_id || detail.agent.current_task_id || null;
-  const pauseKey = `actor:pause:${agentId}`;
-  const resumeKey = `actor:resume:${agentId}`;
-  const cancelKey = `actor:cancel:${agentId}:${currentTaskId ?? "all"}`;
   return (
     <Card className="baize-card"
       title={
@@ -133,43 +115,7 @@ export function ActorRuntimePanel({
       }
       extra={
         <Space wrap>
-          <Button className="baize-btn"
-            size="small"
-            loading={actorActionKey === pauseKey}
-            disabled={!runtime || runtime.desired_state === "paused"}
-            onClick={() => {
-              void onPauseActor(agentId).catch((err) => {
-                message.error(err instanceof Error ? err.message : String(err));
-              });
-            }}
-          >
-            {runtimeCenterText.actionPause}
-          </Button>
-          <Button className="baize-btn"
-            size="small"
-            loading={actorActionKey === resumeKey}
-            disabled={!runtime || runtime.desired_state === "active"}
-            onClick={() => {
-              void onResumeActor(agentId).catch((err) => {
-                message.error(err instanceof Error ? err.message : String(err));
-              });
-            }}
-          >
-            {runtimeCenterText.actionResume}
-          </Button>
-          <Button className="baize-btn"
-            size="small"
-            danger
-            loading={actorActionKey === cancelKey}
-            disabled={!runtime && !currentTaskId}
-            onClick={() => {
-              void onCancelActor(agentId, currentTaskId).catch((err) => {
-                message.error(err instanceof Error ? err.message : String(err));
-              });
-            }}
-          >
-            {commonText.cancel}
-          </Button>
+          <Text type="secondary">只读兼容视图，控制动作已迁到正式执行体主链。</Text>
         </Space>
       }
       style={{ marginBottom: 32 }}
@@ -259,23 +205,6 @@ export function ActorRuntimePanel({
             renderItem={(item) => (
               <List.Item
                 key={item.id}
-                actions={[
-                  ["failed", "blocked", "retry-wait", "cancelled"].includes(item.status) ? (
-                    <Button className="baize-btn"
-                      key={`retry-${item.id}`}
-                      size="small"
-                      type="link"
-                      loading={actorActionKey === `actor:retry:${agentId}:${item.id}`}
-                      onClick={() => {
-                        void onRetryMailbox(agentId, item.id).catch((err) => {
-                          message.error(err instanceof Error ? err.message : String(err));
-                        });
-                      }}
-                    >
-                      {commonText.retry}
-                    </Button>
-                  ) : null,
-                ].filter(Boolean)}
               >
                 <Space direction="vertical" size={0}>
                   <Text strong>{localizeWorkbenchText(item.title)}</Text>

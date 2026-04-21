@@ -231,7 +231,13 @@
   - 当前工作树继续把 Task 6 推到 focused projection：
     - Runtime Center external runtime list/detail 优先读 executor runtime truth
     - query bootstrap 已显式挂接 `executor_runtime_service`
-  - 但因为 actor runtime 仍存在于启动图、`delegation_service.py` 仍承担正式派单链、Runtime Center overview/control 仍保留旧 actor 读面，所以这组本地 actor runtime 仍不能降成 `read-only-compat`，更不能写成 `ready-to-delete`
+  - 但因为 actor runtime 仍存在于启动图、`delegation_service.py` 仍承担正式派单链、Runtime Center overview/control 仍保留旧 actor 读面，所以这组本地 actor runtime 仍不能写成 `ready-to-delete`
+- `2026-04-21` actor runtime compatibility 补充：
+  - `runtime_center_routes_actor.py` 已删除 actor pause/resume/retry/cancel 与 actor capability mutation 路由
+  - actor payload 已显式标记 `compatibility_mode = read-only-compat`
+  - RuntimeExecutionStrip / AgentWorkbench 已删除 actor control affordance，capability governance 统一切到 agent formal surface
+  - 当前条目可正式表述为：actor runtime 在 Runtime Center / Agent Workbench 链路上已降到 `read-only-compat`
+  - 当前剩余边界不变：启动图仍保留 actor runtime，`delegation_service.py` 仍未退役，因此本条目继续保持 `frozen`，不得提前标记为 `ready-to-delete`
 
 ### 3.1.4 `src/copaw/kernel/delegation_service.py`
 
@@ -254,6 +260,9 @@
   - `Codex` first adapter 与 event-ingest slice 已经落地，但 `delegation_service.py` 仍是正式派单链的一部分。
   - 当前工作树里的 executor coordination / event writeback 主链已经能在 focused regression 下回写 evidence/report，但这仍不等于 `delegation_service.py` 已退役。
   - 在 `Assignment -> ExecutorRuntime -> Event -> Evidence/Report` 主链落地前，本条目继续维持 `frozen`，不得提前标记为已退役。
+- `2026-04-21` 状态补充：
+  - actor runtime 前端/路由侧虽然已降到 `read-only-compat`，但 `delegation_service.py` 的正式派单地位并未在本轮变化
+  - 因此 delegation 仍是 external-executor hard-cut 的后续删除项，而不是本轮已完成删除项
 
 ### 3.1.5 donor-first 外接项目产品面：`/capability-market/projects/install*`、`project donor` taxonomy、Runtime Center donor 读面
 
@@ -278,6 +287,9 @@
 - `2026-04-20` 落点补充：
   - 当前 generic executor runtime taxonomy 已开始替代 donor-first active runtime taxonomy。
   - 但 `/capability-market/projects/install*`、`project-package / adapter / runtime-component`、donor state/trust/trial/retirement、Runtime Center donor 读面仍是 compatibility/acquisition-only 遗留，尚未完成正式拆分。
+- `2026-04-21` 状态补充：
+  - 本轮 actor runtime compatibility 收口未继续推进 donor/project intake 边界
+  - 因此本条目状态保持不变：仍是 `compatibility/acquisition-only` 遗留，不得写成 formal executor provider 主链已闭环
 
 ### 3.1.6 本地 browser 执行层：`src/copaw/agents/tools/browser_control.py`、`src/copaw/capabilities/browser_runtime.py`、`src/copaw/environments/surface_execution/browser/service.py`
 

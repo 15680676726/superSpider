@@ -20,10 +20,6 @@ export interface RuntimeExecutionStripPulse {
   items: ReturnType<typeof useRuntimeExecutionPulse>["items"];
   loading: ReturnType<typeof useRuntimeExecutionPulse>["loading"];
   error: ReturnType<typeof useRuntimeExecutionPulse>["error"];
-  actorBusyKey: ReturnType<typeof useRuntimeExecutionPulse>["actorBusyKey"];
-  pauseActor: ReturnType<typeof useRuntimeExecutionPulse>["pauseActor"];
-  resumeActor: ReturnType<typeof useRuntimeExecutionPulse>["resumeActor"];
-  cancelActor: ReturnType<typeof useRuntimeExecutionPulse>["cancelActor"];
 }
 
 export interface RuntimeExecutionStripProps {
@@ -120,10 +116,6 @@ export default function RuntimeExecutionStrip({
     items,
     loading,
     error,
-    actorBusyKey,
-    pauseActor,
-    resumeActor,
-    cancelActor,
   } = pulse ?? hookPulse;
 
   const metrics = useMemo(
@@ -201,9 +193,6 @@ export default function RuntimeExecutionStrip({
         ) : (
           <div className={styles.grid}>
             {items.map((item) => {
-              const pauseKey = `actor:pause:${item.agentId}`;
-              const resumeKey = `actor:resume:${item.agentId}`;
-              const cancelKey = `actor:cancel:${item.agentId}:${item.currentTaskId ?? "all"}`;
               const currentSignal = item.signals[0];
               const displayName = presentExecutionActorName(item.agentId, item.title);
               const classLabel = presentExecutionClassLabel(item.actorClass, item.agentId);
@@ -397,38 +386,7 @@ export default function RuntimeExecutionStrip({
                   </div>
 
                   <div className={styles.actions}>
-                    {item.desiredState === "paused" || item.runtimeStatus === "paused" ? (
-                      <Button
-                        size="small"
-                        loading={actorBusyKey === resumeKey}
-                        onClick={() => {
-                          void resumeActor(item.agentId);
-                        }}
-                      >
-                        恢复
-                      </Button>
-                    ) : (
-                      <Button
-                        size="small"
-                        loading={actorBusyKey === pauseKey}
-                        onClick={() => {
-                          void pauseActor(item.agentId);
-                        }}
-                      >
-                        暂停
-                      </Button>
-                    )}
-                    <Button
-                      size="small"
-                      danger
-                      loading={actorBusyKey === cancelKey}
-                      disabled={!item.currentTaskId && item.queueDepth === 0}
-                      onClick={() => {
-                        void cancelActor(item.agentId, item.currentTaskId);
-                      }}
-                    >
-                      取消当前任务
-                    </Button>
+                    <Text type="secondary">只读兼容视图，控制动作已迁到正式执行体主链。</Text>
                     <Button
                       size="small"
                       type="link"

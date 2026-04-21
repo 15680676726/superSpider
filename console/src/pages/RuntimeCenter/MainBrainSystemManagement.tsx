@@ -14,10 +14,10 @@ import { RefreshCw, RotateCcw, ShieldAlert, ShieldCheck } from "lucide-react";
 import {
   api,
   type GovernanceStatus,
-  type RuntimeChannelRuntimeRecord,
   type StartupRecoverySummary,
   type SystemSelfCheck,
 } from "../../api";
+import type { RuntimeChannelRuntimeRecord } from "../../api/modules/runtimeCenter";
 import { normalizeDisplayChinese } from "../../text";
 import { presentRuntimeStatusLabel } from "../../runtime/executionPresentation";
 import { runtimeStatusColor } from "../../runtime/tagSemantics";

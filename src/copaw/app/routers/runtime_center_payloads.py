@@ -427,7 +427,11 @@ def _actor_runtime_payload(runtime: object) -> dict[str, object]:
     if payload is None:
         raise HTTPException(500, detail="Actor runtime payload is not serializable")
     agent_id = str(payload.get("agent_id") or "")
+    payload["compatibility_mode"] = "read-only-compat"
+    payload["formal_surface"] = False
     if agent_id:
+        agent_capabilities_route = f"/api/runtime-center/agents/{agent_id}/capabilities"
+        payload["agent_capabilities_route"] = agent_capabilities_route
         payload["routes"] = {
             "detail": f"/api/runtime-center/actors/{agent_id}",
             "mailbox": f"/api/runtime-center/actors/{agent_id}/mailbox",
@@ -435,8 +439,7 @@ def _actor_runtime_payload(runtime: object) -> dict[str, object]:
             "leases": f"/api/runtime-center/actors/{agent_id}/leases",
             "teammates": f"/api/runtime-center/actors/{agent_id}/teammates",
             "capabilities": f"/api/runtime-center/actors/{agent_id}/capabilities",
-            "governed_capabilities": f"/api/runtime-center/actors/{agent_id}/capabilities/governed",
-            "agent_capabilities": f"/api/runtime-center/agents/{agent_id}/capabilities",
+            "agent_capabilities": agent_capabilities_route,
         }
     return payload
 

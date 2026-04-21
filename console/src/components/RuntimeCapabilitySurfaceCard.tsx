@@ -379,12 +379,12 @@ export default function RuntimeCapabilitySurfaceCard({
               ? CAPABILITY_SURFACE_TEXT.capabilityDriftDetected
               : CAPABILITY_SURFACE_TEXT.capabilityAligned}
           </Tag>
-          {surface.routes.actor_governed_assign || surface.routes.governed_assign ? (
+          {surface.routes.governed_assign ? (
             <Tag color="cyan">
               {CAPABILITY_SURFACE_TEXT.capabilityGovernedWritePath}
             </Tag>
           ) : null}
-          {surface.routes.actor_direct_assign || surface.routes.direct_assign ? (
+          {surface.routes.direct_assign ? (
             <Tag color="purple">
               {CAPABILITY_SURFACE_TEXT.capabilityDirectWritePath}
             </Tag>
