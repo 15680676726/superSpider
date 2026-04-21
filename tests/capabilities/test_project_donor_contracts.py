@@ -256,6 +256,10 @@ def test_resolve_installed_python_project_contract_exposes_formal_donor_executio
         projected_metadata["host_compatibility_requirements"]
         == contract.metadata["host_compatibility_requirements"]
     )
+    assert contract.metadata["compatibility_mode"] == "compatibility/acquisition-only"
+    assert contract.metadata["formal_surface"] is False
+    assert projected_metadata["compatibility_mode"] == "compatibility/acquisition-only"
+    assert projected_metadata["formal_surface"] is False
 
 
 def test_resolve_installed_python_project_contract_prefers_service_entrypoint_for_runtime_components(

@@ -246,6 +246,58 @@ def test_runtime_center_capability_donors_endpoint_returns_state_query_projectio
     ]
 
 
+def test_runtime_center_state_query_marks_project_donor_surfaces_as_compatibility_only() -> None:
+    state_query = RuntimeCenterStateQueryService(
+        task_repository=object(),
+        task_runtime_repository=object(),
+        runtime_frame_repository=None,
+        schedule_repository=object(),
+        goal_repository=None,
+        work_context_repository=None,
+        decision_request_repository=object(),
+        capability_donor_service=SimpleNamespace(
+            list_donors=lambda limit=20: [
+                {
+                    "donor_id": "donor-project-1",
+                    "donor_kind": "project",
+                    "status": "candidate",
+                },
+            ][: limit or 20],
+        ),
+        donor_package_service=SimpleNamespace(
+            list_packages=lambda donor_id=None, limit=20: [
+                {
+                    "package_id": "pkg-project-1",
+                    "donor_id": donor_id or "donor-project-1",
+                    "package_kind": "github-archive-zip",
+                },
+            ][: limit or 20],
+        ),
+    )
+
+    donors = state_query.list_capability_donors(limit=5)
+    packages = state_query.list_capability_packages(donor_id="donor-project-1", limit=5)
+
+    assert donors == [
+        {
+            "donor_id": "donor-project-1",
+            "donor_kind": "project",
+            "status": "candidate",
+            "compatibility_mode": "compatibility/acquisition-only",
+            "formal_surface": False,
+        },
+    ]
+    assert packages == [
+        {
+            "package_id": "pkg-project-1",
+            "donor_id": "donor-project-1",
+            "package_kind": "github-archive-zip",
+            "compatibility_mode": "compatibility/acquisition-only",
+            "formal_surface": False,
+        },
+    ]
+
+
 def test_runtime_center_capability_source_profiles_endpoint_returns_state_query_projection() -> None:
     app = _build_app()
 

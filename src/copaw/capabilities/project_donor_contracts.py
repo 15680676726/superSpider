@@ -17,6 +17,17 @@ from .external_adapter_contracts import (
     normalize_provider_injection_mode,
 )
 
+PROJECT_DONOR_COMPATIBILITY_MODE = "compatibility/acquisition-only"
+
+
+def project_donor_surface_metadata(
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload = dict(metadata or {})
+    payload["compatibility_mode"] = PROJECT_DONOR_COMPATIBILITY_MODE
+    payload["formal_surface"] = False
+    return payload
+
 
 def _normalize_name(value: object | None) -> str:
     return str(value or "").strip().replace("-", "_").lower()
@@ -519,18 +530,20 @@ def _callable_surface_hints(
 def project_installed_python_project_package_metadata(
     contract: InstalledPythonProjectContract,
 ) -> dict[str, Any]:
-    return {
-        **dict(contract.metadata or {}),
-        **donor_execution_contract_metadata(
-            {
-                "provider_injection_mode": contract.provider_injection_mode,
-                "execution_envelope": contract.execution_envelope,
-                "host_compatibility_requirements": (
-                    contract.host_compatibility_requirements
-                ),
-            },
-        ),
-    }
+    return project_donor_surface_metadata(
+        {
+            **dict(contract.metadata or {}),
+            **donor_execution_contract_metadata(
+                {
+                    "provider_injection_mode": contract.provider_injection_mode,
+                    "execution_envelope": contract.execution_envelope,
+                    "host_compatibility_requirements": (
+                        contract.host_compatibility_requirements
+                    ),
+                },
+            ),
+        },
+    )
 
 
 def _repo_src_path() -> str:
@@ -917,23 +930,25 @@ def resolve_installed_python_project_contract(
         provider_injection_mode=provider_injection_mode,
         execution_envelope=execution_envelope,
         host_compatibility_requirements=host_compatibility_requirements,
-        metadata={
-            "entry_source": "console-script" if preferred_console_script else "module",
-            "console_script": preferred_console_script,
-            "script_path": script_path,
-            **_callable_surface_hints(
-                capability_kind=capability_kind,
-                console_entry_points=console_entry_points,
-                resolved_entry_module=resolved_entry_module,
-            ),
-            **donor_execution_contract_metadata(
-                {
-                    "provider_injection_mode": provider_injection_mode,
-                    "execution_envelope": execution_envelope,
-                    "host_compatibility_requirements": (
-                        host_compatibility_requirements
-                    ),
-                },
-            ),
-        },
+        metadata=project_donor_surface_metadata(
+            {
+                "entry_source": "console-script" if preferred_console_script else "module",
+                "console_script": preferred_console_script,
+                "script_path": script_path,
+                **_callable_surface_hints(
+                    capability_kind=capability_kind,
+                    console_entry_points=console_entry_points,
+                    resolved_entry_module=resolved_entry_module,
+                ),
+                **donor_execution_contract_metadata(
+                    {
+                        "provider_injection_mode": provider_injection_mode,
+                        "execution_envelope": execution_envelope,
+                        "host_compatibility_requirements": (
+                            host_compatibility_requirements
+                        ),
+                    },
+                ),
+            },
+        ),
     )

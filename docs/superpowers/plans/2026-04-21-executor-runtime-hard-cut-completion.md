@@ -44,7 +44,11 @@
   - RuntimeExecutionStrip / AgentWorkbench no longer expose actor pause/resume/cancel/retry controls
   - capability governance now uses the agent formal surface only
 - `Task 6`: improved. Runtime Center / Agent Workbench actor surfaces now read as compatibility-only instead of looking canonical.
-- `Task 7`: fresh `L1 + L2` evidence now exists for actor compatibility backend/frontend slices and `console` build, but not for `default regression`, `L3`, or `L4`.
+- donor/provider surface: additional partial closure now landed in the current worktree:
+  - project donor contract metadata and projected package metadata now carry `compatibility/acquisition-only + formal_surface=false`
+  - `/capability-market/projects/search` and `/projects/install*` responses now advertise the donor/project surface as compatibility-only instead of leaving it visually canonical
+  - Runtime Center donor/package projection now carries the same compatibility marker and tolerates dict-backed service payloads
+- `Task 7`: fresh `L1 + L2` evidence now exists for actor compatibility slices, donor/provider surface demotion, and `console` build, but not for `default regression`, `L3`, or `L4`.
 
 ## Fresh Verification
 
@@ -64,11 +68,14 @@
 - `npm --prefix console run build`
   - passed
   - Acceptance: `L1 + L2`
+- `PYTHONPATH=src python -m pytest tests/capabilities/test_project_donor_contracts.py tests/app/test_capability_market_api.py tests/app/test_runtime_center_events_api.py tests/app/test_runtime_center_external_runtime_api.py -q`
+  - `96 passed in 77.54s`
+  - Acceptance: `L1 + L2`
 
 ## Remaining Boundaries
 
 - `delegation_service.py` is still not retired.
 - `delegate_task` is no longer a default execution-core surface, but it still exists as an explicit compatibility capability.
-- donor/provider compatibility boundaries were not advanced in this closure slice.
+- donor/provider compatibility boundaries are now more explicit at the route/projection/metadata layer, but formal `ExecutorProvider` intake still has not replaced the donor/project install front door.
 - `default regression`, `live smoke`, and `long soak` remain unrun.
 - This plan must not be cited as proof of `L3/L4` closure or full external-executor hard-cut completion.

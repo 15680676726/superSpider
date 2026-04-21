@@ -294,6 +294,11 @@
 - `2026-04-21` 状态补充：
   - 本轮 actor runtime compatibility 收口未继续推进 donor/project intake 边界
   - 因此本条目状态保持不变：仍是 `compatibility/acquisition-only` 遗留，不得写成 formal executor provider 主链已闭环
+  - 当前工作树已继续补上 donor/project intake 的 surface demotion：
+    - `project_donor_contracts.py` 的 donor contract metadata / projected package metadata 现显式带 `compatibility_mode = compatibility/acquisition-only` 与 `formal_surface = false`
+    - `/capability-market/projects/search`、`/projects/install*` 与 Runtime Center donor/package projection 现都会返回同一 compatibility 标记，避免再被误读成 canonical executor-provider surface
+    - Runtime Center donor/package projection 也已兼容 dict-backed service payload，避免 donor 读面只因 projection 形态不同就静默掉数据
+  - 但这仍只是 compatibility 标记收口，不是 formal executor provider intake 完整替代；本条目状态因此继续保持 `frozen`
 
 ### 3.1.6 本地 browser 执行层：`src/copaw/agents/tools/browser_control.py`、`src/copaw/capabilities/browser_runtime.py`、`src/copaw/environments/surface_execution/browser/service.py`
 

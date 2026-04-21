@@ -229,6 +229,40 @@
   - `long soak`：未跑
   - 因此 external-executor hard-cut 当前仍只能写到 `L1 + L2`
 
+## 1.0.5 `2026-04-21` donor/project intake compatibility-acquisition-only 标记收口
+
+- 当前工作树继续把 `Task 4` 往前推了一个正式表面降级切片，但这次仍没有把 donor/project intake 替换成 formal executor provider：
+  - `src/copaw/capabilities/project_donor_contracts.py`
+    - 已给 project donor contract metadata 与 projected package metadata 统一补上：
+      - `compatibility_mode = compatibility/acquisition-only`
+      - `formal_surface = false`
+  - `src/copaw/app/routers/capability_market.py`
+    - `/capability-market/projects/search`
+    - `/capability-market/projects/install`
+    - `/capability-market/projects/install-jobs/{task_id}`
+    - `/capability-market/projects/install-jobs/{task_id}/result`
+    - 上述 donor/project surface 现都会显式返回 compatibility/acquisition-only 标记，不再裸露成像 formal executor-provider intake 的产品面
+    - project candidate materialization / install contract metadata / persisted external package metadata 也会继承同一标记
+  - `src/copaw/app/runtime_center/state_query.py`
+    - Runtime Center donor/package projection 现统一补上 compatibility/acquisition-only 标记
+    - donor/package 读面同时兼容 dict-backed service payload，不再只接受 `model_dump()` 结果
+- 当前能诚实表述的结论：
+  - donor/project intake 这条产品与状态读面现在已明确标为 `compatibility/acquisition-only`
+  - 这证明 `Task 4` 的“先标记 compatibility，再阻止误读为 canonical executor surface”切片已到 `L1 + L2`
+  - 这不等于 formal `ExecutorProvider` intake 已落地，更不等于 donor/project runtime taxonomy 已从所有 state/trial/read 面彻底拆除
+- 当前 fresh focused regression 证据：
+  - donor/project compatibility surface focused regression：
+    - 命令：`PYTHONPATH=src python -m pytest tests/capabilities/test_project_donor_contracts.py tests/app/test_capability_market_api.py tests/app/test_runtime_center_events_api.py tests/app/test_runtime_center_external_runtime_api.py -q`
+    - 结果：`96 passed in 77.54s`
+    - 验收层级：`L1 + L2`
+- 当前仍然明确未完成：
+  - formal `ExecutorProvider / control_surface_kind / protocol_surface_kind` intake 仍未完全替换 donor/project install 前门
+  - donor state/trust/trial/retirement 全量 taxonomy 仍未完成正式拆分
+  - `default regression`：未跑
+  - `live smoke`：未跑
+  - `long soak`：未跑
+  - 因此 external-executor hard-cut 当前仍只能写到 `L1 + L2`
+
 ## 1.1.1 `2026-04-07` Buddy 领域能力阶段收口补充
 
 - Buddy 当前成长阶段的正式真相已从关系经验切到 active `BuddyDomainCapabilityRecord`

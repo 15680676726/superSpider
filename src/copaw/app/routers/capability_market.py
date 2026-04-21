@@ -72,9 +72,11 @@ from ...capabilities.donor_host_compatibility import (
     evaluate_donor_host_compatibility,
 )
 from ...capabilities.project_donor_contracts import (
+    PROJECT_DONOR_COMPATIBILITY_MODE,
     build_github_python_project_transport_chain,
     discover_installed_python_callable_actions,
     parse_pip_install_report_requested_distribution,
+    project_donor_surface_metadata,
     resolve_installed_python_project_contract,
 )
 from ...capabilities.remote_skill_catalog import (
@@ -223,6 +225,8 @@ class CapabilityMarketProjectInstallResponse(BaseModel):
     verified_stage: str = "unverified"
     provider_resolution_status: str = "pending"
     compatibility_status: str = "unknown"
+    compatibility_mode: str = PROJECT_DONOR_COMPATIBILITY_MODE
+    formal_surface: bool = False
     target_agent_id: str | None = None
     trial_attachment: dict[str, Any] | None = None
     probe_result: dict[str, Any] | None = None
@@ -240,6 +244,8 @@ class CapabilityMarketProjectInstallAcceptedResponse(BaseModel):
     source_url: str
     capability_kind: str = "project-package"
     candidate_id: str | None = None
+    compatibility_mode: str = PROJECT_DONOR_COMPATIBILITY_MODE
+    formal_surface: bool = False
     progress_summary: str = ""
     routes: dict[str, str] = Field(default_factory=dict)
 
@@ -253,6 +259,8 @@ class CapabilityMarketProjectInstallJobStatusResponse(BaseModel):
     source_url: str
     capability_kind: str = "project-package"
     candidate_id: str | None = None
+    compatibility_mode: str = PROJECT_DONOR_COMPATIBILITY_MODE
+    formal_surface: bool = False
     target_agent_id: str | None = None
     progress_summary: str = ""
     error: str | None = None
@@ -274,6 +282,8 @@ class CapabilityMarketProjectCandidate(BaseModel):
     canonical_package_id: str | None = None
     capability_keys: list[str] = Field(default_factory=list)
     install_supported: bool = False
+    compatibility_mode: str = PROJECT_DONOR_COMPATIBILITY_MODE
+    formal_surface: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
     routes: dict[str, str] = Field(default_factory=dict)
 
@@ -1125,7 +1135,7 @@ def _evaluate_external_project_host_compatibility(
 
 
 def _project_install_contract_metadata(result: dict[str, object]) -> dict[str, object]:
-    metadata: dict[str, object] = {}
+    metadata: dict[str, object] = project_donor_surface_metadata()
     provider_injection_mode = normalize_provider_injection_mode(
         result.get("provider_injection_mode"),
     )
@@ -1634,17 +1644,19 @@ async def _install_external_project_capability(
             environment_requirements=list(resolved_contract.environment_requirements),
             evidence_contract=list(resolved_contract.evidence_contract),
             provider_ref="github",
-            metadata={
-                "entry_module": resolved_contract.entry_module,
-                "console_script": resolved_contract.console_script,
-                "distribution_name": resolved_contract.distribution_name,
-                "distribution_version": resolved_contract.package_version,
-                "provider": "github-repo",
-                "open_source_project": True,
-                "install_transport_kind": selected_transport.kind,
-                **dict(resolved_contract.metadata or {}),
-                **protocol_surface_metadata(protocol_surface),
-            },
+            metadata=project_donor_surface_metadata(
+                {
+                    "entry_module": resolved_contract.entry_module,
+                    "console_script": resolved_contract.console_script,
+                    "distribution_name": resolved_contract.distribution_name,
+                    "distribution_version": resolved_contract.package_version,
+                    "provider": "github-repo",
+                    "open_source_project": True,
+                    "install_transport_kind": selected_transport.kind,
+                    **dict(resolved_contract.metadata or {}),
+                    **protocol_surface_metadata(protocol_surface),
+                },
+            ),
         )
         config.external_capability_packages = packages
         save_config(config)
@@ -1657,6 +1669,8 @@ async def _install_external_project_capability(
             "capability_kind": capability_kind,
             "execution_mode": "shell",
             "summary": install_summary,
+            "compatibility_mode": PROJECT_DONOR_COMPATIBILITY_MODE,
+            "formal_surface": False,
             "runtime_contract": _serialize_installed_runtime_contract(
                 contract=resolved_contract,
                 execute_command=resolved_execute_command,
@@ -1791,12 +1805,14 @@ def _materialize_project_candidate(
             candidate_source_ref=source_url,
             candidate_source_lineage=f"donor:github:{lineage}",
             canonical_package_id=f"pkg:github:{lineage}",
-            metadata={
-                "provider": "github-repo",
-                "install_supported": True,
-                "repository_url": source_url,
-                "direct_query": True,
-            },
+            metadata=project_donor_surface_metadata(
+                {
+                    "provider": "github-repo",
+                    "install_supported": True,
+                    "repository_url": source_url,
+                    "direct_query": True,
+                },
+            ),
         )
     normalized_hit = NormalizedDiscoveryHit(
         candidate_kind=str(hit.candidate_kind or candidate_kind),
@@ -1827,7 +1843,7 @@ def _materialize_project_candidate(
             for item in hit.capability_keys
             if str(item).strip()
         ),
-        metadata=dict(hit.metadata),
+        metadata=project_donor_surface_metadata(dict(hit.metadata)),
     )
     imported = candidate_service.import_normalized_discovery_hits(
         normalized_hits=[normalized_hit],
@@ -2099,6 +2115,10 @@ def _project_install_response_payload(
         "enabled": bool(result.get("enabled", enable)),
         "source_url": str(result.get("source_url") or source_url),
         "capability_kind": str(result.get("capability_kind") or capability_kind),
+        "compatibility_mode": str(
+            result.get("compatibility_mode") or PROJECT_DONOR_COMPATIBILITY_MODE,
+        ),
+        "formal_surface": False,
         "installed_capability_ids": [
             str(item).strip()
             for item in list(result.get("installed_capability_ids") or [])
@@ -4224,7 +4244,7 @@ async def search_market_project_donors(
             canonical_package_id=hit.canonical_package_id,
             capability_keys=[str(item).strip() for item in hit.capability_keys if str(item).strip()],
             install_supported=bool(hit.metadata.get("install_supported")),
-            metadata=dict(hit.metadata),
+            metadata=project_donor_surface_metadata(dict(hit.metadata)),
             routes={
                 "install": "/api/capability-market/projects/install",
                 "source": str(hit.candidate_source_ref or ""),

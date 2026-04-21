@@ -1831,6 +1831,13 @@ def test_capability_market_project_search_returns_installable_github_donors(
     assert payload[0]["source_url"] == "https://github.com/LeoYeAI/teammate-skill"
     assert payload[0]["install_supported"] is True
     assert payload[0]["candidate_kind"] == "project"
+    assert payload[0]["compatibility_mode"] == "compatibility/acquisition-only"
+    assert payload[0]["formal_surface"] is False
+    assert (
+        payload[0]["metadata"]["compatibility_mode"]
+        == "compatibility/acquisition-only"
+    )
+    assert payload[0]["metadata"]["formal_surface"] is False
     assert payload[0]["routes"]["install"] == "/api/capability-market/projects/install"
 
 
@@ -2006,11 +2013,15 @@ def test_capability_market_project_install_job_status_exposes_terminal_result(
 
     assert status_payload is not None
     assert status_payload["status"] == "completed"
+    assert status_payload["compatibility_mode"] == "compatibility/acquisition-only"
+    assert status_payload["formal_surface"] is False
     assert status_payload["result"]["installed_capability_ids"] == ["project:black"]
     assert result_payload is not None
     assert result_payload["installed"] is True
     assert result_payload["installed_capability_ids"] == ["project:black"]
     assert result_payload["runtime_contract"]["runtime_kind"] == "cli"
+    assert result_payload["compatibility_mode"] == "compatibility/acquisition-only"
+    assert result_payload["formal_surface"] is False
 
 
 def test_capability_market_project_install_job_exposes_intermediate_progress_stages(

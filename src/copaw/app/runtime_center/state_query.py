@@ -482,7 +482,9 @@ class RuntimeCenterStateQueryService:
             model_dump = getattr(item, "model_dump", None)
             serialized = model_dump(mode="json") if callable(model_dump) else None
             if isinstance(serialized, dict):
-                payload.append(serialized)
+                payload.append(self._mark_donor_surface(serialized))
+            elif isinstance(item, dict):
+                payload.append(self._mark_donor_surface(item))
         return payload
 
     def list_capability_source_profiles(
@@ -519,9 +521,9 @@ class RuntimeCenterStateQueryService:
             model_dump = getattr(item, "model_dump", None)
             serialized = model_dump(mode="json") if callable(model_dump) else None
             if isinstance(serialized, dict):
-                payload.append(serialized)
+                payload.append(self._mark_donor_surface(serialized))
             elif isinstance(item, dict):
-                payload.append(dict(item))
+                payload.append(self._mark_donor_surface(item))
         return payload
 
     def list_capability_trust_records(
@@ -1799,6 +1801,15 @@ class RuntimeCenterStateQueryService:
         if isinstance(namespace, Mapping):
             return dict(namespace)
         return {}
+
+    def _mark_donor_surface(
+        self,
+        payload: Mapping[str, object] | None,
+    ) -> dict[str, object]:
+        serialized = dict(payload or {})
+        serialized.setdefault("compatibility_mode", "compatibility/acquisition-only")
+        serialized["formal_surface"] = False
+        return serialized
 
     def _project_probe_projection(
         self,
