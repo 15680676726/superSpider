@@ -4,8 +4,11 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
+import pytest
+
 from copaw.industry import (
     IndustryDraftGenerator,
+    IndustryDraftGenerationError,
     IndustryPreviewRequest,
     normalize_industry_profile,
 )
@@ -472,3 +475,30 @@ def test_industry_draft_generator_prefers_unified_model_call_service() -> None:
     assert draft.team.label == "Northwind Robotics AI Draft"
     assert service.calls[0]["feature"] == "industry_draft_generation"
     assert service.calls[0]["policy"].timeout_seconds == 120
+
+
+def test_industry_draft_generator_treats_missing_chat_model_as_upstream_unavailable() -> None:
+    def _missing_chat_model():
+        raise ValueError("No active or fallback model configured.")
+
+    generator = IndustryDraftGenerator(model_factory=_missing_chat_model)
+    profile = normalize_industry_profile(
+        IndustryPreviewRequest(
+            industry="Industrial Equipment",
+            company_name="Northwind Robotics",
+            product="factory monitoring copilots",
+            goals=["launch two pilot deployments"],
+        ),
+    )
+
+    with pytest.raises(IndustryDraftGenerationError) as exc_info:
+        asyncio.run(
+            generator.generate(
+                profile=profile,
+                owner_scope="industry-v1-northwind-robotics",
+            ),
+        )
+
+    assert exc_info.value.status_code == 503
+    assert "available active chat model" in str(exc_info.value)
+    assert "No active or fallback model configured." in str(exc_info.value)

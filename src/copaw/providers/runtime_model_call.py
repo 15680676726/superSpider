@@ -302,7 +302,11 @@ class RuntimeModelCallService:
         except RuntimeModelCallError:
             raise
         except Exception as exc:
-            raise _coerce_runtime_model_call_error(exc) from exc
+            detail = str(exc).strip() or "运行时模型工厂未返回可用模型。"
+            raise RuntimeModelCallError(
+                code="MODEL_UPSTREAM_ERROR",
+                message=detail,
+            ) from exc
         if model is None:
             raise RuntimeModelCallError(
                 code="MODEL_UPSTREAM_ERROR",

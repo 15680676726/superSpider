@@ -120,10 +120,10 @@
     - `tests/app/test_runtime_center_executor_runtime_projection.py`
     - `tests/app/test_runtime_center_executor_runtime_bootstrap.py`
     - Runtime Center 外部 runtime list/detail 现在优先读 executor runtime truth，并保留 legacy fallback；但 actor runtime 仍未进入 `read-only-compat`，overview/control 读面也还没完全退役。
-  - `Task 7`：部分完成。focused verification、`MCP/skill` guardrail regression、以及 deferred-retirement ledger 同步现在都可以基于真实代码状态执行；但 `default regression`、`live smoke`、`long soak` 仍未跑，不能写成整套 cutover 已完成。
+  - `Task 7`：部分完成。focused verification、`MCP/skill` guardrail regression、widened `default regression`、以及 selected `L3/L4` 证据现在都已基于真实代码状态补齐；但这仍不等于整套 cutover 已完成，因为 `Task 2/3/5` 的 formal truth / retirement 边界仍未全部收口。
 - 当前阶段边界补充：
   - 旧本地 actor runtime 仍然在应用启动图里存在，`delegation_service.py` 也还没有退役，所以这轮不能写成“旧执行脑已完全删除”。
-  - 当前能硬说的只有：executor 主链接缝、focused writeback 主链、Runtime Center 外部 runtime executor projection 已经入树；整套 cutover 仍未达到 `L3/L4`。
+  - 当前能硬说的是：executor 主链接缝、focused writeback 主链、Runtime Center 外部 runtime executor projection，以及 selected runtime smoke/soak 证据都已入树；但整套 cutover 仍未完全收口，更不能写成 formal executor-provider / persisted executor-event truth 已全部终态化。
 - 当前 focused regression 证据：
   - Executor focused regression：
     - 命令：`PYTHONPATH=src python -m pytest tests/adapters/test_codex_app_server_adapter.py tests/capabilities/test_executor_runtime_contracts.py tests/capabilities/test_executor_runtime_execution.py tests/state/test_executor_runtime_service.py tests/state/test_agent_report_service_structured_write.py tests/kernel/test_executor_event_ingest_service.py tests/kernel/test_executor_event_writeback_service.py tests/kernel/test_main_brain_executor_runtime_integration.py tests/app/test_runtime_center_executor_runtime_projection.py tests/app/test_runtime_center_executor_runtime_bootstrap.py tests/app/test_executor_event_writeback_bootstrap.py tests/app/test_runtime_bootstrap_helpers.py tests/app/test_runtime_execution_provider_wiring.py tests/app/test_runtime_bootstrap_split.py tests/app/test_runtime_center_external_runtime_api.py -q`
@@ -141,9 +141,20 @@
     - 命令：`PYTHONPATH=src python -m pytest tests/capabilities/test_capability_discovery.py tests/capabilities/test_install_templates.py tests/app/test_capability_skill_service.py tests/test_skill_service.py tests/test_skills_cmd.py tests/capabilities/test_mcp_registry_cache.py tests/app/test_mcp_runtime_contract.py tests/test_mcp_resilience.py tests/predictions/test_skill_trial_service.py tests/predictions/test_skill_candidate_service.py -q`
     - 结果：`103 passed in 48.21s`
     - 验收层级：`L1 + L2`
-  - `default regression`：未跑
-  - `live smoke`：未跑
-  - `long soak`：未跑
+  - `default regression`：
+    - 命令：`python scripts/run_p0_runtime_terminal_gate.py`
+    - 结果：后端主链回归 `361 passed in 238.94s`；长跑与删旧回归 `84 passed in 387.04s`；前台定向回归 `21 passed`；控制台构建通过
+    - 验收层级：`L2`
+  - `L3` live smoke：
+    - 命令：`PYTHONPATH=src python -m pytest tests/app/test_runtime_canonical_flow_e2e.py tests/app/test_operator_runtime_e2e.py -q`
+    - 结果：`16 passed in 94.23s`
+    - 命令：`PYTHONPATH=src python -m pytest tests/app/test_phase_next_autonomy_smoke.py -q -k "runtime_center or runtime_center_overview or canonical_flow or operator or chat_run or long_run_smoke"`
+    - 结果：`4 passed, 7 deselected in 36.45s`
+    - 验收层级：`L3`
+  - `L4` long soak：
+    - 命令：`PYTHONPATH=src python -m pytest tests/app/test_phase_next_autonomy_smoke.py tests/app/test_runtime_canonical_flow_e2e.py tests/app/test_operator_runtime_e2e.py -q`
+    - 结果：连续 `3` 轮分别为 `27 passed in 178.60s`、`27 passed in 176.46s`、`27 passed in 177.24s`
+    - 验收层级：`selected L4`
 - 当前仍需优先盯住的缺口：
   - `delegation_service.py` 仍承担正式派单链
   - Runtime Center actor overview/control 读面仍未完全切到 executor-runtime-first
@@ -188,12 +199,10 @@
     - 结果：`tsc -b && vite build` 通过
     - 验收层级：`L1 + L2`
 - 当前仍然明确未完成：
-  - `default regression`：未跑
-  - `live smoke`：未跑
-  - `long soak`：未跑
+  - 共享 `default regression` / selected `L3` / selected `L4` 证据现已补齐，详见 `1.0.6`
   - `delegation_service.py` 仍未退役
   - `/capability-market/projects/install*` / donor-provider compatibility 边界未在本轮继续推进
-  - 因此 external-executor hard-cut 当前仍只能写到 `L1 + L2`，不能写成 `L3/L4` 已闭环
+  - 因此 actor-runtime compatibility demotion 这条 slice 现在只能诚实写成 `L1 + L2 + default regression + selected L3 + selected L4`，不能写成整套 external-executor hard-cut 已闭环
 
 ## 1.0.4 `2026-04-21` delegation default-surface compatibility demotion
 
@@ -224,10 +233,8 @@
     - 验收层级：`L1 + L2`
 - 当前仍然明确未完成：
   - `delegation_service.py` 仍承担显式 compatibility delegation 写链，尚未物理退役
-  - `default regression`：未跑
-  - `live smoke`：未跑
-  - `long soak`：未跑
-  - 因此 external-executor hard-cut 当前仍只能写到 `L1 + L2`
+  - 共享 `default regression` / selected `L3` / selected `L4` 证据现已补齐，详见 `1.0.6`
+  - 因此 delegation default-surface demotion 这条 slice 现在只能诚实写成 `L1 + L2 + default regression + selected L3 + selected L4`
 
 ## 1.0.5 `2026-04-21` donor/project intake compatibility-acquisition-only 标记收口
 
@@ -258,10 +265,48 @@
 - 当前仍然明确未完成：
   - formal `ExecutorProvider / control_surface_kind / protocol_surface_kind` intake 仍未完全替换 donor/project install 前门
   - donor state/trust/trial/retirement 全量 taxonomy 仍未完成正式拆分
-  - `default regression`：未跑
-  - `live smoke`：未跑
-  - `long soak`：未跑
-  - 因此 external-executor hard-cut 当前仍只能写到 `L1 + L2`
+  - 共享 `default regression` / selected `L3` / selected `L4` 证据现已补齐，详见 `1.0.6`
+  - 因此 donor/project compatibility demotion 这条 slice 现在只能诚实写成 `L1 + L2 + default regression + selected L3 + selected L4`
+
+## 1.0.6 `2026-04-21` external-executor hard-cut 验收补录（default regression + selected `L3/L4`）
+
+- 这轮 hard-cut 收口在补跑 widened `default regression` 时，先暴露出 `industry` 默认 gate 里的 3 个真实断点：
+  - `IndustryDraftGenerator` 缺模型配置时被错误归到 `MODEL_STRUCTURED_VALIDATION_FAILED / 502`
+  - `tests/app/industry_api_parts/runtime_updates.py` 中 2 条 governance block-reason 断言仍停在旧英文 copy，而正式实现已切到中文治理文案
+- 当前工作树已同步修正：
+  - `src/copaw/providers/runtime_model_call.py`
+    - `_resolve_model()` 现在把模型工厂抛出的解析/配置异常统一视为 `MODEL_UPSTREAM_ERROR`
+    - 因此 `industry` preview 缺少 active/fallback chat model 时重新回到 `503 service unavailable` 合同，而不是误报 `502 structured validation failed`
+  - `tests/app/test_industry_draft_generator.py`
+    - 新增 focused regression，锁定“缺模型配置 -> upstream unavailable / 503”合同
+  - `tests/app/industry_api_parts/runtime_updates.py`
+    - 默认 gate 内的 staffing / runtime-handoff governance 断言已对齐当前中文正式 copy
+- 当前 fresh verification 证据：
+  - focused regression：
+    - 命令：`python -m pytest tests/app/test_industry_draft_generator.py -q -k "missing_chat_model_as_upstream_unavailable"`
+    - 结果：`1 passed, 5 deselected in 4.21s`
+    - 验收层级：`L1 + L2`
+    - 命令：`python -m pytest tests/app/industry_api_parts/runtime_updates.py -q -k "test_industry_preview_returns_service_unavailable_when_chat_model_missing or test_governance_blocks_dispatch_when_pending_staffing_proposal_is_not_top_active_gap or test_report_followup_backlog_wins_next_cycle_over_unrelated_open_backlog_when_handoff_and_staffing_are_live"`
+    - 结果：`3 passed, 45 deselected in 28.56s`
+    - 验收层级：`L1 + L2`
+  - `default regression`：
+    - 命令：`python scripts/run_p0_runtime_terminal_gate.py`
+    - 结果：后端主链回归 `361 passed in 238.94s`；长跑与删旧回归 `84 passed in 387.04s`；前台定向回归 `21 passed`；控制台构建通过
+    - 验收层级：`L2`
+  - `L3` live smoke：
+    - 命令：`PYTHONPATH=src python -m pytest tests/app/test_runtime_canonical_flow_e2e.py tests/app/test_operator_runtime_e2e.py -q`
+    - 结果：`16 passed in 94.23s`
+    - 命令：`PYTHONPATH=src python -m pytest tests/app/test_phase_next_autonomy_smoke.py -q -k "runtime_center or runtime_center_overview or canonical_flow or operator or chat_run or long_run_smoke"`
+    - 结果：`4 passed, 7 deselected in 36.45s`
+    - 验收层级：`L3`
+  - `L4` long soak：
+    - 命令：`PYTHONPATH=src python -m pytest tests/app/test_phase_next_autonomy_smoke.py tests/app/test_runtime_canonical_flow_e2e.py tests/app/test_operator_runtime_e2e.py -q`
+    - 结果：连续 `3` 轮分别为 `27 passed in 178.60s`、`27 passed in 176.46s`、`27 passed in 177.24s`
+    - 验收层级：`selected L4`
+- 当前能诚实表述的结论：
+  - actor-runtime `read-only-compat`、delegation default-surface demotion、以及 donor/project compatibility demotion 这三个 `2026-04-21` 收口 slice 现在都已具备 `L1 + L2 + default regression + selected L3 + selected L4`
+  - 这不等于整套 external-executor hard-cut 已终态完成，更不等于 formal `ExecutorProvider` intake / persisted `ExecutorEventRecord` / `delegation_service.py` retirement 已全部收口
+  - `live external-provider smoke` 与 full-repo soak 仍未在这轮执行，不得混写成“所有真实外部执行链都已验证”
 
 ## 1.1.1 `2026-04-07` Buddy 领域能力阶段收口补充
 

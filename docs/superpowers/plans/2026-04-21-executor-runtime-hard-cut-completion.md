@@ -48,7 +48,11 @@
   - project donor contract metadata and projected package metadata now carry `compatibility/acquisition-only + formal_surface=false`
   - `/capability-market/projects/search` and `/projects/install*` responses now advertise the donor/project surface as compatibility-only instead of leaving it visually canonical
   - Runtime Center donor/package projection now carries the same compatibility marker and tolerates dict-backed service payloads
-- `Task 7`: fresh `L1 + L2` evidence now exists for actor compatibility slices, donor/provider surface demotion, and `console` build, but not for `default regression`, `L3`, or `L4`.
+- `Task 7`: widened verification now exists for the current closure slices:
+  - focused `L1 + L2` evidence still covers actor compatibility, delegation default-surface demotion, donor/provider surface demotion, and `console` build
+  - `default regression` now passes through `python scripts/run_p0_runtime_terminal_gate.py`
+  - selected `L3` smoke now passes for runtime front-door / Runtime Center readback
+  - selected `L4` soak now passes for `3` repeated long-chain cycles across `phase_next_autonomy_smoke + runtime_canonical_flow_e2e + operator_runtime_e2e`
 
 ## Fresh Verification
 
@@ -71,11 +75,33 @@
 - `PYTHONPATH=src python -m pytest tests/capabilities/test_project_donor_contracts.py tests/app/test_capability_market_api.py tests/app/test_runtime_center_events_api.py tests/app/test_runtime_center_external_runtime_api.py -q`
   - `96 passed in 77.54s`
   - Acceptance: `L1 + L2`
+- `python -m pytest tests/app/test_industry_draft_generator.py -q -k "missing_chat_model_as_upstream_unavailable"`
+  - `1 passed, 5 deselected in 4.21s`
+  - Acceptance: `L1 + L2`
+- `python -m pytest tests/app/industry_api_parts/runtime_updates.py -q -k "test_industry_preview_returns_service_unavailable_when_chat_model_missing or test_governance_blocks_dispatch_when_pending_staffing_proposal_is_not_top_active_gap or test_report_followup_backlog_wins_next_cycle_over_unrelated_open_backlog_when_handoff_and_staffing_are_live"`
+  - `3 passed, 45 deselected in 28.56s`
+  - Acceptance: `L1 + L2`
+- `python scripts/run_p0_runtime_terminal_gate.py`
+  - backend mainline regression: `361 passed in 238.94s`
+  - long-run / retirement regression: `84 passed in 387.04s`
+  - console targeted regression: `21 passed`
+  - console build: passed
+  - Acceptance: `L2`
+- `PYTHONPATH=src python -m pytest tests/app/test_runtime_canonical_flow_e2e.py tests/app/test_operator_runtime_e2e.py -q`
+  - `16 passed in 94.23s`
+  - Acceptance: `L3`
+- `PYTHONPATH=src python -m pytest tests/app/test_phase_next_autonomy_smoke.py -q -k "runtime_center or runtime_center_overview or canonical_flow or operator or chat_run or long_run_smoke"`
+  - `4 passed, 7 deselected in 36.45s`
+  - Acceptance: `L3`
+- `PYTHONPATH=src python -m pytest tests/app/test_phase_next_autonomy_smoke.py tests/app/test_runtime_canonical_flow_e2e.py tests/app/test_operator_runtime_e2e.py -q`
+  - repeated `3` times: `27 passed in 178.60s`, `27 passed in 176.46s`, `27 passed in 177.24s`
+  - Acceptance: `selected L4`
 
 ## Remaining Boundaries
 
 - `delegation_service.py` is still not retired.
 - `delegate_task` is no longer a default execution-core surface, but it still exists as an explicit compatibility capability.
 - donor/provider compatibility boundaries are now more explicit at the route/projection/metadata layer, but formal `ExecutorProvider` intake still has not replaced the donor/project install front door.
-- `default regression`, `live smoke`, and `long soak` remain unrun.
-- This plan must not be cited as proof of `L3/L4` closure or full external-executor hard-cut completion.
+- selected `default regression`, `L3`, and `L4` evidence now exist for the `2026-04-21` closure slices, but this still does not prove full external-executor hard-cut completion.
+- `live external-provider smoke` and full-repo soak remain unrun.
+- This plan must not be cited as proof that formal `ExecutorProvider` intake, persisted `ExecutorEventRecord`, or delegation retirement are fully complete.

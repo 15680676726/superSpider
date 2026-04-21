@@ -2597,7 +2597,7 @@ def test_governance_blocks_dispatch_when_pending_staffing_proposal_is_not_top_ac
     assert status.staffing["pending_confirmation_count"] == 1
     assert decision_id in status.staffing["decision_request_ids"]
     assert reason is not None
-    assert "Staffing confirmation is still required" in reason
+    assert "仍需要完成 staffing 确认后才能继续分派" in reason
 
 
 def test_report_followup_backlog_wins_next_cycle_over_unrelated_open_backlog_when_handoff_and_staffing_are_live(
@@ -2792,7 +2792,7 @@ def test_report_followup_backlog_wins_next_cycle_over_unrelated_open_backlog_whe
         ),
     )
     assert reason is not None
-    assert "Runtime handoff is active" in reason
+    assert "当前存在运行时交接" in reason
 
     status = governance.get_status()
     assert status.handoff["active"] is True
@@ -2812,7 +2812,7 @@ def test_report_followup_backlog_wins_next_cycle_over_unrelated_open_backlog_whe
         ),
     )
     assert fallback_reason is not None
-    assert "Runtime handoff is active" in fallback_reason
+    assert "当前存在运行时交接" in fallback_reason
 
     second_cycle = asyncio.run(
         app.state.industry_service.run_operating_cycle(
