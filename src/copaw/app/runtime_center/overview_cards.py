@@ -645,23 +645,6 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
         )
         if sidecar_memory:
             return dict(sidecar_memory)
-        return self._resolve_runtime_contract_sidecar_memory(app_state)
-
-    def _resolve_runtime_contract_sidecar_memory(
-        self,
-        app_state: RuntimeCenterAppStateView,
-    ) -> dict[str, Any] | None:
-        runtime_contracts = (
-            app_state.actor_worker_runtime_contract,
-            app_state.actor_supervisor_runtime_contract,
-        )
-        for target in runtime_contracts:
-            runtime_contract = self._mapping(target)
-            if not runtime_contract:
-                continue
-            sidecar_memory = self._mapping(runtime_contract.get("sidecar_memory"))
-            if sidecar_memory:
-                return sidecar_memory
         return None
 
     async def _build_evidence_card(self, app_state: RuntimeCenterAppStateView) -> RuntimeOverviewCard:

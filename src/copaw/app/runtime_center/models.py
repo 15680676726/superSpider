@@ -321,11 +321,6 @@ def _normalize_supervisor_snapshot(
     return None
 
 
-def _normalize_runtime_contract(target: object | None) -> dict[str, Any] | None:
-    payload = _mapping(getattr(target, "runtime_contract", None))
-    return payload or None
-
-
 class RuntimeCenterSurfaceInfo(BaseModel):
     """Metadata describing the live Runtime Center operator surface."""
 
@@ -488,8 +483,6 @@ class RuntimeCenterAppStateView:
     cron_manager: Any = None
     automation_overview: list[dict[str, Any]] = field(default_factory=list)
     actor_supervisor_overview: dict[str, Any] | None = None
-    actor_worker_runtime_contract: dict[str, Any] | None = None
-    actor_supervisor_runtime_contract: dict[str, Any] | None = None
     recovery_summary: dict[str, Any] | None = None
     recovery_source: str = "latest"
 
@@ -502,7 +495,6 @@ class RuntimeCenterAppStateView:
             None,
         )
         actor_supervisor = getattr(app_state, "actor_supervisor", None)
-        actor_worker = getattr(app_state, "actor_worker", None)
         recovery_summary, recovery_source = _normalize_recovery_payload(app_state)
         return cls(
             state_query_service=getattr(app_state, "state_query_service", None),
@@ -547,8 +539,6 @@ class RuntimeCenterAppStateView:
                 agent_report_repository=getattr(app_state, "agent_report_repository", None),
             ),
             actor_supervisor_overview=_normalize_supervisor_snapshot(actor_supervisor),
-            actor_worker_runtime_contract=_normalize_runtime_contract(actor_worker),
-            actor_supervisor_runtime_contract=_normalize_runtime_contract(actor_supervisor),
             recovery_summary=recovery_summary,
             recovery_source=recovery_source,
         )

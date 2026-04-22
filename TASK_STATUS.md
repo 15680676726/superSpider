@@ -641,6 +641,27 @@
   - 结果：`65 passed in 34.48s`
   - 验收层级：`L1 + L2`
 
+## 1.0.15 `2026-04-23` local executor physical-retirement slice（Runtime Center actor runtime-contract fallback removal）
+
+- 本轮继续收 Runtime Center 的 actor 兼容读面，但没有把 actor kernel 文件本体误写成已删除：
+  - `src/copaw/app/runtime_center/overview_cards.py` 已删除 main-brain governance 对 `actor_worker / actor_supervisor.runtime_contract` 的 `sidecar_memory` fallback
+  - `src/copaw/app/runtime_center/models.py` 已删除 `RuntimeCenterAppStateView.actor_worker_runtime_contract` 与 `actor_supervisor_runtime_contract`
+  - 因此 query entropy 缺失时，Runtime Center main-brain governance 不会再回退读取本地 actor runtime contract
+- 当前能诚实写出的结论：
+  - Runtime Center main-brain governance 已停止把 actor runtime contract 当正式 sidecar-memory 真相
+  - 这仍不等于 actor runtime 已物理删除：
+    - `actor_supervisor_overview / exception_absorption` 读面还在
+    - `actor_mailbox.py / actor_worker.py / actor_supervisor.py` 文件本体还在
+    - actor capability compatibility surface 与 mailbox continuity 兼容链还在
+- fresh focused regression：
+  - 命令：`python -m pytest tests/app/runtime_center_api_parts/overview_governance.py -q -k "does_not_fall_back_to_runtime_contract_sidecar_when_entropy_absent or does_not_expose_degraded_runtime_contract_sidecar_without_entropy_service or prefers_entropy_sidecar_over_runtime_contract_fallback"`
+  - 结果：`3 passed, 100 deselected in 10.01s`
+  - 验收层级：`L1 + L2`
+- focused Runtime Center regression：
+  - 命令：`python -m pytest tests/app/test_runtime_center_overview_group_builders.py tests/app/test_runtime_center_main_brain_localization.py tests/app/test_runtime_center_api.py -q`
+  - 结果：`134 passed in 55.29s`
+  - 验收层级：`L1 + L2`
+
 ## 1.1.1 `2026-04-07` Buddy 领域能力阶段收口补充
 
 - Buddy 当前成长阶段的正式真相已从关系经验切到 active `BuddyDomainCapabilityRecord`

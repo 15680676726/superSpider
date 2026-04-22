@@ -255,6 +255,10 @@
     - `src/copaw/app/_app.py` 与 `src/copaw/app/runtime_lifecycle.py` 默认生命周期已停止通过 startup recovery 传递 actor mailbox / exception absorption，也不再在 default app lifecycle 中启动或停止 actor supervisor
     - Runtime Center formal `agents` 与 `learning governance` 路由已恢复到 `runtime_center_routes_agents.py` / `runtime_center_routes_governance.py`，default gate 已重新通过
     - 但 actor kernel 文件本体仍在，且 browser / desktop / document-file-shell product surface 仍未替换，因此本条目继续保持 `frozen`
+  - `2026-04-23` runtime-center fallback 补充：
+    - `RuntimeCenterAppStateView` 已删除 `actor_worker_runtime_contract / actor_supervisor_runtime_contract`
+    - `overview_cards.py` main-brain governance 已停止在 query entropy 缺失时回退读取 actor runtime-contract sidecar memory
+    - 因此 Runtime Center formal governance 读面已不再把 actor runtime contract 当 sidecar-memory 真相；但 actor supervisor snapshot / exception_absorption 读面与 actor kernel 文件仍在，本条目继续保持 `frozen`
 
 ### 3.1.4 `src/copaw/kernel/delegation_service.py`
 

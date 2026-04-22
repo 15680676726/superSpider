@@ -2026,7 +2026,7 @@ def test_runtime_center_main_brain_route_exposes_query_runtime_compaction_visibi
     assert entropy["tool_use_summary"]["artifact_refs"] == ["artifact://tool-result-1"]
 
 
-def test_runtime_center_main_brain_route_falls_back_to_runtime_contract_sidecar_when_entropy_absent():
+def test_runtime_center_main_brain_route_does_not_fall_back_to_runtime_contract_sidecar_when_entropy_absent():
     app = build_runtime_center_app()
     app.state.state_query_service = FakeStateQueryService()
     app.state.evidence_query_service = FakeEvidenceQueryService()
@@ -2053,11 +2053,7 @@ def test_runtime_center_main_brain_route_falls_back_to_runtime_contract_sidecar_
     assert response.status_code == 200
     payload = response.json()["main_brain"]
     assert payload["governance"]["query_runtime_entropy"] == {}
-    assert payload["governance"]["sidecar_memory"] == {
-        "status": "available",
-        "availability": "attached",
-        "summary": "legacy runtime-contract fallback should stay hidden",
-    }
+    assert "sidecar_memory" not in payload["governance"]
 
 
 def test_runtime_center_main_brain_route_prefers_entropy_sidecar_over_runtime_contract_fallback():
@@ -2119,7 +2115,7 @@ def test_runtime_center_main_brain_route_prefers_entropy_sidecar_over_runtime_co
     )
 
 
-def test_runtime_center_main_brain_route_exposes_degraded_runtime_contract_sidecar_without_entropy_service():
+def test_runtime_center_main_brain_route_does_not_expose_degraded_runtime_contract_sidecar_without_entropy_service():
     app = build_runtime_center_app()
     app.state.state_query_service = FakeStateQueryService()
     app.state.evidence_query_service = FakeEvidenceQueryService()
@@ -2148,18 +2144,7 @@ def test_runtime_center_main_brain_route_exposes_degraded_runtime_contract_sidec
     payload = response.json()["main_brain"]
     governance = payload["governance"]
     assert governance["query_runtime_entropy"] == {}
-    assert governance["status"] == "blocked"
-    assert governance["sidecar_memory"] == {
-        "status": "degraded",
-        "failure_source": "runtime-contract-sidecar",
-        "blocked_next_step": "Reattach the runtime-contract sidecar before resuming autonomy.",
-        "summary": "Runtime contract fallback reports degraded sidecar memory.",
-    }
-    assert governance["sidecar_memory"]["failure_source"] == "runtime-contract-sidecar"
-    assert governance["sidecar_memory"]["blocked_next_step"] == (
-        "Reattach the runtime-contract sidecar before resuming autonomy."
-    )
-    assert governance["summary"] == "Runtime contract fallback reports degraded sidecar memory."
+    assert "sidecar_memory" not in governance
 
 
 def test_runtime_center_main_brain_route_exposes_automation_loop_and_supervisor_health():
