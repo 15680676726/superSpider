@@ -296,11 +296,7 @@ class CapabilityExecutionFacade:
             payload.setdefault("task_id", task.id)
             payload.setdefault("owner_agent_id", task.owner_agent_id)
             payload.setdefault("goal_id", task.goal_id)
-            delegate_inherits_environment = bool(
-                payload.get("inherit_environment_ref", True),
-            )
-            if capability_id != "system:delegate_task" or delegate_inherits_environment:
-                payload.setdefault("environment_ref", task.environment_ref)
+            payload.setdefault("environment_ref", task.environment_ref)
         mount = self._get_capability(capability_id)
         execution_context = self._build_execution_context(
             task,

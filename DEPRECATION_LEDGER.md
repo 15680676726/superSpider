@@ -308,6 +308,11 @@
     - `RuntimeBootstrap` 与 `RuntimeDomainServices` 已不再暴露 formal `delegation_service` field；default app lifecycle / startup recovery 也已不再依赖该 compatibility field
     - Runtime Center learning patch write path 已重新挂回 formal governance router，并显式关闭 main-brain auto-approval，恢复 `waiting-confirm` 审批语义
     - 但 `src/copaw/kernel/delegation_service.py` 文件与 compatibility-focused tests 仍在，本条目状态不变，继续保持 `frozen`
+  - `2026-04-22` capability-plumbing 补充：
+    - `CapabilityService` 已删除 formal `delegation_service` constructor field 与 `set_delegation_service(...)` public setter
+    - `SystemCapabilityHandler` / `SystemTeamCapabilityFacade` 已删除 formal `system:delegate_task` dispatch branch 与 `handle_delegate_task(...)` facade
+    - `CapabilityExecutionFacade` 也已删除仅为 `system:delegate_task` 保留的环境继承特判
+    - 但 `src/copaw/kernel/delegation_service.py` 文件、本地 task-delegation compatibility API、以及 mailbox child-task continuity 兼容链仍在，因此本条目继续保持 `frozen`
 
 ### 3.1.5 donor-first 外接项目产品面：`/capability-market/projects/install*`、`project donor` taxonomy、Runtime Center donor 读面
 

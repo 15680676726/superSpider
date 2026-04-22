@@ -428,11 +428,6 @@ def test_runtime_domain_builder_passes_memory_activation_service_to_industry_ser
     )
     monkeypatch.setattr(
         runtime_bootstrap_domains_module,
-        "TaskDelegationService",
-        lambda **kwargs: SimpleNamespace(),
-    )
-    monkeypatch.setattr(
-        runtime_bootstrap_domains_module,
         "KernelQueryExecutionService",
         lambda **kwargs: SimpleNamespace(),
     )
@@ -1354,7 +1349,6 @@ def test_runtime_domain_builder_injects_research_session_service_into_main_brain
     monkeypatch.setattr(runtime_bootstrap_domains_module, "FixedSopService", lambda **kwargs: SimpleNamespace(set_routine_service=lambda value: None))
     monkeypatch.setattr(runtime_bootstrap_domains_module, "RoutineService", lambda **kwargs: SimpleNamespace())
     monkeypatch.setattr(runtime_bootstrap_domains_module, "PredictionService", lambda **kwargs: SimpleNamespace())
-    monkeypatch.setattr(runtime_bootstrap_domains_module, "TaskDelegationService", lambda **kwargs: SimpleNamespace())
     monkeypatch.setattr(runtime_bootstrap_domains_module, "KernelQueryExecutionService", lambda **kwargs: SimpleNamespace())
     monkeypatch.setattr(runtime_bootstrap_domains_module, "MainBrainChatService", _MainBrainChatService)
     monkeypatch.setattr(runtime_bootstrap_domains_module, "MainBrainOrchestrator", lambda **kwargs: SimpleNamespace())

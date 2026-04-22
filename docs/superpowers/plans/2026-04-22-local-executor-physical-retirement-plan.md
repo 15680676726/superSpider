@@ -109,6 +109,11 @@ These remain follow-up work because the current external executor seam exposes `
   - `delegation_service.py` compatibility result 已停止输出已删除的 actor mailbox route
   - `delegation_service.py` 文件、kernel export 与 compatibility-focused tests 仍在，因此当前仍是 `partial`
 
+  - `capabilities/service.py` no longer exposes a formal `set_delegation_service(...)` setter
+  - `system_handlers.py` / `system_team_handlers.py` no longer keep a formal `system:delegate_task` dispatch branch
+  - `capabilities/execution.py` no longer carries a `system:delegate_task`-only environment inheritance special case
+  - `delegation_service.py` file and compatibility-focused tests still exist, so the task remains `partial`
+
 ### Task 2: Delete Actor Runtime Compatibility From Bootstrap And Runtime Center
 
 - [x] Write failing tests that prove bootstrap/app state no longer expose actor services and Runtime Center no longer serves `/runtime-center/actors*`.

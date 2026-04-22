@@ -619,6 +619,28 @@
   - 结果：通过
   - 验收层级：`L2`
 
+## 1.0.14 `2026-04-22` local executor physical-retirement slice（formal delegation capability plumbing removal）
+
+- 本轮继续收口 `delegation_service.py` 的 formal capability 暴露面，但没有把 compatibility backend 文件本体误写成已删除：
+  - `src/copaw/capabilities/service.py` 已删除 formal `delegation_service` constructor field 与 `set_delegation_service(...)` public setter
+  - `src/copaw/capabilities/system_handlers.py` 已删除 formal `delegation_service` wiring 与 `system:delegate_task` dispatch branch
+  - `src/copaw/capabilities/system_team_handlers.py` 已删除 `handle_delegate_task(...)` 与相关 delegation compatibility facade state
+  - `src/copaw/capabilities/execution.py` 已删除针对 `system:delegate_task` 的环境继承特判；formal system task payload 现在统一走同一条 `environment_ref` 注入口径
+- 当前能诚实写出的结论：
+  - formal capability layer 已不再保留 `delegate_task` setter / dispatcher 这条本地 delegation 接线
+  - 这仍不等于 `src/copaw/kernel/delegation_service.py` 已物理删除：
+    - file 本体还在
+    - Runtime Center task-delegation compatibility API 与 focused tests 还在
+    - `KernelQueryExecutionService` / mailbox compatibility path 仍保留与 child-task continuity 相关的本地兼容逻辑
+- fresh focused regression：
+  - 命令：`python -m pytest tests/app/test_capabilities_execution.py -q -k "formal_delegation_setter or system_delegate_task_capability_is_retired"`
+  - 结果：`2 passed, 60 deselected in 9.59s`
+  - 验收层级：`L1 + L2`
+- focused bootstrap wiring regression：
+  - 命令：`python -m pytest tests/app/test_runtime_bootstrap_split.py tests/app/test_runtime_bootstrap_helpers.py tests/app/test_industry_service_wiring.py -q`
+  - 结果：`65 passed in 34.48s`
+  - 验收层级：`L1 + L2`
+
 ## 1.1.1 `2026-04-07` Buddy 领域能力阶段收口补充
 
 - Buddy 当前成长阶段的正式真相已从关系经验切到 active `BuddyDomainCapabilityRecord`

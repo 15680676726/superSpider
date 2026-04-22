@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from ..app.channels import ChannelManager
     from ..app.mcp import MCPClientManager
     from ..goals import GoalService
-    from ..kernel import KernelToolBridge, KernelTurnExecutor, TaskDelegationService
+    from ..kernel import KernelToolBridge, KernelTurnExecutor
     from ..kernel.agent_profile import AgentProfile
     from ..kernel.agent_profile_service import AgentProfileService
     from ..kernel.models import KernelTask
@@ -49,7 +49,6 @@ class CapabilityService:
         override_repository: "SqliteCapabilityOverrideRepository | None" = None,
         agent_profile_service: "AgentProfileService | None" = None,
         agent_profile_override_repository: "SqliteAgentProfileOverrideRepository | None" = None,
-        delegation_service: "TaskDelegationService | None" = None,
         actor_mailbox_service: object | None = None,
         actor_supervisor: object | None = None,
         industry_service: object | None = None,
@@ -76,7 +75,6 @@ class CapabilityService:
         self._override_repository = override_repository
         self._agent_profile_service = agent_profile_service
         self._agent_profile_override_repository = agent_profile_override_repository
-        self._delegation_service = delegation_service
         self._actor_mailbox_service = actor_mailbox_service
         self._actor_supervisor = actor_supervisor
         self._industry_service = industry_service
@@ -128,7 +126,6 @@ class CapabilityService:
             fixed_sop_service=self._fixed_sop_service,
             agent_profile_service=self._agent_profile_service,
             agent_profile_override_repository=self._agent_profile_override_repository,
-            delegation_service=self._delegation_service,
             industry_service=self._industry_service,
             actor_mailbox_service=self._actor_mailbox_service,
             actor_supervisor=self._actor_supervisor,
@@ -283,13 +280,6 @@ class CapabilityService:
         self._agent_profile_override_repository = override_repository
         self._catalog.set_agent_profile_override_repository(override_repository)
         self._system_handler.set_agent_profile_override_repository(override_repository)
-
-    def set_delegation_service(
-        self,
-        delegation_service: "TaskDelegationService | None",
-    ) -> None:
-        self._delegation_service = delegation_service
-        self._system_handler.set_delegation_service(delegation_service)
 
     def set_industry_service(self, industry_service: object | None) -> None:
         self._industry_service = industry_service

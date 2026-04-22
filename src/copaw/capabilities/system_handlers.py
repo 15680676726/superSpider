@@ -77,7 +77,6 @@ class SystemCapabilityHandler:
         fixed_sop_service: object | None = None,
         agent_profile_service: object | None = None,
         agent_profile_override_repository: object | None = None,
-        delegation_service: object | None = None,
         industry_service: object | None = None,
         actor_mailbox_service: object | None = None,
         actor_supervisor: object | None = None,
@@ -95,7 +94,6 @@ class SystemCapabilityHandler:
             goal_service=goal_service,
             agent_profile_service=agent_profile_service,
             agent_profile_override_repository=agent_profile_override_repository,
-            delegation_service=delegation_service,
             industry_service=industry_service,
         )
         self._actor = SystemActorCapabilityFacade(
@@ -160,9 +158,6 @@ class SystemCapabilityHandler:
     ) -> None:
         self._team.set_agent_profile_override_repository(override_repository)
 
-    def set_delegation_service(self, delegation_service: object | None) -> None:
-        self._team.set_delegation_service(delegation_service)
-
     def set_industry_service(self, industry_service: object | None) -> None:
         self._team.set_industry_service(industry_service)
         self._skills.set_industry_service(industry_service)
@@ -218,9 +213,6 @@ class SystemCapabilityHandler:
 
         if capability_id == "system:run_fixed_sop":
             return await self._routine.handle_run_fixed_sop(resolved_payload)
-
-        if capability_id == "system:delegate_task":
-            return await self._team.handle_delegate_task(resolved_payload)
 
         if capability_id == "system:apply_role":
             return await self._team.handle_apply_role(resolved_payload)

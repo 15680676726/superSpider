@@ -3330,6 +3330,12 @@ def test_system_delegate_task_capability_is_retired() -> None:
     assert "not found" in execution_result["error"]
 
 
+def test_capability_service_no_longer_exposes_formal_delegation_setter() -> None:
+    capability_service = CapabilityService()
+
+    assert not hasattr(capability_service, "set_delegation_service")
+
+
 def test_execute_task_enforces_role_access_policy() -> None:
     service = CapabilityService(
         registry=StaticCapabilityRegistry(

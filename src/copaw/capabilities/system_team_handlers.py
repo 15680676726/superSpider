@@ -21,7 +21,6 @@ class SystemTeamCapabilityFacade:
         goal_service: object | None = None,
         agent_profile_service: object | None = None,
         agent_profile_override_repository: object | None = None,
-        delegation_service: object | None = None,
         industry_service: object | None = None,
     ) -> None:
         self._get_capability = get_capability_fn
@@ -29,7 +28,6 @@ class SystemTeamCapabilityFacade:
         _ = goal_service
         self._agent_profile_service = agent_profile_service
         self._agent_profile_override_repository = agent_profile_override_repository
-        self._delegation_service = delegation_service
         self._industry_service = industry_service
 
     def set_goal_service(self, goal_service: object | None) -> None:
@@ -44,135 +42,8 @@ class SystemTeamCapabilityFacade:
     ) -> None:
         self._agent_profile_override_repository = override_repository
 
-    def set_delegation_service(self, delegation_service: object | None) -> None:
-        self._delegation_service = delegation_service
-
     def set_industry_service(self, industry_service: object | None) -> None:
         self._industry_service = industry_service
-
-    async def handle_delegate_task(
-        self,
-        resolved_payload: dict[str, object],
-    ) -> dict[str, object]:
-        if self._delegation_service is None:
-            return {"success": False, "error": "Delegation service is not available"}
-
-        parent_task_id = str(resolved_payload.get("parent_task_id") or "").strip()
-        if not parent_task_id:
-            return {"success": False, "error": "parent_task_id is required"}
-
-        owner_agent_id = str(resolved_payload.get("owner_agent_id") or "").strip()
-        target_agent_id = (
-            str(resolved_payload.get("target_agent_id") or "").strip() or None
-        )
-        if not owner_agent_id and not target_agent_id:
-            return {"success": False, "error": "owner_agent_id is required"}
-
-        title = str(resolved_payload.get("title") or "").strip()
-        candidate_agent = target_agent_id or owner_agent_id
-        if not title:
-            title = f"Delegated task for {candidate_agent or 'teammate'}"
-
-        prompt_text = resolved_payload.get("prompt_text") or resolved_payload.get(
-            "prompt",
-        )
-        summary = resolved_payload.get("summary")
-        capability_ref = str(
-            resolved_payload.get("capability_ref") or "system:dispatch_query",
-        ).strip()
-        risk_level = str(resolved_payload.get("risk_level") or "guarded").strip()
-        if risk_level not in {"auto", "guarded", "confirm"}:
-            risk_level = "guarded"
-
-        channel = str(resolved_payload.get("channel") or "console").strip() or "console"
-        session_id = resolved_payload.get("session_id")
-        user_id = resolved_payload.get("user_id")
-        request_payload = resolved_payload.get("request_payload") or resolved_payload.get(
-            "request",
-        )
-        if not isinstance(request_payload, dict):
-            request_payload = None
-        child_payload = resolved_payload.get("payload")
-        if not isinstance(child_payload, dict):
-            child_payload = None
-        if prompt_text is None and request_payload is None and child_payload is None:
-            return {
-                "success": False,
-                "error": "prompt_text or request payload is required for delegation",
-            }
-
-        target_role_id = _string_value(
-            resolved_payload.get("target_role_id")
-            or resolved_payload.get("industry_role_id"),
-        )
-        target_role_name = _string_value(
-            resolved_payload.get("target_role_name")
-            or resolved_payload.get("industry_role_name"),
-        )
-
-        try:
-            return await self._delegation_service.delegate_task(
-                parent_task_id,
-                title=title,
-                owner_agent_id=owner_agent_id or candidate_agent or "",
-                target_agent_id=target_agent_id,
-                target_role_id=target_role_id,
-                target_role_name=target_role_name,
-                prompt_text=(
-                    str(prompt_text).strip() if prompt_text is not None else None
-                ),
-                summary=(
-                    str(summary).strip()
-                    if isinstance(summary, str) and summary.strip()
-                    else None
-                ),
-                capability_ref=capability_ref or "system:dispatch_query",
-                risk_level=risk_level,
-                environment_ref=resolved_payload.get("environment_ref"),
-                channel=channel,
-                session_id=(
-                    str(session_id).strip()
-                    if isinstance(session_id, str) and session_id.strip()
-                    else None
-                ),
-                user_id=(
-                    str(user_id).strip()
-                    if isinstance(user_id, str) and user_id.strip()
-                    else None
-                ),
-                request_payload=request_payload,
-                payload=child_payload,
-                actor=str(resolved_payload.get("actor") or "runtime-center"),
-                execute=bool(resolved_payload.get("execute", False)),
-                force=bool(resolved_payload.get("force", False)),
-                industry_instance_id=_string_value(
-                    resolved_payload.get("industry_instance_id"),
-                ),
-                industry_role_id=_string_value(resolved_payload.get("industry_role_id")),
-                industry_label=_string_value(resolved_payload.get("industry_label")),
-                owner_scope=_string_value(resolved_payload.get("owner_scope")),
-                session_kind=_string_value(resolved_payload.get("session_kind")),
-                inherit_environment_ref=bool(
-                    resolved_payload.get("inherit_environment_ref", True),
-                ),
-            )
-        except KeyError as exc:
-            return {
-                "success": False,
-                "error": str(exc).strip("'"),
-                "error_code": getattr(exc, "code", "target_not_found"),
-                "dispatch_status": "failed",
-                "target_agent_id": candidate_agent,
-            }
-        except Exception as exc:
-            error_code = getattr(exc, "code", "delegation_failed")
-            return {
-                "success": False,
-                "error": str(exc),
-                "error_code": error_code,
-                "dispatch_status": "failed",
-                "target_agent_id": candidate_agent,
-            }
 
     async def handle_apply_role(
         self,
