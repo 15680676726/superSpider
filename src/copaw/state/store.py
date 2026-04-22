@@ -314,6 +314,21 @@ CREATE TABLE IF NOT EXISTS executor_model_invocation_policies (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS executor_runtime_instances (
+    runtime_id TEXT PRIMARY KEY,
+    executor_id TEXT NOT NULL,
+    protocol_kind TEXT NOT NULL DEFAULT 'unknown',
+    scope_kind TEXT NOT NULL DEFAULT 'assignment',
+    assignment_id TEXT,
+    role_id TEXT,
+    project_profile_id TEXT,
+    thread_id TEXT,
+    runtime_status TEXT NOT NULL DEFAULT 'starting',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS executor_thread_bindings (
     binding_id TEXT PRIMARY KEY,
     runtime_id TEXT NOT NULL,

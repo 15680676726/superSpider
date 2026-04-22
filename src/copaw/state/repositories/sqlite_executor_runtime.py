@@ -8,6 +8,7 @@ from ..models_executor_runtime import (
     ExecutionPolicyRecord,
     ExecutorEventRecord,
     ExecutorProviderRecord,
+    ExecutorRuntimeInstanceRecord,
     ExecutorThreadBindingRecord,
     ExecutorTurnRecord,
     ModelInvocationPolicyRecord,
@@ -24,6 +25,53 @@ class SqliteExecutorRuntimeRepository(BaseExecutorRuntimeRepository):
     def __init__(self, store: SQLiteStateStore):
         self._store = store
         self._store.initialize()
+
+    def get_runtime(self, runtime_id: str) -> ExecutorRuntimeInstanceRecord | None:
+        return _get_single(
+            store=self._store,
+            table_name="executor_runtime_instances",
+            key_name="runtime_id",
+            key_value=runtime_id,
+            model_type=ExecutorRuntimeInstanceRecord,
+            json_fields=("metadata",),
+        )
+
+    def list_runtimes(
+        self,
+        *,
+        executor_id: str | None = None,
+        assignment_id: str | None = None,
+        role_id: str | None = None,
+        runtime_status: str | None = None,
+        limit: int | None = None,
+    ) -> list[ExecutorRuntimeInstanceRecord]:
+        return _list_records(
+            store=self._store,
+            table_name="executor_runtime_instances",
+            model_type=ExecutorRuntimeInstanceRecord,
+            order_by="updated_at DESC, created_at DESC",
+            limit=limit,
+            json_fields=("metadata",),
+            filters=(
+                ("executor_id", executor_id),
+                ("assignment_id", assignment_id),
+                ("role_id", role_id),
+                ("runtime_status", runtime_status),
+            ),
+        )
+
+    def upsert_runtime(
+        self,
+        record: ExecutorRuntimeInstanceRecord,
+    ) -> ExecutorRuntimeInstanceRecord:
+        _upsert_updated_record(
+            store=self._store,
+            table_name="executor_runtime_instances",
+            key_name="runtime_id",
+            record=record,
+            json_fields=("metadata",),
+        )
+        return record
 
     def get_role_contract(self, role_id: str) -> RoleContractRecord | None:
         return _get_single(

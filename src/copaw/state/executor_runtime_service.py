@@ -17,7 +17,6 @@ from .models_executor_runtime import (
     RoleContractRecord,
     RoleExecutorBindingRecord,
 )
-from .models_external_runtime import ExternalCapabilityRuntimeInstanceRecord
 from .repositories.base import BaseExecutorRuntimeRepository
 from .repositories.sqlite_executor_runtime import SqliteExecutorRuntimeRepository
 from .store import SQLiteStateStore
@@ -155,7 +154,7 @@ def _executor_metadata(
 
 
 def _executor_runtime_from_external(
-    record: ExternalCapabilityRuntimeInstanceRecord,
+    record: Any,
 ) -> ExecutorRuntimeInstanceRecord:
     metadata = dict(record.metadata or {})
     compat = dict(metadata.pop(_EXECUTOR_RUNTIME_METADATA_KEY, {}) or {})
@@ -184,12 +183,14 @@ def _executor_runtime_from_external(
 
 
 def _coerce_state_store(
-    external_runtime_service: ExternalCapabilityRuntimeService,
+    external_runtime_service: ExternalCapabilityRuntimeService | None,
     *,
     explicit_store: SQLiteStateStore | None,
 ) -> SQLiteStateStore | None:
     if explicit_store is not None:
         return explicit_store
+    if external_runtime_service is None:
+        return None
     repository = getattr(external_runtime_service, "_repository", None)
     store = getattr(repository, "_store", None)
     return store if isinstance(store, SQLiteStateStore) else None
@@ -199,7 +200,7 @@ class ExecutorRuntimeService:
     def __init__(
         self,
         *,
-        external_runtime_service: ExternalCapabilityRuntimeService,
+        external_runtime_service: ExternalCapabilityRuntimeService | None = None,
         state_store: SQLiteStateStore | None = None,
         repository: BaseExecutorRuntimeRepository | None = None,
     ) -> None:
@@ -219,6 +220,7 @@ class ExecutorRuntimeService:
         self._providers: dict[str, ExecutorProviderRecord] = {}
         self._role_bindings: dict[str, RoleExecutorBindingRecord] = {}
         self._model_policies: dict[str, ModelInvocationPolicyRecord] = {}
+        self._runtime_instances: dict[str, ExecutorRuntimeInstanceRecord] = {}
         self._thread_bindings: dict[str, ExecutorThreadBindingRecord] = {}
         self._turn_records: dict[str, ExecutorTurnRecord] = {}
         self._event_records: dict[str, ExecutorEventRecord] = {}
@@ -345,7 +347,19 @@ class ExecutorRuntimeService:
         *,
         formal_only: bool = False,
     ) -> ExecutorRuntimeInstanceRecord | None:
-        record = self._external_runtime_service.get_runtime(runtime_id)
+        repository = self._repository
+        if repository is not None:
+            runtime = repository.get_runtime(runtime_id)
+        else:
+            runtime = self._runtime_instances.get(runtime_id)
+        if runtime is not None:
+            if formal_only and not self.is_formal_runtime(runtime):
+                return None
+            return runtime
+        service = self._external_runtime_service
+        if service is None:
+            return None
+        record = service.get_runtime(runtime_id)
         if record is None:
             return None
         runtime = _executor_runtime_from_external(record)
@@ -362,13 +376,22 @@ class ExecutorRuntimeService:
         runtime_status: str | None = None,
         formal_only: bool = False,
     ) -> list[ExecutorRuntimeInstanceRecord]:
-        records = self._external_runtime_service.list_runtimes(
-            capability_id=_executor_capability_id(executor_id) if executor_id else None,
-        )
-        items = [_executor_runtime_from_external(item) for item in records]
+        repository = self._repository
+        if repository is not None:
+            items = repository.list_runtimes(
+                executor_id=executor_id,
+                assignment_id=assignment_id,
+                role_id=role_id,
+                runtime_status=runtime_status,
+                limit=None,
+            )
+        else:
+            items = list(self._runtime_instances.values())
         filtered: list[ExecutorRuntimeInstanceRecord] = []
         for item in items:
             if formal_only and not self.is_formal_runtime(item):
+                continue
+            if executor_id is not None and item.executor_id != executor_id:
                 continue
             if assignment_id is not None and item.assignment_id != assignment_id:
                 continue
@@ -377,7 +400,27 @@ class ExecutorRuntimeService:
             if runtime_status is not None and item.runtime_status != runtime_status:
                 continue
             filtered.append(item)
-        return filtered
+        if filtered:
+            return filtered
+        service = self._external_runtime_service
+        if service is None:
+            return []
+        records = service.list_runtimes(
+            capability_id=_executor_capability_id(executor_id) if executor_id else None,
+        )
+        fallback = [_executor_runtime_from_external(item) for item in records]
+        output: list[ExecutorRuntimeInstanceRecord] = []
+        for item in fallback:
+            if formal_only and not self.is_formal_runtime(item):
+                continue
+            if assignment_id is not None and item.assignment_id != assignment_id:
+                continue
+            if role_id is not None and item.role_id != role_id:
+                continue
+            if runtime_status is not None and item.runtime_status != runtime_status:
+                continue
+            output.append(item)
+        return output
 
     @staticmethod
     def is_formal_runtime(runtime: ExecutorRuntimeInstanceRecord) -> bool:
@@ -396,33 +439,42 @@ class ExecutorRuntimeService:
         thread_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> ExecutorRuntimeInstanceRecord:
-        compat_scope_kind, compat_refs = _compat_scope(
+        runtime_metadata = _merge_metadata(metadata, {"executor_runtime_managed": True})
+        existing = self._resolve_active_runtime(
+            executor_id=executor_id,
             scope_kind=scope_kind,
             assignment_id=assignment_id,
             role_id=role_id,
             project_profile_id=project_profile_id,
         )
-        record = self._external_runtime_service.create_or_reuse_service_runtime(
-            capability_id=_executor_capability_id(executor_id),
-            scope_kind=compat_scope_kind,
-            session_mount_id=compat_refs["session_mount_id"],
-            work_context_id=compat_refs["work_context_id"],
-            environment_ref=compat_refs["environment_ref"],
-            owner_agent_id=role_id,
-            command="",
-            metadata=_executor_metadata(
+        now = _utc_now()
+        if existing is None:
+            runtime = ExecutorRuntimeInstanceRecord(
                 executor_id=executor_id,
                 protocol_kind=protocol_kind,
                 scope_kind=scope_kind,
-                assignment_id=assignment_id,
-                role_id=role_id,
-                project_profile_id=project_profile_id,
-                thread_id=thread_id,
+                assignment_id=_text(assignment_id),
+                role_id=_text(role_id),
+                project_profile_id=_text(project_profile_id),
+                thread_id=_text(thread_id),
                 runtime_status="starting",
-                metadata=metadata,
-            ),
-        )
-        runtime = _executor_runtime_from_external(record)
+                metadata=runtime_metadata,
+            )
+        else:
+            runtime = existing.model_copy(
+                update={
+                    "executor_id": executor_id,
+                    "protocol_kind": protocol_kind or existing.protocol_kind,
+                    "scope_kind": scope_kind or existing.scope_kind,
+                    "assignment_id": _text(assignment_id) or existing.assignment_id,
+                    "role_id": _text(role_id) or existing.role_id,
+                    "project_profile_id": _text(project_profile_id) or existing.project_profile_id,
+                    "thread_id": _text(thread_id) or existing.thread_id,
+                    "metadata": _merge_metadata(existing.metadata, runtime_metadata),
+                    "updated_at": now,
+                }
+            )
+        runtime = self._store_runtime_instance(runtime)
         if thread_id is not None:
             self._sync_thread_binding(
                 runtime=runtime,
@@ -440,28 +492,22 @@ class ExecutorRuntimeService:
         turn_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> ExecutorRuntimeInstanceRecord:
-        current = self._external_runtime_service.get_runtime(runtime_id)
+        current = self.get_runtime(runtime_id)
         if current is None:
             raise KeyError(f"Runtime '{runtime_id}' not found")
-        compat = dict(current.metadata.get(_EXECUTOR_RUNTIME_METADATA_KEY, {}) or {})
-        updated = self._external_runtime_service.mark_runtime_ready(
-            runtime_id,
-            metadata=_executor_metadata(
-                executor_id=str(
-                    compat.get("executor_id")
-                    or _executor_id_from_capability_id(current.capability_id)
-                ),
-                protocol_kind=str(compat.get("protocol_kind") or "unknown"),
-                scope_kind=str(compat.get("scope_kind") or "assignment"),
-                assignment_id=_text(compat.get("assignment_id")),
-                role_id=_text(compat.get("role_id")) or current.owner_agent_id,
-                project_profile_id=_text(compat.get("project_profile_id")),
-                thread_id=_text(thread_id) or _text(compat.get("thread_id")),
-                runtime_status="ready",
-                metadata=metadata,
-            ),
+        runtime = self._store_runtime_instance(
+            current.model_copy(
+                update={
+                    "thread_id": _text(thread_id) or current.thread_id,
+                    "runtime_status": "ready",
+                    "metadata": _merge_metadata(
+                        current.metadata,
+                        _merge_metadata(metadata, {"executor_runtime_managed": True}),
+                    ),
+                    "updated_at": _utc_now(),
+                }
+            )
         )
-        runtime = _executor_runtime_from_external(updated)
         binding = self._sync_thread_binding(
             runtime=runtime,
             thread_id=_text(thread_id) or runtime.thread_id,
@@ -486,34 +532,26 @@ class ExecutorRuntimeService:
         status: str = "stopped",
         metadata: dict[str, Any] | None = None,
     ) -> ExecutorRuntimeInstanceRecord:
-        current = self._external_runtime_service.get_runtime(runtime_id)
+        current = self.get_runtime(runtime_id)
         if current is None:
             raise KeyError(f"Runtime '{runtime_id}' not found")
-        compat = dict(current.metadata.get(_EXECUTOR_RUNTIME_METADATA_KEY, {}) or {})
         normalized_status = (
             status
             if status in _ACTIVE_RUNTIME_STATUSES | _TERMINAL_RUNTIME_STATUSES
             else "stopped"
         )
-        updated = self._external_runtime_service.mark_runtime_stopped(
-            runtime_id,
-            status=normalized_status,
-            metadata=_executor_metadata(
-                executor_id=str(
-                    compat.get("executor_id")
-                    or _executor_id_from_capability_id(current.capability_id)
-                ),
-                protocol_kind=str(compat.get("protocol_kind") or "unknown"),
-                scope_kind=str(compat.get("scope_kind") or "assignment"),
-                assignment_id=_text(compat.get("assignment_id")),
-                role_id=_text(compat.get("role_id")) or current.owner_agent_id,
-                project_profile_id=_text(compat.get("project_profile_id")),
-                thread_id=_text(compat.get("thread_id")),
-                runtime_status=normalized_status,
-                metadata=metadata,
-            ),
+        runtime = self._store_runtime_instance(
+            current.model_copy(
+                update={
+                    "runtime_status": normalized_status,
+                    "metadata": _merge_metadata(
+                        current.metadata,
+                        _merge_metadata(metadata, {"executor_runtime_managed": True}),
+                    ),
+                    "updated_at": _utc_now(),
+                }
+            )
         )
-        runtime = _executor_runtime_from_external(updated)
         for binding in self.list_thread_bindings(runtime_id=runtime_id):
             updated_binding = binding.model_copy(
                 update={
@@ -525,6 +563,47 @@ class ExecutorRuntimeService:
             )
             self._store_thread_binding(updated_binding)
         return runtime
+
+    def _store_runtime_instance(
+        self,
+        record: ExecutorRuntimeInstanceRecord,
+    ) -> ExecutorRuntimeInstanceRecord:
+        repository = self._repository
+        if repository is not None:
+            return repository.upsert_runtime(record)
+        self._runtime_instances[record.runtime_id] = record
+        return record
+
+    def _resolve_active_runtime(
+        self,
+        *,
+        executor_id: str,
+        scope_kind: str,
+        assignment_id: str | None,
+        role_id: str | None,
+        project_profile_id: str | None,
+    ) -> ExecutorRuntimeInstanceRecord | None:
+        candidates = self.list_runtimes(
+            executor_id=executor_id,
+            assignment_id=assignment_id if scope_kind == "assignment" else None,
+            role_id=role_id if scope_kind == "role" else None,
+            runtime_status=None,
+            formal_only=True,
+        )
+        for item in candidates:
+            if item.scope_kind != scope_kind:
+                continue
+            if scope_kind == "assignment" and item.assignment_id != _text(assignment_id):
+                continue
+            if scope_kind == "role" and item.role_id != _text(role_id):
+                continue
+            if scope_kind == "project" and item.project_profile_id != _text(project_profile_id):
+                continue
+            if scope_kind == "session" and item.role_id != _text(role_id):
+                continue
+            if item.runtime_status in _ACTIVE_RUNTIME_STATUSES:
+                return item
+        return None
 
     def list_thread_bindings(
         self,

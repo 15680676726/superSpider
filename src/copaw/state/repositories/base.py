@@ -47,6 +47,7 @@ from ..models_executor_runtime import (
     ExecutionPolicyRecord,
     ExecutorEventRecord,
     ExecutorProviderRecord,
+    ExecutorRuntimeInstanceRecord,
     ExecutorThreadBindingRecord,
     ExecutorTurnRecord,
     ModelInvocationPolicyRecord,
@@ -359,6 +360,29 @@ class BaseExternalCapabilityRuntimeRepository(ABC):
 
 
 class BaseExecutorRuntimeRepository(ABC):
+    @abstractmethod
+    def get_runtime(self, runtime_id: str) -> Optional[ExecutorRuntimeInstanceRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_runtimes(
+        self,
+        *,
+        executor_id: str | None = None,
+        assignment_id: str | None = None,
+        role_id: str | None = None,
+        runtime_status: str | None = None,
+        limit: int | None = None,
+    ) -> list[ExecutorRuntimeInstanceRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upsert_runtime(
+        self,
+        record: ExecutorRuntimeInstanceRecord,
+    ) -> ExecutorRuntimeInstanceRecord:
+        raise NotImplementedError
+
     @abstractmethod
     def get_role_contract(self, role_id: str) -> Optional[RoleContractRecord]:
         raise NotImplementedError

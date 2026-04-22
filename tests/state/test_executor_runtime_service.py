@@ -130,6 +130,36 @@ def test_executor_runtime_service_reuses_assignment_runtime(tmp_path) -> None:
     assert len(service.list_runtimes(executor_id="codex-app-server")) == 1
 
 
+def test_executor_runtime_service_supports_canonical_runtime_truth_without_external_runtime_service(
+    tmp_path,
+) -> None:
+    store = SQLiteStateStore(tmp_path / "state.db")
+    service = ExecutorRuntimeService(state_store=store)
+
+    first = service.create_or_reuse_runtime(
+        executor_id="codex-app-server",
+        protocol_kind="app_server",
+        scope_kind="assignment",
+        assignment_id="assign-1",
+        role_id="backend-engineer",
+        metadata={"source": "test"},
+    )
+    second = service.create_or_reuse_runtime(
+        executor_id="codex-app-server",
+        protocol_kind="app_server",
+        scope_kind="assignment",
+        assignment_id="assign-1",
+        role_id="backend-engineer",
+    )
+    stored = service.get_runtime(first.runtime_id)
+
+    assert second.runtime_id == first.runtime_id
+    assert stored is not None
+    assert stored.assignment_id == "assign-1"
+    assert stored.executor_id == "codex-app-server"
+    assert len(service.list_runtimes(executor_id="codex-app-server")) == 1
+
+
 def test_executor_runtime_service_resolves_provider_binding_and_policy(tmp_path) -> None:
     service = _build_service(tmp_path)
     provider = ExecutorProviderRecord(
