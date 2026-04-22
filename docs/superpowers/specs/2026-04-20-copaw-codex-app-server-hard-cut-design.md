@@ -1,6 +1,13 @@
 # CoPaw External Executor Runtime Hard-Cut Design
 日期：`2026-04-20`
 
+`2026-04-22` supplement:
+- 面向客户交付的本地 `Codex` 执行体边界现已收口为：`managed local codex CLI sidecar + stdio`
+- `CoPaw MainBrain -> ExecutorRuntimePort -> CodexAppServerAdapter -> managed local codex CLI sidecar`
+- `COPAW_CODEX_APP_SERVER_WS_URL` 只保留显式 websocket compatibility/testing path；`COPAW_CODEX_APP_SERVER_BIN` 只保留 env-binary compatibility fallback
+- CoPaw 必须统一持有 sidecar install truth、model policy、approval/recovery、version compatibility 与 upgrade/rollback 治理；这些不再允许散落到 sidecar 私有配置中失控演化
+- 本地 customer-delivery path 不是“客户自己安装 codex 再手动配环境”，而是 CoPaw 以受管 sidecar 方式治理 `codex CLI`
+
 ---
 
 ## 0. 目标
@@ -42,6 +49,22 @@
 - `Codex App Server` 是第一条已确认的正式控制面
 - `Codex` 是第一适配器，不是唯一适配器
 - `Hermes` 与其他执行体只要满足 formal control surface，就应能接入同一条 `ExecutorRuntimePort`
+
+### 1.1.1 customer-delivery 本地接线
+
+对于面向客户交付的本地执行形态，当前正式接线固定为：
+
+- `CoPaw MainBrain`
+- `ExecutorRuntimePort`
+- `CodexAppServerAdapter`
+- `managed local codex CLI sidecar`
+- `stdio`
+
+这意味着：
+
+- 默认本地执行不再依赖 PATH 上“碰巧存在”的 `codex`
+- 默认本地执行不再以 websocket 作为正式客户路径
+- `Codex App Server` websocket 仍可保留为显式 compatibility/testing path，但不能再被描述成客户默认形态
 
 ### 1.2 根本判断
 
@@ -234,6 +257,10 @@ V1 最小新增对象如下：
 - `ExecutorProvider`
 - `RoleExecutorBinding`
 - `ModelInvocationPolicy`
+- `ExecutorSidecarInstall`
+- `ExecutorSidecarCompatibilityPolicy`
+- `ExecutorSidecarRelease`
+- `ExecutorRuntimeInstance`
 - `ExecutorThreadBinding`
 - `ExecutorTurnRecord`
 - `ExecutorEventRecord`
@@ -362,6 +389,63 @@ V1 最小字段建议：
   - `runtime_owned`
   - `copaw_managed`
   - `hybrid`
+
+### 4.6.1 ExecutorSidecarInstall
+
+描述 CoPaw 受管本地 sidecar 的正式安装真相。
+
+V1 最小字段建议：
+
+- `install_id`
+- `runtime_family`
+- `channel`
+- `version`
+- `install_root`
+- `executable_path`
+- `install_status`
+- `last_checked_at`
+
+边界：
+
+- 它描述的是“当前机器上被 CoPaw 接管的 sidecar 安装”
+- 它不是 PATH 探测结果，也不是用户自己随手安装的环境变量事实
+
+### 4.6.2 ExecutorSidecarCompatibilityPolicy
+
+描述 CoPaw 与 sidecar 的正式兼容契约。
+
+V1 最小字段建议：
+
+- `policy_id`
+- `runtime_family`
+- `channel`
+- `supported_version_range`
+- `required_copaw_version_range`
+- `status`
+
+建议 metadata：
+
+- `required_protocol_features`
+- `fail_closed`
+
+### 4.6.3 ExecutorSidecarRelease
+
+描述受管 sidecar 的升级/回滚发布物真相。
+
+V1 最小字段建议：
+
+- `release_id`
+- `runtime_family`
+- `channel`
+- `version`
+- `artifact_ref`
+- `artifact_checksum`
+- `status`
+
+说明：
+
+- staged upgrade / rollback 必须围绕正式 `ExecutorSidecarRelease` 执行
+- 不能把 sidecar 升级简化成“直接把客户机器上的 `codex` 全局升级掉”
 
 ### 4.7 ExecutorThreadBinding
 
@@ -571,6 +655,7 @@ V1 规范化事件集：
 
 - 上述示例来自 `Codex App Server`
 - 其他执行体必须适配到同一套规范化事件集，不能把 runtime-native 事件直接暴露成第二套业务真相
+- `approval_requested / approval_resolved / restart / interrupt` 在 customer-delivery 本地链路里也必须继续通过这套正式事件/证据真相回流，不能只停留在 sidecar console 输出
 
 ### 7.4 主脑回复策略
 
@@ -621,6 +706,9 @@ V1 第一版统一采用 `open_default`。
 - 一键停止能力
 - 独立项目工作区
 - 完整证据回流
+- sidecar approval / recovery / restart 控制
+- sidecar version compatibility gate
+- managed install truth，而不是 PATH 偶然成功
 
 设计原则：
 

@@ -4,6 +4,8 @@
 
 **Goal:** Turn the current Codex external-executor integration into a customer-deliverable built-in local sidecar so CoPaw can install, launch, govern, upgrade, and recover a managed `codex CLI` runtime on customer machines without relying on manual setup.
 
+**Execution Status (`2026-04-22`):** Implemented on `main` via commits `b2767b2`, `8c96253`, `f9d2926`, `5155d33`, `f5c8c86`; fresh acceptance evidence and remaining boundaries are recorded in `TASK_STATUS.md` `1.0.10`. The checkbox steps below remain as the original execution checklist.
+
 **Architecture:** All five concerns below remain `P0`; the order here is dependency order, not importance order. The implementation keeps CoPaw as the single truth source for provider selection, model policy, runtime state, risk/approval, and version compatibility, while `codex CLI` runs as a managed local sidecar controlled by CoPaw instead of a user-installed loose dependency.
 
 **Tech Stack:** Python 3.12, FastAPI, SQLite state store, pytest, Runtime Center, Codex CLI sidecar, local process management, stdio transport

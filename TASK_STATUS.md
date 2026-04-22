@@ -438,6 +438,54 @@
   - compatibility/deprecation 代码尚未物理删除；删除计划继续记录在 `DEPRECATION_LEDGER.md`
   - default formal `executor_runtime_port` 需要本机存在 `codex` binary 或显式提供 `COPAW_CODEX_APP_SERVER_WS_URL`；这是运行前置条件，不是当前 hard-cut 架构缺口
 
+## 1.0.10 `2026-04-22` codex sidecar customer-delivery `P0` 收口
+
+- 本轮按 `docs/superpowers/plans/2026-04-22-codex-sidecar-customer-delivery-plan.md` 连续完成了 customer-delivery `Task 1-6`：
+  - `Task 1 / managed sidecar install truth`
+    - `b2767b2`：`ExecutorSidecarInstallRecord / ExecutorSidecarCompatibilityPolicyRecord / ExecutorSidecarReleaseRecord` 已进入 `models_executor_runtime.py` 与 `ExecutorRuntimeService`，并通过 `runtime_bootstrap_models.py`、`runtime_state_bindings.py` 抬进 formal bootstrap/app.state
+  - `Task 2 / managed local stdio cutover`
+    - `8c96253`：default local `executor_runtime_port` 现优先走受管 `codex CLI` child-process + `stdio`；`COPAW_CODEX_APP_SERVER_WS_URL` 只保留显式 websocket compatibility path，`COPAW_CODEX_APP_SERVER_BIN` 只保留 env-binary compatibility fallback
+  - `Task 3 / system-owned model governance`
+    - `f9d2926`：`RoleExecutorBinding.model_policy_id` 现会硬注入 `model_ref` 到 `thread/start` 与 `turn/start`，并在 runtime reported model 与 CoPaw expected model 不一致时 fail-close；formal provider install 同步保留 `ownership_mode = copaw_managed`
+  - `Task 4 / approval + recovery control`
+    - `5155d33`：sidecar 主动发起的 approval request 现已进入 `AssignmentExecutorRuntimeCoordinator` 正式控制链，并以 `approval_requested / approval_resolved` 事件 + `executor-approval` evidence 回流；daemon command 现可做 `sidecar-status / restart / interrupt / approve / reject`
+  - `Task 5 / version compatibility + upgrade governance`
+    - `f5c8c86`：`SidecarReleaseService` 现提供 compatibility gate、published release 发现、staged upgrade、rollback 与 version command；startup preflight 与 default runtime bootstrap 都已把 sidecar compatibility 作为正式 gate
+  - `Task 6 / fresh verification + doc sync`
+    - `tests/app/test_external_executor_live_smoke.py` 已补上 managed provider-runtime facade 接线，使 live smoke 走和正式 customer-delivery 主链一致的 model/provider injection 路径，而不是测试专用直通链
+- 当前能诚实写出的结论：
+  - CoPaw 面向客户的本地执行体正式边界现已收口为：`managed local codex CLI sidecar + stdio + formal model policy + approval/recovery control + sidecar version governance`
+  - 系统现在控制的是：
+    - sidecar install/runtime truth
+    - model selection truth
+    - approval / interrupt / restart / recovery
+    - compatibility gate / upgrade / rollback
+  - `COPAW_CODEX_APP_SERVER_WS_URL` 与 `COPAW_CODEX_APP_SERVER_BIN` 仍可用于 compatibility/debug，但已不再是客户版默认本地执行路径
+- fresh 验收证据：
+  - focused regression：
+    - 命令：`python -m pytest tests/state/test_executor_runtime_service.py tests/state/test_executor_sidecar_state.py tests/adapters/test_codex_app_server_adapter.py tests/adapters/test_codex_stdio_transport.py tests/kernel/test_main_brain_executor_runtime_integration.py tests/kernel/test_executor_event_writeback_service.py tests/capabilities/test_donor_provider_injection.py tests/app/test_runtime_execution_provider_wiring.py tests/app/test_runtime_bootstrap_helpers.py tests/app/test_runtime_bootstrap_split.py tests/app/test_startup_environment_preflight.py tests/app/test_capability_market_api.py tests/app/test_daemon_commands.py tests/app/test_sidecar_release_service.py -q`
+    - 结果：`163 passed in 122.20s`
+    - 验收层级：`L1 + L2`
+  - `default regression`：
+    - 命令：`python scripts/run_p0_runtime_terminal_gate.py`
+    - 结果：
+      - 后端主链：`361 passed in 257.51s`
+      - 长跑与删旧回归：`84 passed in 414.00s`
+      - 前台定向 Vitest：`4` files / `21` tests passed
+      - 控制台构建：`vite build` passed
+    - 验收层级：`default regression`
+  - `L3` live smoke：
+    - 命令：`COPAW_RUN_EXTERNAL_EXECUTOR_LIVE_SMOKE=1 python -m pytest tests/app/test_external_executor_live_smoke.py -q -k live_external_executor_provider_intake_and_runtime_writeback`
+    - 结果：`1 passed, 1 deselected in 180.41s`
+    - 验收层级：`L3`
+  - `L4` selected repeat：
+    - 命令：重复执行 `COPAW_RUN_EXTERNAL_EXECUTOR_LIVE_SMOKE=1 python -m pytest tests/app/test_external_executor_live_smoke.py -q -k live_external_executor_provider_intake_and_runtime_writeback`
+    - 结果：连续 `2` 轮分别为 `1 passed, 1 deselected in 18.83s`、`1 passed, 1 deselected in 18.25s`
+    - 验收层级：`selected L4`
+- 当前仍应明确保留的边界：
+  - 受管 sidecar 的 artifact 分发、安装包制作、签名与发布通道仍属于 release/packaging 交付面；本轮完成的是运行时治理、兼容治理与控制闭环，不得混写成“安装器/UI 发布物也已全部交付”
+  - websocket / env-binary fallback 仍在 compatibility 边界内保留，后续如不再需要，可继续按 `DEPRECATION_LEDGER.md` 退役
+
 ## 1.1.1 `2026-04-07` Buddy 领域能力阶段收口补充
 
 - Buddy 当前成长阶段的正式真相已从关系经验切到 active `BuddyDomainCapabilityRecord`

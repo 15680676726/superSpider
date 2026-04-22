@@ -8,11 +8,23 @@
   - `ExecutorProvider`
   - `RoleExecutorBinding`
   - `ModelInvocationPolicy`
+  - `ExecutorSidecarInstall`
+  - `ExecutorSidecarCompatibilityPolicy`
+  - `ExecutorSidecarRelease`
   - `ExecutorRuntimeInstance`
   - `ExecutorThreadBinding`
   - `ExecutorTurnRecord`
   - `ExecutorEventRecord`
 - `ExecutorEventRecord` 必须继续回映到既有 `Assignment / EvidenceRecord / AgentReport` 主链，不允许形成第二套业务真相
+
+`2026-04-22` supplement:
+- 面向客户交付的本地 `Codex` 接入边界已收口为：`managed local codex CLI sidecar + stdio`
+- `COPAW_CODEX_APP_SERVER_WS_URL` 与 `COPAW_CODEX_APP_SERVER_BIN` 仅保留 compatibility/debug 入口，不再是 formal customer-delivery path
+- `ExecutorSidecarInstall` 是本机 sidecar 安装真相，承载 `install_root / executable_path / channel / version / install_status`
+- `ExecutorSidecarCompatibilityPolicy` 是 CoPaw 与 sidecar 的版本契约真相，承载 `supported_version_range / required_copaw_version_range / required_protocol_features / fail_closed`
+- `ExecutorSidecarRelease` 是受管升级与回滚真相，承载 `artifact_ref / artifact_checksum / version / channel / status`
+- sidecar 审批与恢复仍不新增第二套一级对象；`approval_requested / approval_resolved / restart / interrupt` 继续通过 `ExecutorEventRecord + EvidenceRecord + runtime metadata` 回流
+- 模型统一治理仍锚定在 `RoleExecutorBinding.model_policy_id -> ModelInvocationPolicy`，执行体不得自带一套不受主脑约束的本地默认模型真相
 
 `2026-03-26` supplement:
 - `docs/superpowers/specs/2026-03-26-agent-body-grid-computer-runtime.md` is an execution-side supplement only
@@ -158,6 +170,9 @@
 - `ExecutorProvider`
 - `RoleExecutorBinding`
 - `ModelInvocationPolicy`
+- `ExecutorSidecarInstall`
+- `ExecutorSidecarCompatibilityPolicy`
+- `ExecutorSidecarRelease`
 - `ExecutorRuntimeInstance`
 - `ExecutorThreadBinding`
 - `ExecutorTurnRecord`
@@ -207,6 +222,9 @@
 - `ExecutorProvider`
 - `RoleExecutorBinding`
 - `ModelInvocationPolicy`
+- `ExecutorSidecarInstall`
+- `ExecutorSidecarCompatibilityPolicy`
+- `ExecutorSidecarRelease`
 - `ExecutorRuntimeInstance`
 - `ExecutorThreadBinding`
 - `ExecutorTurnRecord`
@@ -261,6 +279,11 @@
 - `TaskRuntime 1 -> 1 current RuntimeFrame`
 - `TaskRuntime 1 -> N EnvironmentMount`
 - `EnvironmentMount 1 -> N SessionMount`
+- `ExecutorProvider 1 -> N RoleExecutorBinding`
+- `RoleExecutorBinding 1 -> 0..1 ModelInvocationPolicy`
+- `ExecutorProvider 1 -> 0..N ExecutorSidecarInstall`
+- `ExecutorSidecarCompatibilityPolicy 1 -> 0..N ExecutorSidecarRelease`
+- `ExecutorRuntimeInstance 0..1 -> 1 ExecutorSidecarInstall`
 - `CapabilityMount N <-> N Agent`
 - `Proposal 1 -> N Patch`
 - `Patch N -> 0..N Goal/Agent/Task/Capability`

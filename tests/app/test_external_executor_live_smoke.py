@@ -19,6 +19,7 @@ from copaw.app.runtime_bootstrap_execution import build_executor_runtime_coordin
 from copaw.app.runtime_events import RuntimeEventBus
 from copaw.evidence import EvidenceLedger
 from copaw.kernel.executor_event_writeback_service import ExecutorEventWritebackService
+from copaw.providers.runtime_provider_facade import build_compat_runtime_provider_facade
 from copaw.state import SQLiteStateStore
 from copaw.state.executor_runtime_service import ExecutorRuntimeService
 from copaw.state.external_runtime_service import ExternalCapabilityRuntimeService
@@ -185,6 +186,7 @@ def test_live_external_executor_provider_intake_and_runtime_writeback(
             default_model_policy_id="codex-default",
         )
         coordinator.set_executor_runtime_service(executor_runtime_service)
+        coordinator.set_provider_runtime_facade(build_compat_runtime_provider_facade())
         coordinator.set_executor_event_writeback_service(
             ExecutorEventWritebackService(
                 evidence_ledger=evidence_ledger,
