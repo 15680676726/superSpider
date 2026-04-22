@@ -564,6 +564,7 @@
   - `src/copaw/app/routers/runtime_center_payloads.py` 与 `src/copaw/kernel/agent_profile_service.py` 已停止输出 `/api/runtime-center/actors/*` dead routes；actor runtime payload 现在只保留 `agent_capabilities` formal route
   - `src/copaw/kernel/query_execution_tools.py` 已物理删除 `delegate_task` tool builder；formal query front-door 现在不再生成 `delegate_task`
   - `src/copaw/kernel/query_execution_prompt.py` 与 `src/copaw/kernel/query_execution_runtime.py` 不再把 `system:delegate_task` 当 formal query front-door 条件或提示文案
+  - `src/copaw/capabilities/install_templates.py`、`src/copaw/capabilities/system_actor_handlers.py`、`src/copaw/kernel/delegation_service.py` 已停止输出 `/api/runtime-center/actors/*` dead links；当前仓内已不再残留该类 route 字符串
   - `tests/kernel/test_query_execution_runtime.py` 已同步把 execution-core formal front-door 口径收紧为：
     - 不再保留 browser / desktop / document / read-file 本地 tool front-door
     - formal system front-door 只保留 `system:dispatch_query` 等正式 system-op surface

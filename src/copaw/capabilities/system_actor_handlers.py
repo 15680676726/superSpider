@@ -93,7 +93,6 @@ class SystemActorCapabilityFacade:
                 "summary": f"Enqueued mailbox work for '{agent_id}'.",
                 "agent_id": agent_id,
                 "mailbox": _model_dump_payload(mailbox_item),
-                "route": f"/api/runtime-center/actors/{agent_id}/mailbox/{mailbox_item.id}",
             }
 
         if capability_id == "system:pause_actor":
@@ -216,7 +215,6 @@ class SystemActorCapabilityFacade:
                 "summary": f"Re-queued mailbox item '{mailbox_id}' for '{agent_id}'.",
                 "agent_id": agent_id,
                 "mailbox": _model_dump_payload(mailbox_item),
-                "route": f"/api/runtime-center/actors/{agent_id}/mailbox/{mailbox_item.id}",
             }
 
         if capability_id == "system:list_teammates":

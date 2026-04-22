@@ -1016,7 +1016,6 @@ def _cooperative_execution_routes() -> dict[str, str]:
     return {
         "decisions": "/api/runtime-center/decisions",
         "agents": "/api/runtime-center/agents",
-        "actors": "/api/runtime-center/actors",
         "environments": "/api/runtime-center/environments",
         "sessions": "/api/runtime-center/sessions",
     }
@@ -1494,7 +1493,6 @@ def _build_desktop_install_template(
             routes={
                 "decisions": "/api/runtime-center/decisions",
                 "agents": "/api/runtime-center/agents",
-                "actors": "/api/runtime-center/actors",
             },
         ),
         host_policy=host_policy,
@@ -1685,7 +1683,6 @@ def _build_browser_install_template(
             routes={
                 "decisions": "/api/runtime-center/decisions",
                 "agents": "/api/runtime-center/agents",
-                "actors": "/api/runtime-center/actors",
             },
         ),
         host_policy=host_policy,

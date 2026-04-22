@@ -365,6 +365,7 @@ def test_delegation_service_execute_true_still_lands_mailbox(tmp_path) -> None:
 
     assert result["mailbox_id"] is not None
     assert result["dispatch_status"] == "completed"
+    assert result["routes"]["mailbox"] is None
     assert result["latest_result_summary"]
     mailbox_item = mailbox_repository.get_item(result["mailbox_id"])
     assert mailbox_item is not None
@@ -686,6 +687,7 @@ def test_delegation_service_execute_true_keeps_mailbox_owned_by_worker_when_targ
 
     assert supervisor.calls == ["worker"]
     assert result["dispatch_status"] == "queued"
+    assert result["routes"]["mailbox"] is None
     assert result["latest_result_summary"] == "Queued delegated task"
     mailbox_item = mailbox_repository.get_item(result["mailbox_id"])
     assert mailbox_item is not None

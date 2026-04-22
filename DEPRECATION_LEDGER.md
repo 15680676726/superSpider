@@ -248,7 +248,7 @@
   - `2026-04-22` 晚间退役补充：
     - `src/copaw/app/routers/runtime_center_routes_actor.py` 与 `src/copaw/app/routers/runtime_center_shared_actor.py` 已物理删除
     - formal `kernel task / decision / agent capability` 路由已拆分到 `runtime_center_routes_governance.py` 与 `runtime_center_routes_agents.py`
-    - `runtime_center_payloads.py` 与 `agent_profile_service.py` 已停止生成 `/api/runtime-center/actors/*` dead routes
+    - `runtime_center_payloads.py`、`agent_profile_service.py`、`capabilities/install_templates.py`、`capabilities/system_actor_handlers.py` 已停止生成 `/api/runtime-center/actors/*` dead routes
     - 但 `actor_mailbox.py` / `actor_worker.py` / `actor_supervisor.py` 及 overview/startup compatibility wiring 仍在，因此本条目状态不变，继续保持 `frozen`
 
 ### 3.1.4 `src/copaw/kernel/delegation_service.py`
@@ -296,6 +296,7 @@
   - `2026-04-22` 晚间退役补充：
     - `query_execution_tools.py` 已物理删除 `delegate_task` formal tool builder
     - `query_execution_prompt.py` 与 `query_execution_runtime.py` 不再把 `system:delegate_task` 当 formal query front-door 条件或提示文案
+    - `delegation_service.py` compatibility result 也已停止返回已删除的 actor mailbox route
     - execution-core formal query front-door 现只保留 `dispatch_query / apply_role / discover_capabilities` 等正式 system-op surface；显式 `TaskDelegationService` compatibility chain 仍在
     - 因此本条目继续保持 `frozen`，不得误写成 `deleted`
 

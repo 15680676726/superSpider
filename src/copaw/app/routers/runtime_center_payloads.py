@@ -442,10 +442,6 @@ def _actor_mailbox_payload(item: object) -> dict[str, object]:
     payload = _model_dump_or_dict(item)
     if payload is None:
         raise HTTPException(500, detail="Actor mailbox payload is not serializable")
-    agent_id = str(payload.get("agent_id") or "")
-    item_id = str(payload.get("id") or "")
-    if agent_id and item_id:
-        payload["route"] = f"/api/runtime-center/actors/{agent_id}/mailbox/{item_id}"
     return payload
 
 

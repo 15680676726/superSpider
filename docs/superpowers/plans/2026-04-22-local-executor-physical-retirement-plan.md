@@ -106,6 +106,7 @@ These remain follow-up work because the current external executor seam exposes `
   - `capabilities/sources/system.py` 已停止注册 `system:delegate_task`
   - `query_execution_tools.py` 已物理删除 `delegate_task` tool builder
   - `query_execution_prompt.py` / `query_execution_runtime.py` 不再把 `system:delegate_task` 视为 formal query front-door 条件
+  - `delegation_service.py` compatibility result 已停止输出已删除的 actor mailbox route
   - `delegation_service.py` 文件、kernel export 与 compatibility-focused tests 仍在，因此当前仍是 `partial`
 
 ### Task 2: Delete Actor Runtime Compatibility From Bootstrap And Runtime Center
@@ -118,6 +119,7 @@ These remain follow-up work because the current external executor seam exposes `
   - `runtime_center_routes_actor.py` / `runtime_center_shared_actor.py` 已物理删除
   - formal `kernel task / decision / agent capability` 路由已拆到 `runtime_center_routes_governance.py` / `runtime_center_routes_agents.py`
   - actor runtime payload 与 capability surface 已停止返回 `/api/runtime-center/actors/*` dead routes
+  - `install_templates.py`、`runtime_center_payloads.py`、`system_actor_handlers.py` 也已停止输出 `/api/runtime-center/actors/*` dead links
   - `actor_mailbox.py` / `actor_worker.py` / `actor_supervisor.py` 与 overview/startup compatibility wiring 仍在，因此当前仍是 `partial`
 
 ### Task 3: Re-state The Remaining Local-Tool Blockers Honestly

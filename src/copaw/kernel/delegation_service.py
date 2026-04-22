@@ -368,11 +368,7 @@ class TaskDelegationService:
             "routes": {
                 "parent_task": f"/api/runtime-center/tasks/{parent_task.id}",
                 "child_task": f"/api/runtime-center/tasks/{child_task.id}",
-                "mailbox": (
-                    f"/api/runtime-center/actors/{resolved_agent_id}/mailbox/{mailbox_item.id}"
-                    if mailbox_item is not None
-                    else None
-                ),
+                "mailbox": None,
             },
         }
 

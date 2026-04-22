@@ -1023,6 +1023,7 @@ def test_capability_market_install_templates_expose_productized_surface() -> Non
     assert detail_payload["installed"] is False
     assert detail_payload["manifest"]["capability_ids"] == ["mcp:desktop_windows"]
     assert "legacy_install" not in detail_payload["routes"]
+    assert "actors" not in detail_payload["execution_strategy"]["routes"]
 
 
 def test_capability_market_cooperative_adapter_templates_expose_phase2_runtime_surface(
@@ -1058,6 +1059,7 @@ def test_capability_market_cooperative_adapter_templates_expose_phase2_runtime_s
     assert browser_companion.json()["routes"]["activate"] == (
         "/api/capability-market/install-templates/browser-companion/activate"
     )
+    assert "actors" not in browser_companion.json()["execution_strategy"]["routes"]
     assert browser_companion.json()["manifest"]["capability_ids"] == [
         "system:browser_companion_runtime"
     ]
