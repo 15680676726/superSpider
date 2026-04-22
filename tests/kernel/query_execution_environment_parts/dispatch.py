@@ -52,13 +52,7 @@ def test_query_execution_service_resolves_agent_from_request_agent_id_and_indust
     assert len(_FakeAgent.created) == 1
     agent = _FakeAgent.created[0]
     assert "Active agent id: ops-agent" in agent.kwargs["prompt_appendix"]
-    assert agent.kwargs["allowed_tool_capability_ids"] == {
-        "tool:edit_file",
-        "tool:execute_shell_command",
-        "tool:get_current_time",
-        "tool:read_file",
-        "tool:write_file",
-    }
+    assert agent.kwargs["allowed_tool_capability_ids"] == set()
     assert {
         tool_fn.__name__
         for tool_fn in agent.kwargs["extra_tool_functions"]

@@ -52,20 +52,6 @@ def stream_printing_messages(*args, **kwargs):
     return module.stream_printing_messages(*args, **kwargs)
 
 
-_EXECUTION_CORE_ALLOWED_LOCAL_TOOL_CAPABILITY_IDS = {
-    "tool:document_surface",
-    "tool:edit_file",
-    "tool:execute_shell_command",
-    "tool:get_current_time",
-    "tool:read_file",
-    "tool:write_file",
-}
-
-_EXECUTION_CORE_SURFACE_WRITER_TOOL_CAPABILITY_IDS = {
-    "tool:browser_use",
-    "tool:desktop_screenshot",
-}
-
 _RUNTIME_ENTROPY_FAILURE_SOURCE = "sidecar-memory"
 _RUNTIME_ENTROPY_DEGRADED_SUMMARY = (
     "The private compaction memory sidecar is unavailable; "
@@ -2793,24 +2779,15 @@ class _QueryExecutionRuntimeMixin(
         desktop_writer_ready = _first_non_empty(
             surface_contracts.get("desktop_app_contract_status"),
         ) in {"verified-writer", "writer-ready", "ready"}
-        allowed_tool_capability_ids = set(_EXECUTION_CORE_ALLOWED_LOCAL_TOOL_CAPABILITY_IDS)
-        if browser_writer_ready:
-            allowed_tool_capability_ids.add("tool:browser_use")
-        if desktop_writer_ready:
-            allowed_tool_capability_ids.update(
-                {"tool:desktop_actuation", "tool:desktop_screenshot"},
-            )
-        filtered_tool_capability_ids = {
-            capability_id
-            for capability_id in (tool_capability_ids or set())
-            if capability_id in allowed_tool_capability_ids
-        }
+        _ = browser_writer_ready
+        _ = desktop_writer_ready
+        filtered_tool_capability_ids: set[str] = set()
         return (
             filtered_tool_capability_ids,
             set(),
             [],
             filtered_system_capability_ids,
-            desktop_actuation_available or desktop_writer_ready,
+            False,
         )
 
     def _resolve_delegation_first_guard(
