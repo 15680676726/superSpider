@@ -72,6 +72,7 @@ def infer_turn_capability_and_risk(query: str | None) -> tuple[str, str]:
         "sidecar-interrupt",
         "sidecar-approve",
         "sidecar-reject",
+        "sidecar-install",
         "sidecar-upgrade",
         "sidecar-rollback",
     }:

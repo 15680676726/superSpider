@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import subprocess
+import zipfile
 from types import SimpleNamespace
 
 from copaw.app import runtime_service_graph as runtime_service_graph_module
+from copaw.app import sidecar_release_service as sidecar_release_service_module
 from copaw.app.runtime_bootstrap_execution import build_runtime_execution_stack
 from copaw.state import SQLiteStateStore
 from copaw.state.executor_runtime_service import ExecutorRuntimeService
@@ -240,3 +245,116 @@ def test_build_default_executor_runtime_port_keeps_explicit_websocket_override(
 
     assert adapter.transport == "ws-transport"
     assert captured["ws_kwargs"]["websocket_url"] == "ws://127.0.0.1:9000"
+
+
+def _write_zip_with_executable(
+    path,
+    *,
+    executable_name: str,
+    executable_text: str,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(executable_name, executable_text)
+
+
+def _sha256(path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_build_default_executor_runtime_port_syncs_bundled_manifest_and_installs_sidecar(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    captured: dict[str, object] = {}
+    state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    bundle_root = tmp_path / "runtime" / "codex"
+    artifact_path = bundle_root / "codex-0.10.0.zip"
+    _write_zip_with_executable(
+        artifact_path,
+        executable_name="codex.exe",
+        executable_text="real-codex-0.10.0",
+    )
+    manifest_path = bundle_root / "manifest.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "runtime_family": "codex",
+                "channel": "stable",
+                "compatibility_policy": {
+                    "policy_id": "codex-stable-policy",
+                    "supported_version_range": ">=0.10,<0.11",
+                    "required_copaw_version_range": ">=0",
+                    "status": "active",
+                    "metadata": {"fail_closed": True},
+                },
+                "releases": [
+                    {
+                        "release_id": "codex-stable-0.10.0",
+                        "version": "0.10.0",
+                        "artifact_ref": "codex-0.10.0.zip",
+                        "artifact_checksum": f"sha256:{_sha256(artifact_path)}",
+                        "status": "published",
+                        "metadata": {"executable_name": "codex.exe"},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.delenv("COPAW_CODEX_APP_SERVER_WS_URL", raising=False)
+    monkeypatch.delenv("COPAW_CODEX_APP_SERVER_BIN", raising=False)
+    monkeypatch.setattr(
+        runtime_service_graph_module,
+        "_resolve_state_store",
+        lambda: state_store,
+    )
+    monkeypatch.setattr(
+        runtime_service_graph_module,
+        "WORKING_DIR",
+        tmp_path,
+    )
+    monkeypatch.setattr(
+        sidecar_release_service_module,
+        "subprocess",
+        SimpleNamespace(
+            run=lambda command, **kwargs: subprocess.CompletedProcess(
+                command,
+                0,
+                stdout="codex-cli 0.10.0",
+                stderr="",
+            )
+        ),
+        raising=False,
+    )
+
+    def _fake_stdio_transport(**kwargs):
+        captured["stdio_kwargs"] = kwargs
+        return "stdio-transport"
+
+    monkeypatch.setattr(
+        runtime_service_graph_module,
+        "CodexStdioTransport",
+        _fake_stdio_transport,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        runtime_service_graph_module,
+        "CodexAppServerAdapter",
+        lambda transport: SimpleNamespace(transport=transport),
+    )
+
+    adapter = runtime_service_graph_module._build_default_executor_runtime_port()
+
+    assert adapter.transport == "stdio-transport"
+    active_install = ExecutorRuntimeService(state_store=state_store).get_active_sidecar_install(
+        runtime_family="codex",
+    )
+    assert active_install is not None
+    assert active_install.version == "0.10.0"
+    assert captured["stdio_kwargs"]["codex_command"] == (
+        active_install.executable_path,
+        "app-server",
+    )

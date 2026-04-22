@@ -40,11 +40,13 @@ class _FakeExecutorRuntimePort:
         *,
         subscribed_events: list[object] | None = None,
         subscribe_error: Exception | None = None,
+        subscribe_runs: list[object] | None = None,
     ) -> None:
         self.start_calls: list[dict[str, object]] = []
         self.stop_calls: list[dict[str, object]] = []
         self._subscribed_events = list(subscribed_events or [])
         self._subscribe_error = subscribe_error
+        self._subscribe_runs = list(subscribe_runs or [])
         self._server_request_handler = None
         self._restart_count = 0
 
@@ -90,6 +92,11 @@ class _FakeExecutorRuntimePort:
 
     def subscribe_events(self, *, thread_id: str):
         _ = thread_id
+        if self._subscribe_runs:
+            run = self._subscribe_runs.pop(0)
+            if isinstance(run, Exception):
+                raise run
+            return iter(list(run))
         if self._subscribe_error is not None:
             raise self._subscribe_error
         return iter(self._subscribed_events)
@@ -1158,6 +1165,133 @@ async def test_main_brain_orchestrator_persists_sidecar_recovery_failure_when_ev
     assert len(runtimes) == 1
     assert runtimes[0].runtime_status == "failed"
     assert "sidecar crashed during event stream" in runtimes[0].metadata["event_drain_error"]
+
+
+@pytest.mark.asyncio
+async def test_main_brain_orchestrator_recovers_after_one_sidecar_stream_crash(
+    tmp_path: Path,
+) -> None:
+    from copaw.app.runtime_bootstrap_execution import build_executor_runtime_coordination
+    from copaw.kernel.executor_runtime_port import ExecutorNormalizedEvent
+
+    query_execution_service = _FakeQueryExecutionService()
+    executor_runtime_service = _build_executor_runtime_service(tmp_path)
+    executor_runtime_service.upsert_executor_provider(
+        ExecutorProviderRecord(
+            provider_id="codex-app-server",
+            provider_kind="external-executor",
+            runtime_family="codex",
+            control_surface_kind="app_server",
+            default_protocol_kind="app_server",
+        )
+    )
+    executor_runtime_service.upsert_role_executor_binding(
+        RoleExecutorBindingRecord(
+            role_id="backend-engineer",
+            executor_provider_id="codex-app-server",
+            selection_mode="role-routed",
+            execution_policy_id="default-model-policy",
+        )
+    )
+    executor_runtime_service.upsert_model_invocation_policy(
+        ModelInvocationPolicyRecord(
+            policy_id="default-model-policy",
+            ownership_mode="runtime_owned",
+            default_model_ref="gpt-5-codex",
+        )
+    )
+    executor_port = _FakeExecutorRuntimePort(
+        subscribe_runs=[
+            RuntimeError("sidecar crashed during event stream"),
+            [
+                ExecutorNormalizedEvent(
+                    event_type="task_completed",
+                    source_type="turn/completed",
+                    payload={"thread_id": "thread-1", "turn_id": "turn-1"},
+                    raw_method="turn/completed",
+                )
+            ],
+        ]
+    )
+    assignment = SimpleNamespace(
+        id="assign-recover-1",
+        task_id="task-assign-recover-1",
+        industry_instance_id="industry-1",
+        owner_role_id="backend-engineer",
+        owner_agent_id="agent-1",
+        report_back_mode="agent-report",
+        title="Recover runtime seam",
+        summary="Route assignment into executor runtime",
+        metadata={"project_profile_id": "carrier-main", "risk_level": "guarded"},
+    )
+    assignment_service = _FakeAssignmentService(assignment)
+    report_repository = _FakeReportRepository()
+    report_service = AgentReportService(repository=report_repository)
+    evidence_ledger = EvidenceLedger()
+    _service, coordinator = build_executor_runtime_coordination(
+        assignment_service=assignment_service,
+        external_runtime_service=executor_runtime_service._external_runtime_service,
+        project_root=str(tmp_path),
+        executor_runtime_port=executor_port,
+        default_executor_provider_id="codex-app-server",
+        default_model_policy_id="default-model-policy",
+    )
+    coordinator.set_executor_runtime_service(executor_runtime_service)
+    coordinator.set_executor_event_writeback_service(
+        ExecutorEventWritebackService(
+            evidence_ledger=evidence_ledger,
+            assignment_service=assignment_service,
+            agent_report_service=report_service,
+            executor_runtime_service=executor_runtime_service,
+        )
+    )
+
+    async def _resolver(**_kwargs):
+        return _make_contract(writeback_requested=True)
+
+    orchestrator = MainBrainOrchestrator(
+        query_execution_service=query_execution_service,
+        intake_contract_resolver=_resolver,
+        executor_runtime_coordinator=coordinator,
+    )
+    request = AgentRequest(
+        id="req-executor-runtime-recover-once",
+        session_id="industry-chat:industry-1:execution-core",
+        user_id="user-1",
+        channel="console",
+        input=[],
+    )
+    request.assignment_id = "assign-recover-1"
+    request.industry_instance_id = "industry-1"
+    msgs = [Msg(name="user", role="user", content="Run the assignment.")]
+
+    streamed = [
+        item
+        async for item in orchestrator.execute_stream(
+            msgs=msgs,
+            request=request,
+            kernel_task_id="kernel-task-runtime",
+        )
+    ]
+
+    assert len(streamed) == 1
+    deadline = time.time() + 1.0
+    runtimes = executor_runtime_service.list_runtimes(
+        assignment_id="assign-recover-1",
+        formal_only=True,
+    )
+    while time.time() < deadline and (
+        not runtimes or runtimes[0].runtime_status != "completed"
+    ):
+        time.sleep(0.01)
+        runtimes = executor_runtime_service.list_runtimes(
+            assignment_id="assign-recover-1",
+            formal_only=True,
+        )
+
+    assert len(runtimes) == 1
+    assert runtimes[0].runtime_status == "completed"
+    assert executor_port._restart_count == 1
 
 
 def test_kernel_turn_executor_threads_executor_runtime_coordinator_into_orchestrator() -> None:

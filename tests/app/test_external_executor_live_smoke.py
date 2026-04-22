@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import time
@@ -13,7 +14,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from copaw.adapters.executors.codex_app_server_adapter import CodexAppServerAdapter
-from copaw.adapters.executors.codex_app_server_transport import CodexAppServerTransport
+from copaw.adapters.executors.codex_stdio_transport import CodexStdioTransport
+from copaw.app.sidecar_release_service import SidecarReleaseService
 from copaw.app.routers.capability_market import router as capability_market_router
 from copaw.app.runtime_bootstrap_execution import build_executor_runtime_coordination
 from copaw.app.runtime_events import RuntimeEventBus
@@ -21,6 +23,7 @@ from copaw.evidence import EvidenceLedger
 from copaw.kernel.executor_event_writeback_service import ExecutorEventWritebackService
 from copaw.providers.runtime_provider_facade import build_compat_runtime_provider_facade
 from copaw.state import SQLiteStateStore
+from copaw.state import models_executor_runtime as executor_models
 from copaw.state.executor_runtime_service import ExecutorRuntimeService
 from copaw.state.external_runtime_service import ExternalCapabilityRuntimeService
 from copaw.state.repositories import SqliteExternalCapabilityRuntimeRepository
@@ -57,6 +60,10 @@ def _build_executor_runtime_service(state_store: SQLiteStateStore) -> ExecutorRu
     )
 
 
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def _build_market_client(
     tmp_path: Path,
 ) -> tuple[TestClient, ExecutorRuntimeService]:
@@ -66,6 +73,54 @@ def _build_market_client(
     executor_runtime_service = _build_executor_runtime_service(state_store)
     app.state.executor_runtime_service = executor_runtime_service
     return TestClient(app), executor_runtime_service
+
+
+def _install_managed_codex_sidecar(
+    *,
+    executor_runtime_service: ExecutorRuntimeService,
+    codex_binary: Path,
+    staging_root: Path,
+    verify_health=None,
+) -> executor_models.ExecutorSidecarInstallRecord:
+    executor_runtime_service.upsert_sidecar_compatibility_policy(
+        executor_models.ExecutorSidecarCompatibilityPolicyRecord(
+            policy_id="codex-stable-policy",
+            runtime_family="codex",
+            channel="stable",
+            supported_version_range=">=0",
+            required_copaw_version_range=">=0",
+            status="active",
+            metadata={"fail_closed": True},
+        )
+    )
+    executor_runtime_service.upsert_sidecar_release(
+        executor_models.ExecutorSidecarReleaseRecord(
+            release_id="codex-stable-live-smoke",
+            runtime_family="codex",
+            channel="stable",
+            version="0.0.0",
+            artifact_ref=str(codex_binary),
+            artifact_checksum=f"sha256:{_sha256(codex_binary)}",
+            status="published",
+            metadata={"executable_name": codex_binary.name},
+        )
+    )
+    release_service = SidecarReleaseService(
+        executor_runtime_service=executor_runtime_service,
+    )
+    release_service.install_sidecar(
+        runtime_family="codex",
+        channel="stable",
+        release_id="codex-stable-live-smoke",
+        staging_root=staging_root,
+        verify_health=verify_health,
+    )
+    active_install = executor_runtime_service.get_active_sidecar_install(
+        runtime_family="codex",
+        channel="stable",
+    )
+    assert active_install is not None
+    return active_install
 
 
 class _AssignmentService:
@@ -104,7 +159,12 @@ def _wait_for_terminal_runtime(
             ),
             None,
         )
-        if terminal_event is not None and latest_runtime is not None:
+        runtime_status = str(getattr(latest_runtime, "runtime_status", "") or "").strip().lower()
+        if (
+            terminal_event is not None
+            and latest_runtime is not None
+            and runtime_status in {"completed", "failed"}
+        ):
             return latest_events, latest_runtime
         time.sleep(0.5)
     raise AssertionError(
@@ -116,6 +176,35 @@ def test_live_external_executor_smoke_skip_reason_declares_opt_in_boundary() -> 
     reason = LIVE_EXTERNAL_EXECUTOR_SMOKE_SKIP_REASON.lower()
     assert "opt-in" in reason
     assert "not part of default regression coverage" in reason
+
+
+def test_live_external_executor_smoke_uses_managed_stdio_transport(tmp_path: Path) -> None:
+    fake_codex = tmp_path / "bundle" / "codex.exe"
+    fake_codex.parent.mkdir(parents=True, exist_ok=True)
+    fake_codex.write_text("fake-codex", encoding="utf-8")
+    executor_runtime_service = _build_executor_runtime_service(
+        SQLiteStateStore(tmp_path / "state.db"),
+    )
+
+    active_install = _install_managed_codex_sidecar(
+        executor_runtime_service=executor_runtime_service,
+        codex_binary=fake_codex,
+        staging_root=tmp_path / "staging",
+        verify_health=lambda _install: True,
+    )
+    adapter = CodexAppServerAdapter(
+        transport=CodexStdioTransport(
+            codex_command=(active_install.executable_path, "app-server"),
+        ),
+    )
+
+    try:
+        sidecar = adapter.describe_sidecar()
+    finally:
+        adapter.close()
+
+    assert sidecar["transport_kind"] == "stdio"
+    assert sidecar["command"] == [active_install.executable_path, "app-server"]
 
 
 @pytest.mark.skipif(
@@ -132,7 +221,16 @@ def test_live_external_executor_provider_intake_and_runtime_writeback(
     client, executor_runtime_service = _build_market_client(tmp_path)
     runtime_event_bus = RuntimeEventBus()
     evidence_ledger = EvidenceLedger(tmp_path / "evidence.db")
-    adapter = CodexAppServerAdapter(transport=CodexAppServerTransport())
+    active_install = _install_managed_codex_sidecar(
+        executor_runtime_service=executor_runtime_service,
+        codex_binary=Path(codex_binary),
+        staging_root=tmp_path / "sidecar-staging",
+    )
+    adapter = CodexAppServerAdapter(
+        transport=CodexStdioTransport(
+            codex_command=(active_install.executable_path, "app-server"),
+        )
+    )
 
     assignment = SimpleNamespace(
         id="assignment-live-executor",

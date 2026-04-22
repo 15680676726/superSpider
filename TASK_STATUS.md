@@ -486,6 +486,36 @@
   - 受管 sidecar 的 artifact 分发、安装包制作、签名与发布通道仍属于 release/packaging 交付面；本轮完成的是运行时治理、兼容治理与控制闭环，不得混写成“安装器/UI 发布物也已全部交付”
   - websocket / env-binary fallback 仍在 compatibility 边界内保留，后续如不再需要，可继续按 `DEPRECATION_LEDGER.md` 退役
 
+## 1.0.11 `2026-04-22` codex sidecar customer-delivery hardening 补口
+
+- 本轮补的是 `1.0.10` 审计后暴露出来的 4 个真实缺口，不是重开新范围：
+  - `managed install` 之前对 direct artifact / npm shim 还不够真实；`SidecarReleaseService` 现在补齐了 `install_sidecar(...)`、bundled `manifest.json` -> formal release/policy sync、`.cmd` shim support tree 复制，以及默认 `--version` health probe
+  - `runtime_service_graph.py` 现在在没有 active install 时，会先尝试从 bundled manifest 同步 formal release/policy 并做受管首装；default local path 不再卡在“无 install 就只能吃 PATH/env fallback”
+  - `daemon_commands.py` / `runtime_commands.py` 现在正式补上 `sidecar-install`，`sidecar-upgrade` 也已改成带 `staging_root` 的真实升级写链
+  - `runtime_coordination.py` 现在在 sidecar event stream 首次崩掉时会做一次正式 `restart + resubscribe`，不再只把 runtime 写成 `failed`
+  - `tests/app/test_external_executor_live_smoke.py` 已切到真正的 `managed install + stdio` customer-delivery 主链；live smoke helper 也补齐了“等待 event 终态 + runtime 终态都落真相”的时序口径
+- 当前能诚实写出的结论：
+  - `CoPaw 内置安装 codex CLI`：本轮已补到 `release/manifest/install/health-probe/daemon-install` 的完整主链
+  - `本地 sidecar 通信收口`：live smoke 已不再走旧 `ws/PATH`；正式链是 `managed local sidecar + stdio`
+  - `执行体控制/审批/恢复闭环`：sidecar stream crash 现在已有自动重启/重订阅恢复；approval / interrupt / restart 仍保持正式控制面
+  - `codex CLI 版本升级与兼容治理`：当前 install/upgrade/rollback/compatibility gate/manifest sync 已落到同一 formal 写链
+- fresh 验收证据：
+  - focused regression：
+    - 命令：`python -m pytest tests/app/test_sidecar_release_service.py tests/app/test_daemon_commands.py tests/app/test_runtime_execution_provider_wiring.py tests/app/test_startup_environment_preflight.py tests/kernel/test_main_brain_executor_runtime_integration.py tests/app/test_external_executor_live_smoke.py tests/state/test_executor_sidecar_state.py tests/state/test_executor_runtime_service.py tests/adapters/test_codex_stdio_transport.py tests/adapters/test_codex_app_server_adapter.py -q`
+    - 结果：`55 passed, 1 skipped in 56.26s`
+    - 验收层级：`L1 + L2`
+  - `L3` live smoke：
+    - 命令：`COPAW_RUN_EXTERNAL_EXECUTOR_LIVE_SMOKE=1 python -m pytest tests/app/test_external_executor_live_smoke.py -q -k provider_intake_and_runtime_writeback`
+    - 结果：`1 passed, 2 deselected in 27.47s`
+    - 验收层级：`L3`
+  - `L4` selected repeat：
+    - 命令：重复执行 `COPAW_RUN_EXTERNAL_EXECUTOR_LIVE_SMOKE=1 python -m pytest tests/app/test_external_executor_live_smoke.py -q -k provider_intake_and_runtime_writeback`
+    - 结果：第二轮 `1 passed, 2 deselected in 26.91s`
+    - 验收层级：`selected L4`
+- 当前仍应保留的边界：
+  - 这轮补的是 sidecar customer-delivery 剩余实现缺口，不是把 compatibility/deprecation 代码一并物理删除
+  - `live smoke` 现在已能在真实本机 `codex CLI` 上复跑，但它仍然是 opt-in gated，不得混写成“默认回归已包含真实外部执行体”
+
 ## 1.1.1 `2026-04-07` Buddy 领域能力阶段收口补充
 
 - Buddy 当前成长阶段的正式真相已从关系经验切到 active `BuddyDomainCapabilityRecord`

@@ -82,6 +82,7 @@ class _FakeExecutorRuntimeCoordinator:
 
 class _FakeSidecarReleaseService:
     def __init__(self) -> None:
+        self.install_calls = 0
         self.upgrade_calls = 0
         self.rollback_calls = 0
 
@@ -93,8 +94,17 @@ class _FakeSidecarReleaseService:
             "available_upgrade": {"version": "0.10.0", "release_id": "codex-stable-0.10.0"},
         }
 
-    def upgrade_sidecar(self, *, runtime_family: str, channel: str | None = None):
-        _ = runtime_family, channel
+    def install_sidecar(self, *, runtime_family: str, channel: str | None = None, staging_root=None):
+        _ = runtime_family, channel, staging_root
+        self.install_calls += 1
+        return {
+            "status": "installed",
+            "target_release_id": "codex-stable-0.10.0",
+            "target_version": "0.10.0",
+        }
+
+    def upgrade_sidecar(self, *, runtime_family: str, channel: str | None = None, staging_root=None):
+        _ = runtime_family, channel, staging_root
         self.upgrade_calls += 1
         return {
             "status": "upgraded",
@@ -180,12 +190,15 @@ async def test_daemon_sidecar_version_upgrade_and_rollback_commands() -> None:
     context = DaemonContext(sidecar_release_service=release_service)
 
     version_message = await handler.handle_daemon_command("/daemon sidecar-version", context)
+    install_message = await handler.handle_daemon_command("/daemon sidecar-install", context)
     upgrade_message = await handler.handle_daemon_command("/daemon sidecar-upgrade", context)
     rollback_message = await handler.handle_daemon_command("/daemon sidecar-rollback", context)
 
     assert "Current version: 0.9.0" in version_message.get_text_content()
     assert "Available upgrade: 0.10.0" in version_message.get_text_content()
+    assert "installed" in install_message.get_text_content().lower()
     assert "0.10.0" in upgrade_message.get_text_content()
     assert "rolled_back" in rollback_message.get_text_content().lower()
+    assert release_service.install_calls == 1
     assert release_service.upgrade_calls == 1
     assert release_service.rollback_calls == 1

@@ -2,7 +2,11 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import re
 import shutil
+import subprocess
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +17,7 @@ from ..__version__ import __version__
 from ..state.executor_runtime_service import ExecutorRuntimeService
 from ..state.models_executor_runtime import (
     ExecutorSidecarInstallRecord,
+    ExecutorSidecarCompatibilityPolicyRecord,
     ExecutorSidecarReleaseRecord,
 )
 
@@ -55,6 +60,12 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _copy_file(source: Path, destination: Path) -> Path:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, destination)
+    return destination
 
 
 class SidecarReleaseService:
@@ -242,6 +253,102 @@ class SidecarReleaseService:
             "artifact_checksum": actual_checksum,
         }
 
+    def sync_bundled_release_manifest(self, manifest_path: Path) -> dict[str, Any]:
+        path = Path(manifest_path).expanduser().resolve()
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        runtime_family = _text(payload.get("runtime_family")) or "codex"
+        channel = _text(payload.get("channel")) or "stable"
+        policy_payload = dict(payload.get("compatibility_policy") or {})
+        releases_payload = list(payload.get("releases") or [])
+        if policy_payload:
+            self._executor_runtime_service.upsert_sidecar_compatibility_policy(
+                ExecutorSidecarCompatibilityPolicyRecord(
+                    policy_id=_text(policy_payload.get("policy_id"))
+                    or f"{runtime_family}-{channel}-policy",
+                    runtime_family=runtime_family,
+                    channel=channel,
+                    supported_version_range=_text(policy_payload.get("supported_version_range"))
+                    or ">=0",
+                    required_copaw_version_range=_text(
+                        policy_payload.get("required_copaw_version_range"),
+                    )
+                    or "",
+                    status=_text(policy_payload.get("status")) or "active",
+                    metadata=dict(policy_payload.get("metadata") or {}),
+                )
+            )
+        synced_releases: list[str] = []
+        for item in releases_payload:
+            artifact_ref = Path(str(item.get("artifact_ref") or "")).expanduser()
+            if not artifact_ref.is_absolute():
+                artifact_ref = (path.parent / artifact_ref).resolve()
+            release = self._executor_runtime_service.upsert_sidecar_release(
+                ExecutorSidecarReleaseRecord(
+                    release_id=_text(item.get("release_id"))
+                    or f"{runtime_family}-{channel}-{_text(item.get('version')) or 'unknown'}",
+                    runtime_family=runtime_family,
+                    channel=channel,
+                    version=_text(item.get("version")) or "0",
+                    artifact_ref=str(artifact_ref),
+                    artifact_checksum=_text(item.get("artifact_checksum")) or "",
+                    status=_text(item.get("status")) or "published",
+                    metadata=dict(item.get("metadata") or {}),
+                )
+            )
+            synced_releases.append(release.release_id)
+        return {
+            "runtime_family": runtime_family,
+            "channel": channel,
+            "release_ids": synced_releases,
+            "manifest_path": str(path),
+        }
+
+    def install_sidecar(
+        self,
+        *,
+        runtime_family: str,
+        channel: str | None = None,
+        release_id: str | None = None,
+        staging_root: Path,
+        verify_health=None,
+    ) -> dict[str, Any]:
+        release = self._resolve_release(
+            runtime_family=runtime_family,
+            channel=channel,
+            release_id=release_id,
+        )
+        staged = self.stage_release(
+            runtime_family=runtime_family,
+            channel=channel,
+            release_id=release.release_id,
+            staging_root=staging_root,
+        )
+        installed_install = self._activate_release_install(
+            release=release,
+            staged=staged,
+            previous_install=None,
+        )
+        if not self._verify_install_health(
+            installed_install,
+            verify_health=verify_health,
+        ):
+            self._executor_runtime_service.mark_sidecar_install_status(
+                installed_install.install_id,
+                status="retired",
+                metadata={"install_error": "health-verification-failed"},
+            )
+            raise RuntimeError(
+                f"Sidecar health verification failed for release '{release.release_id}'.",
+            )
+        return {
+            "status": "installed",
+            "rolled_back": False,
+            "target_release_id": release.release_id,
+            "target_version": release.version,
+            "active_install_id": installed_install.install_id,
+            "stage_artifact_path": staged["stage_artifact_path"],
+        }
+
     def upgrade_sidecar(
         self,
         *,
@@ -266,43 +373,15 @@ class SidecarReleaseService:
             release_id=release.release_id,
             staging_root=staging_root,
         )
-        stage_dir = Path(staged["stage_dir"])
-        executable_name = _text(release.metadata.get("executable_name")) or (
-            Path(current_install.executable_path).name
-            if current_install is not None
-            else "codex.exe"
+        upgraded_install = self._activate_release_install(
+            release=release,
+            staged=staged,
+            previous_install=current_install,
         )
-        protocol_features = _string_list(release.metadata.get("protocol_features"))
-        if not protocol_features and current_install is not None:
-            protocol_features = _string_list(current_install.metadata.get("protocol_features"))
-        executable_path = stage_dir / executable_name
-        if not executable_path.exists():
-            executable_path.write_text("managed sidecar executable", encoding="utf-8")
-        install_id = f"{release.runtime_family}-{release.channel}-{release.version}"
-        upgraded_install = self._executor_runtime_service.upsert_sidecar_install(
-            ExecutorSidecarInstallRecord(
-                install_id=install_id,
-                runtime_family=release.runtime_family,
-                channel=release.channel,
-                version=release.version,
-                install_root=str(stage_dir),
-                executable_path=str(executable_path),
-                install_status="ready",
-                metadata={
-                    "release_id": release.release_id,
-                    "artifact_ref": release.artifact_ref,
-                    "artifact_checksum": release.artifact_checksum,
-                    "protocol_features": protocol_features,
-                    "staged_artifact_path": staged["stage_artifact_path"],
-                    "rollback_source_install_id": _text(
-                        getattr(current_install, "install_id", None),
-                    ),
-                },
-            )
+        health_ok = self._verify_install_health(
+            upgraded_install,
+            verify_health=verify_health,
         )
-        health_ok = True
-        if callable(verify_health):
-            health_ok = bool(verify_health(upgraded_install))
         if not health_ok:
             rollback = self.rollback_sidecar(
                 runtime_family=runtime_family,
@@ -383,6 +462,175 @@ class SidecarReleaseService:
             "active_install_id": reactivated_install.install_id,
             "active_version": reactivated_install.version,
         }
+
+    def _activate_release_install(
+        self,
+        *,
+        release: ExecutorSidecarReleaseRecord,
+        staged: dict[str, Any],
+        previous_install: ExecutorSidecarInstallRecord | None,
+    ) -> ExecutorSidecarInstallRecord:
+        stage_dir = Path(str(staged["stage_dir"]))
+        staged_artifact_path = Path(str(staged["stage_artifact_path"]))
+        executable_name = _text(release.metadata.get("executable_name")) or (
+            Path(previous_install.executable_path).name
+            if previous_install is not None
+            else staged_artifact_path.name
+        )
+        protocol_features = _string_list(release.metadata.get("protocol_features"))
+        if not protocol_features and previous_install is not None:
+            protocol_features = _string_list(previous_install.metadata.get("protocol_features"))
+        executable_path = self._materialize_executable(
+            source_artifact_path=Path(release.artifact_ref).expanduser().resolve(),
+            staged_artifact_path=staged_artifact_path,
+            stage_dir=stage_dir,
+            executable_name=executable_name,
+        )
+        install_id = f"{release.runtime_family}-{release.channel}-{release.version}"
+        installed = self._executor_runtime_service.upsert_sidecar_install(
+            ExecutorSidecarInstallRecord(
+                install_id=install_id,
+                runtime_family=release.runtime_family,
+                channel=release.channel,
+                version=release.version,
+                install_root=str(executable_path.parent),
+                executable_path=str(executable_path),
+                install_status="ready",
+                metadata={
+                    "release_id": release.release_id,
+                    "artifact_ref": release.artifact_ref,
+                    "artifact_checksum": release.artifact_checksum,
+                    "protocol_features": protocol_features,
+                    "staged_artifact_path": str(staged_artifact_path),
+                    "rollback_source_install_id": _text(
+                        getattr(previous_install, "install_id", None),
+                    ),
+                },
+            )
+        )
+        return installed
+
+    def _materialize_executable(
+        self,
+        *,
+        source_artifact_path: Path,
+        staged_artifact_path: Path,
+        stage_dir: Path,
+        executable_name: str | None,
+    ) -> Path:
+        resolved_name = _text(executable_name)
+        if zipfile.is_zipfile(staged_artifact_path):
+            extract_root = stage_dir / "payload"
+            if extract_root.exists():
+                shutil.rmtree(extract_root)
+            extract_root.mkdir(parents=True, exist_ok=True)
+            with zipfile.ZipFile(staged_artifact_path) as archive:
+                archive.extractall(extract_root)
+            executable = self._find_executable(
+                root=extract_root,
+                executable_name=resolved_name,
+            )
+            if executable is None:
+                raise RuntimeError(
+                    f"Managed sidecar archive '{staged_artifact_path.name}' does not contain "
+                    f"expected executable '{resolved_name or '<unspecified>'}'.",
+                )
+            return executable
+        executable_path = (
+            staged_artifact_path
+            if resolved_name is None or staged_artifact_path.name == resolved_name
+            else _copy_file(staged_artifact_path, stage_dir / resolved_name)
+        )
+        self._copy_direct_artifact_support_tree(
+            source_artifact_path=source_artifact_path,
+            stage_dir=stage_dir,
+        )
+        return executable_path
+
+    def _copy_direct_artifact_support_tree(
+        self,
+        *,
+        source_artifact_path: Path,
+        stage_dir: Path,
+    ) -> None:
+        if source_artifact_path.suffix.lower() != ".cmd":
+            return
+        try:
+            shim_text = source_artifact_path.read_text(encoding="utf-8")
+        except OSError:
+            return
+        package_roots: set[Path] = set()
+        for relative_ref in re.findall(r"%dp0%\\([^\"\r\n]+)", shim_text, flags=re.IGNORECASE):
+            relative_path = Path(relative_ref.replace("\\", "/"))
+            if not relative_path.parts or relative_path.parts[0] != "node_modules":
+                continue
+            package_root = self._package_root_from_relative_path(relative_path)
+            if package_root is not None:
+                package_roots.add(package_root)
+        for package_root in sorted(package_roots):
+            source_package_root = source_artifact_path.parent / package_root
+            if not source_package_root.exists() or not source_package_root.is_dir():
+                continue
+            target_package_root = stage_dir / package_root
+            if target_package_root.exists():
+                shutil.rmtree(target_package_root)
+            target_package_root.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(source_package_root, target_package_root)
+
+    def _package_root_from_relative_path(self, relative_path: Path) -> Path | None:
+        parts = list(relative_path.parts)
+        if len(parts) < 2 or parts[0] != "node_modules":
+            return None
+        if parts[1].startswith("@"):
+            if len(parts) < 3:
+                return None
+            return Path(parts[0]) / parts[1] / parts[2]
+        return Path(parts[0]) / parts[1]
+
+    def _verify_install_health(
+        self,
+        install: ExecutorSidecarInstallRecord,
+        *,
+        verify_health=None,
+    ) -> bool:
+        if callable(verify_health):
+            return bool(verify_health(install))
+        return self._default_verify_install_health(install)
+
+    def _default_verify_install_health(
+        self,
+        install: ExecutorSidecarInstallRecord,
+    ) -> bool:
+        executable_path = Path(install.executable_path).expanduser().resolve()
+        if not executable_path.exists() or not executable_path.is_file():
+            return False
+        completed = subprocess.run(
+            [str(executable_path), "--version"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=20,
+            check=False,
+        )
+        return int(completed.returncode) == 0
+
+    def _find_executable(
+        self,
+        *,
+        root: Path,
+        executable_name: str | None,
+    ) -> Path | None:
+        if executable_name is not None:
+            exact = next(
+                (item for item in root.rglob(executable_name) if item.is_file()),
+                None,
+            )
+            if exact is not None:
+                return exact
+        files = [item for item in root.rglob("*") if item.is_file()]
+        if len(files) == 1:
+            return files[0]
+        return None
 
     def _resolve_release(
         self,

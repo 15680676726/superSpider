@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from typing import Any
 
 from ..adapters.executors.codex_app_server_adapter import CodexAppServerAdapter
@@ -173,6 +174,51 @@ from .runtime_threads import SessionRuntimeThreadHistoryReader
 logger = logging.getLogger(__name__)
 
 
+def _default_sidecar_staging_root() -> Path:
+    return WORKING_DIR / "runtime" / "sidecars" / "staging"
+
+
+def _iter_bundled_sidecar_manifest_paths() -> tuple[Path, ...]:
+    return (
+        WORKING_DIR / "runtime" / "codex" / "manifest.json",
+        WORKING_DIR / "runtime" / "sidecars" / "codex" / "manifest.json",
+    )
+
+
+def _resolve_managed_sidecar_install(
+    *,
+    executor_runtime_service: ExecutorRuntimeService,
+) -> object | None:
+    active_install = executor_runtime_service.get_active_sidecar_install(
+        runtime_family="codex",
+    )
+    if active_install is not None:
+        return active_install
+    release_service = SidecarReleaseService(
+        executor_runtime_service=executor_runtime_service,
+    )
+    for manifest_path in _iter_bundled_sidecar_manifest_paths():
+        if not manifest_path.exists():
+            continue
+        try:
+            release_service.sync_bundled_release_manifest(manifest_path)
+            release_service.install_sidecar(
+                runtime_family="codex",
+                channel="stable",
+                staging_root=_default_sidecar_staging_root(),
+            )
+        except Exception:
+            logger.exception(
+                "Failed to materialize managed codex sidecar from bundled manifest",
+                extra={"manifest_path": str(manifest_path)},
+            )
+            return None
+        return executor_runtime_service.get_active_sidecar_install(
+            runtime_family="codex",
+        )
+    return None
+
+
 def _build_default_executor_runtime_port() -> object | None:
     websocket_url = str(os.getenv("COPAW_CODEX_APP_SERVER_WS_URL") or "").strip() or None
     if websocket_url is not None:
@@ -183,8 +229,8 @@ def _build_default_executor_runtime_port() -> object | None:
         )
     state_store = _resolve_state_store()
     executor_runtime_service = ExecutorRuntimeService(state_store=state_store)
-    active_install = executor_runtime_service.get_active_sidecar_install(
-        runtime_family="codex",
+    active_install = _resolve_managed_sidecar_install(
+        executor_runtime_service=executor_runtime_service,
     )
     if active_install is None:
         compatibility_bin = str(os.getenv("COPAW_CODEX_APP_SERVER_BIN") or "").strip() or None

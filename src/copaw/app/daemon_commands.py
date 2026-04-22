@@ -33,6 +33,7 @@ DAEMON_SUBCOMMANDS = frozenset(
         "sidecar-interrupt",
         "sidecar-approve",
         "sidecar-reject",
+        "sidecar-install",
         "sidecar-version",
         "sidecar-upgrade",
         "sidecar-rollback",
@@ -50,6 +51,7 @@ DAEMON_SHORT_ALIASES = {
     "sidecar_interrupt": "sidecar-interrupt",
     "sidecar_approve": "sidecar-approve",
     "sidecar_reject": "sidecar-reject",
+    "sidecar_install": "sidecar-install",
     "sidecar_version": "sidecar-version",
     "sidecar_upgrade": "sidecar-upgrade",
     "sidecar_rollback": "sidecar-rollback",
@@ -77,6 +79,10 @@ def _text(value: object | None) -> str | None:
 
 def _mapping(value: object | None) -> dict[str, Any]:
     return dict(value) if isinstance(value, dict) else {}
+
+
+def _default_sidecar_staging_root(context: DaemonContext) -> Path:
+    return context.working_dir / "runtime" / "sidecars" / "staging"
 
 
 def _get_last_lines(
@@ -303,6 +309,28 @@ def run_daemon_sidecar_version(context: DaemonContext) -> str:
     )
 
 
+def run_daemon_sidecar_install(context: DaemonContext) -> str:
+    service = context.sidecar_release_service
+    installer = getattr(service, "install_sidecar", None)
+    if not callable(installer):
+        return (
+            "**Sidecar Install**\n\n"
+            "- Sidecar release service is not attached."
+        )
+    payload = _mapping(
+        installer(
+            runtime_family="codex",
+            channel="stable",
+            staging_root=_default_sidecar_staging_root(context),
+        )
+    )
+    return (
+        "**Sidecar Install**\n\n"
+        f"- Status: {_text(payload.get('status')) or 'unknown'}\n"
+        f"- Target version: {_text(payload.get('target_version')) or 'n/a'}"
+    )
+
+
 def run_daemon_sidecar_upgrade(context: DaemonContext) -> str:
     service = context.sidecar_release_service
     upgrade = getattr(service, "upgrade_sidecar", None)
@@ -311,7 +339,13 @@ def run_daemon_sidecar_upgrade(context: DaemonContext) -> str:
             "**Sidecar Upgrade**\n\n"
             "- Sidecar release service is not attached."
         )
-    payload = _mapping(upgrade(runtime_family="codex", channel="stable"))
+    payload = _mapping(
+        upgrade(
+            runtime_family="codex",
+            channel="stable",
+            staging_root=_default_sidecar_staging_root(context),
+        )
+    )
     return (
         "**Sidecar Upgrade**\n\n"
         f"- Status: {_text(payload.get('status')) or 'unknown'}\n"
@@ -422,6 +456,8 @@ class DaemonCommandHandlerMixin:
                     decision="approved" if subcommand == "sidecar-approve" else "rejected",
                     reason=" ".join(args[1:]).strip() or None,
                 )
+        elif subcommand == "sidecar-install":
+            text = run_daemon_sidecar_install(context)
         elif subcommand == "sidecar-version":
             text = run_daemon_sidecar_version(context)
         elif subcommand == "sidecar-upgrade":

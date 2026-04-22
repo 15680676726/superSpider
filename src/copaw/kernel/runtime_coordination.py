@@ -1087,34 +1087,72 @@ class AssignmentExecutorRuntimeCoordinator:
         runtime_service = self._executor_runtime_service
         if port is None or writeback_service is None or runtime_service is None:
             return
-        try:
-            for event in port.subscribe_events(thread_id=thread_id):
-                event_turn_id = _text(event.payload.get("turn_id"))
-                if turn_id is not None and event_turn_id not in {None, turn_id}:
+        recovery_attempts = 0
+        restart = getattr(port, "restart_sidecar", None)
+        while True:
+            try:
+                for event in port.subscribe_events(thread_id=thread_id):
+                    event_turn_id = _text(event.payload.get("turn_id"))
+                    if turn_id is not None and event_turn_id not in {None, turn_id}:
+                        continue
+                    result = writeback_service.ingest_and_writeback(
+                        context=context,
+                        event=event,
+                    )
+                    self._mark_runtime_progress(
+                        runtime_id=runtime_id,
+                        event_type=event.event_type,
+                        evidence_id=_text(getattr(result.evidence_record, "id", None)),
+                        report_id=_text(getattr(result.report_record, "id", None)),
+                    )
+                    if event.event_type == "task_completed":
+                        self._mark_runtime_terminal(runtime_id=runtime_id, status="completed")
+                        return
+                    if event.event_type == "task_failed":
+                        self._mark_runtime_terminal(runtime_id=runtime_id, status="failed")
+                        return
+                return
+            except Exception as exc:
+                logger.debug("Executor runtime event drain failed", exc_info=True)
+                if callable(restart) and recovery_attempts < 1:
+                    recovery_attempts += 1
+                    self._mark_runtime_restarting(
+                        runtime_id=runtime_id,
+                        metadata={
+                            "sidecar_control": {
+                                "recovery": {
+                                    "status": "restarting",
+                                    "reason": "event-drain-error",
+                                    "event_drain_error": str(exc),
+                                    "attempt": recovery_attempts,
+                                }
+                            }
+                        },
+                    )
+                    try:
+                        restart()
+                    except Exception as restart_exc:
+                        logger.debug("Executor runtime sidecar restart failed", exc_info=True)
+                        self._mark_runtime_terminal(
+                            runtime_id=runtime_id,
+                            status="failed",
+                            metadata={
+                                "event_drain_error": str(exc),
+                                "recovery_error": str(restart_exc),
+                                "recovery_attempts": recovery_attempts,
+                            },
+                        )
+                        return
                     continue
-                result = writeback_service.ingest_and_writeback(
-                    context=context,
-                    event=event,
-                )
-                self._mark_runtime_progress(
+                self._mark_runtime_terminal(
                     runtime_id=runtime_id,
-                    event_type=event.event_type,
-                    evidence_id=_text(getattr(result.evidence_record, "id", None)),
-                    report_id=_text(getattr(result.report_record, "id", None)),
+                    status="failed",
+                    metadata={
+                        "event_drain_error": str(exc),
+                        "recovery_attempts": recovery_attempts,
+                    },
                 )
-                if event.event_type == "task_completed":
-                    self._mark_runtime_terminal(runtime_id=runtime_id, status="completed")
-                    return
-                if event.event_type == "task_failed":
-                    self._mark_runtime_terminal(runtime_id=runtime_id, status="failed")
-                    return
-        except Exception as exc:
-            logger.debug("Executor runtime event drain failed", exc_info=True)
-            self._mark_runtime_terminal(
-                runtime_id=runtime_id,
-                status="failed",
-                metadata={"event_drain_error": str(exc)},
-            )
+                return
 
     def _mark_runtime_progress(
         self,
@@ -1139,6 +1177,21 @@ class AssignmentExecutorRuntimeCoordinator:
             mark_runtime_ready(runtime_id, metadata=metadata)
         except Exception:
             logger.debug("Failed to mark executor runtime progress", exc_info=True)
+
+    def _mark_runtime_restarting(
+        self,
+        *,
+        runtime_id: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        runtime_service = self._executor_runtime_service
+        mark_runtime_stopped = getattr(runtime_service, "mark_runtime_stopped", None)
+        if not callable(mark_runtime_stopped):
+            return
+        try:
+            mark_runtime_stopped(runtime_id, status="restarting", metadata=metadata)
+        except Exception:
+            logger.debug("Failed to mark executor runtime restarting state", exc_info=True)
 
     def _mark_runtime_terminal(
         self,
