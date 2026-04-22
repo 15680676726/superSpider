@@ -4,6 +4,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from copaw.app.routers import runtime_center_dependencies as runtime_center_dependencies_module
 from copaw.app.routers.runtime_center import router as runtime_center_router
 from copaw.capabilities import CapabilityService
 from copaw.evidence import EvidenceLedger
@@ -37,6 +38,11 @@ class FakeActorSupervisor:
     async def run_agent_once(self, agent_id: str) -> bool:
         self.calls.append(agent_id)
         return True
+
+
+def test_runtime_center_dependencies_drop_legacy_actor_service_getters() -> None:
+    assert not hasattr(runtime_center_dependencies_module, "_get_actor_mailbox_service")
+    assert not hasattr(runtime_center_dependencies_module, "_get_actor_supervisor")
 
 
 def _build_actor_app(tmp_path):

@@ -742,6 +742,20 @@
   - 结果：`127 passed in 42.32s`
   - 验收层级：`L1 + L2`
 
+## 1.0.20 `2026-04-23` local executor physical-retirement slice（Runtime Center actor dependency getter deletion）
+
+- 本轮继续删除 Runtime Center 已无调用方的 actor compatibility getter，但没有把仍在用的 actor kernel 文件误写成已删除：
+  - `src/copaw/app/routers/runtime_center_dependencies.py` 已物理删除 `_get_actor_mailbox_service(...)` 与 `_get_actor_supervisor(...)`
+  - Runtime Center dependency module 现在只保留 formal state-query / repository / knowledge / governance getter，不再给 actor compatibility service 留专门 DI 入口
+- 当前能诚实写出的结论：
+  - Runtime Center dependency surface 已进一步退出 actor runtime compatibility 读写入口
+  - 这仍不等于 actor runtime 已物理删除：
+    - `runtime_center_actor_api`、`startup_recovery`、`TaskDelegationService` 等 compatibility path 仍会直接使用 actor service / actor kernel 文件
+- fresh focused regression：
+  - 命令：`python -m pytest tests/app/test_runtime_center_actor_api.py tests/app/test_runtime_bootstrap_split.py tests/app/test_industry_service_wiring.py -q`
+  - 结果：`32 passed in 39.28s`
+  - 验收层级：`L1 + L2`
+
 ## 1.1.1 `2026-04-07` Buddy 领域能力阶段收口补充
 
 - Buddy 当前成长阶段的正式真相已从关系经验切到 active `BuddyDomainCapabilityRecord`

@@ -136,6 +136,7 @@ These remain follow-up work because the current external executor seam exposes `
   - `runtime_center/models.py` / `overview_cards.py` no longer expose `main_brain.automation.supervisor`; Runtime Center automation now reads only schedules, automation loops, and heartbeat
   - `main_brain_chat_service.py` no longer reads actor-supervisor exception-absorption snapshots into pure-chat prompt context
   - `query_execution_runtime.py` / `query_execution_context_runtime.py` now read and write formal execution checkpoints via `agent_checkpoint_repository`; `KernelQueryExecutionService` no longer exposes `set_actor_mailbox_service(...)`
+  - `runtime_center_dependencies.py` no longer exposes `_get_actor_mailbox_service(...)` or `_get_actor_supervisor(...)` dead compatibility getters
   - `actor_mailbox.py` / `actor_worker.py` / `actor_supervisor.py` files still exist, so the task remains `partial`
 
 ### Task 3: Re-state The Remaining Local-Tool Blockers Honestly

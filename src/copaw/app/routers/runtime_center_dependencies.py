@@ -79,20 +79,6 @@ def _get_agent_thread_binding_repository(request: Request):
     return repository
 
 
-def _get_actor_mailbox_service(request: Request):
-    service = getattr(request.app.state, "actor_mailbox_service", None)
-    if service is None:
-        raise HTTPException(503, detail="Actor mailbox service is not available")
-    return service
-
-
-def _get_actor_supervisor(request: Request):
-    service = getattr(request.app.state, "actor_supervisor", None)
-    if service is None:
-        raise HTTPException(503, detail="Actor supervisor is not available")
-    return service
-
-
 def _get_knowledge_service(request: Request):
     service = getattr(request.app.state, "knowledge_service", None)
     if service is None or not all(
