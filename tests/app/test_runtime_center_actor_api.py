@@ -1,9 +1,12 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import inspect
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from copaw.app.routers import runtime_center_actor_capabilities as runtime_center_actor_capabilities_module
 from copaw.app.routers import runtime_center_dependencies as runtime_center_dependencies_module
 from copaw.app.routers.runtime_center import router as runtime_center_router
 from copaw.capabilities import CapabilityService
@@ -43,6 +46,15 @@ class FakeActorSupervisor:
 def test_runtime_center_dependencies_drop_legacy_actor_service_getters() -> None:
     assert not hasattr(runtime_center_dependencies_module, "_get_actor_mailbox_service")
     assert not hasattr(runtime_center_dependencies_module, "_get_actor_supervisor")
+
+
+def test_runtime_center_agent_capability_helpers_drop_require_actor_flag() -> None:
+    assert "require_actor" not in inspect.signature(
+        runtime_center_actor_capabilities_module._assign_agent_capabilities,
+    ).parameters
+    assert "require_actor" not in inspect.signature(
+        runtime_center_actor_capabilities_module._submit_governed_capabilities,
+    ).parameters
 
 
 def _build_actor_app(tmp_path):

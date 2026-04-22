@@ -771,6 +771,20 @@
   - 结果：`34 passed in 39.50s`
   - 验收层级：`L1 + L2`
 
+## 1.0.22 `2026-04-23` local executor physical-retirement slice（formal agent capability helper actor flag deletion）
+
+- 本轮继续清 formal `/runtime-center/agents/*/capabilities` 路由里的残余 actor 语义：
+  - `src/copaw/app/routers/runtime_center_actor_capabilities.py` 已删除 `_assign_agent_capabilities(...)` / `_submit_governed_capabilities(...)` 的 `require_actor` dead flag
+  - `src/copaw/app/routers/runtime_center_routes_agents.py` 已停止向 formal agent capability helper 透传 `require_actor=False`
+- 当前能诚实写出的结论：
+  - Runtime Center formal agent capability assignment surface 已不再保留 `actor not found` 这种已无调用方的 compatibility 分支
+  - 这仍不等于 actor runtime 已物理删除：
+    - actor kernel 文件、delegation compatibility path 与 startup recovery 仍在
+- fresh focused regression：
+  - 命令：`python -m pytest tests/app/test_runtime_center_actor_api.py tests/app/test_runtime_center_payloads.py tests/app/test_runtime_bootstrap_split.py tests/app/test_industry_service_wiring.py -q`
+  - 结果：`35 passed in 41.78s`
+  - 验收层级：`L1 + L2`
+
 ## 1.1.1 `2026-04-07` Buddy 领域能力阶段收口补充
 
 - Buddy 当前成长阶段的正式真相已从关系经验切到 active `BuddyDomainCapabilityRecord`

@@ -285,6 +285,10 @@
     - `runtime_center_payloads.py` 已删除 `_actor_mailbox_payload(...)` dead helper
     - Runtime Center payload module 不再保留 actor mailbox compatibility serializer，只剩 actor runtime compatibility payload 与 formal payload serializer
     - 但 actor mailbox / supervisor compatibility 仍在其他产品面和 kernel 文件中使用，本条目继续保持 `frozen`
+  - `2026-04-23` formal capability helper 补充：
+    - `runtime_center_actor_capabilities.py` 已删除 `_assign_agent_capabilities(...)` / `_submit_governed_capabilities(...)` 的 `require_actor` dead flag
+    - `runtime_center_routes_agents.py` 也已停止向 formal agent capability helper 透传 `require_actor=False`
+    - Runtime Center formal agent capability surface 不再保留已无调用方的 actor-only 分支；但 actor kernel 文件与 compatibility path 仍在，本条目继续保持 `frozen`
 
 ### 3.1.4 `src/copaw/kernel/delegation_service.py`
 

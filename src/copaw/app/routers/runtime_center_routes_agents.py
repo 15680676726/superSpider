@@ -113,7 +113,6 @@ async def assign_agent_capabilities(
         request,
         agent_id=agent_id,
         payload=request_payload,
-        require_actor=False,
     )
 
 
@@ -131,5 +130,4 @@ async def govern_agent_capabilities(
         request,
         agent_id=agent_id,
         payload=request_payload,
-        require_actor=False,
     )

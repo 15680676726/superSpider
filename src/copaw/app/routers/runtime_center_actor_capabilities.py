@@ -12,7 +12,6 @@ from ...capabilities.lifecycle_assignment import (
 )
 from .runtime_center_dependencies import (
     _get_agent_profile_service,
-    _get_agent_runtime_repository,
 )
 from .runtime_center_mutation_helpers import (
     _dispatch_runtime_mutation,
@@ -116,7 +115,6 @@ async def _assign_agent_capabilities(
     *,
     agent_id: str,
     payload: AgentCapabilityAssignmentRequest,
-    require_actor: bool = False,
 ) -> dict[str, object]:
     profile_service = _get_agent_profile_service(request)
     agent = profile_service.get_agent(agent_id)
@@ -124,11 +122,6 @@ async def _assign_agent_capabilities(
         raise HTTPException(404, detail=f"Agent '{agent_id}' not found")
     runtime_repository = getattr(request.app.state, "agent_runtime_repository", None)
     runtime = runtime_repository.get_runtime(agent_id) if runtime_repository is not None else None
-    if require_actor:
-        runtime_repository = _get_agent_runtime_repository(request)
-        runtime = runtime_repository.get_runtime(agent_id)
-        if runtime is None:
-            raise HTTPException(404, detail=f"Actor '{agent_id}' not found")
     lifecycle_payload = build_capability_lifecycle_assignment_payload(
         agent_profile_service=profile_service,
         target_agent_id=agent_id,
@@ -169,7 +162,6 @@ async def _submit_governed_capabilities(
     *,
     agent_id: str,
     payload: GovernedAgentCapabilityAssignmentRequest,
-    require_actor: bool = False,
 ) -> dict[str, object]:
     profile_service = _get_agent_profile_service(request)
     agent = profile_service.get_agent(agent_id)
@@ -177,11 +169,6 @@ async def _submit_governed_capabilities(
         raise HTTPException(404, detail=f"Agent '{agent_id}' not found")
     runtime_repository = getattr(request.app.state, "agent_runtime_repository", None)
     runtime = runtime_repository.get_runtime(agent_id) if runtime_repository is not None else None
-    if require_actor:
-        runtime_repository = _get_agent_runtime_repository(request)
-        runtime = runtime_repository.get_runtime(agent_id)
-        if runtime is None:
-            raise HTTPException(404, detail=f"Actor '{agent_id}' not found")
     surface = _get_agent_capability_surface(request, agent_id=agent_id)
     requested_capabilities = list(payload.capabilities)
     if not requested_capabilities and payload.use_recommended:
