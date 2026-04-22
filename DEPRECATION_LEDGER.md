@@ -292,6 +292,9 @@
   - `2026-04-23` bootstrap domain parameter 补充：
     - `runtime_bootstrap_domains.py` 已删除 `actor_supervisor` 形参，`runtime_service_graph.py` 也不再透传该值
     - default bootstrap domain build path 不再保留 actor supervisor dead parameter；但 actor mailbox / supervisor compatibility path 与 kernel 文件本体仍在，本条目继续保持 `frozen`
+  - `2026-04-23` default lifecycle kwargs 补充：
+    - `src/copaw/app/_app.py` 与 `src/copaw/app/runtime_lifecycle.py` 已停止在 `run_startup_recovery(...)` 中传递 `actor_mailbox_service=None` 与 `exception_absorption_service=None`
+    - default startup / restart path 不再保留这两个 dead kwargs；但 actor mailbox / supervisor compatibility path 与 kernel 文件本体仍在，本条目继续保持 `frozen`
 
 ### 3.1.4 `src/copaw/kernel/delegation_service.py`
 

@@ -796,7 +796,7 @@ def test_operator_runtime_overview_surfaces_sidecar_memory_degradation(
     assert governance["summary"] == expected_entropy["sidecar_memory"]["summary"]
 
 
-def test_operator_runtime_overview_falls_back_to_runtime_contract_sidecar_diagnostics(
+def test_operator_runtime_overview_does_not_fall_back_to_runtime_contract_sidecar_diagnostics(
     tmp_path,
 ) -> None:
     app = _build_operator_app(tmp_path)
@@ -836,18 +836,12 @@ def test_operator_runtime_overview_falls_back_to_runtime_contract_sidecar_diagno
     cards = {card["key"]: card for card in response.json()["cards"]}
     governance = cards["governance"]
     entry = governance["entries"][0]
-    assert entry["status"] == "blocked"
+    assert entry["status"] == "idle"
     assert governance["meta"]["query_runtime_entropy"] == {}
-    assert governance["meta"]["sidecar_memory"] == degraded_sidecar_memory
-    assert entry["meta"]["sidecar_memory"] == degraded_sidecar_memory
-    assert governance["meta"]["failure_source"] == "runtime-contract-sidecar"
-    assert governance["meta"]["blocked_next_step"] == (
-        "Restore the runtime-contract sidecar before scheduling the next turn."
-    )
-    assert entry["meta"]["failure_source"] == "runtime-contract-sidecar"
-    assert entry["meta"]["blocked_next_step"] == (
-        "Restore the runtime-contract sidecar before scheduling the next turn."
-    )
-    assert governance["summary"] == (
-        "Runtime contract fallback is degraded and canonical state is the only safe carry-forward path."
-    )
+    assert governance["meta"]["sidecar_memory"] is None
+    assert entry["meta"]["sidecar_memory"] is None
+    assert governance["meta"]["failure_source"] is None
+    assert governance["meta"]["blocked_next_step"] is None
+    assert entry["meta"]["failure_source"] is None
+    assert entry["meta"]["blocked_next_step"] is None
+    assert governance["summary"] == "运行时正在接收新工作。"

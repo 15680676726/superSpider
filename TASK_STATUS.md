@@ -800,6 +800,20 @@
   - 结果：`66 passed in 34.31s`
   - 验收层级：`L1 + L2`
 
+## 1.0.24 `2026-04-23` local executor physical-retirement slice（default startup/restart dead actor kwargs deletion）
+
+- 本轮继续删除 default app startup / restart path 上残留的 dead actor kwargs：
+  - `src/copaw/app/_app.py` 与 `src/copaw/app/runtime_lifecycle.py` 已停止在 `run_startup_recovery(...)` 中传递 `actor_mailbox_service=None` 与 `exception_absorption_service=None`
+- 当前能诚实写出的结论：
+  - default startup/restart 主链已进一步退出 actor mailbox / exception absorption dead kwargs
+  - 这仍不等于 actor runtime 已物理删除：
+    - `actor_mailbox.py / actor_worker.py / actor_supervisor.py` 文件本体还在
+    - `delegation_service.py` / `service_lifecycle.py` / `startup_recovery.py` 仍保留 actor mailbox 兼容写链
+- fresh focused regression：
+  - 命令：`python -m pytest tests/app/test_runtime_center_api.py tests/app/test_learning_api.py tests/app/test_operator_runtime_e2e.py tests/app/test_runtime_center_actor_api.py tests/app/runtime_center_api_parts/detail_environment.py tests/app/runtime_center_api_parts/overview_governance.py tests/app/test_runtime_bootstrap_helpers.py tests/app/test_runtime_bootstrap_split.py tests/app/test_runtime_lifecycle.py -q`
+  - 结果：`351 passed in 187.10s`
+  - 验收层级：`L1 + L2`
+
 ## 1.1.1 `2026-04-07` Buddy 领域能力阶段收口补充
 
 - Buddy 当前成长阶段的正式真相已从关系经验切到 active `BuddyDomainCapabilityRecord`

@@ -88,13 +88,11 @@ async def lifespan(
 
     startup_recovery_summary = run_startup_recovery(
         environment_service=bootstrap.environment_service,
-        actor_mailbox_service=None,
         decision_request_repository=bootstrap.repositories.decision_request_repository,
         kernel_dispatcher=bootstrap.kernel_dispatcher,
         kernel_task_store=bootstrap.kernel_task_store,
         schedule_repository=bootstrap.repositories.schedule_repository,
         runtime_repository=bootstrap.repositories.agent_runtime_repository,
-        exception_absorption_service=None,
         human_assist_task_service=bootstrap.human_assist_task_service,
         backlog_item_repository=bootstrap.repositories.backlog_item_repository,
         assignment_repository=bootstrap.repositories.assignment_repository,

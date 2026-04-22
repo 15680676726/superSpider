@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import FastAPI
 
+import copaw.app._app as app_module
 from copaw.app import runtime_lifecycle as runtime_lifecycle_module
 from copaw.app.crons.heartbeat import run_heartbeat_once
 from copaw.app.runtime_bootstrap_repositories import build_runtime_repositories
@@ -702,8 +703,130 @@ async def test_runtime_restart_coordinator_does_not_require_retired_actor_runtim
     await coordinator._do_restart_services(restart_requester_task=None)
 
     startup_recovery_kwargs = captured["run_startup_recovery"]
-    assert startup_recovery_kwargs["actor_mailbox_service"] is None
-    assert startup_recovery_kwargs["exception_absorption_service"] is None
+    assert "actor_mailbox_service" not in startup_recovery_kwargs
+    assert "exception_absorption_service" not in startup_recovery_kwargs
+    assert captured["industry_schedule_runtime"]["schedule_writer"] == "job-repository"
+    assert captured["workflow_schedule_runtime"]["cron_manager"] == "cron-manager"
+
+
+@pytest.mark.asyncio
+async def test_app_lifespan_startup_recovery_does_not_thread_retired_actor_runtime_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    app = FastAPI()
+
+    class _RuntimeHost:
+        def __init__(self) -> None:
+            self.session_backend = "session-backend"
+            self.conversation_compaction_service = "conversation-compaction-service"
+
+        async def start(self) -> None:
+            captured["runtime_host_started"] = True
+
+        async def stop(self) -> None:
+            captured["runtime_host_stopped"] = True
+
+        def sync_turn_executor(self, value) -> None:
+            captured.setdefault("sync_turn_executor", []).append(value)
+
+        def set_restart_callback(self, value) -> None:
+            captured["restart_callback"] = value
+
+    class _IndustryService:
+        def set_schedule_runtime(self, **kwargs) -> None:
+            captured["industry_schedule_runtime"] = kwargs
+
+    class _WorkflowTemplateService:
+        def set_schedule_runtime(self, **kwargs) -> None:
+            captured["workflow_schedule_runtime"] = kwargs
+
+    class _EnvironmentService:
+        def set_latest_recovery_report_sink(self, value) -> None:
+            captured["latest_recovery_report_sink"] = value
+
+        def set_latest_recovery_report(self, value) -> None:
+            captured["latest_recovery_report"] = value
+
+    bootstrap = SimpleNamespace(
+        environment_service=_EnvironmentService(),
+        repositories=SimpleNamespace(
+            decision_request_repository="decision-repository",
+            schedule_repository="schedule-repository",
+            agent_runtime_repository="agent-runtime-repository",
+            backlog_item_repository="backlog-item-repository",
+            assignment_repository="assignment-repository",
+            goal_repository="goal-repository",
+            goal_override_repository="goal-override-repository",
+            task_repository="task-repository",
+            task_runtime_repository="task-runtime-repository",
+            bootstrap_schedule_repository="bootstrap-schedule-repository",
+            automation_loop_runtime_repository="automation-loop-runtime-repository",
+        ),
+        kernel_dispatcher="kernel-dispatcher",
+        kernel_task_store="kernel-task-store",
+        human_assist_task_service="human-assist-task-service",
+        runtime_event_bus="runtime-event-bus",
+        memory_sleep_service="memory-sleep-service",
+        research_session_service="research-session-service",
+        weixin_ilink_runtime_state="weixin-ilink-runtime-state",
+        capability_service="capability-service",
+        governance_service="governance-service",
+        industry_service=_IndustryService(),
+        workflow_template_service=_WorkflowTemplateService(),
+        turn_executor="turn-executor",
+        learning_service="learning-service",
+    )
+
+    class _RestartCoordinator:
+        def __init__(self, **kwargs) -> None:
+            captured["restart_coordinator_kwargs"] = kwargs
+
+        async def restart_services(self, *_args, **_kwargs) -> None:
+            return None
+
+    monkeypatch.setattr(app_module, "resolve_environment_preflight_paths", lambda **_kwargs: {})
+    monkeypatch.setattr(app_module, "assert_startup_environment_ready", lambda **_kwargs: "preflight")
+    monkeypatch.setattr(app_module, "add_copaw_file_handler", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(app_module, "runtime_host", _RuntimeHost())
+    monkeypatch.setattr(app_module, "load_config", lambda: SimpleNamespace())
+    monkeypatch.setattr(
+        app_module,
+        "initialize_mcp_manager",
+        lambda **_kwargs: asyncio.sleep(0, result="mcp-manager"),
+    )
+    monkeypatch.setattr(app_module, "build_runtime_bootstrap", lambda **_kwargs: bootstrap)
+    monkeypatch.setattr(
+        app_module,
+        "run_startup_recovery",
+        lambda **kwargs: captured.setdefault("run_startup_recovery", kwargs) or {"reason": "startup"},
+    )
+    monkeypatch.setattr(
+        app_module,
+        "start_runtime_manager_stack",
+        lambda **_kwargs: asyncio.sleep(
+            0,
+            result=SimpleNamespace(job_repository="job-repository", cron_manager="cron-manager"),
+        ),
+    )
+    monkeypatch.setattr(
+        app_module,
+        "attach_runtime_state",
+        lambda _app, **kwargs: setattr(_app.state, "startup_recovery_summary", kwargs["startup_recovery_summary"]),
+    )
+    monkeypatch.setattr(app_module, "start_automation_tasks", lambda **_kwargs: [])
+    monkeypatch.setattr(app_module, "build_latest_recovery_report", lambda **_kwargs: {"reason": "startup"})
+    monkeypatch.setattr(app_module, "RuntimeRestartCoordinator", _RestartCoordinator)
+    monkeypatch.setattr(app_module, "stop_automation_tasks", lambda *_args, **_kwargs: asyncio.sleep(0))
+    monkeypatch.setattr(app_module, "runtime_manager_stack_from_app_state", lambda _state: "manager-stack")
+    monkeypatch.setattr(app_module, "stop_runtime_manager_stack", lambda *_args, **_kwargs: asyncio.sleep(0))
+
+    async with app_module.lifespan(app):
+        pass
+
+    startup_recovery_kwargs = captured["run_startup_recovery"]
+    assert "actor_mailbox_service" not in startup_recovery_kwargs
+    assert "exception_absorption_service" not in startup_recovery_kwargs
     assert captured["industry_schedule_runtime"]["schedule_writer"] == "job-repository"
     assert captured["workflow_schedule_runtime"]["cron_manager"] == "cron-manager"
 

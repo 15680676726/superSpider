@@ -34,15 +34,6 @@ from copaw.state.repositories import (
 )
 
 
-class FakeActorSupervisor:
-    def __init__(self) -> None:
-        self.calls: list[str] = []
-
-    async def run_agent_once(self, agent_id: str) -> bool:
-        self.calls.append(agent_id)
-        return True
-
-
 def test_runtime_center_dependencies_drop_legacy_actor_service_getters() -> None:
     assert not hasattr(runtime_center_dependencies_module, "_get_actor_mailbox_service")
     assert not hasattr(runtime_center_dependencies_module, "_get_actor_supervisor")
@@ -55,6 +46,13 @@ def test_runtime_center_agent_capability_helpers_drop_require_actor_flag() -> No
     assert "require_actor" not in inspect.signature(
         runtime_center_actor_capabilities_module._submit_governed_capabilities,
     ).parameters
+
+
+def test_runtime_center_actor_fixture_drops_legacy_actor_state(tmp_path) -> None:
+    app, _item = _build_actor_app(tmp_path)
+
+    assert not hasattr(app.state, "actor_mailbox_service")
+    assert not hasattr(app.state, "actor_supervisor")
 
 
 def _build_actor_app(tmp_path):
@@ -105,8 +103,6 @@ def _build_actor_app(tmp_path):
         checkpoint_repository=checkpoint_repository,
         thread_binding_repository=thread_binding_repository,
     )
-    supervisor = FakeActorSupervisor()
-
     item = mailbox_service.enqueue_item(
         agent_id="agent-1",
         task_id="task-1",
@@ -205,11 +201,9 @@ def _build_actor_app(tmp_path):
     app.state.runtime_frame_repository = runtime_frame_repository
     app.state.decision_request_repository = decision_request_repository
     app.state.agent_profile_service = agent_profile_service
-    app.state.actor_mailbox_service = mailbox_service
-    app.state.actor_supervisor = supervisor
     app.state.capability_service = capability_service
     app.state.kernel_dispatcher = dispatcher
-    return app, mailbox_service, supervisor, item
+    return app, item
 
 
 def _list_lifecycle_kernel_tasks(app: FastAPI) -> list[object]:
@@ -222,7 +216,7 @@ def _list_lifecycle_kernel_tasks(app: FastAPI) -> list[object]:
 
 
 def test_runtime_center_actor_routes_are_retired(tmp_path) -> None:
-    app, _mailbox_service, _supervisor, _item = _build_actor_app(tmp_path)
+    app, _item = _build_actor_app(tmp_path)
     client = TestClient(app)
 
     assert client.get("/runtime-center/actors").status_code == 404
@@ -230,7 +224,7 @@ def test_runtime_center_actor_routes_are_retired(tmp_path) -> None:
 
 
 def test_runtime_center_actor_mutation_routes_are_retired(tmp_path) -> None:
-    app, _mailbox_service, _supervisor, item = _build_actor_app(tmp_path)
+    app, item = _build_actor_app(tmp_path)
     client = TestClient(app)
 
     pause_response = client.post(
@@ -267,7 +261,7 @@ def test_runtime_center_actor_mutation_routes_are_retired(tmp_path) -> None:
 
 
 def test_runtime_center_actor_capability_assignment_route_uses_agent_surface(tmp_path) -> None:
-    app, _mailbox_service, _supervisor, _item = _build_actor_app(tmp_path)
+    app, _item = _build_actor_app(tmp_path)
     client = TestClient(app)
 
     response = client.put(
@@ -313,7 +307,7 @@ def test_runtime_center_actor_capability_assignment_route_uses_agent_surface(tmp
 
 
 def test_runtime_center_actor_capability_surface_and_governed_assignment(tmp_path) -> None:
-    app, _mailbox_service, _supervisor, _item = _build_actor_app(tmp_path)
+    app, _item = _build_actor_app(tmp_path)
     client = TestClient(app)
 
     surface_response = client.get("/runtime-center/agents/agent-1/capabilities")
@@ -357,7 +351,7 @@ def test_runtime_center_actor_capability_surface_and_governed_assignment(tmp_pat
 
 
 def test_runtime_center_agent_capability_assignment_route_for_execution_core(tmp_path) -> None:
-    app, _mailbox_service, _supervisor, _item = _build_actor_app(tmp_path)
+    app, _item = _build_actor_app(tmp_path)
     client = TestClient(app)
 
     response = client.put(
@@ -392,7 +386,7 @@ def test_runtime_center_agent_capability_assignment_route_for_execution_core(tmp
 
 
 def test_runtime_center_agent_governed_capability_assignment_route_for_execution_core(tmp_path) -> None:
-    app, _mailbox_service, _supervisor, _item = _build_actor_app(tmp_path)
+    app, _item = _build_actor_app(tmp_path)
     client = TestClient(app)
 
     response = client.post(
