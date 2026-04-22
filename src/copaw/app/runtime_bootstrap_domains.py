@@ -1233,22 +1233,7 @@ def build_runtime_domain_services(
     )
     industry_service.set_prediction_service(prediction_service)
 
-    delegation_service = TaskDelegationService(
-        task_repository=repositories.task_repository,
-        task_runtime_repository=repositories.task_runtime_repository,
-        kernel_dispatcher=kernel_dispatcher,
-        evidence_ledger=evidence_ledger,
-        agent_profile_service=agent_profile_service,
-        industry_service=industry_service,
-        environment_service=environment_service,
-        actor_mailbox_service=actor_mailbox_service,
-        actor_supervisor=actor_supervisor,
-        runtime_event_bus=runtime_event_bus,
-        experience_memory_service=agent_experience_service,
-    )
-    capability_service.set_delegation_service(delegation_service)
-    capability_service.set_actor_mailbox_service(actor_mailbox_service)
-    capability_service.set_actor_supervisor(actor_supervisor)
+    delegation_service = None
     environment_service.set_kernel_dispatcher(kernel_dispatcher)
     memory_surface_service = MemorySurfaceService(
         memory_recall_service=memory_recall_service,
@@ -1265,7 +1250,7 @@ def build_runtime_domain_services(
         capability_service=capability_service,
         kernel_dispatcher=kernel_dispatcher,
         agent_profile_service=agent_profile_service,
-        delegation_service=delegation_service,
+        delegation_service=None,
         industry_service=industry_service,
         strategy_memory_service=strategy_memory_service,
         prediction_service=prediction_service,
@@ -1273,7 +1258,7 @@ def build_runtime_domain_services(
         memory_recall_service=memory_recall_service,
         memory_surface_service=memory_surface_service,
         memory_activation_service=memory_activation_service,
-        actor_mailbox_service=actor_mailbox_service,
+        actor_mailbox_service=None,
         agent_runtime_repository=repositories.agent_runtime_repository,
         governance_control_repository=repositories.governance_control_repository,
         task_repository=repositories.task_repository,
@@ -1287,7 +1272,7 @@ def build_runtime_domain_services(
         agent_profile_service=agent_profile_service,
         memory_recall_service=memory_recall_service,
         memory_surface_service=memory_surface_service,
-        actor_supervisor=actor_supervisor,
+        actor_supervisor=None,
         model_factory=runtime_provider.get_active_chat_model,
     )
     main_brain_orchestrator = MainBrainOrchestrator(

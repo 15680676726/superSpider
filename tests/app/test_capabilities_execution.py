@@ -3307,53 +3307,27 @@ def test_routines_replay_route_is_retired() -> None:
     assert evidence == []
 
 
-def test_system_delegate_task_executes_through_delegation_service() -> None:
-    app = FastAPI()
-    app.include_router(capabilities_router)
+def test_system_delegate_task_capability_is_retired() -> None:
+    capability_service = CapabilityService()
 
-    class FakeDelegationService:
-        def __init__(self) -> None:
-            self.calls: list[tuple[str, dict[str, object]]] = []
-
-        async def delegate_task(self, parent_task_id: str, **kwargs):
-            self.calls.append((parent_task_id, dict(kwargs)))
-            return {
-                "summary": "Delegation created.",
-                "child_task": {"id": "child-task-1"},
-            }
-
-    evidence_ledger = EvidenceLedger()
-    capability_service = CapabilityService(evidence_ledger=evidence_ledger)
-    delegation_service = FakeDelegationService()
-    capability_service.set_delegation_service(delegation_service)
-    app.state.capability_service = capability_service
-    app.state.kernel_dispatcher = KernelDispatcher(capability_service=capability_service)
-
-    payload = _execute_capability_direct(
-        capability_service,
-        app.state.kernel_dispatcher,
-        capability_id="system:delegate_task",
-        title="Delegate research",
-        owner_agent_id="ops-agent",
-        environment_ref="session:console:industry-chat:buddy:demo:execution-core",
-        payload={
-            "parent_task_id": "task-parent-1",
-            "owner_agent_id": "ops-researcher",
-            "prompt_text": "Review the latest operator handoff notes.",
-            "industry_instance_id": "industry-v1-ops",
-            "industry_role_id": "researcher",
-            "inherit_environment_ref": False,
-        },
+    execution_result = asyncio.run(
+        capability_service.execute_task(
+            KernelTask(
+                id="task-system-delegate-task",
+                title="Delegate task",
+                capability_ref="system:delegate_task",
+                owner_agent_id="ops-agent",
+                payload={
+                    "parent_task_id": "task-parent-1",
+                    "owner_agent_id": "ops-researcher",
+                    "prompt_text": "Review the latest operator handoff notes.",
+                },
+            ),
+        ),
     )
-    assert payload["success"] is True
-    assert payload["phase"] == "completed"
-    assert payload["summary"] == "Delegation created."
-    assert len(delegation_service.calls) == 1
-    parent_task_id, kwargs = delegation_service.calls[0]
-    assert parent_task_id == "task-parent-1"
-    assert kwargs["owner_agent_id"] == "ops-researcher"
-    assert kwargs["industry_role_id"] == "researcher"
-    assert kwargs["environment_ref"] is None
+
+    assert execution_result["success"] is False
+    assert "not found" in execution_result["error"]
 
 
 def test_execute_task_enforces_role_access_policy() -> None:

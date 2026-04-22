@@ -25,7 +25,7 @@ class _QueryExecutionToolsMixin:
             {
                 capability_id
                 for capability_id in (system_capability_ids or set())
-                if capability_id in {"system:dispatch_query", "system:delegate_task"}
+                if capability_id == "system:dispatch_query"
             },
         )
         supported = {
@@ -35,7 +35,6 @@ class _QueryExecutionToolsMixin:
                 "system:apply_role",
                 "system:discover_capabilities",
                 "system:dispatch_query",
-                "system:delegate_task",
             }
         }
         if not supported and not collect_sources_available:
@@ -70,7 +69,7 @@ class _QueryExecutionToolsMixin:
         )
         if assignment_leaf_owner:
             supported.difference_update(
-                {"system:dispatch_query", "system:delegate_task"},
+                {"system:dispatch_query"},
             )
             if not supported and not collect_sources_available:
                 return []
@@ -413,142 +412,6 @@ class _QueryExecutionToolsMixin:
                 return _json_tool_response(result)
 
             tools.append(dispatch_query)
-
-        if "system:delegate_task" in supported:
-            async def delegate_task(
-                prompt_text: str,
-                target_agent_id: str | None = None,
-                target_role_id: str | None = None,
-                target_role_name: str | None = None,
-                title: str | None = None,
-                parent_task_id: str | None = None,
-                execute: bool = False,
-            ) -> ToolResponse:
-                """Delegate a focused task through the legacy local delegation compatibility path."""
-                normalized_prompt = str(prompt_text or "").strip()
-                if not normalized_prompt:
-                    return _json_tool_response(
-                        {"success": False, "error": "prompt_text is required"},
-                    )
-                # The live interactive query task is the authoritative delegation parent.
-                # Model-supplied parent ids may reflect stale recovery/runtime context and
-                # must not override the current frontdoor chain.
-                resolved_parent_task_id = _first_non_empty(
-                    current_parent_task_id,
-                    parent_task_id,
-                )
-                if not resolved_parent_task_id:
-                    return _json_tool_response(
-                        {
-                            "success": False,
-                            "error": "parent_task_id is required",
-                        },
-                    )
-                target_specified = any(
-                    _normalize_agent_candidate(value)
-                    for value in (target_agent_id, target_role_id, target_role_name)
-                )
-                if execution_core_owner and not target_specified:
-                    return _guard_target_required_response("delegate_task")
-                if delegation_guard is not None and delegation_guard.locked and not target_specified:
-                    return _guard_target_required_response("delegate_task")
-                resolution = _resolve_teammate(
-                    candidate_agent_id=_normalize_agent_candidate(target_agent_id),
-                    target_role_id=_normalize_agent_candidate(target_role_id),
-                    target_role_name=_normalize_agent_candidate(target_role_name),
-                )
-                if target_specified and resolution.error_code:
-                    return _json_tool_response(
-                        {
-                            "success": False,
-                            "error": resolution.error or "Target teammate not found",
-                            "error_code": resolution.error_code,
-                        },
-                    )
-                resolved_agent_id = resolution.agent_id or owner_agent_id
-                if execution_core_owner and resolved_agent_id == owner_agent_id:
-                    return _guard_self_target_response("delegate_task")
-                if delegation_guard is not None and delegation_guard.locked and resolved_agent_id == owner_agent_id:
-                    return _guard_self_target_response("delegate_task")
-                if self._capability_service is not None:
-                    mounts = self._capability_service.list_accessible_capabilities(
-                        agent_id=resolved_agent_id,
-                        enabled_only=True,
-                    )
-                    if not any(str(mount.id) == "system:dispatch_query" for mount in mounts):
-                        return _json_tool_response(
-                            {
-                                "success": False,
-                                "error": (
-                                    f"Target agent '{resolved_agent_id}' is not authorized for dispatch_query."
-                                ),
-                                "error_code": "target_not_authorized",
-                            },
-                        )
-                target_profile = self._get_agent_profile(resolved_agent_id)
-                target_industry_instance_id = _first_non_empty(
-                    getattr(target_profile, "industry_instance_id", None) if target_profile is not None else None,
-                    current_industry_instance_id,
-                )
-                target_industry_role_id = _first_non_empty(
-                    getattr(target_profile, "industry_role_id", None) if target_profile is not None else None,
-                    resolution.role_id if resolution else None,
-                    current_industry_role_id,
-                )
-                target_industry_label = current_industry_label
-                if target_industry_instance_id and target_industry_instance_id != current_industry_instance_id:
-                    target_instance = self._get_industry_instance(target_industry_instance_id)
-                    target_industry_label = _first_non_empty(
-                        _field_value(target_instance, "label"),
-                        current_industry_label,
-                    )
-                payload = {
-                    "parent_task_id": resolved_parent_task_id,
-                    "owner_agent_id": resolved_agent_id,
-                    "target_agent_id": resolved_agent_id,
-                    "target_role_id": resolution.role_id if resolution else None,
-                    "target_role_name": resolution.role_name if resolution else None,
-                    "title": title or f"Delegated task for {resolved_agent_id}",
-                    "prompt_text": normalized_prompt,
-                    "execute": bool(execute),
-                    "channel": current_channel,
-                    "industry_instance_id": target_industry_instance_id,
-                    "industry_role_id": target_industry_role_id,
-                    "industry_label": target_industry_label,
-                    "owner_scope": current_owner_scope,
-                    "inherit_environment_ref": False,
-                    "session_kind": (
-                        "industry-agent-chat"
-                        if target_industry_instance_id and target_industry_role_id
-                        else "agent-chat"
-                    ),
-                }
-                result = _structured_tool_payload(
-                    await self._execute_bound_system_capability(
-                        capability_id="system:delegate_task",
-                        owner_agent_id=owner_agent_id,
-                        payload=payload,
-                        title=title or f"Delegate task to {resolved_agent_id}",
-                        parent_task_id=current_parent_task_id,
-                        environment_ref=current_environment_ref,
-                    ),
-                    default_error=(
-                        "delegate_task returned an unexpected result payload"
-                    ),
-                )
-                _enrich_delegate_task_payload(
-                    result=result,
-                    resolved_agent_id=resolved_agent_id,
-                )
-                if result.get("success") is True:
-                    _mark_guard_delegation(
-                        capability_id="system:delegate_task",
-                        resolved_agent_id=resolved_agent_id,
-                        resolution=resolution,
-                    )
-                return _json_tool_response(result)
-
-            tools.append(delegate_task)
 
         if "system:apply_role" in supported:
             async def apply_role(

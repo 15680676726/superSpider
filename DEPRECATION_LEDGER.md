@@ -241,10 +241,15 @@
 - `2026-04-22` 状态补充：
   - `runtime_bootstrap_execution.py` / `runtime_service_graph.py` 现已把 actor runtime 收进显式 compatibility wiring；default formal bootstrap 不再默认装配 `actor_mailbox_service / actor_worker / actor_supervisor`
   - `_app.py` 现只会在 actor supervisor 被显式装配时启动 actor runtime lifecycle
-  - 因此 actor runtime 已退出 default formal startup graph，但 compatibility codepath 与显式 read surface 仍在；本条目继续保持 `frozen`，不得误写成 `deleted`
+  - 因此 actor runtime 已退出 default formal startup graph；旧 `/runtime-center/actors*` 显式读面现也已被物理删除，但 compatibility codepath 与 actor kernel 文件仍在；本条目继续保持 `frozen`，不得误写成 `deleted`
   - `2026-04-22` 验收补充：
     - formal external-provider intake 现已通过真实 `Codex App Server` live smoke，且 `python scripts/run_p0_runtime_terminal_gate.py` 已 fresh 通过
     - 因此 actor runtime compatibility surface 已不再阻塞 external-executor hard-cut 的终态完成声明；但物理删除仍是后续退役事项，本条目继续保持 `frozen`
+  - `2026-04-22` 晚间退役补充：
+    - `src/copaw/app/routers/runtime_center_routes_actor.py` 与 `src/copaw/app/routers/runtime_center_shared_actor.py` 已物理删除
+    - formal `kernel task / decision / agent capability` 路由已拆分到 `runtime_center_routes_governance.py` 与 `runtime_center_routes_agents.py`
+    - `runtime_center_payloads.py` 与 `agent_profile_service.py` 已停止生成 `/api/runtime-center/actors/*` dead routes
+    - 但 `actor_mailbox.py` / `actor_worker.py` / `actor_supervisor.py` 及 overview/startup compatibility wiring 仍在，因此本条目状态不变，继续保持 `frozen`
 
 ### 3.1.4 `src/copaw/kernel/delegation_service.py`
 
@@ -288,6 +293,11 @@
   - `2026-04-22` 验收补充：
     - formal assignment -> executor-runtime mainline、formal provider intake live smoke、以及 default regression gate 现都已 fresh 通过
     - 因此 `delegation_service.py` 剩余的 compatibility child-task 能力不再阻塞 external-executor hard-cut 终态收口；但物理删除与 capability 退役仍属于后续删除项
+  - `2026-04-22` 晚间退役补充：
+    - `query_execution_tools.py` 已物理删除 `delegate_task` formal tool builder
+    - `query_execution_prompt.py` 与 `query_execution_runtime.py` 不再把 `system:delegate_task` 当 formal query front-door 条件或提示文案
+    - execution-core formal query front-door 现只保留 `dispatch_query / apply_role / discover_capabilities` 等正式 system-op surface；显式 `TaskDelegationService` compatibility chain 仍在
+    - 因此本条目继续保持 `frozen`，不得误写成 `deleted`
 
 ### 3.1.5 donor-first 外接项目产品面：`/capability-market/projects/install*`、`project donor` taxonomy、Runtime Center donor 读面
 

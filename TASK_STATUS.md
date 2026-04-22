@@ -551,6 +551,34 @@
       - 结果：后端主链回归 `361 passed in 263.98s`；长跑与删旧回归 `84 passed in 466.91s`；前台定向回归 `21 passed`；控制台构建通过
       - 验收层级：`L2`
 
+## 1.0.12 `2026-04-22` local executor physical-retirement slice（actor read surface + delegation front-door）
+
+- 本轮没有把“本地执行脑已全部删除”说成完成，而是继续做了两条可以诚实推进的物理退役切片：
+  - actor Runtime Center 旧读面物理删除
+  - delegation formal query front-door 物理退役
+- 当前已落地的代码切口：
+  - `src/copaw/app/routers/runtime_center_routes_actor.py`、`src/copaw/app/routers/runtime_center_shared_actor.py` 已物理删除
+  - formal `kernel task / decision / agent capability` 路由已拆分到：
+    - `src/copaw/app/routers/runtime_center_routes_governance.py`
+    - `src/copaw/app/routers/runtime_center_routes_agents.py`
+  - `src/copaw/app/routers/runtime_center_payloads.py` 与 `src/copaw/kernel/agent_profile_service.py` 已停止输出 `/api/runtime-center/actors/*` dead routes；actor runtime payload 现在只保留 `agent_capabilities` formal route
+  - `src/copaw/kernel/query_execution_tools.py` 已物理删除 `delegate_task` tool builder；formal query front-door 现在不再生成 `delegate_task`
+  - `src/copaw/kernel/query_execution_prompt.py` 与 `src/copaw/kernel/query_execution_runtime.py` 不再把 `system:delegate_task` 当 formal query front-door 条件或提示文案
+  - `tests/kernel/test_query_execution_runtime.py` 已同步把 execution-core formal front-door 口径收紧为：
+    - 不再保留 browser / desktop / document / read-file 本地 tool front-door
+    - formal system front-door 只保留 `system:dispatch_query` 等正式 system-op surface
+- 当前能诚实写出的结论：
+  - Runtime Center actor 旧路由不再是“未 import 但文件还在”的假删除，而是已经物理删除
+  - formal query front-door 不再同时保留 `dispatch_query + delegate_task` 双入口；`delegate_task` 已退出正式 tool 心智
+  - 这仍不等于本地执行脑已全部删除：
+    - `src/copaw/kernel/actor_mailbox.py` / `actor_worker.py` / `actor_supervisor.py` 仍在
+    - `src/copaw/kernel/delegation_service.py` 与 compatibility-focused tests 仍在
+    - browser / desktop / document-file-shell 本地产品/API surface 仍是 blocker，尚未被 external-executor product surface 替代
+- fresh focused regression：
+  - 命令：`python -m pytest tests/app/test_capabilities_execution.py tests/app/test_runtime_bootstrap_helpers.py tests/app/test_runtime_bootstrap_split.py tests/app/test_runtime_center_actor_api.py tests/kernel/query_execution_environment_parts/dispatch.py tests/kernel/test_agent_profile_service.py tests/kernel/test_query_execution_runtime.py -q`
+  - 结果：`178 passed in 101.15s`
+  - 验收层级：`L1 + L2`
+
 ## 1.1.1 `2026-04-07` Buddy 领域能力阶段收口补充
 
 - Buddy 当前成长阶段的正式真相已从关系经验切到 active `BuddyDomainCapabilityRecord`

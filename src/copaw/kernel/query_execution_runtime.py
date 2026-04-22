@@ -2804,7 +2804,6 @@ class _QueryExecutionRuntimeMixin(
             return None
         if not (
             "system:dispatch_query" in system_capability_ids
-            or "system:delegate_task" in system_capability_ids
         ):
             return None
         industry_instance_id = _first_non_empty(

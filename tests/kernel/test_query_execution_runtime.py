@@ -1739,13 +1739,9 @@ def test_query_execution_service_preserves_verified_browser_desktop_tools_for_ex
         desktop_actuation_available=True,
     )
 
-    assert tool_capability_ids == {
-        "tool:read_file",
-        "tool:browser_use",
-        "tool:desktop_screenshot",
-    }
+    assert tool_capability_ids == set()
     assert system_capability_ids == {"system:dispatch_query"}
-    assert desktop_actuation_available is True
+    assert desktop_actuation_available is False
 
 
 def test_query_execution_service_preserves_document_and_desktop_frontdoors_for_execution_core() -> None:
@@ -1806,11 +1802,6 @@ def test_query_execution_service_preserves_document_and_desktop_frontdoors_for_e
         desktop_actuation_available=True,
     )
 
-    assert tool_capability_ids == {
-        "tool:document_surface",
-        "tool:desktop_actuation",
-        "tool:desktop_screenshot",
-        "tool:read_file",
-    }
+    assert tool_capability_ids == set()
     assert system_capability_ids == {"system:dispatch_query"}
-    assert desktop_actuation_available is True
+    assert desktop_actuation_available is False

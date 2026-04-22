@@ -1570,10 +1570,6 @@ class _QueryExecutionPromptMixin:
             lines.append(
                 "- Focused sub-query dispatch is mounted; use it to hand work to a teammate from the team roster (agent_id/role_id/role_name) instead of only describing what should happen.",
             )
-        if "system:delegate_task" in capability_ids:
-            lines.append(
-                "- Legacy task delegation compatibility is mounted; prefer dispatch_query or the executor-runtime path unless an older local actor flow explicitly requires delegate_task.",
-            )
         if "system:apply_role" in capability_ids:
             lines.append(
                 "- Governed role/capability assignment is mounted; use it to update a teammate's role or capability envelope through the kernel instead of leaving the change as a suggestion.",

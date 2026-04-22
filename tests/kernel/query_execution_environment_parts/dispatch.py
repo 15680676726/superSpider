@@ -95,7 +95,6 @@ def test_query_execution_service_system_dispatch_tools_execute_via_kernel_dispat
             "system:apply_role",
             "system:discover_capabilities",
             "system:dispatch_query",
-            "system:delegate_task",
         },
         kernel_task_id="task-1",
     )
@@ -123,17 +122,10 @@ def test_query_execution_service_system_dispatch_tools_execute_via_kernel_dispat
             capability_assignment_mode="merge",
         ),
     )
-    delegate_task_result = asyncio.run(
-        tools_by_name["delegate_task"](
-            "Review the operator handoff notes and summarize blockers.",
-            target_role_name="Ops Researcher",
-        ),
-    )
 
     assert isinstance(dispatch_query_result, ToolResponse)
     assert isinstance(discover_capabilities_result, ToolResponse)
     assert isinstance(apply_role_result, ToolResponse)
-    assert isinstance(delegate_task_result, ToolResponse)
 
     dispatch_query_payload = query_execution_module._structured_tool_payload(
         dispatch_query_result,
@@ -147,23 +139,17 @@ def test_query_execution_service_system_dispatch_tools_execute_via_kernel_dispat
         apply_role_result,
         default_error="apply_role test payload missing",
     )
-    delegate_task_payload = query_execution_module._structured_tool_payload(
-        delegate_task_result,
-        default_error="delegate_task test payload missing",
-    )
 
     assert dispatch_query_payload["success"] is True
     assert discover_capabilities_payload["success"] is True
     assert apply_role_payload["success"] is True
     assert "goal_count" not in apply_role_payload
-    assert delegate_task_payload["success"] is True
     assert [task.capability_ref for task in kernel_dispatcher.submitted] == [
         "system:dispatch_query",
         "system:discover_capabilities",
         "system:apply_role",
-        "system:delegate_task",
     ]
-    assert len(kernel_dispatcher.executed) == 4
+    assert len(kernel_dispatcher.executed) == 3
     dispatch_query_task = kernel_dispatcher.submitted[0]
     assert dispatch_query_task.owner_agent_id == "ops-agent"
     assert dispatch_query_task.parent_task_id == "task-1"
@@ -179,67 +165,6 @@ def test_query_execution_service_system_dispatch_tools_execute_via_kernel_dispat
     assert apply_role_task.payload["agent_id"] == "ops-researcher"
     assert apply_role_task.payload["capabilities"] == ["skill:test-skill", "mcp:browser"]
     assert apply_role_task.payload["capability_assignment_mode"] == "merge"
-    delegate_task = kernel_dispatcher.submitted[3]
-    assert delegate_task.payload["parent_task_id"] == "task-1"
-    assert delegate_task.payload["owner_agent_id"] == "ops-researcher"
-    assert delegate_task.payload["inherit_environment_ref"] is False
-
-
-def test_query_execution_service_delegate_task_tool_ignores_model_supplied_parent_override() -> None:
-    capability_service = _FakeCapabilityService()
-    kernel_dispatcher = _FakeKernelDispatcher()
-    agent_profile_service = _FakeAgentProfileService()
-    service = KernelQueryExecutionService(
-        session_backend=_FakeSessionBackend(),
-        capability_service=capability_service,
-        kernel_dispatcher=kernel_dispatcher,
-        agent_profile_service=agent_profile_service,
-        industry_service=_FakeIndustryService(),
-    )
-    agent_profile = agent_profile_service.get_agent("ops-agent")
-    request = SimpleNamespace(
-        session_id="industry-chat-1",
-        user_id="ops-agent",
-        channel="industry",
-        owner_scope="industry-v1-ops-scope",
-        industry_instance_id="industry-v1-ops",
-        industry_role_id="execution-core",
-        session_kind="industry-agent-chat",
-        entry_source="agent-workbench",
-    )
-
-    tool_functions = service._build_system_tool_functions(
-        request=request,
-        owner_agent_id="ops-agent",
-        agent_profile=agent_profile,
-        system_capability_ids={
-            "system:delegate_task",
-        },
-        kernel_task_id="task-root-1",
-    )
-    delegate_task = next(
-        tool_fn
-        for tool_fn in tool_functions
-        if tool_fn.__name__ == "delegate_task"
-    )
-
-    delegate_task_result = asyncio.run(
-        delegate_task(
-            "Check the missing file and report back honestly.",
-            target_role_name="Ops Researcher",
-            parent_task_id="ctask:stale-auto-cycle-parent",
-        ),
-    )
-
-    delegate_task_payload = query_execution_module._structured_tool_payload(
-        delegate_task_result,
-        default_error="delegate_task test payload missing",
-    )
-
-    assert delegate_task_payload["success"] is True
-    [submitted] = kernel_dispatcher.submitted
-    assert submitted.parent_task_id == "task-root-1"
-    assert submitted.payload["parent_task_id"] == "task-root-1"
 
 
 def test_query_execution_service_specialist_assignment_turn_hides_dispatch_and_delegate_tools() -> None:
@@ -273,7 +198,6 @@ def test_query_execution_service_specialist_assignment_turn_hides_dispatch_and_d
             "system:apply_role",
             "system:discover_capabilities",
             "system:dispatch_query",
-            "system:delegate_task",
         },
         kernel_task_id="task-1",
     )
@@ -644,7 +568,6 @@ def test_query_execution_service_delegation_first_guard_blocks_direct_work_until
         agent_profile=agent_profile,
         system_capability_ids={
             "system:dispatch_query",
-            "system:delegate_task",
         },
     )
 
@@ -658,7 +581,6 @@ def test_query_execution_service_delegation_first_guard_blocks_direct_work_until
         agent_profile=agent_profile,
         system_capability_ids={
             "system:dispatch_query",
-            "system:delegate_task",
         },
         kernel_task_id="task-1",
         delegation_guard=delegation_guard,
@@ -669,7 +591,7 @@ def test_query_execution_service_delegation_first_guard_blocks_direct_work_until
     }
 
     blocked_result = asyncio.run(
-        tools_by_name["delegate_task"](
+        tools_by_name["dispatch_query"](
             "Review the operator handoff notes and summarize blockers.",
         ),
     )
@@ -749,7 +671,6 @@ def test_query_execution_service_delegation_first_guard_prefers_agent_payload_ca
         agent_profile=service._agent_profile_service.get_agent("ops-agent"),
         system_capability_ids={
             "system:dispatch_query",
-            "system:delegate_task",
         },
     )
 
@@ -848,7 +769,6 @@ def test_query_execution_service_delegation_first_guard_unlocks_after_child_term
         agent_profile=agent_profile,
         system_capability_ids={
             "system:dispatch_query",
-            "system:delegate_task",
         },
         kernel_task_id=parent_task_id,
         conversation_thread_id=request.session_id,
@@ -964,7 +884,6 @@ def test_query_execution_service_delegation_first_guard_unlocks_after_real_worke
         agent_profile=agent_profile,
         system_capability_ids={
             "system:dispatch_query",
-            "system:delegate_task",
         },
         kernel_task_id=parent_task_id,
         conversation_thread_id=request.session_id,

@@ -649,3 +649,6 @@ def test_domain_builder_wires_environment_service_into_fixed_sop_service(
     assert captured["routine_service_kwargs"]["agent_profile_service"] is not None
     assert captured["routine_service_kwargs"]["capability_service"] is not None
     assert callable(captured["main_brain_orchestrator_kwargs"]["intake_contract_resolver"])
+    assert "delegation_service" not in captured
+    assert "actor_mailbox_service" not in captured
+    assert "actor_supervisor" not in captured

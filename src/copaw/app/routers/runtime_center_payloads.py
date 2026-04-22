@@ -433,12 +433,6 @@ def _actor_runtime_payload(runtime: object) -> dict[str, object]:
         agent_capabilities_route = f"/api/runtime-center/agents/{agent_id}/capabilities"
         payload["agent_capabilities_route"] = agent_capabilities_route
         payload["routes"] = {
-            "detail": f"/api/runtime-center/actors/{agent_id}",
-            "mailbox": f"/api/runtime-center/actors/{agent_id}/mailbox",
-            "checkpoints": f"/api/runtime-center/actors/{agent_id}/checkpoints",
-            "leases": f"/api/runtime-center/actors/{agent_id}/leases",
-            "teammates": f"/api/runtime-center/actors/{agent_id}/teammates",
-            "capabilities": f"/api/runtime-center/actors/{agent_id}/capabilities",
             "agent_capabilities": agent_capabilities_route,
         }
     return payload

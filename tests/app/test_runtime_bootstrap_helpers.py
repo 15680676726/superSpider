@@ -783,6 +783,10 @@ def test_build_runtime_state_bindings_materializes_single_state_payload() -> Non
     assert bindings["latest_recovery_report"]["source"] == "startup"
     assert bindings["automation_tasks"] == automation_tasks
     assert bindings["automation_tasks"] is not automation_tasks
+    assert "delegation_service" not in bindings
+    assert "actor_mailbox_service" not in bindings
+    assert "actor_worker" not in bindings
+    assert "actor_supervisor" not in bindings
 
 
 def test_build_runtime_state_bindings_exposes_executor_runtime_services() -> None:

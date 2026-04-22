@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -207,108 +205,12 @@ def _list_lifecycle_kernel_tasks(app: FastAPI) -> list[object]:
     ]
 
 
-def test_runtime_center_actor_read_routes(tmp_path) -> None:
-    app, _mailbox_service, _supervisor, item = _build_actor_app(tmp_path)
-    client = TestClient(app)
-
-    list_response = client.get("/runtime-center/actors")
-    assert list_response.status_code == 200
-    actors = list_response.json()
-    assert len(actors) == 2
-    assert actors[0]["routes"]["detail"].startswith("/api/runtime-center/actors/")
-    assert actors[0]["compatibility_mode"] == "read-only-compat"
-    assert "governed_capabilities" not in actors[0]["routes"]
-
-    detail_response = client.get("/runtime-center/actors/agent-1")
-    assert detail_response.status_code == 200
-    detail = detail_response.json()
-    assert detail["runtime"]["agent_id"] == "agent-1"
-    assert detail["runtime"]["compatibility_mode"] == "read-only-compat"
-    assert detail["capability_surface"]["default_mode"] == "governed"
-    assert "system:dispatch_query" in detail["capability_surface"]["recommended_capabilities"]
-    assert detail["stats"]["mailbox_count"] == 1
-    assert detail["stats"]["checkpoint_count"] == 1
-    assert detail["stats"]["lease_count"] == 1
-    assert detail["stats"]["binding_count"] == 1
-    assert detail["teammates"][0]["agent_id"] == "agent-2"
-    assert detail["focus"]["task_id"] == "task-1"
-
-    mailbox_response = client.get("/runtime-center/actors/agent-1/mailbox")
-    assert mailbox_response.status_code == 200
-    mailbox_payload = mailbox_response.json()
-    assert mailbox_payload[0]["id"] == item.id
-    assert mailbox_payload[0]["route"].endswith(item.id)
-
-    mailbox_detail = client.get(f"/runtime-center/actors/agent-1/mailbox/{item.id}")
-    assert mailbox_detail.status_code == 200
-    assert mailbox_detail.json()["conversation_thread_id"] == "agent-chat:agent-1"
-
-    checkpoints_response = client.get("/runtime-center/actors/agent-1/checkpoints")
-    assert checkpoints_response.status_code == 200
-    assert checkpoints_response.json()[0]["phase"] == "queued"
-
-    leases_response = client.get("/runtime-center/actors/agent-1/leases")
-    assert leases_response.status_code == 200
-    assert leases_response.json()[0]["resource_ref"] == "actor-runtime:agent-1"
-
-    teammates_response = client.get("/runtime-center/actors/agent-1/teammates")
-    assert teammates_response.status_code == 200
-    assert teammates_response.json()[0]["thread_bindings"][0]["thread_id"] == "agent-chat:agent-2"
-
-
-def test_runtime_center_actor_focus_ignores_terminal_history(tmp_path) -> None:
-    app, _mailbox_service, _supervisor, item = _build_actor_app(tmp_path)
-    client = TestClient(app)
-
-    mailbox_repository = app.state.agent_mailbox_repository
-    checkpoint_repository = app.state.agent_checkpoint_repository
-    runtime_repository = app.state.agent_runtime_repository
-
-    mailbox_item = mailbox_repository.get_item(item.id)
-    assert mailbox_item is not None
-    mailbox_item.status = "completed"
-    mailbox_item.completed_at = datetime.now(timezone.utc)
-    mailbox_repository.upsert_item(mailbox_item)
-
-    checkpoint = checkpoint_repository.list_checkpoints(agent_id="agent-1", limit=1)[0]
-    checkpoint.status = "applied"
-    checkpoint_repository.upsert_checkpoint(checkpoint)
-
-    runtime = runtime_repository.get_runtime("agent-1")
-    assert runtime is not None
-    runtime.current_task_id = None
-    runtime.current_mailbox_id = None
-    runtime.last_checkpoint_id = checkpoint.id
-    runtime.queue_depth = 0
-    runtime_repository.upsert_runtime(runtime)
-
-    detail_response = client.get("/runtime-center/actors/agent-1")
-    assert detail_response.status_code == 200
-    assert detail_response.json()["focus"] is None
-
-
-def test_runtime_center_actor_focus_supports_async_review_lookup(tmp_path) -> None:
+def test_runtime_center_actor_routes_are_retired(tmp_path) -> None:
     app, _mailbox_service, _supervisor, _item = _build_actor_app(tmp_path)
-
-    class AsyncStateQueryService:
-        async def get_task_review(self, task_id: str) -> dict[str, object]:
-            return {
-                "route": f"/api/runtime-center/tasks/{task_id}/governed-review",
-                "review": {
-                    "task_id": task_id,
-                    "status": "reviewing",
-                },
-            }
-
-    app.state.state_query_service = AsyncStateQueryService()
     client = TestClient(app)
 
-    detail_response = client.get("/runtime-center/actors/agent-1")
-    assert detail_response.status_code == 200
-    focus = detail_response.json()["focus"]
-    assert focus["task_id"] == "task-1"
-    assert focus["route"] == "/api/runtime-center/tasks/task-1/governed-review"
-    assert focus["review"]["status"] == "reviewing"
+    assert client.get("/runtime-center/actors").status_code == 404
+    assert client.get("/runtime-center/actors/agent-1").status_code == 404
 
 
 def test_runtime_center_actor_mutation_routes_are_retired(tmp_path) -> None:
@@ -344,7 +246,7 @@ def test_runtime_center_actor_mutation_routes_are_retired(tmp_path) -> None:
     assert resume_response.status_code == 404
     assert retry_response.status_code == 404
     assert cancel_response.status_code == 404
-    assert assign_capabilities_response.status_code == 405
+    assert assign_capabilities_response.status_code == 404
     assert govern_capabilities_response.status_code == 404
 
 
@@ -367,8 +269,9 @@ def test_runtime_center_actor_capability_assignment_route_uses_agent_surface(tmp
     assert payload["agent"]["agent_id"] == "agent-1"
     assert "tool:send_file_to_user" in payload["agent"]["capabilities"]
     assert "system:dispatch_query" in payload["agent"]["capabilities"]
-    assert payload["runtime"]["routes"]["capabilities"] == "/api/runtime-center/actors/agent-1/capabilities"
-    assert "governed_capabilities" not in payload["runtime"]["routes"]
+    assert payload["runtime"]["routes"] == {
+        "agent_capabilities": "/api/runtime-center/agents/agent-1/capabilities",
+    }
     assert payload["runtime"]["agent_capabilities_route"] == "/api/runtime-center/agents/agent-1/capabilities"
 
     override = app.state.agent_profile_override_repository.get_override("agent-1")
@@ -397,15 +300,14 @@ def test_runtime_center_actor_capability_surface_and_governed_assignment(tmp_pat
     app, _mailbox_service, _supervisor, _item = _build_actor_app(tmp_path)
     client = TestClient(app)
 
-    surface_response = client.get("/runtime-center/actors/agent-1/capabilities")
+    surface_response = client.get("/runtime-center/agents/agent-1/capabilities")
     assert surface_response.status_code == 200
     surface = surface_response.json()
     assert surface["agent_id"] == "agent-1"
     assert surface["default_mode"] == "governed"
     assert "system:dispatch_query" in surface["baseline_capabilities"]
     assert surface["routes"]["governed_assign"] == "/api/runtime-center/agents/agent-1/capabilities/governed"
-    assert "actor_governed_assign" not in surface["routes"]
-    assert "actor_direct_assign" not in surface["routes"]
+    assert "actor_detail" not in surface["routes"]
 
     govern_response = client.post(
         "/runtime-center/agents/agent-1/capabilities/governed",
@@ -426,12 +328,11 @@ def test_runtime_center_actor_capability_surface_and_governed_assignment(tmp_pat
     assert decision["task_id"]
     assert decision["requested_by"] == "copaw-main-brain"
 
-    refreshed_surface = client.get("/runtime-center/actors/agent-1/capabilities")
+    refreshed_surface = client.get("/runtime-center/agents/agent-1/capabilities")
     assert refreshed_surface.status_code == 200
     refreshed_payload = refreshed_surface.json()
     assert refreshed_payload["pending_decisions"] == []
-    assert "actor_governed_assign" not in refreshed_payload["routes"]
-    assert "actor_direct_assign" not in refreshed_payload["routes"]
+    assert "actor_detail" not in refreshed_payload["routes"]
     assert "tool:send_file_to_user" in refreshed_payload["effective_capabilities"]
     lifecycle_tasks = _list_lifecycle_kernel_tasks(app)
     assert len(lifecycle_tasks) == 1
