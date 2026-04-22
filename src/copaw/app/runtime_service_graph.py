@@ -3,8 +3,11 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 from typing import Any
 
+from ..adapters.executors.codex_app_server_adapter import CodexAppServerAdapter
+from ..adapters.executors.codex_app_server_transport import CodexAppServerTransport
 from ..capabilities import CapabilityService
 from ..constant import WORKING_DIR
 from ..evidence import EvidenceLedger
@@ -167,6 +170,25 @@ from .runtime_health_service import RuntimeHealthService
 from .runtime_threads import SessionRuntimeThreadHistoryReader
 
 logger = logging.getLogger(__name__)
+
+
+def _build_default_executor_runtime_port() -> object | None:
+    websocket_url = str(os.getenv("COPAW_CODEX_APP_SERVER_WS_URL") or "").strip() or None
+    codex_bin = str(os.getenv("COPAW_CODEX_APP_SERVER_BIN") or "").strip() or None
+    resolved_bin = codex_bin
+    if resolved_bin is None:
+        if os.name == "nt":
+            resolved_bin = shutil.which("codex.cmd") or shutil.which("codex")
+        else:
+            resolved_bin = shutil.which("codex")
+    if websocket_url is None and resolved_bin is None:
+        return None
+    command = None if resolved_bin is None else (resolved_bin, "app-server")
+    transport = CodexAppServerTransport(
+        websocket_url=websocket_url,
+        codex_command=command,
+    )
+    return CodexAppServerAdapter(transport=transport)
 
 
 async def initialize_mcp_manager(
@@ -542,10 +564,12 @@ def build_runtime_bootstrap(
         repository=repositories.external_runtime_repository,
     )
     _reconcile_external_runtime_truth(external_runtime_service)
+    executor_runtime_port = _build_default_executor_runtime_port()
     executor_runtime_service, executor_runtime_coordinator = build_executor_runtime_coordination_components(
         assignment_service=None,
         external_runtime_service=external_runtime_service,
         project_root=str(WORKING_DIR),
+        executor_runtime_port=executor_runtime_port,
     )
     weixin_ilink_runtime_state = WeixinILinkRuntimeState()
 
@@ -872,6 +896,7 @@ def build_runtime_bootstrap(
         external_runtime_service=external_runtime_service,
         executor_runtime_service=executor_runtime_service,
         executor_runtime_coordinator=executor_runtime_coordinator,
+        executor_runtime_port=executor_runtime_port,
         executor_event_writeback_service=executor_event_writeback_service,
         weixin_ilink_runtime_state=weixin_ilink_runtime_state,
     )

@@ -390,6 +390,54 @@
   - `delegation_service.py`、actor runtime 代码与 donor/project taxonomy 仍保留 compatibility 遗留，尚未物理删除
   - `/capability-market/projects/install*` compatibility/acquisition-only 前门仍在，不得误写成 donor-first 产品壳已删除
 
+## 1.0.9 `2026-04-22` external-executor hard-cut 终态收口
+
+- 本轮完成了 remaining-work plan 的 `Task 7`，同时补齐了此前唯一缺失的 formal external-provider live smoke：
+  - `src/copaw/adapters/executors/codex_protocol.py`、`src/copaw/adapters/executors/codex_app_server_transport.py`、`src/copaw/adapters/executors/codex_app_server_adapter.py` 现已按真实 `Codex App Server` websocket/json-rpc 协议跑通：
+    - `thread/start` -> `result.thread.id`
+    - `turn/start` -> `result.turn.id`
+    - `turn/steer` / `turn/interrupt`
+    - `turn/completed` / `item/completed` / `agentMessage` 事件归一化与 writeback
+  - `src/copaw/app/runtime_service_graph.py`、`src/copaw/app/runtime_bootstrap_models.py`、`src/copaw/app/runtime_state_bindings.py`、`src/copaw/app/_app.py` 现已把 default formal `executor_runtime_port` 接进主启动图，并在 app shutdown 时显式关闭外部 executor transport
+  - `tests/app/test_external_executor_live_smoke.py` 现已覆盖真实 formal provider intake + runtime writeback 主链：
+    - `/capability-market/executor-providers/search`
+    - `/capability-market/executor-providers/install`
+    - real `Codex App Server` session start / event ingest / writeback / readback
+  - `src/copaw/app/runtime_center/task_review_projection.py` 与 `tests/app/test_runtime_center_task_review_projection.py` 同步补了一处 default gate 暴露出的回归：
+    - 对没有 kernel payload 的普通 task，Runtime Center child rollup 现在会默认走 `formal_surface = true`
+    - 不再因为 `payload is None` 在 `serialize_child_rollup(...)` 里崩溃
+- 当前能诚实写出的结论：
+  - external-executor hard-cut 现在已在 **formal execution mainline** 意义上完成终态收口：
+    - formal assignment 主链已锚定到 `Assignment -> ExecutorRuntime -> Event -> Evidence/Report`
+    - formal provider intake 已锚定到 `/capability-market/executor-providers/search` 与 `/executor-providers/install`
+    - default runtime bootstrap 现可直连真实 `Codex App Server` external executor
+    - Runtime Center formal external-runtime read surface、provider inventory、event writeback 与 default regression gate 都已按 fresh 证据跑通
+  - actor runtime、`delegation_service.py`、donor/project product shell 仍保留 compatibility/deprecation 代码，但它们已经不再处在 canonical formal execution path 上；因此它们现在是 **后续删除项**，不是 external-executor hard-cut 终态完成的阻塞项
+- fresh 验收证据：
+  - focused regression：
+    - 命令：`python -m pytest tests/adapters/test_codex_app_server_adapter.py tests/state/test_external_runtime_service.py tests/state/test_executor_runtime_service.py tests/kernel/test_executor_event_ingest_service.py tests/kernel/test_executor_event_writeback_service.py tests/kernel/test_main_brain_executor_runtime_integration.py tests/kernel/test_main_brain_orchestrator.py tests/app/test_runtime_center_executor_runtime_projection.py tests/app/test_runtime_center_executor_runtime_bootstrap.py tests/app/test_executor_event_writeback_bootstrap.py tests/app/test_runtime_center_external_runtime_api.py tests/app/test_runtime_center_actor_api.py tests/app/test_runtime_bootstrap_helpers.py tests/app/test_runtime_execution_provider_wiring.py tests/app/test_runtime_bootstrap_split.py tests/app/test_runtime_center_task_delegation_api.py tests/app/test_capability_market_api.py tests/capabilities/test_project_donor_contracts.py tests/kernel/test_assignment_envelope.py tests/kernel/test_task_execution_projection.py tests/app/test_capabilities_execution.py tests/app/test_mcp_runtime_contract.py -q`
+    - 结果：`282 passed in 182.78s`
+    - 验收层级：`L1 + L2`
+  - `L3` live smoke：
+    - 命令：`COPAW_RUN_EXTERNAL_EXECUTOR_LIVE_SMOKE=1 python -m pytest tests/app/test_external_executor_live_smoke.py -q -k live_external_executor_provider_intake_and_runtime_writeback`
+    - 结果：`1 passed, 1 deselected in 159.27s`
+    - 验收层级：`L3`
+  - `L4` long soak：
+    - 命令：重复执行 `COPAW_RUN_EXTERNAL_EXECUTOR_LIVE_SMOKE=1 python -m pytest tests/app/test_external_executor_live_smoke.py -q -k live_external_executor_provider_intake_and_runtime_writeback`
+    - 结果：连续 `2` 轮分别为 `1 passed, 1 deselected in 169.46s`、`1 passed, 1 deselected in 22.69s`
+    - 验收层级：`selected L4`
+  - `default regression`：
+    - 命令：`python scripts/run_p0_runtime_terminal_gate.py`
+    - 结果：
+      - 后端主链：`361 passed in 251.12s`
+      - 长跑与删旧回归：`84 passed in 405.77s`
+      - 前台定向 Vitest：`4` files / `21` tests passed
+      - 控制台构建：`vite build` passed
+    - 验收层级：`default regression`
+- 当前仍应明确保留的边界：
+  - compatibility/deprecation 代码尚未物理删除；删除计划继续记录在 `DEPRECATION_LEDGER.md`
+  - default formal `executor_runtime_port` 需要本机存在 `codex` binary 或显式提供 `COPAW_CODEX_APP_SERVER_WS_URL`；这是运行前置条件，不是当前 hard-cut 架构缺口
+
 ## 1.1.1 `2026-04-07` Buddy 领域能力阶段收口补充
 
 - Buddy 当前成长阶段的正式真相已从关系经验切到 active `BuddyDomainCapabilityRecord`

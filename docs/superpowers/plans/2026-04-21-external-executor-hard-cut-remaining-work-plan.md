@@ -8,6 +8,8 @@
 
 **Tech Stack:** Python 3.12, FastAPI, SQLite state store, pytest, Vitest, Runtime Center frontend, Codex App Server adapter
 
+**Status Update (`2026-04-22`):** Remaining-work `Task 1-7` is now complete. The latest truthful evidence and acceptance layering live in `TASK_STATUS.md` section `1.0.9`. Physical compatibility deletions remain follow-up items in `DEPRECATION_LEDGER.md`, but they no longer block the external-executor hard-cut completion claim.
+
 ---
 
 ## Guardrails

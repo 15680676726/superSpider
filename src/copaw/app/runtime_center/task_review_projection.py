@@ -458,8 +458,8 @@ def serialize_child_rollup(
     work_context: dict[str, object] | None = None,
 ) -> dict[str, object]:
     kernel_metadata = decode_kernel_task_metadata(getattr(task, "acceptance_criteria", None))
-    payload = dict_from_value((kernel_metadata or {}).get("payload"))
-    payload_meta = dict_from_value(payload.get("meta"))
+    payload = dict_from_value((kernel_metadata or {}).get("payload")) or {}
+    payload_meta = dict_from_value(payload.get("meta")) or {}
     execution_source = first_non_empty(
         payload_meta.get("execution_source"),
         payload.get("execution_source"),

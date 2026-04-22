@@ -229,6 +229,13 @@ async def lifespan(
                 evidence_ledger.close()
             except Exception:
                 pass
+        executor_runtime_port = getattr(app.state, "executor_runtime_port", None)
+        close_executor_runtime_port = getattr(executor_runtime_port, "close", None)
+        if callable(close_executor_runtime_port):
+            try:
+                close_executor_runtime_port()
+            except Exception:
+                pass
         await runtime_host.stop()
         runtime_event_bus = getattr(app.state, "runtime_event_bus", None)
         close_runtime_event_bus = getattr(runtime_event_bus, "close", None)

@@ -1188,6 +1188,7 @@ def test_runtime_center_work_context_detail_reads_runtime_owner_from_state(tmp_p
             "owner_agent_name": "runtime-owner",
             "updated_at": "2026-04-02T12:00:00Z",
             "context_key": "control-thread:runtime-center-api",
+            "formal_surface": True,
             "work_context": {
                 "id": "ctx-api-1",
                 "title": "API-backed work context",

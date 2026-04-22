@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import inspect
 import logging
 from types import SimpleNamespace
@@ -780,6 +781,32 @@ def test_build_runtime_state_bindings_materializes_single_state_payload() -> Non
     assert bindings["latest_recovery_report"]["source"] == "startup"
     assert bindings["automation_tasks"] == automation_tasks
     assert bindings["automation_tasks"] is not automation_tasks
+
+
+def test_build_runtime_state_bindings_exposes_executor_runtime_services() -> None:
+    bootstrap = _build_bootstrap()
+    bootstrap_payload = {
+        field.name: getattr(bootstrap, field.name)
+        for field in dataclasses.fields(bootstrap)
+    }
+    executor_runtime_service = object()
+    executor_runtime_coordinator = object()
+    executor_runtime_port = object()
+    bootstrap_payload["executor_runtime_service"] = executor_runtime_service
+    bootstrap_payload["executor_runtime_coordinator"] = executor_runtime_coordinator
+    bootstrap_payload["executor_runtime_port"] = executor_runtime_port
+    proxy_bootstrap = SimpleNamespace(**bootstrap_payload)
+
+    bindings = build_runtime_state_bindings(
+        runtime_host=object(),
+        bootstrap=proxy_bootstrap,
+        manager_stack=RuntimeManagerStack(),
+        startup_recovery_summary={"reason": "startup"},
+    )
+
+    assert bindings["executor_runtime_service"] is executor_runtime_service
+    assert bindings["executor_runtime_coordinator"] is executor_runtime_coordinator
+    assert bindings["executor_runtime_port"] is executor_runtime_port
 
 
 def test_build_runtime_state_bindings_preserves_automation_group_contract() -> None:

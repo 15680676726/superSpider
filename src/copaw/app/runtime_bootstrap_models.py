@@ -314,6 +314,7 @@ class RuntimeBootstrap:
     external_runtime_service: Any | None = None
     executor_runtime_service: ExecutorRuntimeService | None = None
     executor_runtime_coordinator: AssignmentExecutorRuntimeCoordinator | None = None
+    executor_runtime_port: Any | None = None
     executor_event_writeback_service: ExecutorEventWritebackService | None = None
     weixin_ilink_runtime_state: Any | None = None
     research_session_service: Any | None = None

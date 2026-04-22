@@ -147,6 +147,32 @@ def test_build_runtime_bootstrap_assembles_domain_services_via_domain_builder(
         "_build_runtime_observability",
         lambda **kwargs: ("evidence-ledger", "environment-registry", "environment-service", "runtime-event-bus"),
     )
+    executor_runtime_port = object()
+    monkeypatch.setattr(
+        runtime_service_graph_module,
+        "_build_default_executor_runtime_port",
+        lambda: executor_runtime_port,
+        raising=False,
+    )
+    class _ExecutorRuntimeCoordinator:
+        def set_assignment_service(self, assignment_service) -> None:
+            calls["executor_runtime_assignment_service"] = assignment_service
+
+        def set_executor_event_writeback_service(self, service) -> None:
+            calls["executor_runtime_writeback_service"] = service
+
+    def _fake_executor_runtime_coordination(**kwargs):
+        calls["executor_runtime_coordination_kwargs"] = kwargs
+        return (
+            "executor-runtime-service",
+            _ExecutorRuntimeCoordinator(),
+        )
+
+    monkeypatch.setattr(
+        runtime_service_graph_module,
+        "build_executor_runtime_coordination_components",
+        _fake_executor_runtime_coordination,
+    )
     monkeypatch.setattr(
         runtime_service_graph_module,
         "_build_query_services",
@@ -237,6 +263,7 @@ def test_build_runtime_bootstrap_assembles_domain_services_via_domain_builder(
     assert calls["domain_builder_kwargs"]["capability_service"] is capability_service
     assert calls["domain_builder_kwargs"]["runtime_provider"] == "provider-runtime-facade"
     assert calls["domain_builder_kwargs"]["knowledge_graph_service"] == "knowledge-graph-service"
+    assert calls["executor_runtime_coordination_kwargs"]["executor_runtime_port"] is executor_runtime_port
     assert calls["governance_environment_service"] == "environment-service"
     assert calls["governance_industry_service"] == "industry-service"
     assert (
@@ -262,6 +289,8 @@ def test_build_runtime_bootstrap_assembles_domain_services_via_domain_builder(
     assert bootstrap.main_brain_orchestrator == "main-brain-orchestrator"
     assert bootstrap.runtime_provider == "provider-runtime-facade"
     assert bootstrap.provider_admin_service == "provider-admin-service"
+    assert bootstrap.executor_runtime_service == "executor-runtime-service"
+    assert bootstrap.executor_runtime_port is executor_runtime_port
     assert not hasattr(bootstrap, "provider_manager")
     assert bootstrap.turn_executor == "turn-executor"
 

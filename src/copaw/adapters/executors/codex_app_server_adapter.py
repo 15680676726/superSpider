@@ -54,6 +54,8 @@ class CodexAppServerAdapter(ExecutorRuntimePort):
             resolved_thread_id = extract_thread_id(thread_response)
             if resolved_thread_id is None:
                 raise ValueError("Codex App Server did not return a thread id")
+        else:
+            thread_response = {}
 
         turn_method, turn_params = build_turn_start_request(
             thread_id=resolved_thread_id,
@@ -68,7 +70,7 @@ class CodexAppServerAdapter(ExecutorRuntimePort):
         return ExecutorTurnStartResult(
             thread_id=resolved_thread_id,
             turn_id=turn_id,
-            model_ref=extract_model_ref(turn_response),
+            model_ref=extract_model_ref(turn_response) or extract_model_ref(thread_response),
             runtime_metadata=extract_runtime_metadata(turn_response),
         )
 
@@ -103,6 +105,11 @@ class CodexAppServerAdapter(ExecutorRuntimePort):
             event = self.normalize_event(payload)
             if event is not None:
                 yield event
+
+    def close(self) -> None:
+        closer = getattr(self._transport, "close", None)
+        if callable(closer):
+            closer()
 
     def normalize_event(
         self,

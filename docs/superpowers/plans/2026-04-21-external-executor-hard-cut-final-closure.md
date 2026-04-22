@@ -8,6 +8,8 @@
 
 **Tech Stack:** Python 3.12, FastAPI, SQLite state store, pytest, Vitest, Runtime Center frontend, Codex App Server adapter
 
+**Status Update (`2026-04-22`):** This closure plan is now complete at the formal execution mainline boundary. Fresh evidence lives in `TASK_STATUS.md` section `1.0.9`: focused regression `282 passed`, formal provider live smoke `1 passed`, repeated selected `L4` live cycles, and `python scripts/run_p0_runtime_terminal_gate.py` passed end-to-end. Compatibility leftovers remain tracked in `DEPRECATION_LEDGER.md` and are no longer part of the canonical execution path.
+
 ---
 
 ### Task 1: Formalize The Executor Truth Chain

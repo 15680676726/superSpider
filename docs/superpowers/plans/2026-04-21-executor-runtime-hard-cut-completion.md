@@ -8,6 +8,8 @@
 
 **Tech Stack:** Python 3.12, FastAPI, SQLite state store, pytest, Runtime Center frontend, Codex App Server protocol shim
 
+**Status Update (`2026-04-22`):** This plan is now historical. Later work closed the remaining formal provider-intake and runtime-bootstrap gaps; see `TASK_STATUS.md` section `1.0.9` for the latest truthful terminal-closure evidence.
+
 ---
 
 ## Scope

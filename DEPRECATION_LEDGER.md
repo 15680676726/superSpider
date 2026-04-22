@@ -242,6 +242,9 @@
   - `runtime_bootstrap_execution.py` / `runtime_service_graph.py` 现已把 actor runtime 收进显式 compatibility wiring；default formal bootstrap 不再默认装配 `actor_mailbox_service / actor_worker / actor_supervisor`
   - `_app.py` 现只会在 actor supervisor 被显式装配时启动 actor runtime lifecycle
   - 因此 actor runtime 已退出 default formal startup graph，但 compatibility codepath 与显式 read surface 仍在；本条目继续保持 `frozen`，不得误写成 `deleted`
+  - `2026-04-22` 验收补充：
+    - formal external-provider intake 现已通过真实 `Codex App Server` live smoke，且 `python scripts/run_p0_runtime_terminal_gate.py` 已 fresh 通过
+    - 因此 actor runtime compatibility surface 已不再阻塞 external-executor hard-cut 的终态完成声明；但物理删除仍是后续退役事项，本条目继续保持 `frozen`
 
 ### 3.1.4 `src/copaw/kernel/delegation_service.py`
 
@@ -282,6 +285,9 @@
     - `formal_surface = false`
     - `compatibility_mode = delegation-compat`
   - 因此 delegation compatibility run 不再伪装成 formal assignment child backend；但 `delegation_service.py` 仍会创建 compatibility child task，因此本条目继续保持 `frozen`
+  - `2026-04-22` 验收补充：
+    - formal assignment -> executor-runtime mainline、formal provider intake live smoke、以及 default regression gate 现都已 fresh 通过
+    - 因此 `delegation_service.py` 剩余的 compatibility child-task 能力不再阻塞 external-executor hard-cut 终态收口；但物理删除与 capability 退役仍属于后续删除项
 
 ### 3.1.5 donor-first 外接项目产品面：`/capability-market/projects/install*`、`project donor` taxonomy、Runtime Center donor 读面
 
@@ -327,6 +333,9 @@
     - `compatibility_mode = compatibility/acquisition-only`
     - `formal_surface = false`
   - donor/project shell 因此不再返回“裸 runtime_contract”误导前台把 acquisition-only surface 当 active execution shell；但 donor-first taxonomy 与路由仍在，本条目继续保持 `frozen`
+  - `2026-04-22` 验收补充：
+    - `/capability-market/executor-providers/search` 与 `/executor-providers/install` 现已通过真实 external-provider smoke，formal provider intake 已不再依赖 donor/project 产品壳做真实性证明
+    - 因此 donor/project compatibility/acquisition-only surface 已不再阻塞 external-executor hard-cut 终态完成；但 donor-first taxonomy、旧产品壳与路由删除仍是单独 follow-up
 
 ### 3.1.6 本地 browser 执行层：`src/copaw/agents/tools/browser_control.py`、`src/copaw/capabilities/browser_runtime.py`、`src/copaw/environments/surface_execution/browser/service.py`
 
