@@ -41,6 +41,8 @@ class CodexStdioTransport:
         self._initialized = False
         self._launch_env: dict[str, str] = {}
         self._launch_args: tuple[str, ...] = ()
+        self._server_request_handler = None
+        self._restart_count = 0
         self._request_ids = itertools.count(1)
         self._response_queues: dict[str, queue.Queue[object]] = {}
         self._event_queues: dict[str, queue.Queue[object]] = {}
@@ -85,6 +87,10 @@ class CodexStdioTransport:
         self._shutdown_process()
         self._signal_shutdown()
 
+    def set_server_request_handler(self, handler) -> None:
+        with self._lock:
+            self._server_request_handler = handler
+
     def configure_launch(
         self,
         *,
@@ -108,6 +114,33 @@ class CodexStdioTransport:
         if changed:
             self._shutdown_process()
             self._initialized = False
+            self._reader_error = None
+            self._reset_queues()
+
+    def describe_sidecar(self) -> dict[str, object]:
+        process = self._process
+        return {
+            "transport_kind": "stdio",
+            "connected": process is not None and process.poll() is None,
+            "initialized": self._initialized,
+            "process_id": getattr(process, "pid", None),
+            "command": list(self._codex_command),
+            "launch_args": list(self._launch_args),
+            "restart_count": self._restart_count,
+            "reader_error": self._reader_error,
+        }
+
+    def restart(self) -> dict[str, object]:
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("Codex stdio transport is closed.")
+            self._restart_count += 1
+        self._shutdown_process()
+        self._initialized = False
+        self._reader_error = None
+        self._signal_shutdown()
+        self._reset_queues()
+        return self.describe_sidecar()
 
     def _ensure_connection(self) -> None:
         with self._lock:
@@ -225,6 +258,14 @@ class CodexStdioTransport:
                 if not isinstance(payload, Mapping):
                     continue
                 message = dict(payload)
+                if (
+                    _text(message.get("method")) is not None
+                    and _text(message.get("id")) is not None
+                    and "result" not in message
+                    and "error" not in message
+                ):
+                    self._handle_server_request(message)
+                    continue
                 response_id = _text(message.get("id"))
                 if response_id is not None:
                     self._deliver_response(response_id, message)
@@ -237,6 +278,46 @@ class CodexStdioTransport:
             self._reader_error = str(exc)
         finally:
             self._signal_shutdown()
+
+    def _handle_server_request(self, payload: Mapping[str, Any]) -> None:
+        request_id = _text(payload.get("id"))
+        method = _text(payload.get("method"))
+        if request_id is None or method is None:
+            return
+        handler = self._server_request_handler
+        if not callable(handler):
+            self._send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": {
+                        "code": -32601,
+                        "message": f"No handler registered for sidecar request '{method}'.",
+                    },
+                }
+            )
+            return
+        try:
+            result = handler(dict(payload))
+        except Exception as exc:
+            self._send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": {
+                        "code": -32000,
+                        "message": str(exc),
+                    },
+                }
+            )
+            return
+        self._send_json(
+            {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": dict(result or {}),
+            }
+        )
 
     def _deliver_response(self, request_id: str, payload: Mapping[str, Any]) -> None:
         with self._lock:
@@ -262,6 +343,7 @@ class CodexStdioTransport:
     def _shutdown_process(self) -> None:
         process = self._process
         self._process = None
+        self._reader_thread = None
         if process is None:
             return
         try:
@@ -277,3 +359,8 @@ class CodexStdioTransport:
                 process.kill()
             except Exception:
                 pass
+
+    def _reset_queues(self) -> None:
+        with self._lock:
+            self._response_queues = {}
+            self._event_queues = {}

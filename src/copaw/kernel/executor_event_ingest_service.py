@@ -103,6 +103,7 @@ class ExecutorEventIngestService:
         "mcpToolCall": "executor-mcp-call",
         "webSearch": "executor-web-search",
     }
+    _APPROVAL_EVENT_TYPES = {"approval_requested", "approval_resolved"}
 
     def ingest_event(
         self,
@@ -154,6 +155,8 @@ class ExecutorEventIngestService:
     ) -> ExecutorEventProjectionKind:
         if event.event_type == "plan_submitted":
             return "plan"
+        if event.event_type in self._APPROVAL_EVENT_TYPES:
+            return "evidence"
         if event.event_type == "evidence_emitted" and event.source_type in self._EVIDENCE_KIND_BY_SOURCE:
             return "evidence"
         if event.event_type in {"task_completed", "task_failed"}:
@@ -185,6 +188,27 @@ class ExecutorEventIngestService:
                 payload=payload,
             )
             return _first_text(result_summary, action_summary) or "Executor emitted evidence"
+        if event.event_type in self._APPROVAL_EVENT_TYPES:
+            request_id = _first_text(payload.get("request_id"), payload.get("requestId"))
+            summary = _first_text(
+                payload.get("summary"),
+                payload.get("message"),
+                payload.get("decision"),
+            )
+            if summary is not None:
+                return summary
+            if event.event_type == "approval_requested":
+                return (
+                    f"Executor approval requested ({request_id})"
+                    if request_id is not None
+                    else "Executor approval requested"
+                )
+            decision = _first_text(payload.get("decision"), payload.get("status"))
+            return (
+                f"Executor approval resolved as {decision}"
+                if decision is not None
+                else "Executor approval resolved"
+            )
         if event.event_type in {"task_completed", "task_failed"}:
             result = "completed" if event.event_type == "task_completed" else "failed"
             summary = _first_text(
@@ -210,6 +234,49 @@ class ExecutorEventIngestService:
         event: ExecutorNormalizedEvent,
         payload: Mapping[str, Any],
     ) -> dict[str, Any] | None:
+        if event.event_type in self._APPROVAL_EVENT_TYPES and _text(context.task_id) is not None:
+            request_id = _first_text(payload.get("request_id"), payload.get("requestId"))
+            decision = _first_text(payload.get("decision"), payload.get("status"))
+            action_summary = _first_text(
+                payload.get("summary"),
+                (
+                    f"Executor approval requested: {request_id}"
+                    if event.event_type == "approval_requested" and request_id is not None
+                    else None
+                ),
+                "Executor approval requested"
+                if event.event_type == "approval_requested"
+                else "Executor approval resolved",
+            )
+            result_summary = _first_text(
+                payload.get("summary"),
+                (
+                    f"Executor approval resolved as {decision}"
+                    if event.event_type == "approval_resolved" and decision is not None
+                    else None
+                ),
+                "Executor approval pending"
+                if event.event_type == "approval_requested"
+                else "Executor approval resolved",
+            )
+            return {
+                "task_id": context.task_id,
+                "actor_ref": f"executor:{context.executor_id}",
+                "capability_ref": f"executor:{context.executor_id}",
+                "environment_ref": self._resolve_environment_ref(context=context, payload=payload),
+                "risk_level": context.risk_level,
+                "kind": "executor-approval",
+                "action_summary": action_summary,
+                "result_summary": result_summary,
+                "status": "recorded",
+                "input_digest": request_id,
+                "output_digest": decision,
+                "metadata": self._build_metadata(
+                    context=context,
+                    event=event,
+                    payload=payload,
+                ),
+            }
         if event.event_type != "evidence_emitted":
             return None
         evidence_kind = self._EVIDENCE_KIND_BY_SOURCE.get(event.source_type)

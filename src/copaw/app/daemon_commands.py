@@ -28,6 +28,11 @@ DAEMON_SUBCOMMANDS = frozenset(
         "reload-config",
         "version",
         "logs",
+        "sidecar-status",
+        "sidecar-restart",
+        "sidecar-interrupt",
+        "sidecar-approve",
+        "sidecar-reject",
     },
 )
 DAEMON_SHORT_ALIASES = {
@@ -37,6 +42,11 @@ DAEMON_SHORT_ALIASES = {
     "reload_config": "reload-config",
     "version": "version",
     "logs": "logs",
+    "sidecar_status": "sidecar-status",
+    "sidecar_restart": "sidecar-restart",
+    "sidecar_interrupt": "sidecar-interrupt",
+    "sidecar_approve": "sidecar-approve",
+    "sidecar_reject": "sidecar-reject",
 }
 
 
@@ -48,6 +58,18 @@ class DaemonContext:
     load_config_fn: Callable[[], Any] = load_config
     conversation_compaction_service: Optional[Any] = None
     restart_callback: Optional[RestartCallback] = None
+    executor_runtime_coordinator: Optional[Any] = None
+
+
+def _text(value: object | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _mapping(value: object | None) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
 
 
 def _get_last_lines(
@@ -155,6 +177,105 @@ def run_daemon_logs(context: DaemonContext, lines: int = 100) -> str:
     return f"**Console log (last {lines} lines)**\n\n```\n{content}\n```"
 
 
+def run_daemon_sidecar_status(context: DaemonContext) -> str:
+    coordinator = context.executor_runtime_coordinator
+    describe = getattr(coordinator, "describe_sidecar_control_state", None)
+    if not callable(describe):
+        return (
+            "**Sidecar Status**\n\n"
+            "- Executor runtime coordinator is not attached."
+        )
+    payload = _mapping(describe())
+    sidecar = _mapping(payload.get("sidecar"))
+    active_runtime = _mapping(payload.get("active_runtime"))
+    pending = list(payload.get("pending_approvals") or [])
+    connected = "yes" if bool(sidecar.get("connected")) else "no"
+    lines = ["**Sidecar Status**", ""]
+    lines.append(f"- Connected: {connected}")
+    lines.append(f"- Transport: {_text(sidecar.get('transport_kind')) or 'unknown'}")
+    lines.append(f"- Restart count: {int(sidecar.get('restart_count') or 0)}")
+    lines.append(f"- Pending approvals: {len(pending)}")
+    if active_runtime:
+        lines.append(f"- Runtime status: {_text(active_runtime.get('runtime_status')) or 'unknown'}")
+        lines.append(f"- Thread id: {_text(active_runtime.get('thread_id')) or 'n/a'}")
+        lines.append(f"- Turn id: {_text(active_runtime.get('turn_id')) or 'n/a'}")
+    return "\n".join(lines)
+
+
+def run_daemon_sidecar_restart(context: DaemonContext) -> str:
+    coordinator = context.executor_runtime_coordinator
+    restart = getattr(coordinator, "restart_sidecar", None)
+    if not callable(restart):
+        return (
+            "**Sidecar Restart**\n\n"
+            "- Executor runtime coordinator is not attached."
+        )
+    payload = _mapping(restart())
+    return (
+        "**Sidecar Restart**\n\n"
+        f"- Connected: {'yes' if bool(payload.get('connected')) else 'no'}\n"
+        f"- Restart count: {int(payload.get('restart_count') or 0)}"
+    )
+
+
+def run_daemon_sidecar_interrupt(
+    context: DaemonContext,
+    *,
+    thread_id: str | None = None,
+    turn_id: str | None = None,
+    assignment_id: str | None = None,
+) -> str:
+    coordinator = context.executor_runtime_coordinator
+    interrupt = getattr(coordinator, "interrupt_active_turn", None)
+    if not callable(interrupt):
+        return (
+            "**Sidecar Interrupt**\n\n"
+            "- Executor runtime coordinator is not attached."
+        )
+    payload = _mapping(
+        interrupt(
+            thread_id=thread_id,
+            turn_id=turn_id,
+            assignment_id=assignment_id,
+        )
+    )
+    return (
+        "**Sidecar Interrupt**\n\n"
+        f"- Status: {_text(payload.get('status')) or 'unknown'}\n"
+        f"- Thread id: {_text(payload.get('thread_id')) or 'n/a'}\n"
+        f"- Turn id: {_text(payload.get('turn_id')) or 'n/a'}"
+    )
+
+
+def run_daemon_sidecar_approval(
+    context: DaemonContext,
+    *,
+    request_id: str,
+    decision: str,
+    reason: str | None = None,
+) -> str:
+    coordinator = context.executor_runtime_coordinator
+    responder = getattr(coordinator, "respond_to_sidecar_approval", None)
+    if not callable(responder):
+        return (
+            "**Sidecar Approval**\n\n"
+            "- Executor runtime coordinator is not attached."
+        )
+    payload = _mapping(
+        responder(
+            request_id,
+            decision=decision,
+            reason=reason,
+        )
+    )
+    return (
+        "**Sidecar Approval**\n\n"
+        f"- Request id: {_text(payload.get('request_id')) or request_id}\n"
+        f"- Status: {_text(payload.get('status')) or decision}\n"
+        f"- Reason: {_text(payload.get('reason')) or 'n/a'}"
+    )
+
+
 def parse_daemon_query(query: str) -> Optional[tuple[str, list[str]]]:
     """Parse `/daemon <sub>` or `/restart` style aliases."""
     if not query or not isinstance(query, str):
@@ -218,6 +339,30 @@ class DaemonCommandHandlerMixin:
                     line_count = max(1, min(int(arg), 2000))
                     break
             text = run_daemon_logs(context, lines=line_count)
+        elif subcommand == "sidecar-status":
+            text = run_daemon_sidecar_status(context)
+        elif subcommand == "sidecar-restart":
+            text = run_daemon_sidecar_restart(context)
+        elif subcommand == "sidecar-interrupt":
+            thread_id = args[0] if len(args) > 0 else None
+            turn_id = args[1] if len(args) > 1 else None
+            assignment_id = args[2] if len(args) > 2 else None
+            text = run_daemon_sidecar_interrupt(
+                context,
+                thread_id=thread_id,
+                turn_id=turn_id,
+                assignment_id=assignment_id,
+            )
+        elif subcommand in {"sidecar-approve", "sidecar-reject"}:
+            if not args:
+                text = "**Sidecar Approval**\n\n- Missing request id."
+            else:
+                text = run_daemon_sidecar_approval(
+                    context,
+                    request_id=args[0],
+                    decision="approved" if subcommand == "sidecar-approve" else "rejected",
+                    reason=" ".join(args[1:]).strip() or None,
+                )
         else:
             text = "Unknown daemon subcommand."
         logger.info("handle_daemon_command %s completed", query)
@@ -239,6 +384,10 @@ __all__ = [
     "run_daemon_logs",
     "run_daemon_reload_config",
     "run_daemon_restart",
+    "run_daemon_sidecar_approval",
+    "run_daemon_sidecar_interrupt",
+    "run_daemon_sidecar_restart",
+    "run_daemon_sidecar_status",
     "run_daemon_status",
     "run_daemon_version",
 ]

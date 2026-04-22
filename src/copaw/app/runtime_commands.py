@@ -65,9 +65,16 @@ def infer_turn_capability_and_risk(query: str | None) -> tuple[str, str]:
         return "system:dispatch_command", "auto"
 
     subcommand = parsed[0]
-    if subcommand in {"restart", "reload-config"}:
+    if subcommand in {
+        "restart",
+        "reload-config",
+        "sidecar-restart",
+        "sidecar-interrupt",
+        "sidecar-approve",
+        "sidecar-reject",
+    }:
         return "system:dispatch_command", "confirm"
-    if subcommand in {"logs", "status", "version"}:
+    if subcommand in {"logs", "status", "version", "sidecar-status"}:
         return "system:dispatch_command", "guarded"
     return "system:dispatch_command", "guarded"
 
@@ -93,6 +100,7 @@ async def run_command_path(
     session_backend,
     conversation_compaction_service,
     restart_callback,
+    executor_runtime_coordinator=None,
 ) -> AsyncIterator[tuple]:
     """Run daemon/conversation commands without entering the full query path."""
     query = get_last_user_text(msgs)
@@ -131,6 +139,7 @@ async def run_command_path(
             load_config_fn=load_config,
             conversation_compaction_service=conversation_compaction_service,
             restart_callback=restart_callback,
+            executor_runtime_coordinator=executor_runtime_coordinator,
         )
         message = await handler.handle_daemon_command(query, context)
         yield message, True

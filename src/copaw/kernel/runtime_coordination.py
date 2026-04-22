@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import logging
 import threading
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from typing import Any
 
 from ..capabilities.donor_provider_injection import (
@@ -11,7 +12,7 @@ from ..capabilities.donor_provider_injection import (
 )
 from .executor_event_ingest_service import ExecutorEventIngestContext
 from .executor_event_writeback_service import ExecutorEventWritebackService
-from .executor_runtime_port import ExecutorRuntimePort
+from .executor_runtime_port import ExecutorNormalizedEvent, ExecutorRuntimePort
 
 
 DURABLE_RUNTIME_COORDINATOR_CONTRACT = "durable-runtime-coordinator/v1"
@@ -145,6 +146,24 @@ class ExecutorRuntimeSelection:
     sidecar_launch_payload: dict[str, Any] | None = None
 
 
+@dataclass(slots=True)
+class _PendingSidecarApproval:
+    request_id: str
+    runtime_id: str
+    thread_id: str
+    turn_id: str | None
+    method: str
+    risk_level: str
+    summary: str | None
+    params: dict[str, Any]
+    status: str = "pending"
+    decision: str | None = None
+    reason: str | None = None
+    created_at: float = field(default_factory=time.time)
+    resolved_at: float | None = None
+    wait_event: threading.Event = field(default_factory=threading.Event, repr=False)
+
+
 class AssignmentExecutorRuntimeCoordinator:
     """Optional seam from assignment truth into executor runtime selection/start."""
 
@@ -168,6 +187,12 @@ class AssignmentExecutorRuntimeCoordinator:
         self._default_executor_provider_id = _text(default_executor_provider_id)
         self._default_model_policy_id = _text(default_model_policy_id)
         self._project_root = _text(project_root)
+        self._sidecar_request_lock = threading.RLock()
+        self._sidecar_context_by_thread: dict[str, ExecutorEventIngestContext] = {}
+        self._runtime_id_by_thread: dict[str, str] = {}
+        self._pending_sidecar_approvals: dict[str, _PendingSidecarApproval] = {}
+        self._sidecar_approval_timeout_seconds = 5.0
+        self._sync_sidecar_request_handler()
 
     def set_assignment_service(self, assignment_service: object | None) -> None:
         self._assignment_service = assignment_service
@@ -184,6 +209,7 @@ class AssignmentExecutorRuntimeCoordinator:
         executor_runtime_port: ExecutorRuntimePort | None,
     ) -> None:
         self._executor_runtime_port = executor_runtime_port
+        self._sync_sidecar_request_handler()
 
     def set_executor_event_writeback_service(
         self,
@@ -211,6 +237,15 @@ class AssignmentExecutorRuntimeCoordinator:
         setter = getattr(writeback_service, "set_executor_runtime_service", None)
         if callable(setter):
             setter(self._executor_runtime_service)
+
+    def _sync_sidecar_request_handler(self) -> None:
+        port = self._executor_runtime_port
+        setter = getattr(port, "set_server_request_handler", None)
+        if callable(setter):
+            try:
+                setter(self.handle_sidecar_request)
+            except Exception:
+                logger.debug("Failed to bind sidecar request handler", exc_info=True)
 
     def coordinate_assignment_runtime(
         self,
@@ -390,6 +425,379 @@ class AssignmentExecutorRuntimeCoordinator:
         )
         self._start_event_writeback(payload=payload)
         return payload
+
+    def handle_sidecar_request(self, payload: dict[str, Any]) -> dict[str, Any]:
+        method = _text(payload.get("method")) or "unknown"
+        if "approval" not in method:
+            return {
+                "status": "ignored",
+                "method": method,
+            }
+        params = _mapping(payload.get("params"))
+        request_id = _text(params.get("requestId")) or _text(payload.get("id"))
+        thread_id = _text(params.get("threadId")) or _text(params.get("thread_id"))
+        turn_id = _text(params.get("turnId")) or _text(params.get("turn_id"))
+        if request_id is None or thread_id is None:
+            return {
+                "decision": "rejected",
+                "status": "rejected",
+                "reason": "Sidecar approval request is missing request_id or thread_id.",
+            }
+        context = self._sidecar_context_by_thread.get(thread_id)
+        runtime_id = self._runtime_id_by_thread.get(thread_id)
+        if context is None or runtime_id is None:
+            return {
+                "decision": "rejected",
+                "status": "rejected",
+                "reason": f"No active executor runtime context bound for thread '{thread_id}'.",
+            }
+        risk_level = _text(params.get("riskLevel")) or context.risk_level or "guarded"
+        approval = _PendingSidecarApproval(
+            request_id=request_id,
+            runtime_id=runtime_id,
+            thread_id=thread_id,
+            turn_id=turn_id,
+            method=method,
+            risk_level=risk_level,
+            summary=_text(params.get("summary")) or _text(params.get("message")),
+            params=params,
+        )
+        with self._sidecar_request_lock:
+            self._pending_sidecar_approvals[request_id] = approval
+        self._mark_runtime_sidecar_state(
+            runtime_id=runtime_id,
+            metadata={
+                "sidecar_control": {
+                    "approval": {
+                        "request_id": request_id,
+                        "thread_id": thread_id,
+                        "turn_id": turn_id,
+                        "status": "pending",
+                        "risk_level": risk_level,
+                        "summary": approval.summary,
+                    }
+                }
+            },
+        )
+        self._emit_sidecar_event(
+            context=context,
+            event_type="approval_requested",
+            payload={
+                "thread_id": thread_id,
+                "turn_id": turn_id,
+                "request_id": request_id,
+                "summary": approval.summary,
+                "decision_mode": risk_level,
+                "method": method,
+            },
+            raw_method=method,
+        )
+        if risk_level == "auto":
+            resolved = self._resolve_pending_sidecar_approval(
+                approval,
+                decision="approved",
+                reason="auto-approved",
+            )
+            return {
+                "requestId": request_id,
+                "decision": resolved["status"],
+                "status": resolved["status"],
+                "reason": resolved.get("reason"),
+            }
+        if not approval.wait_event.wait(timeout=self._sidecar_approval_timeout_seconds):
+            resolved = self._resolve_pending_sidecar_approval(
+                approval,
+                decision="rejected",
+                reason="Approval timed out.",
+            )
+        else:
+            resolved = self._serialize_pending_sidecar_approval(approval)
+        return {
+            "requestId": request_id,
+            "decision": resolved["status"],
+            "status": resolved["status"],
+            "reason": resolved.get("reason"),
+        }
+
+    def list_pending_sidecar_approvals(self) -> list[dict[str, Any]]:
+        with self._sidecar_request_lock:
+            approvals = list(self._pending_sidecar_approvals.values())
+        approvals.sort(key=lambda item: item.created_at)
+        return [self._serialize_pending_sidecar_approval(item) for item in approvals]
+
+    def respond_to_sidecar_approval(
+        self,
+        request_id: str,
+        *,
+        decision: str,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        with self._sidecar_request_lock:
+            approval = self._pending_sidecar_approvals.get(request_id)
+        if approval is None:
+            raise KeyError(f"Pending sidecar approval '{request_id}' not found")
+        normalized_decision = _text(decision) or "rejected"
+        return self._resolve_pending_sidecar_approval(
+            approval,
+            decision=normalized_decision,
+            reason=reason,
+        )
+
+    def describe_sidecar_control_state(self) -> dict[str, Any]:
+        port = self._executor_runtime_port
+        describe = getattr(port, "describe_sidecar", None)
+        sidecar_payload = describe() if callable(describe) else {}
+        active_runtime = self._resolve_active_runtime_snapshot()
+        return {
+            "sidecar": _mapping(sidecar_payload),
+            "pending_approvals": self.list_pending_sidecar_approvals(),
+            "active_runtime": active_runtime,
+        }
+
+    def restart_sidecar(self) -> dict[str, Any]:
+        port = self._executor_runtime_port
+        restart = getattr(port, "restart_sidecar", None)
+        if not callable(restart):
+            raise RuntimeError("Executor runtime port does not support sidecar restart.")
+        runtime_service = self._executor_runtime_service
+        active_runtime_ids: list[str] = []
+        lister = getattr(runtime_service, "list_runtimes", None)
+        marker = getattr(runtime_service, "mark_runtime_stopped", None)
+        if callable(lister) and callable(marker):
+            for runtime in list(lister(formal_only=True) or []):
+                if _text(getattr(runtime, "runtime_status", None)) not in {
+                    "starting",
+                    "restarting",
+                    "ready",
+                    "degraded",
+                }:
+                    continue
+                marker(
+                    getattr(runtime, "runtime_id"),
+                    status="restarting",
+                    metadata={
+                        "sidecar_control": {
+                            "recovery": {
+                                "status": "restarting",
+                                "reason": "operator-requested restart",
+                            }
+                        }
+                    },
+                )
+                active_runtime_ids.append(str(getattr(runtime, "runtime_id")))
+        payload = restart()
+        response = _mapping(payload)
+        response["active_runtime_ids"] = active_runtime_ids
+        return response
+
+    def interrupt_active_turn(
+        self,
+        *,
+        thread_id: str | None = None,
+        turn_id: str | None = None,
+        assignment_id: str | None = None,
+    ) -> dict[str, Any]:
+        port = self._executor_runtime_port
+        runtime_service = self._executor_runtime_service
+        if port is None:
+            raise RuntimeError("Executor runtime port is unavailable.")
+        runtime = self._resolve_target_runtime(
+            thread_id=thread_id,
+            assignment_id=assignment_id,
+        )
+        resolved_thread_id = thread_id or _text(getattr(runtime, "thread_id", None))
+        resolved_turn_id = turn_id
+        if resolved_turn_id is None and runtime_service is not None and resolved_thread_id is not None:
+            list_bindings = getattr(runtime_service, "list_thread_bindings", None)
+            if callable(list_bindings):
+                bindings = list_bindings(thread_id=resolved_thread_id, limit=1)
+                if bindings:
+                    resolved_turn_id = _text(getattr(bindings[0], "last_turn_id", None))
+        if resolved_thread_id is None:
+            raise RuntimeError("No active executor thread is available to interrupt.")
+        response = port.stop_turn(thread_id=resolved_thread_id, turn_id=resolved_turn_id)
+        runtime_id = _text(getattr(runtime, "runtime_id", None))
+        if runtime_id is not None:
+            marker = getattr(runtime_service, "mark_runtime_stopped", None)
+            if callable(marker):
+                marker(
+                    runtime_id,
+                    status="stopped",
+                    metadata={
+                        "sidecar_control": {
+                            "last_action": "interrupt",
+                            "thread_id": resolved_thread_id,
+                            "turn_id": resolved_turn_id,
+                        }
+                    },
+                )
+        result = _mapping(response)
+        result.setdefault("status", "interrupted")
+        result.setdefault("thread_id", resolved_thread_id)
+        result.setdefault("turn_id", resolved_turn_id)
+        result.setdefault("assignment_id", assignment_id or _text(getattr(runtime, "assignment_id", None)))
+        return result
+
+    def _resolve_pending_sidecar_approval(
+        self,
+        approval: _PendingSidecarApproval,
+        *,
+        decision: str,
+        reason: str | None,
+    ) -> dict[str, Any]:
+        normalized = decision if decision in {"approved", "rejected"} else "rejected"
+        approval.status = normalized
+        approval.decision = normalized
+        approval.reason = _text(reason)
+        approval.resolved_at = time.time()
+        with self._sidecar_request_lock:
+            self._pending_sidecar_approvals.pop(approval.request_id, None)
+        self._mark_runtime_sidecar_state(
+            runtime_id=approval.runtime_id,
+            metadata={
+                "sidecar_control": {
+                    "approval": {
+                        "request_id": approval.request_id,
+                        "thread_id": approval.thread_id,
+                        "turn_id": approval.turn_id,
+                        "status": normalized,
+                        "risk_level": approval.risk_level,
+                        "summary": approval.summary,
+                        "reason": approval.reason,
+                    }
+                }
+            },
+        )
+        context = self._sidecar_context_by_thread.get(approval.thread_id)
+        if context is not None:
+            self._emit_sidecar_event(
+                context=context,
+                event_type="approval_resolved",
+                payload={
+                    "thread_id": approval.thread_id,
+                    "turn_id": approval.turn_id,
+                    "request_id": approval.request_id,
+                    "summary": approval.summary,
+                    "decision": normalized,
+                    "reason": approval.reason,
+                },
+                raw_method=approval.method,
+            )
+        approval.wait_event.set()
+        return self._serialize_pending_sidecar_approval(approval)
+
+    def _serialize_pending_sidecar_approval(
+        self,
+        approval: _PendingSidecarApproval,
+    ) -> dict[str, Any]:
+        return {
+            "request_id": approval.request_id,
+            "runtime_id": approval.runtime_id,
+            "thread_id": approval.thread_id,
+            "turn_id": approval.turn_id,
+            "method": approval.method,
+            "risk_level": approval.risk_level,
+            "summary": approval.summary,
+            "status": approval.status,
+            "reason": approval.reason,
+            "created_at": approval.created_at,
+            "resolved_at": approval.resolved_at,
+        }
+
+    def _emit_sidecar_event(
+        self,
+        *,
+        context: ExecutorEventIngestContext,
+        event_type: str,
+        payload: dict[str, Any],
+        raw_method: str | None,
+    ) -> None:
+        writeback_service = self._executor_event_writeback_service
+        if writeback_service is None:
+            return
+        try:
+            writeback_service.ingest_and_writeback(
+                context=context,
+                event=ExecutorNormalizedEvent(
+                    event_type=event_type,
+                    source_type="approval",
+                    payload=dict(payload),
+                    raw_method=raw_method,
+                ),
+            )
+        except Exception:
+            logger.debug("Failed to record sidecar approval event", exc_info=True)
+
+    def _mark_runtime_sidecar_state(
+        self,
+        *,
+        runtime_id: str,
+        metadata: dict[str, Any],
+    ) -> None:
+        runtime_service = self._executor_runtime_service
+        getter = getattr(runtime_service, "get_runtime", None)
+        ready_marker = getattr(runtime_service, "mark_runtime_ready", None)
+        stopped_marker = getattr(runtime_service, "mark_runtime_stopped", None)
+        runtime = getter(runtime_id) if callable(getter) else None
+        current_status = _text(getattr(runtime, "runtime_status", None))
+        try:
+            if current_status in {"completed", "stopped", "failed", "orphaned"} and callable(
+                stopped_marker,
+            ):
+                stopped_marker(runtime_id, status=current_status, metadata=metadata)
+                return
+            if callable(ready_marker):
+                ready_marker(runtime_id, metadata=metadata)
+        except Exception:
+            logger.debug("Failed to persist sidecar runtime metadata", exc_info=True)
+
+    def _resolve_active_runtime_snapshot(self) -> dict[str, Any] | None:
+        runtime = self._resolve_target_runtime(thread_id=None, assignment_id=None)
+        if runtime is None:
+            return None
+        return _compact_mapping(
+            {
+                "runtime_id": _text(getattr(runtime, "runtime_id", None)),
+                "assignment_id": _text(getattr(runtime, "assignment_id", None)),
+                "thread_id": _text(getattr(runtime, "thread_id", None)),
+                "runtime_status": _text(getattr(runtime, "runtime_status", None)),
+            }
+        )
+
+    def _resolve_target_runtime(
+        self,
+        *,
+        thread_id: str | None,
+        assignment_id: str | None,
+    ) -> object | None:
+        runtime_service = self._executor_runtime_service
+        if runtime_service is None:
+            return None
+        get_runtime = getattr(runtime_service, "get_runtime", None)
+        list_bindings = getattr(runtime_service, "list_thread_bindings", None)
+        if thread_id is not None and callable(list_bindings) and callable(get_runtime):
+            bindings = list_bindings(thread_id=thread_id, limit=1)
+            if bindings:
+                runtime = get_runtime(getattr(bindings[0], "runtime_id"))
+                if runtime is not None:
+                    return runtime
+        list_runtimes = getattr(runtime_service, "list_runtimes", None)
+        if callable(list_runtimes):
+            runtimes = list_runtimes(
+                assignment_id=assignment_id,
+                formal_only=True,
+            ) if assignment_id is not None else list_runtimes(formal_only=True)
+            for runtime in list(runtimes or []):
+                if _text(getattr(runtime, "runtime_status", None)) in {
+                    "starting",
+                    "restarting",
+                    "ready",
+                    "degraded",
+                }:
+                    return runtime
+            if runtimes:
+                return runtimes[0]
+        return None
 
     def _resolve_selection(self, *, assignment_id: str) -> ExecutorRuntimeSelection | None:
         assignment_service = self._assignment_service
@@ -650,6 +1058,9 @@ class AssignmentExecutorRuntimeCoordinator:
         except Exception:
             logger.debug("Executor runtime event writeback context is invalid", exc_info=True)
             return
+        with self._sidecar_request_lock:
+            self._sidecar_context_by_thread[thread_id] = context
+            self._runtime_id_by_thread[thread_id] = runtime_id
         thread = threading.Thread(
             target=self._drain_executor_events,
             name=f"executor-runtime-drain:{runtime_id}",
@@ -744,6 +1155,27 @@ class AssignmentExecutorRuntimeCoordinator:
             mark_runtime_stopped(runtime_id, status=status, metadata=metadata)
         except Exception:
             logger.debug("Failed to mark executor runtime terminal state", exc_info=True)
+        with self._sidecar_request_lock:
+            stale_threads = [
+                thread_id
+                for thread_id, mapped_runtime_id in self._runtime_id_by_thread.items()
+                if mapped_runtime_id == runtime_id
+            ]
+            stale_approvals = [
+                approval
+                for approval in self._pending_sidecar_approvals.values()
+                if approval.runtime_id == runtime_id
+            ]
+        for approval in stale_approvals:
+            self._resolve_pending_sidecar_approval(
+                approval,
+                decision="rejected",
+                reason=f"Runtime transitioned to {status}.",
+            )
+        with self._sidecar_request_lock:
+            for thread_id in stale_threads:
+                self._runtime_id_by_thread.pop(thread_id, None)
+                self._sidecar_context_by_thread.pop(thread_id, None)
 
 
 __all__ = [

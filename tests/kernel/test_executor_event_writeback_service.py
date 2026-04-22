@@ -177,6 +177,82 @@ def test_writeback_records_terminal_report_with_evidence_ids() -> None:
     assert report_service._repository.get_report(report.id) == report
 
 
+def test_writeback_records_sidecar_approval_evidence_and_runtime_truth(
+    tmp_path,
+) -> None:
+    evidence_ledger = EvidenceLedger()
+    assignment_service = _FakeAssignmentService()
+    report_service = _FakeReportService()
+    runtime_event_bus = RuntimeEventBus()
+    executor_runtime_service = _build_executor_runtime_service(tmp_path)
+    runtime = executor_runtime_service.create_or_reuse_runtime(
+        executor_id="codex-app-server",
+        protocol_kind="app_server",
+        scope_kind="assignment",
+        assignment_id="assignment-1",
+        role_id="role-1",
+    )
+    executor_runtime_service.mark_runtime_ready(
+        runtime.runtime_id,
+        thread_id="thread-1",
+        turn_id="turn-1",
+    )
+    service = ExecutorEventWritebackService(
+        evidence_ledger=evidence_ledger,
+        assignment_service=assignment_service,
+        agent_report_service=report_service,
+        runtime_event_bus=runtime_event_bus,
+        executor_runtime_service=executor_runtime_service,
+    )
+
+    service.ingest_and_writeback(
+        context=_context(runtime_id=runtime.runtime_id),
+        event=ExecutorNormalizedEvent(
+            event_type="approval_requested",
+            source_type="approval",
+            payload={
+                "thread_id": "thread-1",
+                "turn_id": "turn-1",
+                "request_id": "approval-1",
+                "summary": "Approve guarded command execution",
+                "decision_mode": "confirm",
+            },
+            raw_method="approval/request",
+        ),
+    )
+    service.ingest_and_writeback(
+        context=_context(runtime_id=runtime.runtime_id),
+        event=ExecutorNormalizedEvent(
+            event_type="approval_resolved",
+            source_type="approval",
+            payload={
+                "thread_id": "thread-1",
+                "turn_id": "turn-1",
+                "request_id": "approval-1",
+                "decision": "approved",
+                "summary": "Operator approved guarded command execution",
+            },
+            raw_method="approval/request",
+        ),
+    )
+
+    stored = evidence_ledger.list_by_task("task-1")
+    stored_events = executor_runtime_service.list_event_records(thread_id="thread-1")
+
+    assert [record.kind for record in stored] == [
+        "executor-approval",
+        "executor-approval",
+    ]
+    assert [item.event_type for item in stored_events] == [
+        "approval_resolved",
+        "approval_requested",
+    ]
+    assert assignment_service.attach_calls == [
+        ("assignment-1", [stored[0].id]),
+        ("assignment-1", [stored[1].id]),
+    ]
+
+
 def test_writeback_persists_executor_event_records_into_formal_runtime_truth(
     tmp_path,
 ) -> None:

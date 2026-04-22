@@ -1184,6 +1184,7 @@ class KernelTurnExecutor:
                         session_backend=self._session_backend,
                         conversation_compaction_service=self._conversation_compaction_service,
                         restart_callback=self._restart_callback,
+                        executor_runtime_coordinator=self._executor_runtime_coordinator,
                     ):
                         last_output_summary = summarize_stream_message(msg)
                         yield msg, last
@@ -1195,6 +1196,7 @@ class KernelTurnExecutor:
                             session_backend=self._session_backend,
                             conversation_compaction_service=self._conversation_compaction_service,
                             restart_callback=self._restart_callback,
+                            executor_runtime_coordinator=self._executor_runtime_coordinator,
                         ):
                             last_output_summary = summarize_stream_message(msg)
                             yield msg, last

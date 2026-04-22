@@ -31,6 +31,12 @@ class _CodexTransport(Protocol):
 
     def subscribe_events(self, thread_id: str) -> Iterable[dict[str, object]]: ...
 
+    def set_server_request_handler(self, handler) -> None: ...
+
+    def describe_sidecar(self) -> dict[str, object]: ...
+
+    def restart(self) -> dict[str, object]: ...
+
 
 class CodexAppServerAdapter(ExecutorRuntimePort):
     def __init__(self, *, transport: _CodexTransport) -> None:
@@ -112,6 +118,27 @@ class CodexAppServerAdapter(ExecutorRuntimePort):
             event = self.normalize_event(payload)
             if event is not None:
                 yield event
+
+    def set_server_request_handler(self, handler) -> None:
+        setter = getattr(self._transport, "set_server_request_handler", None)
+        if callable(setter):
+            setter(handler)
+
+    def describe_sidecar(self) -> dict[str, Any]:
+        describe = getattr(self._transport, "describe_sidecar", None)
+        if callable(describe):
+            payload = describe()
+            if isinstance(payload, Mapping):
+                return dict(payload)
+        return {}
+
+    def restart_sidecar(self) -> dict[str, Any]:
+        restart = getattr(self._transport, "restart", None)
+        if callable(restart):
+            payload = restart()
+            if isinstance(payload, Mapping):
+                return dict(payload)
+        return {}
 
     def close(self) -> None:
         closer = getattr(self._transport, "close", None)
