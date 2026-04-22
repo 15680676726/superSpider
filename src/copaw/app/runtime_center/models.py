@@ -310,17 +310,6 @@ def _resolve_automation_report_anchor(
     }
 
 
-def _normalize_supervisor_snapshot(
-    actor_supervisor: object | None,
-) -> dict[str, Any] | None:
-    getter = getattr(actor_supervisor, "snapshot", None)
-    if callable(getter):
-        payload = getter()
-        if isinstance(payload, dict):
-            return dict(payload)
-    return None
-
-
 class RuntimeCenterSurfaceInfo(BaseModel):
     """Metadata describing the live Runtime Center operator surface."""
 
@@ -482,7 +471,6 @@ class RuntimeCenterAppStateView:
     agent_report_repository: Any = None
     cron_manager: Any = None
     automation_overview: list[dict[str, Any]] = field(default_factory=list)
-    actor_supervisor_overview: dict[str, Any] | None = None
     recovery_summary: dict[str, Any] | None = None
     recovery_source: str = "latest"
 
@@ -494,7 +482,6 @@ class RuntimeCenterAppStateView:
             "automation_loop_runtime_repository",
             None,
         )
-        actor_supervisor = getattr(app_state, "actor_supervisor", None)
         recovery_summary, recovery_source = _normalize_recovery_payload(app_state)
         return cls(
             state_query_service=getattr(app_state, "state_query_service", None),
@@ -538,7 +525,6 @@ class RuntimeCenterAppStateView:
                 automation_loop_runtime_repository=automation_loop_runtime_repository,
                 agent_report_repository=getattr(app_state, "agent_report_repository", None),
             ),
-            actor_supervisor_overview=_normalize_supervisor_snapshot(actor_supervisor),
             recovery_summary=recovery_summary,
             recovery_source=recovery_source,
         )
@@ -550,11 +536,6 @@ class RuntimeCenterAppStateView:
 
     def automation_overview_snapshot(self) -> list[dict[str, Any]]:
         return [dict(item) for item in self.automation_overview]
-
-    def actor_supervisor_snapshot(self) -> dict[str, Any] | None:
-        if self.actor_supervisor_overview is None:
-            return None
-        return dict(self.actor_supervisor_overview)
 
 
 class RuntimeMainBrainSection(BaseModel):

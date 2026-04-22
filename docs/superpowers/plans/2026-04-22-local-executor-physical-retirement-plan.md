@@ -133,6 +133,7 @@ These remain follow-up work because the current external executor seam exposes `
   - `runtime_center/models.py` / `overview_cards.py` no longer fall back to `actor_worker / actor_supervisor.runtime_contract` for main-brain governance sidecar memory
   - `overview_main_brain.py` no longer reads `actor_supervisor_snapshot / actor_supervisor.snapshot()` to expose `exception_absorption` in the Runtime Center main-brain card
   - `capabilities/service.py` / `system_handlers.py` no longer keep a formal actor capability setter/dispatch surface; `system_actor_handlers.py` is physically deleted and prediction recommendations no longer emit `system:pause_actor`
+  - `runtime_center/models.py` / `overview_cards.py` no longer expose `main_brain.automation.supervisor`; Runtime Center automation now reads only schedules, automation loops, and heartbeat
   - `actor_mailbox.py` / `actor_worker.py` / `actor_supervisor.py` files still exist, so the task remains `partial`
 
 ### Task 3: Re-state The Remaining Local-Tool Blockers Honestly

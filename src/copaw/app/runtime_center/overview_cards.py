@@ -2843,18 +2843,15 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             or self._string(loop.get("status")) == "degraded"
             or self._string(loop.get("loop_phase")) in {"failed", "degraded"}
         )
-        supervisor = self._build_actor_supervisor_payload(app_state)
         automation_status = "idle"
         if (
-            self._string(supervisor.get("status")) == "degraded"
-            or degraded_loop_count > 0
+            degraded_loop_count > 0
             or heartbeat_status == "error"
         ):
             automation_status = "degraded"
         elif (
             active_schedule_count > 0
             or active_loop_count > 0
-            or bool(supervisor.get("running"))
         ):
             automation_status = "active"
         return {
@@ -2862,7 +2859,6 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             "summary": (
                 f"{schedule_count} schedule(s) visible; "
                 f"{active_loop_count}/{len(automation_loops)} automation loops running; "
-                f"supervisor {self._string(supervisor.get('status')) or 'unavailable'}; "
                 f"heartbeat {heartbeat_status} every {heartbeat_config.every}."
             ),
             "route": "/api/runtime-center/schedules",
@@ -2874,7 +2870,6 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             "active_loop_count": active_loop_count,
             "degraded_loop_count": degraded_loop_count,
             "loops": automation_loops,
-            "supervisor": supervisor,
             "heartbeat": {
                 "route": "/api/runtime-center/heartbeat",
                 "status": heartbeat_status,
@@ -2898,25 +2893,6 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
         app_state: RuntimeCenterAppStateView,
     ) -> list[dict[str, Any]]:
         return app_state.automation_overview_snapshot()
-
-    def _build_actor_supervisor_payload(
-        self,
-        app_state: RuntimeCenterAppStateView,
-    ) -> dict[str, Any]:
-        snapshot = app_state.actor_supervisor_snapshot()
-        if isinstance(snapshot, dict) and snapshot:
-            return snapshot
-        return {
-            "available": False,
-            "status": "unavailable",
-            "running": False,
-            "poll_interval_seconds": None,
-            "active_agent_run_count": 0,
-            "blocked_runtime_count": 0,
-            "recent_failure_count": 0,
-            "last_failure_at": None,
-            "last_failure_type": None,
-        }
 
     def _serialize_timestamp(self, value: object) -> str | None:
         isoformat = getattr(value, "isoformat", None)

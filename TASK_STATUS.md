@@ -705,6 +705,27 @@
   - 结果：`151 passed in 102.52s`
   - 验收层级：`L1 + L2`
 
+## 1.0.18 `2026-04-23` local executor physical-retirement slice（Runtime Center supervisor automation read-surface removal）
+
+- 本轮继续删 Runtime Center / self-check 共用的 actor supervisor 读投影，但没有把 actor kernel 本体误写成已删除：
+  - `src/copaw/app/runtime_center/models.py` 已删除 `actor_supervisor_overview` 与 `actor_supervisor_snapshot()` 读桥
+  - `src/copaw/app/runtime_center/overview_cards.py` 已停止输出 `main_brain.automation.supervisor`
+  - Runtime Center automation 状态与 summary 现在只看 `automation loops + schedules + heartbeat`，不再把 actor supervisor health 当正式 automation 真相
+- 当前能诚实写出的结论：
+  - Runtime Center formal automation 读面已不再依赖 actor supervisor snapshot
+  - 这仍不等于 actor runtime 已物理删除：
+    - `main_brain_chat_service.py` 仍保留 actor supervisor exception-absorption prompt 接线
+    - `query_execution_runtime.py` 仍保留 actor mailbox checkpoint compatibility
+    - `actor_mailbox.py / actor_worker.py / actor_supervisor.py` 文件本体还在
+- fresh focused regression：
+  - 命令：`python -m pytest tests/app/runtime_center_api_parts/overview_governance.py -q -k "automation_loops_without_supervisor_surface or prefers_public_runtime_snapshots or marks_automation_degraded_from_persisted_loop_state"`
+  - 结果：`3 passed, 100 deselected in 9.75s`
+  - 验收层级：`L1 + L2`
+- focused Runtime Center / self-check regression：
+  - 命令：`python -m pytest tests/app/test_runtime_center_api.py tests/app/runtime_center_api_parts/overview_governance.py tests/app/test_runtime_center_overview_group_builders.py tests/app/test_system_api.py -q`
+  - 结果：`249 passed in 111.92s`
+  - 验收层级：`L1 + L2`
+
 ## 1.1.1 `2026-04-07` Buddy 领域能力阶段收口补充
 
 - Buddy 当前成长阶段的正式真相已从关系经验切到 active `BuddyDomainCapabilityRecord`

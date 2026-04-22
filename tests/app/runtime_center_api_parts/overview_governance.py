@@ -737,7 +737,7 @@ def test_runtime_center_overview_uses_state_and_evidence_services():
 
     payload = response.json()
     assert payload["surface"]["version"] == "runtime-center-v1"
-    assert payload["surface"]["status"] == "degraded"
+    assert payload["surface"]["status"] == "state-service"
     assert "bridge" not in payload
 
     cards = {card["key"]: card for card in payload["cards"]}
@@ -794,6 +794,7 @@ def test_runtime_center_overview_uses_state_and_evidence_services():
     assert main_brain_entry["meta"]["strategy_id"] == "strategy:industry:industry-v1-ops:copaw-agent-runner"
     assert "exception_absorption" not in cards["main-brain"]["meta"]
     assert "absorbing internal execution pressure" not in cards["main-brain"]["summary"]
+    assert "supervisor" not in payload["main_brain"]["automation"]
     assert cards["decisions"]["entries"][0]["status"] == "open"
     assert cards["decisions"]["entries"][0]["actions"]["approve"] == "/api/runtime-center/decisions/decision-1/approve"
     assert cards["patches"]["source"] == "learning_service"
@@ -2145,7 +2146,7 @@ def test_runtime_center_main_brain_route_does_not_expose_degraded_runtime_contra
     assert "sidecar_memory" not in governance
 
 
-def test_runtime_center_main_brain_route_exposes_automation_loop_and_supervisor_health():
+def test_runtime_center_main_brain_route_exposes_automation_loops_without_supervisor_surface():
     class _FakeLoopTask:
         def __init__(
             self,
@@ -2239,13 +2240,7 @@ def test_runtime_center_main_brain_route_exposes_automation_loop_and_supervisor_
     assert payload["automation"]["loops"][0]["name"] == "copaw-automation-host-recovery"
     assert payload["automation"]["loops"][0]["status"] == "running"
     assert payload["automation"]["loops"][1]["status"] == "completed"
-    assert payload["automation"]["supervisor"]["status"] == "degraded"
-    assert payload["automation"]["supervisor"]["running"] is True
-    assert payload["automation"]["supervisor"]["poll_interval_seconds"] == 1.25
-    assert payload["automation"]["supervisor"]["active_agent_run_count"] == 1
-    assert payload["automation"]["supervisor"]["blocked_runtime_count"] == 1
-    assert payload["automation"]["supervisor"]["recent_failure_count"] == 1
-    assert payload["automation"]["supervisor"]["last_failure_type"] == "RuntimeError"
+    assert "supervisor" not in payload["automation"]
 
 
 def test_runtime_center_main_brain_route_exposes_automation_loop_snapshots():
@@ -2538,8 +2533,7 @@ def test_runtime_center_main_brain_route_prefers_public_runtime_snapshots():
     assert payload["automation"]["loop_count"] == 1
     assert payload["automation"]["active_loop_count"] == 1
     assert payload["automation"]["loops"][0]["submit_count"] == 4
-    assert payload["automation"]["supervisor"]["poll_interval_seconds"] == 2.5
-    assert payload["automation"]["supervisor"]["active_agent_run_count"] == 2
+    assert "supervisor" not in payload["automation"]
 
 
 def test_runtime_center_main_brain_route_marks_automation_degraded_from_persisted_loop_state():

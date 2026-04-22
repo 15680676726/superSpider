@@ -268,6 +268,11 @@
     - `CapabilityService` / `SystemCapabilityHandler` 已删除 formal actor setter 与 actor-capability dispatch 残口
     - `predictions/service_recommendations.py` 已停止输出 `system:pause_actor`，高负载执行位只会提示 `manual:coordinate-main-brain`
     - 因此 formal actor capability surface 已不再处在 capability execution 主链；但 actor kernel 文件、`main_brain_chat_service.py` / `query_execution_runtime.py` 的 compatibility 接线与 mailbox continuity 链仍在，本条目继续保持 `frozen`
+  - `2026-04-23` automation read-surface 补充：
+    - `runtime_center/models.py` 已删除 `actor_supervisor_overview` 与 `actor_supervisor_snapshot()` 读桥
+    - `overview_cards.py` 已停止输出 `main_brain.automation.supervisor`
+    - Runtime Center / self-check 共用 automation 摘要现在只看 `loops + schedules + heartbeat`，不再把 actor supervisor health 当正式 automation 真相
+    - 因此 actor supervisor automation 读面已退出 Runtime Center formal surface；但 `main_brain_chat_service.py`、`query_execution_runtime.py` 与 actor kernel 文件本体仍在，本条目继续保持 `frozen`
 
 ### 3.1.4 `src/copaw/kernel/delegation_service.py`
 

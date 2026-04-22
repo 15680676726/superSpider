@@ -313,13 +313,7 @@ def test_system_self_check_exposes_runtime_summary_for_automation_and_recovery(
     assert runtime_summary["automation"]["active_loop_count"] == 1
     assert runtime_summary["automation"]["loops"][0]["name"] == "copaw-automation-host-recovery"
     assert runtime_summary["automation"]["loops"][0]["status"] == "running"
-    assert runtime_summary["automation"]["supervisor"]["status"] == "degraded"
-    assert runtime_summary["automation"]["supervisor"]["running"] is True
-    assert runtime_summary["automation"]["supervisor"]["poll_interval_seconds"] == 1.25
-    assert runtime_summary["automation"]["supervisor"]["active_agent_run_count"] == 1
-    assert runtime_summary["automation"]["supervisor"]["blocked_runtime_count"] == 1
-    assert runtime_summary["automation"]["supervisor"]["recent_failure_count"] == 1
-    assert runtime_summary["automation"]["supervisor"]["last_failure_type"] == "RuntimeError"
+    assert "supervisor" not in runtime_summary["automation"]
     assert runtime_summary["startup_recovery"]["available"] is True
     assert runtime_summary["startup_recovery"]["status"] == "ready"
     assert runtime_summary["startup_recovery"]["reason"] == "Recovered leases after restart."
@@ -338,7 +332,7 @@ def test_system_self_check_exposes_runtime_summary_for_automation_and_recovery(
     assert runtime_summary["startup_recovery"]["notes"] == [
         "Recovered canonical scheduler ownership after restart."
     ]
-    assert runtime_summary["status"] == "degraded"
+    assert runtime_summary["status"] == "active"
     by_name = {item["name"]: item for item in payload["checks"]}
     assert by_name["startup_recovery"]["meta"]["recovery_summary"][
         "absorption_action_kind"
