@@ -335,7 +335,7 @@ class AssignmentExecutorRuntimeCoordinator:
         provider = resolve_provider(provider_id)
         if provider is None:
             return None
-        model_policy_id = _text(getattr(binding, "execution_policy_id", None)) or self._default_model_policy_id
+        model_policy_id = _text(getattr(binding, "model_policy_id", None)) or self._default_model_policy_id
         model_ref = None
         if model_policy_id is not None:
             resolve_policy = getattr(runtime_service, "resolve_model_invocation_policy", None)
