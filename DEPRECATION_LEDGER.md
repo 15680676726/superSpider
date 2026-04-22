@@ -281,6 +281,10 @@
     - `runtime_center_dependencies.py` 已删除 `_get_actor_mailbox_service(...)` 与 `_get_actor_supervisor(...)`
     - Runtime Center dependency module 不再为 actor compatibility service 保留专门 getter；formal DI surface 现在只保留 state-query / repository / governance getter
     - 但 Runtime Center actor compatibility API、startup recovery 与 delegation compatibility path 仍直接使用 actor kernel 文件，本条目继续保持 `frozen`
+  - `2026-04-23` runtime-center payload 补充：
+    - `runtime_center_payloads.py` 已删除 `_actor_mailbox_payload(...)` dead helper
+    - Runtime Center payload module 不再保留 actor mailbox compatibility serializer，只剩 actor runtime compatibility payload 与 formal payload serializer
+    - 但 actor mailbox / supervisor compatibility 仍在其他产品面和 kernel 文件中使用，本条目继续保持 `frozen`
 
 ### 3.1.4 `src/copaw/kernel/delegation_service.py`
 

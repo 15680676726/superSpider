@@ -1,10 +1,8 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-from copaw.app.routers.runtime_center_payloads import (
-    _actor_mailbox_payload,
-    _actor_runtime_payload,
-)
+from copaw.app.routers import runtime_center_payloads as runtime_center_payloads_module
+from copaw.app.routers.runtime_center_payloads import _actor_runtime_payload
 
 
 def test_actor_runtime_payload_no_longer_emits_actor_read_routes() -> None:
@@ -21,14 +19,5 @@ def test_actor_runtime_payload_no_longer_emits_actor_read_routes() -> None:
     }
 
 
-def test_actor_mailbox_payload_no_longer_emits_deleted_actor_mailbox_route() -> None:
-    payload = _actor_mailbox_payload(
-        {
-            "id": "mailbox-1",
-            "agent_id": "agent-1",
-            "conversation_thread_id": "agent-chat:agent-1",
-        },
-    )
-
-    assert payload["id"] == "mailbox-1"
-    assert "route" not in payload
+def test_runtime_center_payloads_drop_actor_mailbox_payload_helper() -> None:
+    assert not hasattr(runtime_center_payloads_module, "_actor_mailbox_payload")

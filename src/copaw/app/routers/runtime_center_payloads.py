@@ -437,14 +437,6 @@ def _actor_runtime_payload(runtime: object) -> dict[str, object]:
         }
     return payload
 
-
-def _actor_mailbox_payload(item: object) -> dict[str, object]:
-    payload = _model_dump_or_dict(item)
-    if payload is None:
-        raise HTTPException(500, detail="Actor mailbox payload is not serializable")
-    return payload
-
-
 def _serialize_knowledge_chunk(chunk: object) -> dict[str, object]:
     payload = _model_dump_or_dict(chunk)
     if payload is None:

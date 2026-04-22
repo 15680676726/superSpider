@@ -756,6 +756,21 @@
   - 结果：`32 passed in 39.28s`
   - 验收层级：`L1 + L2`
 
+## 1.0.21 `2026-04-23` local executor physical-retirement slice（Runtime Center actor mailbox payload helper deletion）
+
+- 本轮继续删除 Runtime Center 仅剩测试引用的 actor mailbox compatibility helper：
+  - `src/copaw/app/routers/runtime_center_payloads.py` 已物理删除 `_actor_mailbox_payload(...)`
+  - Runtime Center payload module 现在只保留 actor runtime compatibility payload 与正式 knowledge/task/decision payload serializer，不再保留 actor mailbox dead helper
+- 当前能诚实写出的结论：
+  - Runtime Center payload surface 已进一步退出 actor mailbox compatibility helper
+  - 这仍不等于 actor runtime 已物理删除：
+    - `TaskDelegationService`、`startup_recovery`、`IndustryService` 仍直接依赖 actor mailbox / supervisor compatibility path
+    - `actor_mailbox.py / actor_worker.py / actor_supervisor.py` 文件本体还在
+- fresh focused regression：
+  - 命令：`python -m pytest tests/app/test_runtime_center_actor_api.py tests/app/test_runtime_center_payloads.py tests/app/test_runtime_bootstrap_split.py tests/app/test_industry_service_wiring.py -q`
+  - 结果：`34 passed in 39.50s`
+  - 验收层级：`L1 + L2`
+
 ## 1.1.1 `2026-04-07` Buddy 领域能力阶段收口补充
 
 - Buddy 当前成长阶段的正式真相已从关系经验切到 active `BuddyDomainCapabilityRecord`
