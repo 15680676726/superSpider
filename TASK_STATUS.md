@@ -726,6 +726,22 @@
   - 结果：`249 passed in 111.92s`
   - 验收层级：`L1 + L2`
 
+## 1.0.19 `2026-04-23` local executor physical-retirement slice（main-brain prompt + query checkpoint compatibility removal）
+
+- 本轮继续删除 actor runtime 在纯聊天 prompt 和 query checkpoint 主链里的兼容接线，但没有把 actor kernel 文件本体误写成已删除：
+  - `src/copaw/kernel/main_brain_chat_service.py` 已停止读取 `actor_supervisor.snapshot()` / exception-absorption summary；pure-chat prompt 与 prompt-context signature 不再把 actor supervisor snapshot 当正式输入
+  - `src/copaw/kernel/query_execution_runtime.py` / `src/copaw/kernel/query_execution_context_runtime.py` 已把 checkpoint 读写统一切到 `agent_checkpoint_repository`
+  - `KernelQueryExecutionService` 已删除 `set_actor_mailbox_service(...)` legacy setter；default bootstrap 现在显式注入 `agent_checkpoint_repository`
+- 当前能诚实写出的结论：
+  - 主脑纯聊天链与 query runtime formal checkpoint read/write 已不再依赖 actor supervisor / actor mailbox compatibility surface
+  - 这仍不等于 actor runtime 已物理删除：
+    - `actor_mailbox.py / actor_worker.py / actor_supervisor.py` 文件本体还在
+    - `IndustryService`、`startup_recovery`、`TaskDelegationService` 等 compatibility path 仍保留 actor mailbox / supervisor 链
+- fresh focused regression：
+  - 命令：`python -m pytest tests/kernel/test_main_brain_chat_service.py tests/kernel/test_query_execution_runtime.py tests/kernel/query_execution_environment_parts/dispatch.py tests/kernel/test_main_brain_runtime_context_consumption.py tests/kernel/test_main_brain_runtime_context_buddy_prompt.py tests/app/test_runtime_bootstrap_split.py tests/app/test_industry_service_wiring.py -q`
+  - 结果：`127 passed in 42.32s`
+  - 验收层级：`L1 + L2`
+
 ## 1.1.1 `2026-04-07` Buddy 领域能力阶段收口补充
 
 - Buddy 当前成长阶段的正式真相已从关系经验切到 active `BuddyDomainCapabilityRecord`

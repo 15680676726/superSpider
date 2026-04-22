@@ -273,6 +273,10 @@
     - `overview_cards.py` 已停止输出 `main_brain.automation.supervisor`
     - Runtime Center / self-check 共用 automation 摘要现在只看 `loops + schedules + heartbeat`，不再把 actor supervisor health 当正式 automation 真相
     - 因此 actor supervisor automation 读面已退出 Runtime Center formal surface；但 `main_brain_chat_service.py`、`query_execution_runtime.py` 与 actor kernel 文件本体仍在，本条目继续保持 `frozen`
+  - `2026-04-23` prompt/checkpoint 补充：
+    - `main_brain_chat_service.py` 已停止把 `actor_supervisor.snapshot()` / exception-absorption summary 注入 pure-chat prompt 与 prompt-context signature
+    - `query_execution_runtime.py` / `query_execution_context_runtime.py` 已改用 `agent_checkpoint_repository` 作为 formal checkpoint read/write truth，并删除 `KernelQueryExecutionService.set_actor_mailbox_service(...)`
+    - 因此主脑纯聊天与 query checkpoint 主链已不再依赖 actor supervisor / actor mailbox compatibility；但 `actor_mailbox.py / actor_worker.py / actor_supervisor.py` 文件本体及若干 compatibility path 仍在，本条目继续保持 `frozen`
 
 ### 3.1.4 `src/copaw/kernel/delegation_service.py`
 

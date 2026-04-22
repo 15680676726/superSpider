@@ -1084,7 +1084,7 @@ async def test_main_brain_chat_service_rebuilds_heavy_prompt_context_when_runtim
 
 
 @pytest.mark.asyncio
-async def test_main_brain_chat_service_rebuilds_prompt_context_when_exception_absorption_changes(
+async def test_main_brain_chat_service_ignores_actor_supervisor_changes_for_prompt_context(
     monkeypatch: pytest.MonkeyPatch,
 ):
     backend = _FakeSessionBackend()
@@ -1094,7 +1094,6 @@ async def test_main_brain_chat_service_rebuilds_prompt_context_when_exception_ab
     service = MainBrainChatService(
         session_backend=backend,
         industry_service=industry_service,
-        actor_supervisor=actor_supervisor,
         model_factory=lambda: model,
     )
     request = SimpleNamespace(
@@ -1131,7 +1130,7 @@ async def test_main_brain_chat_service_rebuilds_prompt_context_when_exception_ab
         )
     ]
 
-    assert call_counts["runtime"] == 2
+    assert call_counts["runtime"] == 1
     assert len(model.calls) == 2
 
 
@@ -1490,12 +1489,11 @@ def test_main_brain_chat_service_prompt_guides_structured_goal_and_auto_progress
     assert "优先给结果、进度、下一步" in system_prompt
 
 
-def test_main_brain_chat_service_prompt_includes_exception_absorption_summary_without_low_level_case_names():
+def test_main_brain_chat_service_prompt_no_longer_includes_exception_absorption_summary():
     actor_supervisor = _VersionedActorSupervisor()
     service = MainBrainChatService(
         session_backend=_FakeSessionBackend(),
         industry_service=_VersionedIndustryService(),
-        actor_supervisor=actor_supervisor,
         model_factory=lambda: _StaticResponseModel("ok"),
     )
     request = SimpleNamespace(
@@ -1514,8 +1512,8 @@ def test_main_brain_chat_service_prompt_includes_exception_absorption_summary_wi
     )
 
     context_prompt = prompt_messages[1]["content"]
-    assert "## 主脑异常吸收" in context_prompt
-    assert "internal execution pressure" in context_prompt
+    assert "## 主脑异常吸收" not in context_prompt
+    assert "internal execution pressure" not in context_prompt
     assert "writer-contention" not in context_prompt
     assert "waiting-confirm-orphan" not in context_prompt
 

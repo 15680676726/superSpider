@@ -701,7 +701,7 @@ def test_query_execution_service_delegation_first_guard_unlocks_after_child_term
         kernel_dispatcher=kernel_dispatcher,
         agent_profile_service=agent_profile_service,
         industry_service=_FakeIndustryService(),
-        actor_mailbox_service=mailbox_service,
+        agent_checkpoint_repository=checkpoint_repository,
         agent_runtime_repository=runtime_repository,
     )
     agent_profile = agent_profile_service.get_agent("ops-agent")
@@ -819,7 +819,7 @@ def test_query_execution_service_delegation_first_guard_unlocks_after_real_worke
         kernel_dispatcher=_FakeKernelDispatcher(),
         agent_profile_service=agent_profile_service,
         industry_service=_FakeIndustryService(),
-        actor_mailbox_service=mailbox_service,
+        agent_checkpoint_repository=checkpoint_repository,
         agent_runtime_repository=runtime_repository,
     )
     agent_profile = agent_profile_service.get_agent("ops-agent")
@@ -1017,7 +1017,7 @@ def test_query_execution_service_records_resume_checkpoints_and_segment_context(
         agent_profile_service=_FakeAgentProfileService(),
         industry_service=_FakeIndustryService(),
         kernel_dispatcher=dispatcher,
-        actor_mailbox_service=mailbox_service,
+        agent_checkpoint_repository=checkpoint_repository,
         agent_runtime_repository=runtime_repository,
     )
 

@@ -166,28 +166,33 @@ class _QueryExecutionContextRuntimeMixin:
                 _merge_capability_trial_attribution(
                     runtime_metadata.get("current_capability_trial"),
                 )
-        if self._actor_mailbox_service is not None:
-            list_checkpoints = getattr(self._actor_mailbox_service, "list_checkpoints", None)
-            if callable(list_checkpoints):
-                checkpoints = list_checkpoints(
-                    agent_id=agent_id,
-                    task_id=kernel_task_id,
-                    conversation_thread_id=conversation_thread_id,
-                    limit=10,
-                )
-                if checkpoints:
-                    latest_checkpoint = checkpoints[0]
-                    context["resume_checkpoint"] = latest_checkpoint.model_dump(mode="json")
-                    checkpoint_resume = _mapping_value(latest_checkpoint.resume_payload)
-                    if checkpoint_resume:
-                        context["resume_payload"] = checkpoint_resume
-                        embedded_resume = _mapping_value(checkpoint_resume.get("resume_point"))
-                        if embedded_resume and "resume_point" not in context:
-                            context["resume_point"] = embedded_resume
-                        _merge_main_brain_runtime(checkpoint_resume.get("main_brain_runtime"))
-                    checkpoint_snapshot = _mapping_value(latest_checkpoint.snapshot_payload)
-                    if checkpoint_snapshot:
-                        context["resume_snapshot"] = checkpoint_snapshot
+        checkpoint_repository = getattr(self, "_agent_checkpoint_repository", None)
+        if checkpoint_repository is not None:
+            checkpoints = checkpoint_repository.list_checkpoints(
+                agent_id=agent_id,
+                task_id=kernel_task_id,
+                limit=10,
+            )
+            if conversation_thread_id is not None:
+                checkpoints = [
+                    checkpoint
+                    for checkpoint in checkpoints
+                    if _first_non_empty(getattr(checkpoint, "conversation_thread_id", None))
+                    == _first_non_empty(conversation_thread_id)
+                ]
+            if checkpoints:
+                latest_checkpoint = checkpoints[0]
+                context["resume_checkpoint"] = latest_checkpoint.model_dump(mode="json")
+                checkpoint_resume = _mapping_value(latest_checkpoint.resume_payload)
+                if checkpoint_resume:
+                    context["resume_payload"] = checkpoint_resume
+                    embedded_resume = _mapping_value(checkpoint_resume.get("resume_point"))
+                    if embedded_resume and "resume_point" not in context:
+                        context["resume_point"] = embedded_resume
+                    _merge_main_brain_runtime(checkpoint_resume.get("main_brain_runtime"))
+                checkpoint_snapshot = _mapping_value(latest_checkpoint.snapshot_payload)
+                if checkpoint_snapshot:
+                    context["resume_snapshot"] = checkpoint_snapshot
         _merge_main_brain_runtime(
             self._resolve_request_main_brain_runtime_context(request=request),
         )

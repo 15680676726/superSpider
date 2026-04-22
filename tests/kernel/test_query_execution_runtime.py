@@ -242,6 +242,10 @@ def test_query_execution_runtime_drops_legacy_memory_alias() -> None:
     assert not hasattr(KernelQueryExecutionService, "set_memory_manager")
 
 
+def test_query_execution_runtime_drops_actor_mailbox_setter() -> None:
+    assert not hasattr(KernelQueryExecutionService, "set_actor_mailbox_service")
+
+
 def test_query_execution_runtime_resolves_execution_context_from_task_runtime_and_request(
     tmp_path,
 ) -> None:

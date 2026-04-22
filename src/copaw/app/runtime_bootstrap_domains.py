@@ -1255,7 +1255,7 @@ def build_runtime_domain_services(
         memory_recall_service=memory_recall_service,
         memory_surface_service=memory_surface_service,
         memory_activation_service=memory_activation_service,
-        actor_mailbox_service=None,
+        agent_checkpoint_repository=repositories.agent_checkpoint_repository,
         agent_runtime_repository=repositories.agent_runtime_repository,
         governance_control_repository=repositories.governance_control_repository,
         task_repository=repositories.task_repository,
@@ -1269,7 +1269,6 @@ def build_runtime_domain_services(
         agent_profile_service=agent_profile_service,
         memory_recall_service=memory_recall_service,
         memory_surface_service=memory_surface_service,
-        actor_supervisor=None,
         model_factory=runtime_provider.get_active_chat_model,
     )
     main_brain_orchestrator = MainBrainOrchestrator(

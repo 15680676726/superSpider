@@ -15,6 +15,7 @@ from ..industry.models import (
 from ..memory.conversation_compaction_service import ConversationCompactionService
 from ..memory.surface_service import MemorySurfaceService
 from ..memory.knowledge_writeback_service import KnowledgeWritebackService
+from ..state import AgentCheckpointRecord
 from .main_brain_intake import (
     build_industry_chat_action_kwargs,
     read_attached_main_brain_intake_contract,
@@ -750,7 +751,7 @@ class _QueryExecutionRuntimeMixin(
         memory_surface_service: Any | None = None,
         memory_activation_service: Any | None = None,
         buddy_projection_service: Any | None = None,
-        actor_mailbox_service: Any | None = None,
+        agent_checkpoint_repository: Any | None = None,
         agent_runtime_repository: Any | None = None,
         governance_control_repository: Any | None = None,
         task_repository: Any | None = None,
@@ -780,7 +781,7 @@ class _QueryExecutionRuntimeMixin(
         )
         self._memory_activation_service = memory_activation_service
         self._buddy_projection_service = buddy_projection_service
-        self._actor_mailbox_service = actor_mailbox_service
+        self._agent_checkpoint_repository = agent_checkpoint_repository
         self._agent_runtime_repository = agent_runtime_repository
         self._governance_control_repository = governance_control_repository
         self._task_repository = task_repository
@@ -859,8 +860,8 @@ class _QueryExecutionRuntimeMixin(
     def set_memory_activation_service(self, memory_activation_service: Any | None) -> None:
         self._memory_activation_service = memory_activation_service
 
-    def set_actor_mailbox_service(self, actor_mailbox_service: Any | None) -> None:
-        self._actor_mailbox_service = actor_mailbox_service
+    def set_agent_checkpoint_repository(self, agent_checkpoint_repository: Any | None) -> None:
+        self._agent_checkpoint_repository = agent_checkpoint_repository
 
     def set_agent_runtime_repository(self, agent_runtime_repository: Any | None) -> None:
         self._agent_runtime_repository = agent_runtime_repository
@@ -2424,10 +2425,8 @@ class _QueryExecutionRuntimeMixin(
         stream_step_count: int = 0,
         snapshot_payload: dict[str, object] | None = None,
     ) -> Any | None:
-        if self._actor_mailbox_service is None:
-            return None
-        create_checkpoint = getattr(self._actor_mailbox_service, "create_checkpoint", None)
-        if not callable(create_checkpoint):
+        checkpoint_repository = self._agent_checkpoint_repository
+        if checkpoint_repository is None:
             return None
         runtime = (
             self._agent_runtime_repository.get_runtime(agent_id)
@@ -2435,6 +2434,7 @@ class _QueryExecutionRuntimeMixin(
             else None
         )
         mailbox_id = getattr(runtime, "current_mailbox_id", None) if runtime is not None else None
+        work_context_id = _first_non_empty((execution_context or {}).get("work_context_id"))
         task_segment = _mapping_value((execution_context or {}).get("task_segment"))
         resume_point = _mapping_value((execution_context or {}).get("resume_point"))
         main_brain_runtime = self._merge_main_brain_runtime_contexts(
@@ -2462,24 +2462,58 @@ class _QueryExecutionRuntimeMixin(
         degradation = _mapping_value((execution_context or {}).get("degradation"))
         if degradation:
             checkpoint_payload["degradation"] = degradation
-        return create_checkpoint(
+        normalized_snapshot_payload = {
+            "channel": channel,
+            "conversation_thread_id": conversation_thread_id,
+            **dict(snapshot_payload or {}),
+        }
+        candidate_checkpoints = checkpoint_repository.list_checkpoints(
             agent_id=agent_id,
             mailbox_id=mailbox_id,
             task_id=task_id,
-            work_context_id=_first_non_empty((execution_context or {}).get("work_context_id")),
-            checkpoint_kind=checkpoint_kind,
-            status=status,
+            work_context_id=work_context_id,
+            limit=None,
+        )
+        for checkpoint in candidate_checkpoints:
+            if checkpoint.checkpoint_kind != checkpoint_kind:
+                continue
+            if checkpoint.status != status or checkpoint.phase != phase:
+                continue
+            if checkpoint.conversation_thread_id != conversation_thread_id:
+                continue
+            if checkpoint.environment_ref != channel:
+                continue
+            if dict(checkpoint.snapshot_payload or {}) != normalized_snapshot_payload:
+                continue
+            if dict(checkpoint.resume_payload or {}) != checkpoint_payload:
+                continue
+            if checkpoint.summary != summary:
+                continue
+            return checkpoint
+        checkpoint = AgentCheckpointRecord(
+            agent_id=agent_id,
+            mailbox_id=mailbox_id,
+            task_id=task_id,
+            work_context_id=work_context_id,
+            checkpoint_kind=(
+                checkpoint_kind
+                if checkpoint_kind in {"worker-step", "resume", "handoff", "task-result"}
+                else "worker-step"
+            ),
+            status=(status if status in {"ready", "applied", "abandoned", "failed"} else "ready"),
             phase=phase,
+            cursor=_first_non_empty(
+                resume_point.get("cursor"),
+                task_segment.get("segment_id"),
+                conversation_thread_id,
+            ),
             conversation_thread_id=conversation_thread_id,
             environment_ref=channel,
-            summary=summary,
-            snapshot_payload={
-                "channel": channel,
-                "conversation_thread_id": conversation_thread_id,
-                **dict(snapshot_payload or {}),
-            },
+            snapshot_payload=normalized_snapshot_payload,
             resume_payload=checkpoint_payload,
+            summary=summary,
         )
+        return checkpoint_repository.upsert_checkpoint(checkpoint)
 
     def _resolve_query_agent_profile(
         self,
@@ -2850,14 +2884,13 @@ class _QueryExecutionRuntimeMixin(
         parent_task_id: str | None,
         conversation_thread_id: str | None,
     ) -> bool:
-        mailbox_service = self._actor_mailbox_service
-        list_checkpoints = getattr(mailbox_service, "list_checkpoints", None)
-        if not callable(list_checkpoints):
+        checkpoint_repository = self._agent_checkpoint_repository
+        if checkpoint_repository is None:
             return False
         resolved_parent_task_id = _first_non_empty(parent_task_id)
         if resolved_parent_task_id is None:
             return False
-        checkpoints = list_checkpoints(limit=50)
+        checkpoints = checkpoint_repository.list_checkpoints(limit=50)
         for checkpoint in checkpoints:
             if _first_non_empty(getattr(checkpoint, "checkpoint_kind", None)) != "task-result":
                 continue

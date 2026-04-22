@@ -944,7 +944,6 @@ class MainBrainChatService:
         memory_recall_service: MemoryRecallService | None = None,
         memory_surface_service: MemorySurfaceService | None = None,
         buddy_projection_service: Any | None = None,
-        actor_supervisor: object | None = None,
         model_factory: Callable[[], object] | None = None,
         scope_snapshot_service: MainBrainScopeSnapshotService | None = None,
         commit_service: MainBrainCommitService | None = None,
@@ -958,7 +957,6 @@ class MainBrainChatService:
             memory_recall_service=memory_recall_service,
         )
         self._buddy_projection_service = buddy_projection_service
-        self._actor_supervisor = actor_supervisor
         self._model_factory = model_factory or _missing_main_brain_chat_model
         self._scope_snapshot_service = scope_snapshot_service or MainBrainScopeSnapshotService(
             stable_prefix_builder=self._build_stable_prompt_prefix,
@@ -1008,9 +1006,6 @@ class MainBrainChatService:
 
     def set_buddy_projection_service(self, buddy_projection_service: Any | None) -> None:
         self._buddy_projection_service = buddy_projection_service
-
-    def set_actor_supervisor(self, actor_supervisor: object | None) -> None:
-        self._actor_supervisor = actor_supervisor
 
     def set_research_session_service(self, research_session_service: object | None) -> None:
         self._research_session_service = research_session_service
@@ -2343,7 +2338,6 @@ class MainBrainChatService:
         detail: object | None,
         owner_agent_id: str | None,
     ) -> str:
-        exception_absorption = self._load_actor_supervisor_snapshot()
         roster_lines = _format_team_roster(
             detail=detail,
             agent_profile_service=self._agent_profile_service,
@@ -2356,11 +2350,6 @@ class MainBrainChatService:
             f"- {_current_prompt_time_snapshot()}\n"
             "- 凡是涉及今天、明天、周几、截止日期或等待到某天的回答，都必须先以这里的当前时间为准，不要自行猜测。",
             f"## 当前运行摘要\n{_format_runtime_snapshot(detail)}",
-            *(
-                [f"## 主脑异常吸收\n{_format_exception_absorption_snapshot(exception_absorption)}"]
-                if exception_absorption
-                else []
-            ),
             f"## 主脑 cognitive closure\n{_format_cognitive_closure(detail=detail, request=request)}",
             f"## 正式战略摘要\n{_format_strategy_summary(detail)}",
             "## 团队职业成员 roster\n"
@@ -2505,7 +2494,6 @@ class MainBrainChatService:
             "backlog": list(payload.get("backlog") or [])[:8],
             "lanes": list(payload.get("lanes") or [])[:6],
             "agent_reports": list(payload.get("agent_reports") or [])[:6],
-            "exception_absorption": self._load_actor_supervisor_snapshot(),
         }
         try:
             return json.dumps(
@@ -2532,18 +2520,6 @@ class MainBrainChatService:
         except Exception:
             logger.exception("Failed to load industry detail for pure chat")
             return None
-
-    def _load_actor_supervisor_snapshot(self) -> dict[str, Any]:
-        supervisor = self._actor_supervisor
-        if supervisor is None:
-            return {}
-        snapshot_getter = getattr(supervisor, "snapshot", None)
-        try:
-            snapshot = snapshot_getter() if callable(snapshot_getter) else supervisor
-        except Exception:
-            logger.debug("failed to load actor supervisor snapshot for pure chat", exc_info=True)
-            return {}
-        return _normalize_exception_absorption_snapshot(snapshot)
 
     def _resolve_owner_agent_id(self, request: Any, *, detail: object | None) -> str | None:
         explicit = str(getattr(request, "agent_id", "") or "").strip()

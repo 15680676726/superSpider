@@ -150,7 +150,7 @@ def test_query_execution_service_appends_buddy_persona_prompt_when_bound_profile
         capability_service=_FakeCapabilityService(),
         agent_profile_service=_FakeAgentProfileService(),
         industry_service=_ContractAwareIndustryService(),
-        actor_mailbox_service=mailbox_service,
+        agent_checkpoint_repository=checkpoint_repository,
         agent_runtime_repository=runtime_repository,
         buddy_projection_service=_FakeBuddyProjectionService(),
     )
@@ -249,7 +249,7 @@ def test_query_execution_service_appends_current_time_grounding_for_buddy_runtim
         capability_service=_FakeCapabilityService(),
         agent_profile_service=_FakeAgentProfileService(),
         industry_service=_ContractAwareIndustryService(),
-        actor_mailbox_service=mailbox_service,
+        agent_checkpoint_repository=checkpoint_repository,
         agent_runtime_repository=runtime_repository,
         buddy_projection_service=_FakeBuddyProjectionService(),
     )

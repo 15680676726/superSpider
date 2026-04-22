@@ -135,7 +135,7 @@ def test_query_execution_service_formally_consumes_main_brain_runtime_context_in
         capability_service=_FakeCapabilityService(),
         agent_profile_service=_FakeAgentProfileService(),
         industry_service=_FakeIndustryService(),
-        actor_mailbox_service=mailbox_service,
+        agent_checkpoint_repository=checkpoint_repository,
         agent_runtime_repository=runtime_repository,
     )
 
