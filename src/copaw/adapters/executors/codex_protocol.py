@@ -77,14 +77,16 @@ def build_thread_start_request(
     *,
     assignment_id: str,
     project_root: str,
+    model_ref: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     _ = assignment_id
-    return (
-        "thread/start",
-        {
-            "cwd": project_root,
-        },
-    )
+    payload: dict[str, Any] = {
+        "cwd": project_root,
+    }
+    resolved_model_ref = _string(model_ref)
+    if resolved_model_ref is not None:
+        payload["model"] = resolved_model_ref
+    return ("thread/start", payload)
 
 
 def build_turn_start_request(
@@ -93,15 +95,20 @@ def build_turn_start_request(
     prompt: str,
     assignment_id: str,
     project_root: str,
+    model_ref: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     _ = assignment_id
+    payload: dict[str, Any] = {
+        "threadId": thread_id,
+        "input": _text_input(prompt),
+        "cwd": project_root,
+    }
+    resolved_model_ref = _string(model_ref)
+    if resolved_model_ref is not None:
+        payload["model"] = resolved_model_ref
     return (
         "turn/start",
-        {
-            "threadId": thread_id,
-            "input": _text_input(prompt),
-            "cwd": project_root,
-        },
+        payload,
     )
 
 

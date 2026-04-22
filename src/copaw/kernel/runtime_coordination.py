@@ -6,6 +6,9 @@ import threading
 from dataclasses import dataclass
 from typing import Any
 
+from ..capabilities.donor_provider_injection import (
+    build_sidecar_provider_injection_payload,
+)
 from .executor_event_ingest_service import ExecutorEventIngestContext
 from .executor_event_writeback_service import ExecutorEventWritebackService
 from .executor_runtime_port import ExecutorRuntimePort
@@ -137,7 +140,9 @@ class ExecutorRuntimeSelection:
     risk_level: str | None = None
     project_profile_id: str | None = None
     model_policy_id: str | None = None
+    model_ownership_mode: str | None = None
     model_ref: str | None = None
+    sidecar_launch_payload: dict[str, Any] | None = None
 
 
 class AssignmentExecutorRuntimeCoordinator:
@@ -150,6 +155,7 @@ class AssignmentExecutorRuntimeCoordinator:
         executor_runtime_service: object | None = None,
         executor_runtime_port: ExecutorRuntimePort | None = None,
         executor_event_writeback_service: ExecutorEventWritebackService | None = None,
+        provider_runtime_facade: object | None = None,
         default_executor_provider_id: str | None = None,
         default_model_policy_id: str | None = None,
         project_root: str | None = None,
@@ -158,6 +164,7 @@ class AssignmentExecutorRuntimeCoordinator:
         self._executor_runtime_service = executor_runtime_service
         self._executor_runtime_port = executor_runtime_port
         self._executor_event_writeback_service = executor_event_writeback_service
+        self._provider_runtime_facade = provider_runtime_facade
         self._default_executor_provider_id = _text(default_executor_provider_id)
         self._default_model_policy_id = _text(default_model_policy_id)
         self._project_root = _text(project_root)
@@ -184,6 +191,9 @@ class AssignmentExecutorRuntimeCoordinator:
     ) -> None:
         self._executor_event_writeback_service = executor_event_writeback_service
         self._sync_writeback_runtime_service()
+
+    def set_provider_runtime_facade(self, provider_runtime_facade: object | None) -> None:
+        self._provider_runtime_facade = provider_runtime_facade
 
     def set_default_executor_provider_id(self, provider_id: str | None) -> None:
         self._default_executor_provider_id = _text(provider_id)
@@ -247,6 +257,34 @@ class AssignmentExecutorRuntimeCoordinator:
                 "model_ref": selection.model_ref,
             },
         )
+        provider_resolution_status = _text(
+            _mapping(selection.sidecar_launch_payload).get("provider_resolution_status"),
+        )
+        if provider_resolution_status == "failed":
+            error = _text(_mapping(selection.sidecar_launch_payload).get("error")) or (
+                "Sidecar provider resolution failed."
+            )
+            mark_runtime_stopped = getattr(runtime_service, "mark_runtime_stopped", None)
+            if callable(mark_runtime_stopped):
+                try:
+                    runtime = mark_runtime_stopped(
+                        getattr(runtime, "runtime_id"),
+                        status="failed",
+                        metadata={"provider_resolution_error": error},
+                    )
+                except Exception:
+                    logger.debug(
+                        "Failed to mark executor runtime as failed after provider resolution error",
+                        exc_info=True,
+                    )
+            return self._build_payload(
+                request=request,
+                intake_contract=intake_contract,
+                selection=selection,
+                runtime=runtime,
+                status="failed",
+                error=error,
+            )
         if self._executor_runtime_port is None:
             return self._build_payload(
                 request=request,
@@ -263,6 +301,8 @@ class AssignmentExecutorRuntimeCoordinator:
                 project_root=project_root,
                 prompt=prompt,
                 thread_id=_text(getattr(runtime, "thread_id", None)),
+                model_ref=selection.model_ref,
+                sidecar_launch_payload=selection.sidecar_launch_payload,
             )
         except Exception as exc:
             logger.debug("Executor runtime start failed for assignment %s", assignment_id, exc_info=True)
@@ -284,6 +324,48 @@ class AssignmentExecutorRuntimeCoordinator:
                 status="start-failed",
                 error=str(exc),
             )
+        expected_model_ref = selection.model_ref
+        reported_model_ref = _text(getattr(started, "model_ref", None))
+        if (
+            expected_model_ref is not None
+            and reported_model_ref is not None
+            and reported_model_ref != expected_model_ref
+        ):
+            mismatch_error = (
+                f"Executor model mismatch: expected '{expected_model_ref}' "
+                f"but runtime reported '{reported_model_ref}'."
+            )
+            mark_runtime_stopped = getattr(runtime_service, "mark_runtime_stopped", None)
+            if callable(mark_runtime_stopped):
+                try:
+                    runtime = mark_runtime_stopped(
+                        getattr(runtime, "runtime_id"),
+                        status="failed",
+                        metadata={
+                            "model_mismatch_error": mismatch_error,
+                            "expected_model_ref": expected_model_ref,
+                            "reported_model_ref": reported_model_ref,
+                        },
+                    )
+                except Exception:
+                    logger.debug(
+                        "Failed to mark executor runtime as failed after model mismatch",
+                        exc_info=True,
+                    )
+            payload = self._build_payload(
+                request=request,
+                intake_contract=intake_contract,
+                selection=selection,
+                runtime=runtime,
+                status="failed",
+                thread_id=started.thread_id,
+                turn_id=started.turn_id,
+                runtime_metadata=dict(getattr(started, "runtime_metadata", {}) or {}),
+                model_ref=reported_model_ref,
+                error=mismatch_error,
+            )
+            self._start_event_writeback(payload=payload)
+            return payload
         mark_runtime_ready = getattr(runtime_service, "mark_runtime_ready", None)
         if callable(mark_runtime_ready):
             runtime = mark_runtime_ready(
@@ -337,11 +419,13 @@ class AssignmentExecutorRuntimeCoordinator:
             return None
         model_policy_id = _text(getattr(binding, "model_policy_id", None)) or self._default_model_policy_id
         model_ref = None
+        model_ownership_mode = None
         if model_policy_id is not None:
             resolve_policy = getattr(runtime_service, "resolve_model_invocation_policy", None)
             if callable(resolve_policy):
                 policy = resolve_policy(model_policy_id)
                 model_ref = _text(getattr(policy, "default_model_ref", None))
+                model_ownership_mode = _text(getattr(policy, "ownership_mode", None))
         executor_id = (
             _text(getattr(provider, "provider_id", None))
             or _text(getattr(provider, "runtime_family", None))
@@ -380,6 +464,12 @@ class AssignmentExecutorRuntimeCoordinator:
             or _text(assignment_metadata.get("risk_level"))
             or _text(assignment_metadata.get("current_risk_level"))
         )
+        sidecar_launch_payload = None
+        if model_ownership_mode in {"copaw_managed", "hybrid"}:
+            sidecar_launch_payload = build_sidecar_provider_injection_payload(
+                provider_runtime_facade=self._provider_runtime_facade,
+                model_ref=model_ref,
+            )
         return ExecutorRuntimeSelection(
             assignment_id=assignment_id,
             role_id=role_id,
@@ -396,7 +486,9 @@ class AssignmentExecutorRuntimeCoordinator:
             risk_level=risk_level,
             project_profile_id=project_profile_id,
             model_policy_id=model_policy_id,
+            model_ownership_mode=model_ownership_mode,
             model_ref=model_ref,
+            sidecar_launch_payload=sidecar_launch_payload,
         )
 
     def _build_payload(
@@ -439,6 +531,7 @@ class AssignmentExecutorRuntimeCoordinator:
                 "report_back_mode": selection.report_back_mode,
                 "risk_level": selection.risk_level or "auto",
                 "executor_runtime": {
+                    "status": status,
                     "assignment_id": selection.assignment_id,
                     "task_id": selection.task_id,
                     "industry_instance_id": selection.industry_instance_id,
@@ -456,6 +549,15 @@ class AssignmentExecutorRuntimeCoordinator:
                     "selection_mode": selection.selection_mode,
                     "role_id": selection.role_id,
                     "project_profile_id": selection.project_profile_id,
+                    "model_ownership_mode": selection.model_ownership_mode,
+                    "provider_resolution_status": _text(
+                        _mapping(selection.sidecar_launch_payload).get(
+                            "provider_resolution_status",
+                        )
+                    ),
+                    "provider_injection_mode": _text(
+                        _mapping(selection.sidecar_launch_payload).get("mode"),
+                    ),
                     "thread_id": resolved_thread_id,
                     "turn_id": turn_id,
                     "model_policy_id": selection.model_policy_id,

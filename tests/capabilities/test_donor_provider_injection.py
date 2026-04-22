@@ -173,3 +173,25 @@ def test_missing_provider_contract_returns_typed_provider_resolution_failure() -
     assert payload["env"] == {}
     assert payload["args"] == []
     assert payload["config_wrapper"] == {}
+
+
+def test_build_sidecar_provider_injection_payload_applies_system_model_override() -> None:
+    import copaw.capabilities.donor_provider_injection as provider_injection_module
+
+    builder = getattr(
+        provider_injection_module,
+        "build_sidecar_provider_injection_payload",
+        None,
+    )
+    assert builder is not None
+
+    payload = builder(
+        provider_runtime_facade=_FakeRuntimeProviderFacade(
+            contract=_resolved_runtime_contract(),
+        ),
+        model_ref="gpt-5-codex",
+    )
+
+    assert payload["provider_resolution_status"] == "resolved"
+    assert payload["env"]["COPAW_PROVIDER_MODEL"] == "gpt-5-codex"
+    assert payload["env"]["COPAW_PROVIDER_API_KEY"] == "sk-test-secret"

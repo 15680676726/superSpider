@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import os
 import queue
 import subprocess
 import threading
@@ -38,6 +39,8 @@ class CodexStdioTransport:
         self._reader_error: str | None = None
         self._closed = False
         self._initialized = False
+        self._launch_env: dict[str, str] = {}
+        self._launch_args: tuple[str, ...] = ()
         self._request_ids = itertools.count(1)
         self._response_queues: dict[str, queue.Queue[object]] = {}
         self._event_queues: dict[str, queue.Queue[object]] = {}
@@ -79,23 +82,32 @@ class CodexStdioTransport:
             if self._closed:
                 return
             self._closed = True
-        process = self._process
-        self._process = None
-        if process is not None:
-            try:
-                if process.stdin is not None and not process.stdin.closed:
-                    process.stdin.close()
-            except Exception:
-                pass
-            try:
-                process.terminate()
-                process.wait(timeout=5)
-            except Exception:
-                try:
-                    process.kill()
-                except Exception:
-                    pass
+        self._shutdown_process()
         self._signal_shutdown()
+
+    def configure_launch(
+        self,
+        *,
+        sidecar_launch_payload: dict[str, object] | None = None,
+    ) -> None:
+        payload = dict(sidecar_launch_payload or {})
+        launch_env = {
+            str(key): str(value)
+            for key, value in dict(payload.get("env") or {}).items()
+            if value is not None and str(value).strip()
+        }
+        launch_args = tuple(
+            str(item)
+            for item in list(payload.get("args") or [])
+            if str(item).strip()
+        )
+        with self._lock:
+            changed = launch_env != self._launch_env or launch_args != self._launch_args
+            self._launch_env = launch_env
+            self._launch_args = launch_args
+        if changed:
+            self._shutdown_process()
+            self._initialized = False
 
     def _ensure_connection(self) -> None:
         with self._lock:
@@ -104,13 +116,14 @@ class CodexStdioTransport:
             if self._process is not None:
                 return
             process = subprocess.Popen(
-                list(self._codex_command),
+                [*self._codex_command, *self._launch_args],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
                 text=True,
                 encoding="utf-8",
                 bufsize=1,
+                env={**os.environ, **self._launch_env},
             )
             if process.stdin is None or process.stdout is None:
                 raise RuntimeError("Codex stdio transport failed to open stdio pipes.")
@@ -245,3 +258,22 @@ class CodexStdioTransport:
                 event_queue.put_nowait(_CLOSE_SENTINEL)
             except queue.Full:
                 continue
+
+    def _shutdown_process(self) -> None:
+        process = self._process
+        self._process = None
+        if process is None:
+            return
+        try:
+            if process.stdin is not None and not process.stdin.closed:
+                process.stdin.close()
+        except Exception:
+            pass
+        try:
+            process.terminate()
+            process.wait(timeout=5)
+        except Exception:
+            try:
+                process.kill()
+            except Exception:
+                pass

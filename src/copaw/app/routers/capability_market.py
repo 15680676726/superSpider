@@ -4414,7 +4414,7 @@ async def install_market_executor_provider(
         model_policy = service.upsert_model_invocation_policy(
             ModelInvocationPolicyRecord(
                 policy_id=model_policy_id,
-                ownership_mode="runtime_owned",
+                ownership_mode="copaw_managed",
                 default_model_ref=str(payload.default_model_ref or "").strip() or None,
             )
         )

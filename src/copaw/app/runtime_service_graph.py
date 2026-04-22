@@ -583,6 +583,13 @@ def build_runtime_bootstrap(
 
     provider_manager = ProviderManager()
     runtime_provider = _resolve_runtime_provider_facade(provider_manager)
+    set_provider_runtime_facade = getattr(
+        executor_runtime_coordinator,
+        "set_provider_runtime_facade",
+        None,
+    )
+    if callable(set_provider_runtime_facade):
+        set_provider_runtime_facade(runtime_provider)
     provider_admin_service: ProviderAdminService = build_provider_admin_service(
         provider_manager,
     )

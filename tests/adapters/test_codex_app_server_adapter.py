@@ -8,6 +8,7 @@ class _FakeTransport:
     def __init__(self) -> None:
         self.requests: list[tuple[str, dict[str, object]]] = []
         self.streams: dict[str, list[dict[str, object]]] = {}
+        self.launch_payloads: list[dict[str, object]] = []
 
     def request(self, method: str, params: dict[str, object] | None = None) -> dict[str, object]:
         payload = dict(params or {})
@@ -35,6 +36,9 @@ class _FakeTransport:
     def subscribe_events(self, thread_id: str):
         for item in self.streams.get(thread_id, []):
             yield item
+
+    def configure_launch(self, *, sidecar_launch_payload: dict[str, object] | None = None) -> None:
+        self.launch_payloads.append(dict(sidecar_launch_payload or {}))
 
 
 def test_codex_adapter_starts_thread_and_turn_for_assignment() -> None:
@@ -223,3 +227,31 @@ def test_codex_adapter_steers_and_stops_turn() -> None:
             },
         ),
     ]
+
+
+def test_codex_adapter_forwards_model_ref_and_sidecar_launch_payload() -> None:
+    transport = _FakeTransport()
+    adapter = CodexAppServerAdapter(transport=transport)
+
+    adapter.start_assignment_turn(
+        assignment_id="assign-1",
+        project_root="D:/agents/codex-project",
+        prompt="Implement the task",
+        model_ref="gpt-5-codex",
+        sidecar_launch_payload={
+            "env": {
+                "COPAW_PROVIDER_MODEL": "gpt-5-codex",
+                "COPAW_PROVIDER_API_KEY": "sk-test-secret",
+            }
+        },
+    )
+
+    assert transport.launch_payloads == [
+        {
+            "env": {
+                "COPAW_PROVIDER_MODEL": "gpt-5-codex",
+                "COPAW_PROVIDER_API_KEY": "sk-test-secret",
+            }
+        }
+    ]
+    assert transport.requests[1][1]["model"] == "gpt-5-codex"

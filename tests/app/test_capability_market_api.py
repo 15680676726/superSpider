@@ -1934,6 +1934,7 @@ def test_capability_market_executor_provider_install_persists_formal_provider_in
     assert stored_binding.executor_provider_id == "codex-app-server"
     stored_policy = executor_runtime_service.resolve_model_invocation_policy("codex-default")
     assert stored_policy is not None
+    assert stored_policy.ownership_mode == "copaw_managed"
     assert stored_policy.default_model_ref == "gpt-5-codex"
 
 

@@ -198,6 +198,79 @@ def resolve_donor_provider_contract(
     }
 
 
+def resolve_sidecar_provider_contract(
+    *,
+    provider_runtime_facade: object | None,
+    model_ref: str | None = None,
+    provider_injection_mode: str | None = "environment",
+) -> dict[str, Any]:
+    normalized_mode = normalize_provider_injection_mode(provider_injection_mode)
+    provider_contract_kind = "cooperative_provider_runtime"
+    if normalized_mode in {None, "none"}:
+        return {
+            "required": False,
+            "provider_resolution_status": "not_required",
+            "provider_injection_mode": normalized_mode,
+            "provider_contract_kind": provider_contract_kind,
+            "error_type": None,
+            "error": None,
+        }
+    if provider_runtime_facade is None:
+        return _provider_resolution_failure(
+            provider_injection_mode=normalized_mode,
+            provider_contract_kind=provider_contract_kind,
+            error="runtime_provider facade is not attached to sidecar execution.",
+        )
+    resolve_runtime_provider_contract = getattr(
+        provider_runtime_facade,
+        "resolve_runtime_provider_contract",
+        None,
+    )
+    if not callable(resolve_runtime_provider_contract):
+        return _provider_resolution_failure(
+            provider_injection_mode=normalized_mode,
+            provider_contract_kind=provider_contract_kind,
+            error="runtime_provider facade does not expose resolve_runtime_provider_contract().",
+        )
+    try:
+        runtime_contract = dict(resolve_runtime_provider_contract() or {})
+    except Exception as exc:
+        return _provider_resolution_failure(
+            provider_injection_mode=normalized_mode,
+            provider_contract_kind=provider_contract_kind,
+            error=str(exc),
+        )
+    effective_model_ref = _string(model_ref) or _string(runtime_contract.get("model"))
+    credentials: dict[str, str] = {}
+    api_key = _string(runtime_contract.get("api_key"))
+    if api_key is not None:
+        credentials["api_key"] = api_key
+    return {
+        "required": True,
+        "provider_resolution_status": "resolved",
+        "provider_injection_mode": normalized_mode,
+        "provider_contract_kind": provider_contract_kind,
+        "provider_id": _string(runtime_contract.get("provider_id")),
+        "provider_name": _string(runtime_contract.get("provider_name")),
+        "model": effective_model_ref,
+        "base_url": _string(runtime_contract.get("base_url")),
+        "auth_mode": _string(runtime_contract.get("auth_mode")) or "none",
+        "credentials": credentials,
+        "extra_headers": dict(runtime_contract.get("extra_headers") or {}),
+        "timeout_policy": {
+            "action_timeout_sec": 120,
+            "probe_timeout_sec": 10,
+        },
+        "retry_policy": {
+            "max_retries": 0,
+            "retry_backoff_policy": "none",
+        },
+        "provenance": dict(runtime_contract.get("provenance") or {}),
+        "error_type": None,
+        "error": None,
+    }
+
+
 def _environment_payload(provider_contract: Mapping[str, Any]) -> dict[str, str]:
     env = {
         "COPAW_PROVIDER_CONTRACT_KIND": str(
@@ -329,8 +402,24 @@ def build_donor_injection_payload(
     return payload
 
 
+def build_sidecar_provider_injection_payload(
+    *,
+    provider_runtime_facade: object | None,
+    model_ref: str | None = None,
+    provider_injection_mode: str | None = "environment",
+) -> dict[str, Any]:
+    resolved = resolve_sidecar_provider_contract(
+        provider_runtime_facade=provider_runtime_facade,
+        model_ref=model_ref,
+        provider_injection_mode=provider_injection_mode,
+    )
+    return build_donor_injection_payload(provider_contract=resolved)
+
+
 __all__ = [
+    "build_sidecar_provider_injection_payload",
     "build_donor_injection_payload",
+    "resolve_sidecar_provider_contract",
     "resolve_donor_provider_contract",
     "_CONFIG_WRAPPER_ENV_KEY",
 ]

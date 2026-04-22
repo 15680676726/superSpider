@@ -43,12 +43,18 @@ class CodexAppServerAdapter(ExecutorRuntimePort):
         project_root: str,
         prompt: str,
         thread_id: str | None = None,
+        model_ref: str | None = None,
+        sidecar_launch_payload: dict[str, object] | None = None,
     ) -> ExecutorTurnStartResult:
+        configure_launch = getattr(self._transport, "configure_launch", None)
+        if callable(configure_launch):
+            configure_launch(sidecar_launch_payload=sidecar_launch_payload)
         resolved_thread_id = thread_id
         if resolved_thread_id is None:
             thread_method, thread_params = build_thread_start_request(
                 assignment_id=assignment_id,
                 project_root=project_root,
+                model_ref=model_ref,
             )
             thread_response = self._transport.request(thread_method, thread_params)
             resolved_thread_id = extract_thread_id(thread_response)
@@ -62,6 +68,7 @@ class CodexAppServerAdapter(ExecutorRuntimePort):
             prompt=prompt,
             assignment_id=assignment_id,
             project_root=project_root,
+            model_ref=model_ref,
         )
         turn_response = self._transport.request(turn_method, turn_params)
         turn_id = extract_turn_id(turn_response)

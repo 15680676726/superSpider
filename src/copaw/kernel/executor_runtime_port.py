@@ -29,6 +29,8 @@ class ExecutorRuntimePort(Protocol):
         project_root: str,
         prompt: str,
         thread_id: str | None = None,
+        model_ref: str | None = None,
+        sidecar_launch_payload: dict[str, Any] | None = None,
     ) -> ExecutorTurnStartResult: ...
 
     def steer_turn(

@@ -45,15 +45,20 @@ class _FakeExecutorRuntimePort:
         project_root: str,
         prompt: str,
         thread_id: str | None = None,
+        model_ref: str | None = None,
+        sidecar_launch_payload: dict[str, object] | None = None,
     ):
-        self.start_calls.append(
-            {
-                "assignment_id": assignment_id,
-                "project_root": project_root,
-                "prompt": prompt,
-                "thread_id": thread_id,
-            }
-        )
+        payload = {
+            "assignment_id": assignment_id,
+            "project_root": project_root,
+            "prompt": prompt,
+            "thread_id": thread_id,
+        }
+        if model_ref is not None:
+            payload["model_ref"] = model_ref
+        if sidecar_launch_payload is not None:
+            payload["sidecar_launch_payload"] = sidecar_launch_payload
+        self.start_calls.append(payload)
         return SimpleNamespace(
             thread_id="thread-1",
             turn_id="turn-1",
@@ -112,6 +117,33 @@ class _FakeReportRepository:
     def upsert_report(self, report):
         self.records[report.id] = report
         return report
+
+
+class _FakeRuntimeProviderFacade:
+    def __init__(self, *, contract: dict[str, object] | None = None, error: Exception | None = None) -> None:
+        self._contract = dict(contract or {})
+        self._error = error
+
+    def resolve_runtime_provider_contract(self) -> dict[str, object]:
+        if self._error is not None:
+            raise self._error
+        return dict(self._contract)
+
+
+def _resolved_runtime_contract() -> dict[str, object]:
+    return {
+        "provider_id": "openai",
+        "provider_name": "OpenAI",
+        "model": "gpt-5.2",
+        "base_url": "https://api.openai.com/v1",
+        "api_key": "sk-test-secret",
+        "auth_mode": "api_key",
+        "provenance": {
+            "resolution_reason": "Using configured active model.",
+            "fallback_applied": False,
+            "unavailable_candidates": [],
+        },
+    }
 
 
 def _make_contract(
@@ -224,6 +256,7 @@ async def test_main_brain_orchestrator_starts_executor_runtime_for_assignment(
             "project_root": str(tmp_path),
             "prompt": "Implement the assignment in Codex.",
             "thread_id": None,
+            "model_ref": "gpt-5-codex",
         }
     ]
     runtime_context = getattr(request, "_copaw_main_brain_runtime_context")
@@ -329,6 +362,200 @@ async def test_main_brain_orchestrator_prefers_binding_model_policy_id_over_exec
     assert len(streamed) == 1
     runtime_context = getattr(request, "_copaw_main_brain_runtime_context")
     assert runtime_context["executor_runtime"]["model_policy_id"] == "codex-default"
+
+
+@pytest.mark.asyncio
+async def test_main_brain_orchestrator_forwards_system_model_and_sidecar_provider_payload(
+    tmp_path: Path,
+) -> None:
+    from copaw.app.runtime_bootstrap_execution import build_executor_runtime_coordination
+
+    query_execution_service = _FakeQueryExecutionService()
+    executor_runtime_service = _build_executor_runtime_service(tmp_path)
+    executor_runtime_service.upsert_executor_provider(
+        ExecutorProviderRecord(
+            provider_id="codex-app-server",
+            provider_kind="external-executor",
+            runtime_family="codex",
+            control_surface_kind="app_server",
+            default_protocol_kind="app_server",
+        )
+    )
+    executor_runtime_service.upsert_role_executor_binding(
+        RoleExecutorBindingRecord(
+            role_id="backend-engineer",
+            executor_provider_id="codex-app-server",
+            selection_mode="role-routed",
+            model_policy_id="codex-default",
+        )
+    )
+    executor_runtime_service.upsert_model_invocation_policy(
+        ModelInvocationPolicyRecord(
+            policy_id="codex-default",
+            ownership_mode="copaw_managed",
+            default_model_ref="gpt-5-codex",
+        )
+    )
+    executor_port = _FakeExecutorRuntimePort()
+    assignment_service = SimpleNamespace(
+        get_assignment=lambda assignment_id: SimpleNamespace(
+            id=assignment_id,
+            owner_role_id="backend-engineer",
+            owner_agent_id="agent-1",
+            title="Implement runtime seam",
+            summary="Route assignment into executor runtime",
+            metadata={"project_profile_id": "carrier-main"},
+        )
+    )
+    _service, coordinator = build_executor_runtime_coordination(
+        assignment_service=assignment_service,
+        external_runtime_service=executor_runtime_service._external_runtime_service,
+        project_root=str(tmp_path),
+        executor_runtime_port=executor_port,
+        default_executor_provider_id="codex-app-server",
+        default_model_policy_id="codex-default",
+    )
+    coordinator.set_executor_runtime_service(executor_runtime_service)
+    coordinator.set_provider_runtime_facade(
+        _FakeRuntimeProviderFacade(contract=_resolved_runtime_contract()),
+    )
+
+    async def _resolver(**_kwargs):
+        return _make_contract()
+
+    orchestrator = MainBrainOrchestrator(
+        query_execution_service=query_execution_service,
+        intake_contract_resolver=_resolver,
+        executor_runtime_coordinator=coordinator,
+    )
+    request = AgentRequest(
+        id="req-executor-runtime-model-governance",
+        session_id="industry-chat:industry-1:execution-core",
+        user_id="user-1",
+        channel="console",
+        input=[],
+    )
+    request.assignment_id = "assign-1"
+    msgs = [
+        Msg(
+            name="user",
+            role="user",
+            content="Implement the assignment in Codex and then report back.",
+        )
+    ]
+
+    _ = [
+        item
+        async for item in orchestrator.execute_stream(
+            msgs=msgs,
+            request=request,
+            kernel_task_id="kernel-task-runtime",
+        )
+    ]
+
+    assert executor_port.start_calls[0]["model_ref"] == "gpt-5-codex"
+    provider_payload = executor_port.start_calls[0]["sidecar_launch_payload"]
+    assert provider_payload["provider_resolution_status"] == "resolved"
+    assert provider_payload["env"]["COPAW_PROVIDER_MODEL"] == "gpt-5-codex"
+    assert provider_payload["env"]["COPAW_PROVIDER_API_KEY"] == "sk-test-secret"
+
+
+@pytest.mark.asyncio
+async def test_main_brain_orchestrator_blocks_executor_start_when_sidecar_provider_resolution_fails(
+    tmp_path: Path,
+) -> None:
+    from copaw.app.runtime_bootstrap_execution import build_executor_runtime_coordination
+
+    query_execution_service = _FakeQueryExecutionService()
+    executor_runtime_service = _build_executor_runtime_service(tmp_path)
+    executor_runtime_service.upsert_executor_provider(
+        ExecutorProviderRecord(
+            provider_id="codex-app-server",
+            provider_kind="external-executor",
+            runtime_family="codex",
+            control_surface_kind="app_server",
+            default_protocol_kind="app_server",
+        )
+    )
+    executor_runtime_service.upsert_role_executor_binding(
+        RoleExecutorBindingRecord(
+            role_id="backend-engineer",
+            executor_provider_id="codex-app-server",
+            selection_mode="role-routed",
+            model_policy_id="codex-default",
+        )
+    )
+    executor_runtime_service.upsert_model_invocation_policy(
+        ModelInvocationPolicyRecord(
+            policy_id="codex-default",
+            ownership_mode="copaw_managed",
+            default_model_ref="gpt-5-codex",
+        )
+    )
+    executor_port = _FakeExecutorRuntimePort()
+    assignment_service = SimpleNamespace(
+        get_assignment=lambda assignment_id: SimpleNamespace(
+            id=assignment_id,
+            owner_role_id="backend-engineer",
+            owner_agent_id="agent-1",
+            title="Implement runtime seam",
+            summary="Route assignment into executor runtime",
+            metadata={"project_profile_id": "carrier-main"},
+        )
+    )
+    _service, coordinator = build_executor_runtime_coordination(
+        assignment_service=assignment_service,
+        external_runtime_service=executor_runtime_service._external_runtime_service,
+        project_root=str(tmp_path),
+        executor_runtime_port=executor_port,
+        default_executor_provider_id="codex-app-server",
+        default_model_policy_id="codex-default",
+    )
+    coordinator.set_executor_runtime_service(executor_runtime_service)
+    coordinator.set_provider_runtime_facade(
+        _FakeRuntimeProviderFacade(
+            error=ValueError("No active or fallback model configured."),
+        ),
+    )
+
+    async def _resolver(**_kwargs):
+        return _make_contract()
+
+    orchestrator = MainBrainOrchestrator(
+        query_execution_service=query_execution_service,
+        intake_contract_resolver=_resolver,
+        executor_runtime_coordinator=coordinator,
+    )
+    request = AgentRequest(
+        id="req-executor-runtime-provider-failure",
+        session_id="industry-chat:industry-1:execution-core",
+        user_id="user-1",
+        channel="console",
+        input=[],
+    )
+    request.assignment_id = "assign-1"
+    msgs = [
+        Msg(
+            name="user",
+            role="user",
+            content="Implement the assignment in Codex and then report back.",
+        )
+    ]
+
+    streamed = [
+        item
+        async for item in orchestrator.execute_stream(
+            msgs=msgs,
+            request=request,
+            kernel_task_id="kernel-task-runtime",
+        )
+    ]
+
+    assert executor_port.start_calls == []
+    runtime_context = getattr(request, "_copaw_main_brain_runtime_context")
+    assert runtime_context["executor_runtime"]["status"] == "failed"
+    assert "No active or fallback model configured." in runtime_context["executor_runtime"]["error"]
+    assert len(streamed) == 1
 
 
 @pytest.mark.asyncio
