@@ -205,6 +205,12 @@ def build_child_run_resume_payload(
         "industry_instance_id": _first_text(metadata.get("industry_instance_id")),
         "industry_role_id": _first_text(metadata.get("industry_role_id")),
         "execution_source": _first_text(metadata.get("execution_source")),
+        "compatibility_mode": _first_text(
+            metadata.get("compatibility_mode"),
+            payload.get("compatibility_mode"),
+            nested_payload.get("compatibility_mode"),
+            payload_meta.get("compatibility_mode"),
+        ),
         "access_mode": _first_text(metadata.get("access_mode")),
         "lease_class": _first_text(metadata.get("lease_class")),
         "writer_lock_scope": _first_text(metadata.get("writer_lock_scope")),
@@ -216,6 +222,15 @@ def build_child_run_resume_payload(
             if value is not None
         },
     )
+    formal_surface = metadata.get("formal_surface")
+    if formal_surface is None:
+        formal_surface = payload.get("formal_surface")
+    if formal_surface is None:
+        formal_surface = nested_payload.get("formal_surface")
+    if formal_surface is None:
+        formal_surface = payload_meta.get("formal_surface")
+    if isinstance(formal_surface, bool):
+        result["formal_surface"] = formal_surface
     if isinstance(extra_payload, dict):
         result.update(
             {

@@ -230,6 +230,37 @@ def test_runtime_center_delegate_task_route_stays_retired_even_when_conflicts_ex
     assert delegated.status_code == 404
 
 
+def test_runtime_center_task_detail_marks_delegation_children_as_compatibility(
+    tmp_path,
+) -> None:
+    client = _build_client(tmp_path)
+
+    result = asyncio.run(
+        client.app.state.delegation_service.delegate_task(
+            "task-parent",
+            title="Worker follow-up",
+            owner_agent_id="execution-core-agent",
+            target_agent_id="worker",
+            prompt_text="Review the evidence and draft the next action.",
+            execute=False,
+            channel="console",
+            industry_instance_id="industry-1",
+            industry_role_id="solution-lead",
+        ),
+    )
+
+    parent_detail = client.get("/runtime-center/tasks/task-parent")
+    assert parent_detail.status_code == 200
+    detail = parent_detail.json()
+    child_results = detail["delegation"]["child_results"]
+
+    assert len(child_results) == 1
+    assert child_results[0]["id"] == result["child_task_id"]
+    assert child_results[0]["execution_source"] == "delegation-compat"
+    assert child_results[0]["formal_surface"] is False
+    assert child_results[0]["compatibility_mode"] == "delegation-compat"
+
+
 def test_delegation_service_execute_true_still_lands_mailbox(tmp_path) -> None:
     store = SQLiteStateStore(tmp_path / "state.db")
     evidence_ledger = EvidenceLedger(tmp_path / "evidence.db")

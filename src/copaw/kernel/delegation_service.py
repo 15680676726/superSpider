@@ -28,6 +28,7 @@ _INFLIGHT_TASK_STATUSES = frozenset({"queued", "running", "waiting", "blocked", 
 _INFLIGHT_RUNTIME_STATUSES = frozenset({"active", "hydrating", "waiting-confirm"})
 _INFLIGHT_RUNTIME_PHASES = frozenset({"risk-check", "executing", "waiting-confirm"})
 _DELEGATION_COMPAT_EXECUTION_SOURCE = "delegation-compat"
+_DELEGATION_COMPATIBILITY_MODE = "delegation-compat"
 
 
 class DelegationError(ValueError):
@@ -277,6 +278,8 @@ class TaskDelegationService:
                         "industry_role_id": industry_role_id or resolution.role_id,
                         "assignment_id": getattr(parent_task, "assignment_id", None),
                         "execution_source": _DELEGATION_COMPAT_EXECUTION_SOURCE,
+                        "formal_surface": False,
+                        "compatibility_mode": _DELEGATION_COMPATIBILITY_MODE,
                         "access_mode": access_mode,
                         "lease_class": lease_class,
                         "writer_lock_scope": writer_lock_scope,
@@ -454,6 +457,8 @@ class TaskDelegationService:
                 "parent_task_id": child_task.parent_task_id,
                 "assignment_id": payload.get("assignment_id"),
                 "execution_source": _DELEGATION_COMPAT_EXECUTION_SOURCE,
+                "formal_surface": False,
+                "compatibility_mode": _DELEGATION_COMPATIBILITY_MODE,
             },
         )
         remember(
@@ -804,6 +809,8 @@ class TaskDelegationService:
                     "context_key": context_key,
                     "assignment_id": assignment_id,
                     "execution_source": execution_source,
+                    "formal_surface": False,
+                    "compatibility_mode": _DELEGATION_COMPATIBILITY_MODE,
                     "lane_id": lane_id,
                     "cycle_id": cycle_id,
                     "report_back_mode": report_back_mode,
@@ -823,6 +830,8 @@ class TaskDelegationService:
                 ("lane_id", lane_id),
                 ("cycle_id", cycle_id),
                 ("report_back_mode", report_back_mode),
+                ("formal_surface", False),
+                ("compatibility_mode", _DELEGATION_COMPATIBILITY_MODE),
             ):
                 if value is not None and key not in base_payload:
                     base_payload[key] = value

@@ -457,12 +457,28 @@ def serialize_child_rollup(
     owner_agent: dict[str, object] | None = None,
     work_context: dict[str, object] | None = None,
 ) -> dict[str, object]:
+    kernel_metadata = decode_kernel_task_metadata(getattr(task, "acceptance_criteria", None))
+    payload = dict_from_value((kernel_metadata or {}).get("payload"))
+    payload_meta = dict_from_value(payload.get("meta"))
+    execution_source = first_non_empty(
+        payload_meta.get("execution_source"),
+        payload.get("execution_source"),
+    )
+    compatibility_mode = first_non_empty(
+        payload_meta.get("compatibility_mode"),
+        payload.get("compatibility_mode"),
+    )
+    formal_surface = payload_meta.get("formal_surface")
+    if not isinstance(formal_surface, bool):
+        formal_surface = payload.get("formal_surface")
+    if not isinstance(formal_surface, bool):
+        formal_surface = compatibility_mode is None
     owner_agent_name = (
         first_non_empty(owner_agent.get("name"), owner_agent.get("role_name"))
         if isinstance(owner_agent, dict)
         else None
     )
-    return {
+    rollup = {
         "id": getattr(task, "id", None),
         "title": getattr(task, "title", None),
         "status": task_status_value(task, runtime),
@@ -485,8 +501,12 @@ def serialize_child_rollup(
         "work_context": work_context,
         "route": task_route(getattr(task, "id", "")),
     }
-
-
+    if execution_source is not None:
+        rollup["execution_source"] = execution_source
+    rollup["formal_surface"] = formal_surface
+    if compatibility_mode is not None:
+        rollup["compatibility_mode"] = compatibility_mode
+    return rollup
 def build_task_review_payload(
     *,
     task: Any,
