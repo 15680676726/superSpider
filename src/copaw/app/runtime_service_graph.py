@@ -396,6 +396,7 @@ def _build_kernel_runtime(
     work_context_service: WorkContextService,
     runtime_provider: object | None,
     external_runtime_service: object | None = None,
+    enable_actor_runtime: bool = False,
 ) -> tuple[
     LearningService,
     GovernanceService,
@@ -403,9 +404,9 @@ def _build_kernel_runtime(
     KernelToolBridge,
     CapabilityService,
     KernelDispatcher,
-    ActorMailboxService,
-    ActorWorker,
-    ActorSupervisor,
+    ActorMailboxService | None,
+    ActorWorker | None,
+    ActorSupervisor | None,
 ]:
     return build_runtime_execution_stack_components(
         mcp_manager=mcp_manager,
@@ -430,6 +431,7 @@ def _build_kernel_runtime(
         actor_mailbox_service_cls=ActorMailboxService,
         actor_worker_cls=ActorWorker,
         actor_supervisor_cls=ActorSupervisor,
+        enable_actor_runtime=enable_actor_runtime,
     )
 
 
@@ -630,6 +632,7 @@ def build_runtime_bootstrap(
         work_context_service=work_context_service,
         runtime_provider=runtime_provider,
         external_runtime_service=external_runtime_service,
+        enable_actor_runtime=False,
     )
     exception_absorption_service = MainBrainExceptionAbsorptionService()
     configure_exception_absorption = getattr(actor_supervisor, "configure_exception_absorption", None)

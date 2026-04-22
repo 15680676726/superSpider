@@ -308,9 +308,9 @@ class RuntimeBootstrap:
     turn_executor: KernelTurnExecutor
     main_brain_chat_service: MainBrainChatService
     query_execution_service: KernelQueryExecutionService
-    actor_mailbox_service: ActorMailboxService
-    actor_worker: ActorWorker
-    actor_supervisor: ActorSupervisor
+    actor_mailbox_service: ActorMailboxService | None
+    actor_worker: ActorWorker | None
+    actor_supervisor: ActorSupervisor | None
     external_runtime_service: Any | None = None
     executor_runtime_service: ExecutorRuntimeService | None = None
     executor_runtime_coordinator: AssignmentExecutorRuntimeCoordinator | None = None

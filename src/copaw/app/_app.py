@@ -146,7 +146,8 @@ async def lifespan(
     actor_supervisor = bootstrap.actor_supervisor
     turn_executor = bootstrap.turn_executor
 
-    await actor_supervisor.start()
+    if actor_supervisor is not None:
+        await actor_supervisor.start()
     automation_tasks = start_automation_tasks(
         kernel_dispatcher=bootstrap.kernel_dispatcher,
         capability_service=bootstrap.capability_service,

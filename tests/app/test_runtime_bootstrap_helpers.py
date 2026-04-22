@@ -989,6 +989,83 @@ def test_build_kernel_runtime_threads_state_store_into_capability_service(
     assert "state_query_dispatcher" not in captured
 
 
+def test_build_kernel_runtime_demotes_actor_runtime_from_default_bootstrap(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeCapabilityService:
+        def __init__(self, **kwargs) -> None:
+            captured["capability_service_kwargs"] = kwargs
+
+    class _FakeActorMailboxService:
+        def __init__(self, **kwargs) -> None:
+            captured["actor_mailbox_service_kwargs"] = kwargs
+
+    class _FakeActorWorker:
+        def __init__(self, **kwargs) -> None:
+            captured["actor_worker_kwargs"] = kwargs
+
+    class _FakeActorSupervisor:
+        def __init__(self, **kwargs) -> None:
+            captured["actor_supervisor_kwargs"] = kwargs
+
+    monkeypatch.setattr(runtime_service_graph_module, "PatchExecutor", lambda **kwargs: object())
+    monkeypatch.setattr(runtime_service_graph_module, "LearningService", lambda **kwargs: object())
+    monkeypatch.setattr(
+        runtime_service_graph_module,
+        "GovernanceService",
+        lambda **kwargs: SimpleNamespace(set_kernel_dispatcher=lambda dispatcher: None),
+    )
+    monkeypatch.setattr(runtime_service_graph_module, "KernelTaskStore", lambda **kwargs: object())
+    monkeypatch.setattr(runtime_service_graph_module, "KernelToolBridge", lambda **kwargs: object())
+    monkeypatch.setattr(runtime_service_graph_module, "CapabilityService", _FakeCapabilityService)
+    monkeypatch.setattr(runtime_service_graph_module, "KernelDispatcher", lambda **kwargs: object())
+    monkeypatch.setattr(runtime_service_graph_module, "ActorMailboxService", _FakeActorMailboxService)
+    monkeypatch.setattr(runtime_service_graph_module, "ActorWorker", _FakeActorWorker)
+    monkeypatch.setattr(runtime_service_graph_module, "ActorSupervisor", _FakeActorSupervisor)
+
+    state_store = SQLiteStateStore(tmp_path / "state.db")
+    repositories = SimpleNamespace(
+        capability_override_repository=object(),
+        agent_profile_override_repository=object(),
+        goal_override_repository=object(),
+        workflow_template_repository=object(),
+        workflow_run_repository=object(),
+        decision_request_repository=object(),
+        task_repository=object(),
+        governance_control_repository=object(),
+        task_runtime_repository=object(),
+        runtime_frame_repository=object(),
+        agent_mailbox_repository=object(),
+        agent_runtime_repository=object(),
+        agent_checkpoint_repository=object(),
+        agent_thread_binding_repository=object(),
+    )
+
+    runtime_stack = _build_kernel_runtime(
+        mcp_manager=object(),
+        environment_service=object(),
+        evidence_ledger=object(),
+        repositories=repositories,
+        runtime_event_bus=object(),
+        state_query_service=SimpleNamespace(),
+        conversation_compaction_service=None,
+        experience_memory_service=None,
+        state_store=state_store,
+        work_context_service=object(),
+        runtime_provider=object(),
+    )
+
+    assert runtime_stack[6] is None
+    assert runtime_stack[7] is None
+    assert runtime_stack[8] is None
+    assert "actor_mailbox_service_kwargs" not in captured
+    assert "actor_worker_kwargs" not in captured
+    assert "actor_supervisor_kwargs" not in captured
+
+
 def test_build_kernel_runtime_threads_external_runtime_service_into_capability_service(
     monkeypatch,
     tmp_path,
