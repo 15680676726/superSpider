@@ -1089,9 +1089,13 @@ class AssignmentExecutorRuntimeCoordinator:
             return
         recovery_attempts = 0
         restart = getattr(port, "restart_sidecar", None)
+        describe_sidecar = getattr(port, "describe_sidecar", None)
         while True:
             try:
+                saw_terminal_event = False
+                saw_any_event = False
                 for event in port.subscribe_events(thread_id=thread_id):
+                    saw_any_event = True
                     event_turn_id = _text(event.payload.get("turn_id"))
                     if turn_id is not None and event_turn_id not in {None, turn_id}:
                         continue
@@ -1106,11 +1110,83 @@ class AssignmentExecutorRuntimeCoordinator:
                         report_id=_text(getattr(result.report_record, "id", None)),
                     )
                     if event.event_type == "task_completed":
+                        saw_terminal_event = True
                         self._mark_runtime_terminal(runtime_id=runtime_id, status="completed")
                         return
                     if event.event_type == "task_failed":
+                        saw_terminal_event = True
                         self._mark_runtime_terminal(runtime_id=runtime_id, status="failed")
                         return
+                if saw_terminal_event:
+                    return
+                sidecar_state = {}
+                if callable(describe_sidecar):
+                    try:
+                        payload = describe_sidecar()
+                    except Exception:
+                        payload = {}
+                    if isinstance(payload, dict):
+                        sidecar_state = dict(payload)
+                connected = sidecar_state.get("connected")
+                reader_error = _text(sidecar_state.get("reader_error"))
+                if not saw_any_event and connected is True and reader_error is None:
+                    time.sleep(0.05)
+                    continue
+                premature_end_message = "Executor event stream ended without terminal event."
+                if callable(restart) and recovery_attempts < 1:
+                    recovery_attempts += 1
+                    self._mark_runtime_restarting(
+                        runtime_id=runtime_id,
+                        metadata={
+                            "sidecar_control": {
+                                "recovery": {
+                                    "status": "restarting",
+                                    "reason": "event-stream-ended",
+                                    "event_drain_error": premature_end_message,
+                                    "attempt": recovery_attempts,
+                                }
+                            }
+                        },
+                    )
+                    try:
+                        restart()
+                    except Exception as restart_exc:
+                        logger.debug("Executor runtime sidecar restart failed", exc_info=True)
+                        self._record_runtime_failure_event(
+                            runtime_id=runtime_id,
+                            thread_id=thread_id,
+                            turn_id=turn_id,
+                            context=context,
+                            writeback_service=writeback_service,
+                            error_message=premature_end_message,
+                        )
+                        self._mark_runtime_terminal(
+                            runtime_id=runtime_id,
+                            status="failed",
+                            metadata={
+                                "event_drain_error": premature_end_message,
+                                "recovery_error": str(restart_exc),
+                                "recovery_attempts": recovery_attempts,
+                            },
+                        )
+                        return
+                    continue
+                self._record_runtime_failure_event(
+                    runtime_id=runtime_id,
+                    thread_id=thread_id,
+                    turn_id=turn_id,
+                    context=context,
+                    writeback_service=writeback_service,
+                    error_message=premature_end_message,
+                )
+                self._mark_runtime_terminal(
+                    runtime_id=runtime_id,
+                    status="failed",
+                    metadata={
+                        "event_drain_error": premature_end_message,
+                        "recovery_attempts": recovery_attempts,
+                    },
+                )
                 return
             except Exception as exc:
                 logger.debug("Executor runtime event drain failed", exc_info=True)
@@ -1133,6 +1209,14 @@ class AssignmentExecutorRuntimeCoordinator:
                         restart()
                     except Exception as restart_exc:
                         logger.debug("Executor runtime sidecar restart failed", exc_info=True)
+                        self._record_runtime_failure_event(
+                            runtime_id=runtime_id,
+                            thread_id=thread_id,
+                            turn_id=turn_id,
+                            context=context,
+                            writeback_service=writeback_service,
+                            error_message=str(exc),
+                        )
                         self._mark_runtime_terminal(
                             runtime_id=runtime_id,
                             status="failed",
@@ -1144,6 +1228,14 @@ class AssignmentExecutorRuntimeCoordinator:
                         )
                         return
                     continue
+                self._record_runtime_failure_event(
+                    runtime_id=runtime_id,
+                    thread_id=thread_id,
+                    turn_id=turn_id,
+                    context=context,
+                    writeback_service=writeback_service,
+                    error_message=str(exc),
+                )
                 self._mark_runtime_terminal(
                     runtime_id=runtime_id,
                     status="failed",
@@ -1153,6 +1245,44 @@ class AssignmentExecutorRuntimeCoordinator:
                     },
                 )
                 return
+
+    def _record_runtime_failure_event(
+        self,
+        *,
+        runtime_id: str,
+        thread_id: str,
+        turn_id: str | None,
+        context: ExecutorEventIngestContext,
+        writeback_service: ExecutorEventWritebackService,
+        error_message: str,
+    ) -> None:
+        failure_event = ExecutorNormalizedEvent(
+            event_type="task_failed",
+            source_type="runtime",
+            payload={
+                "thread_id": thread_id,
+                "turn_id": turn_id,
+                "error": error_message,
+                "message": error_message,
+                "summary": error_message,
+                "status": "failed",
+            },
+            raw_method="copaw/runtime-coordination",
+        )
+        try:
+            result = writeback_service.ingest_and_writeback(
+                context=context,
+                event=failure_event,
+            )
+        except Exception:
+            logger.debug("Failed to record synthetic executor runtime failure event", exc_info=True)
+            return
+        self._mark_runtime_progress(
+            runtime_id=runtime_id,
+            event_type=failure_event.event_type,
+            evidence_id=_text(getattr(result.evidence_record, "id", None)),
+            report_id=_text(getattr(result.report_record, "id", None)),
+        )
 
     def _mark_runtime_progress(
         self,

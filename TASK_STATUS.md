@@ -527,6 +527,29 @@
       - 命令：`COPAW_RUN_EXTERNAL_EXECUTOR_LIVE_SMOKE=1 python -m pytest tests/app/test_external_executor_live_smoke.py -q -k provider_intake_and_runtime_writeback`
       - 结果：连续 `2` 轮分别为 `1 passed, 4 deselected in 78.56s`、`1 passed, 4 deselected in 47.29s`
       - 验收层级：`L3 + selected L4`
+  - `2026-04-22` 晚间续补：本轮继续修掉了“真实 sidecar stream 无 terminal event 时 runtime 卡在 `ready` / 只有 failed status 没有 formal `task_failed` event”这一条主链缺口：
+    - `src/copaw/kernel/runtime_coordination.py`
+      - sidecar event stream 在“已见事件后提前结束”或“event drain 异常且重启恢复失败”时，现会补写 synthetic `task_failed` formal event，然后再把 runtime 标成 `failed`
+      - `0` 事件且 sidecar 仍然 connected 的场景不再误判为 crash；approval 等待链会继续保持活跃
+    - `tests/kernel/test_main_brain_executor_runtime_integration.py`
+      - 新增 `test_main_brain_orchestrator_fails_runtime_when_event_stream_ends_without_terminal_event`
+      - 现已覆盖：
+        - stream crash -> restart once -> fail-closed
+        - non-terminal stream end -> synthetic `task_failed`
+        - approval path 不被误伤
+  - 本轮 latest fresh 验收：
+    - runtime/drain targeted regression：
+      - 命令：`python -m pytest tests/kernel/test_main_brain_executor_runtime_integration.py tests/app/test_external_executor_live_smoke.py tests/adapters/test_codex_stdio_transport.py tests/adapters/test_codex_app_server_adapter.py -q`
+      - 结果：`26 passed, 1 skipped in 28.52s`
+      - 验收层级：`L1 + L2`
+    - external executor live smoke repeat：
+      - 命令：连续 `3` 轮执行 `COPAW_RUN_EXTERNAL_EXECUTOR_LIVE_SMOKE=1 python -m pytest tests/app/test_external_executor_live_smoke.py -q -k provider_intake_and_runtime_writeback`
+      - 结果：`1 passed, 4 deselected in 30.64s`、`1 passed, 4 deselected in 25.23s`、`1 passed, 4 deselected in 53.25s`
+      - 验收层级：`L3 + selected L4`
+    - `default regression`：
+      - 命令：`python scripts/run_p0_runtime_terminal_gate.py`
+      - 结果：后端主链回归 `361 passed in 263.98s`；长跑与删旧回归 `84 passed in 466.91s`；前台定向回归 `21 passed`；控制台构建通过
+      - 验收层级：`L2`
 
 ## 1.1.1 `2026-04-07` Buddy 领域能力阶段收口补充
 

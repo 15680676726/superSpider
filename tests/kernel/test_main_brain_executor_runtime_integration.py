@@ -1155,6 +1155,7 @@ async def test_main_brain_orchestrator_persists_sidecar_recovery_failure_when_ev
     )
     while time.time() < deadline and (
         not runtimes or runtimes[0].runtime_status != "failed"
+        or "event_drain_error" not in runtimes[0].metadata
     ):
         time.sleep(0.01)
         runtimes = executor_runtime_service.list_runtimes(
@@ -1162,6 +1163,10 @@ async def test_main_brain_orchestrator_persists_sidecar_recovery_failure_when_ev
             formal_only=True,
         )
 
+    runtimes = executor_runtime_service.list_runtimes(
+        assignment_id="assign-1",
+        formal_only=True,
+    )
     assert len(runtimes) == 1
     assert runtimes[0].runtime_status == "failed"
     assert "sidecar crashed during event stream" in runtimes[0].metadata["event_drain_error"]
@@ -1292,6 +1297,151 @@ async def test_main_brain_orchestrator_recovers_after_one_sidecar_stream_crash(
     assert len(runtimes) == 1
     assert runtimes[0].runtime_status == "completed"
     assert executor_port._restart_count == 1
+
+
+@pytest.mark.asyncio
+async def test_main_brain_orchestrator_fails_runtime_when_event_stream_ends_without_terminal_event(
+    tmp_path: Path,
+) -> None:
+    from copaw.app.runtime_bootstrap_execution import build_executor_runtime_coordination
+    from copaw.kernel.executor_runtime_port import ExecutorNormalizedEvent
+
+    query_execution_service = _FakeQueryExecutionService()
+    executor_runtime_service = _build_executor_runtime_service(tmp_path)
+    executor_runtime_service.upsert_executor_provider(
+        ExecutorProviderRecord(
+            provider_id="codex-app-server",
+            provider_kind="external-executor",
+            runtime_family="codex",
+            control_surface_kind="app_server",
+            default_protocol_kind="app_server",
+        )
+    )
+    executor_runtime_service.upsert_role_executor_binding(
+        RoleExecutorBindingRecord(
+            role_id="backend-engineer",
+            executor_provider_id="codex-app-server",
+            selection_mode="role-routed",
+            execution_policy_id="default-model-policy",
+        )
+    )
+    executor_runtime_service.upsert_model_invocation_policy(
+        ModelInvocationPolicyRecord(
+            policy_id="default-model-policy",
+            ownership_mode="runtime_owned",
+            default_model_ref="gpt-5-codex",
+        )
+    )
+    executor_port = _FakeExecutorRuntimePort(
+        subscribe_runs=[
+            [
+                ExecutorNormalizedEvent(
+                    event_type="message_emitted",
+                    source_type="agentMessage",
+                    payload={
+                        "thread_id": "thread-1",
+                        "turn_id": "turn-1",
+                        "message": "partial progress",
+                    },
+                    raw_method="item/completed",
+                )
+            ]
+        ]
+    )
+    executor_port.describe_sidecar = lambda: {
+        "transport_kind": "test-port",
+        "connected": False,
+        "restart_count": executor_port._restart_count,
+    }
+    assignment = SimpleNamespace(
+        id="assign-non-terminal-1",
+        task_id="task-assign-non-terminal-1",
+        industry_instance_id="industry-1",
+        owner_role_id="backend-engineer",
+        owner_agent_id="agent-1",
+        report_back_mode="agent-report",
+        title="Handle non-terminal runtime end",
+        summary="Mark runtime failed when stream ends without terminal event",
+        metadata={"project_profile_id": "carrier-main", "risk_level": "guarded"},
+    )
+    assignment_service = _FakeAssignmentService(assignment)
+    report_repository = _FakeReportRepository()
+    report_service = AgentReportService(repository=report_repository)
+    evidence_ledger = EvidenceLedger()
+    _service, coordinator = build_executor_runtime_coordination(
+        assignment_service=assignment_service,
+        external_runtime_service=executor_runtime_service._external_runtime_service,
+        project_root=str(tmp_path),
+        executor_runtime_port=executor_port,
+        default_executor_provider_id="codex-app-server",
+        default_model_policy_id="default-model-policy",
+    )
+    coordinator.set_executor_runtime_service(executor_runtime_service)
+    coordinator.set_executor_event_writeback_service(
+        ExecutorEventWritebackService(
+            evidence_ledger=evidence_ledger,
+            assignment_service=assignment_service,
+            agent_report_service=report_service,
+            executor_runtime_service=executor_runtime_service,
+        )
+    )
+
+    async def _resolver(**_kwargs):
+        return _make_contract(writeback_requested=True)
+
+    orchestrator = MainBrainOrchestrator(
+        query_execution_service=query_execution_service,
+        intake_contract_resolver=_resolver,
+        executor_runtime_coordinator=coordinator,
+    )
+    request = AgentRequest(
+        id="req-executor-runtime-non-terminal-end",
+        session_id="industry-chat:industry-1:execution-core",
+        user_id="user-1",
+        channel="console",
+        input=[],
+    )
+    request.assignment_id = "assign-non-terminal-1"
+    request.industry_instance_id = "industry-1"
+    msgs = [Msg(name="user", role="user", content="Run the assignment.")]
+
+    streamed = [
+        item
+        async for item in orchestrator.execute_stream(
+            msgs=msgs,
+            request=request,
+            kernel_task_id="kernel-task-runtime",
+        )
+    ]
+
+    assert len(streamed) == 1
+    deadline = time.time() + 1.0
+    runtimes = executor_runtime_service.list_runtimes(
+        assignment_id="assign-non-terminal-1",
+        formal_only=True,
+    )
+    while time.time() < deadline and (
+        not runtimes or runtimes[0].runtime_status not in {"failed", "completed"}
+        or "event_drain_error" not in runtimes[0].metadata
+    ):
+        time.sleep(0.01)
+        runtimes = executor_runtime_service.list_runtimes(
+            assignment_id="assign-non-terminal-1",
+            formal_only=True,
+        )
+
+    runtimes = executor_runtime_service.list_runtimes(
+        assignment_id="assign-non-terminal-1",
+        formal_only=True,
+    )
+    assert len(runtimes) == 1
+    assert runtimes[0].runtime_status == "failed"
+    assert "ended without terminal event" in runtimes[0].metadata["event_drain_error"]
+    stored_events = executor_runtime_service.list_event_records(thread_id="thread-1")
+    assert {item.event_type for item in stored_events} == {
+        "message_emitted",
+        "task_failed",
+    }
 
 
 def test_kernel_turn_executor_threads_executor_runtime_coordinator_into_orchestrator() -> None:
