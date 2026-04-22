@@ -122,6 +122,11 @@ These remain follow-up work because the current external executor seam exposes `
   - `install_templates.py`、`runtime_center_payloads.py`、`system_actor_handlers.py` 也已停止输出 `/api/runtime-center/actors/*` dead links
   - `actor_mailbox.py` / `actor_worker.py` / `actor_supervisor.py` 与 overview/startup compatibility wiring 仍在，因此当前仍是 `partial`
 
+  - `runtime_bootstrap_models.py` / `runtime_service_graph.py` no longer expose `actor_mailbox_service / actor_worker / actor_supervisor` on the formal bootstrap object
+  - `_app.py` / `runtime_lifecycle.py` no longer thread actor mailbox or actor-supervisor lifecycle through the default app startup/restart path
+  - `runtime_center_routes_agents.py` / `runtime_center_routes_governance.py` now carry the formal Runtime Center `agents + learning governance` routes needed by the default gate
+  - `actor_mailbox.py` / `actor_worker.py` / `actor_supervisor.py` files still exist, so the task remains `partial`
+
 ### Task 3: Re-state The Remaining Local-Tool Blockers Honestly
 
 - [ ] Update docs/status so browser/desktop/document-file-shell local paths are explicitly recorded as still-blocked product-surface replacements, not “done later maybe”.
@@ -130,9 +135,20 @@ These remain follow-up work because the current external executor seam exposes `
 ### Task 4: Verify And Close
 
 - [x] Run focused regression for delegation/actor retirement.
-- [ ] Run default regression if the focused slice is green.
-- [ ] Update docs with exact `L1 / L2 / L3 / L4` evidence and remaining blocker boundaries.
+- [x] Run default regression if the focused slice is green.
+- [x] Update docs with exact `L1 / L2 / L3 / L4` evidence and remaining blocker boundaries.
 - [ ] Commit and push to `origin/main`.
 - Focused regression `2026-04-22`:
   - `python -m pytest tests/app/test_capabilities_execution.py tests/app/test_runtime_bootstrap_helpers.py tests/app/test_runtime_bootstrap_split.py tests/app/test_runtime_center_actor_api.py tests/kernel/query_execution_environment_parts/dispatch.py tests/kernel/test_agent_profile_service.py tests/kernel/test_query_execution_runtime.py -q`
   - `178 passed in 101.15s`
+- Focused regression `2026-04-22` gate-repair slice:
+  - `python -m pytest tests/app/test_runtime_center_api.py tests/app/test_learning_api.py tests/app/test_operator_runtime_e2e.py tests/app/test_runtime_center_actor_api.py tests/app/runtime_center_api_parts/detail_environment.py tests/app/runtime_center_api_parts/overview_governance.py tests/app/test_runtime_bootstrap_helpers.py tests/app/test_runtime_bootstrap_split.py tests/app/test_runtime_lifecycle.py -q`
+  - `346 passed in 180.25s`
+- Default regression `2026-04-22`:
+  - `python scripts/run_p0_runtime_terminal_gate.py`
+  - backend mainline `361 passed in 266.07s`
+  - long-run / deletion regression `84 passed in 427.67s`
+  - `cmd /c npm --prefix console run test -- src/pages/RuntimeCenter/MainBrainCockpitPanel.test.tsx src/components/RuntimeExecutionStrip.test.tsx src/pages/Predictions/index.test.ts src/pages/Knowledge/index.test.tsx`
+  - frontend targeted regression passed, `21 passed`
+  - `cmd /c npm --prefix console run build`
+  - frontend build passed

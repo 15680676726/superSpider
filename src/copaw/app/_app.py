@@ -85,25 +85,16 @@ async def lifespan(
         mcp_manager=mcp_manager,
     )
     runtime_host.sync_turn_executor(bootstrap.turn_executor)
-    resolve_exception_absorption_service = getattr(
-        bootstrap.actor_supervisor,
-        "exception_absorption_service",
-        None,
-    )
 
     startup_recovery_summary = run_startup_recovery(
         environment_service=bootstrap.environment_service,
-        actor_mailbox_service=bootstrap.actor_mailbox_service,
+        actor_mailbox_service=None,
         decision_request_repository=bootstrap.repositories.decision_request_repository,
         kernel_dispatcher=bootstrap.kernel_dispatcher,
         kernel_task_store=bootstrap.kernel_task_store,
         schedule_repository=bootstrap.repositories.schedule_repository,
         runtime_repository=bootstrap.repositories.agent_runtime_repository,
-        exception_absorption_service=(
-            resolve_exception_absorption_service()
-            if callable(resolve_exception_absorption_service)
-            else None
-        ),
+        exception_absorption_service=None,
         human_assist_task_service=bootstrap.human_assist_task_service,
         backlog_item_repository=bootstrap.repositories.backlog_item_repository,
         assignment_repository=bootstrap.repositories.assignment_repository,
@@ -142,12 +133,7 @@ async def lifespan(
         manager_stack=manager_stack,
         startup_recovery_summary=startup_recovery_summary,
     )
-
-    actor_supervisor = bootstrap.actor_supervisor
     turn_executor = bootstrap.turn_executor
-
-    if actor_supervisor is not None:
-        await actor_supervisor.start()
     automation_tasks = start_automation_tasks(
         kernel_dispatcher=bootstrap.kernel_dispatcher,
         capability_service=bootstrap.capability_service,
@@ -200,7 +186,6 @@ async def lifespan(
             list(getattr(app.state, "automation_tasks", []) or []),
         )
         evidence_ledger = getattr(app.state, "evidence_ledger", None)
-        actor_supervisor = getattr(app.state, "actor_supervisor", None)
         memory_recall_service = getattr(app.state, "memory_recall_service", None)
         await stop_runtime_manager_stack(
             runtime_manager_stack_from_app_state(app.state),
@@ -208,11 +193,6 @@ async def lifespan(
             error_mode="ignore",
             context="shutdown",
         )
-        if actor_supervisor is not None:
-            try:
-                await actor_supervisor.stop()
-            except Exception:
-                pass
         if memory_recall_service is not None:
             close_sidecars = getattr(
                 memory_recall_service,

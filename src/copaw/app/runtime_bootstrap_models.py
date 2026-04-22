@@ -14,9 +14,6 @@ if TYPE_CHECKING:
     from ..goals import GoalService
     from ..industry import IndustryService
     from ..kernel import (
-        ActorMailboxService,
-        ActorSupervisor,
-        ActorWorker,
         AgentProfileService,
         BuddyOnboardingService,
         BuddyProjectionService,
@@ -28,7 +25,6 @@ if TYPE_CHECKING:
         KernelTaskStore,
         KernelToolBridge,
         KernelTurnExecutor,
-        TaskDelegationService,
     )
     from ..kernel.runtime_coordination import AssignmentExecutorRuntimeCoordinator
     from ..kernel.executor_event_writeback_service import ExecutorEventWritebackService
@@ -291,7 +287,6 @@ class RuntimeBootstrap:
     operating_cycle_service: OperatingCycleService
     assignment_service: AssignmentService
     agent_report_service: AgentReportService
-    delegation_service: TaskDelegationService
     capability_service: CapabilityService
     agent_profile_service: AgentProfileService
     industry_service: IndustryService
@@ -308,9 +303,6 @@ class RuntimeBootstrap:
     turn_executor: KernelTurnExecutor
     main_brain_chat_service: MainBrainChatService
     query_execution_service: KernelQueryExecutionService
-    actor_mailbox_service: ActorMailboxService | None
-    actor_worker: ActorWorker | None
-    actor_supervisor: ActorSupervisor | None
     external_runtime_service: Any | None = None
     executor_runtime_service: ExecutorRuntimeService | None = None
     executor_runtime_coordinator: AssignmentExecutorRuntimeCoordinator | None = None

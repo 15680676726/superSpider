@@ -172,7 +172,6 @@ def _build_bootstrap() -> RuntimeBootstrap:
         knowledge_graph_service=object(),
         agent_experience_service=object(),
         reporting_service=object(),
-        delegation_service=object(),
         capability_service=object(),
         agent_profile_service=object(),
         industry_service=object(),
@@ -194,9 +193,6 @@ def _build_bootstrap() -> RuntimeBootstrap:
         turn_executor=object(),
         main_brain_chat_service=object(),
         query_execution_service=object(),
-        actor_mailbox_service=object(),
-        actor_worker=object(),
-        actor_supervisor=object(),
     )
 
 
@@ -813,6 +809,15 @@ def test_build_runtime_state_bindings_exposes_executor_runtime_services() -> Non
     assert bindings["executor_runtime_service"] is executor_runtime_service
     assert bindings["executor_runtime_coordinator"] is executor_runtime_coordinator
     assert bindings["executor_runtime_port"] is executor_runtime_port
+
+
+def test_runtime_bootstrap_model_does_not_expose_retired_local_executor_fields() -> None:
+    field_names = {field.name for field in dataclasses.fields(RuntimeBootstrap)}
+
+    assert "delegation_service" not in field_names
+    assert "actor_mailbox_service" not in field_names
+    assert "actor_worker" not in field_names
+    assert "actor_supervisor" not in field_names
 
 
 def test_build_runtime_state_bindings_preserves_executor_runtime_sidecar_truth(

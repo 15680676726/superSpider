@@ -834,14 +834,9 @@ class RuntimeRestartCoordinator:
             self._bootstrap.capability_service.set_mcp_manager(None)
             self._bootstrap.turn_executor.set_mcp_manager(None)
 
-        resolve_exception_absorption_service = getattr(
-            self._bootstrap.actor_supervisor,
-            "exception_absorption_service",
-            None,
-        )
         startup_recovery_summary = run_startup_recovery(
             environment_service=getattr(self._app.state, "environment_service", None),
-            actor_mailbox_service=getattr(self._app.state, "actor_mailbox_service", None),
+            actor_mailbox_service=None,
             decision_request_repository=getattr(
                 self._app.state,
                 "decision_request_repository",
@@ -851,11 +846,7 @@ class RuntimeRestartCoordinator:
             kernel_task_store=getattr(self._app.state, "kernel_task_store", None),
             schedule_repository=getattr(self._app.state, "schedule_repository", None),
             runtime_repository=getattr(self._app.state, "agent_runtime_repository", None),
-            exception_absorption_service=(
-                resolve_exception_absorption_service()
-                if callable(resolve_exception_absorption_service)
-                else None
-            ),
+            exception_absorption_service=None,
             human_assist_task_service=getattr(self._app.state, "human_assist_task_service", None),
             backlog_item_repository=getattr(self._app.state, "backlog_item_repository", None),
             assignment_repository=getattr(self._app.state, "assignment_repository", None),

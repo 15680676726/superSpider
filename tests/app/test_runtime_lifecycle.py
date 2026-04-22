@@ -579,6 +579,135 @@ async def test_runtime_restart_coordinator_waits_for_existing_restart(
     await waiter
 
 
+@pytest.mark.asyncio
+async def test_runtime_restart_coordinator_does_not_require_retired_actor_runtime_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    app = FastAPI()
+    app.state.schedule_repository = "schedule-repository"
+    app.state.environment_service = "environment-service"
+    app.state.decision_request_repository = "decision-repository"
+    app.state.kernel_task_store = "kernel-task-store"
+    app.state.agent_runtime_repository = "agent-runtime-repository"
+    app.state.human_assist_task_service = "human-assist-task-service"
+    app.state.backlog_item_repository = "backlog-item-repository"
+    app.state.assignment_repository = "assignment-repository"
+    app.state.goal_repository = "goal-repository"
+    app.state.goal_override_repository = "goal-override-repository"
+    app.state.task_repository = "task-repository"
+    app.state.task_runtime_repository = "task-runtime-repository"
+    app.state.runtime_event_bus = "runtime-event-bus"
+    app.state.automation_tasks = []
+
+    agent_runtime_app = FastAPI()
+
+    class _CapabilityService:
+        def set_mcp_manager(self, value) -> None:
+            captured["capability_service_mcp_manager"] = value
+
+    class _TurnExecutor:
+        def set_mcp_manager(self, value) -> None:
+            captured["turn_executor_mcp_manager"] = value
+
+    class _IndustryService:
+        def set_schedule_runtime(self, **kwargs) -> None:
+            captured["industry_schedule_runtime"] = kwargs
+
+    class _WorkflowTemplateService:
+        def set_schedule_runtime(self, **kwargs) -> None:
+            captured["workflow_schedule_runtime"] = kwargs
+
+    bootstrap = SimpleNamespace(
+        kernel_dispatcher="kernel-dispatcher",
+        capability_service=_CapabilityService(),
+        governance_service="governance-service",
+        memory_sleep_service="memory-sleep-service",
+        research_session_service="research-session-service",
+        weixin_ilink_runtime_state="weixin-ilink-runtime-state",
+        industry_service=_IndustryService(),
+        workflow_template_service=_WorkflowTemplateService(),
+        turn_executor=_TurnExecutor(),
+    )
+    coordinator = RuntimeRestartCoordinator(
+        app=app,
+        agent_runtime_app=agent_runtime_app,
+        bootstrap=bootstrap,
+        runtime_host=object(),
+        logger=logging.getLogger(__name__),
+    )
+
+    monkeypatch.setattr(
+        runtime_lifecycle_module,
+        "get_config_path",
+        lambda: "config.toml",
+    )
+    monkeypatch.setattr(
+        runtime_lifecycle_module,
+        "load_config",
+        lambda _path: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        runtime_lifecycle_module,
+        "runtime_manager_stack_from_app_state",
+        lambda _state: "old-manager-stack",
+    )
+
+    async def _stop_runtime_manager_stack(stack, *, logger, error_mode, context, **kwargs) -> None:
+        captured["stop_runtime_manager_stack"] = {
+            "stack": stack,
+            "logger": logger,
+            "error_mode": error_mode,
+            "context": context,
+            **kwargs,
+        }
+
+    async def _initialize_mcp_manager(**kwargs):
+        captured["initialize_mcp_manager"] = kwargs
+        return "new-mcp-manager"
+
+    async def _start_runtime_manager_stack(**kwargs):
+        captured["start_runtime_manager_stack"] = kwargs
+        return SimpleNamespace(job_repository="job-repository", cron_manager="cron-manager")
+
+    monkeypatch.setattr(
+        runtime_lifecycle_module,
+        "stop_runtime_manager_stack",
+        _stop_runtime_manager_stack,
+    )
+    monkeypatch.setattr(
+        runtime_lifecycle_module,
+        "initialize_mcp_manager",
+        _initialize_mcp_manager,
+    )
+    monkeypatch.setattr(
+        runtime_lifecycle_module,
+        "start_runtime_manager_stack",
+        _start_runtime_manager_stack,
+    )
+    monkeypatch.setattr(
+        runtime_lifecycle_module,
+        "run_startup_recovery",
+        lambda **kwargs: captured.setdefault("run_startup_recovery", kwargs) or {"reason": "restart"},
+    )
+    monkeypatch.setattr(
+        runtime_lifecycle_module,
+        "attach_runtime_state",
+        lambda *args, **kwargs: captured.setdefault(
+            "attach_runtime_state",
+            {"args": args, "kwargs": kwargs},
+        ),
+    )
+
+    await coordinator._do_restart_services(restart_requester_task=None)
+
+    startup_recovery_kwargs = captured["run_startup_recovery"]
+    assert startup_recovery_kwargs["actor_mailbox_service"] is None
+    assert startup_recovery_kwargs["exception_absorption_service"] is None
+    assert captured["industry_schedule_runtime"]["schedule_writer"] == "job-repository"
+    assert captured["workflow_schedule_runtime"]["cron_manager"] == "cron-manager"
+
+
 class _FakeAutomationTaskStore:
     def __init__(self, tasks) -> None:
         self._tasks = list(tasks)

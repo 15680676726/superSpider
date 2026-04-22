@@ -29,7 +29,6 @@ from ..kernel import (
     KernelToolBridge,
     MainBrainChatService,
     MainBrainOrchestrator,
-    TaskDelegationService,
 )
 from ..kernel.main_brain_execution_planner import MainBrainExecutionPlanner
 from ..kernel.main_brain_intake import resolve_request_main_brain_intake_contract
@@ -912,7 +911,6 @@ class RuntimeDomainServices:
     fixed_sop_service: FixedSopService
     routine_service: RoutineService
     prediction_service: PredictionService
-    delegation_service: TaskDelegationService
     query_execution_service: KernelQueryExecutionService
     main_brain_chat_service: MainBrainChatService
     main_brain_orchestrator: MainBrainOrchestrator
@@ -1233,7 +1231,6 @@ def build_runtime_domain_services(
     )
     industry_service.set_prediction_service(prediction_service)
 
-    delegation_service = None
     environment_service.set_kernel_dispatcher(kernel_dispatcher)
     memory_surface_service = MemorySurfaceService(
         memory_recall_service=memory_recall_service,
@@ -1339,7 +1336,6 @@ def build_runtime_domain_services(
         fixed_sop_service=fixed_sop_service,
         routine_service=routine_service,
         prediction_service=prediction_service,
-        delegation_service=delegation_service,
         query_execution_service=query_execution_service,
         main_brain_chat_service=main_brain_chat_service,
         main_brain_orchestrator=main_brain_orchestrator,

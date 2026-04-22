@@ -250,6 +250,11 @@
     - formal `kernel task / decision / agent capability` 路由已拆分到 `runtime_center_routes_governance.py` 与 `runtime_center_routes_agents.py`
     - `runtime_center_payloads.py`、`agent_profile_service.py`、`capabilities/install_templates.py`、`capabilities/system_actor_handlers.py` 已停止生成 `/api/runtime-center/actors/*` dead routes
     - 但 `actor_mailbox.py` / `actor_worker.py` / `actor_supervisor.py` 及 overview/startup compatibility wiring 仍在，因此本条目状态不变，继续保持 `frozen`
+  - `2026-04-22` gate-repair 补充：
+    - `RuntimeBootstrap` / `RuntimeDomainServices` 已删除 formal `actor_mailbox_service / actor_worker / actor_supervisor / delegation_service` 暴露位
+    - `src/copaw/app/_app.py` 与 `src/copaw/app/runtime_lifecycle.py` 默认生命周期已停止通过 startup recovery 传递 actor mailbox / exception absorption，也不再在 default app lifecycle 中启动或停止 actor supervisor
+    - Runtime Center formal `agents` 与 `learning governance` 路由已恢复到 `runtime_center_routes_agents.py` / `runtime_center_routes_governance.py`，default gate 已重新通过
+    - 但 actor kernel 文件本体仍在，且 browser / desktop / document-file-shell product surface 仍未替换，因此本条目继续保持 `frozen`
 
 ### 3.1.4 `src/copaw/kernel/delegation_service.py`
 
@@ -299,6 +304,10 @@
     - `delegation_service.py` compatibility result 也已停止返回已删除的 actor mailbox route
     - execution-core formal query front-door 现只保留 `dispatch_query / apply_role / discover_capabilities` 等正式 system-op surface；显式 `TaskDelegationService` compatibility chain 仍在
     - 因此本条目继续保持 `frozen`，不得误写成 `deleted`
+  - `2026-04-22` gate-repair 补充：
+    - `RuntimeBootstrap` 与 `RuntimeDomainServices` 已不再暴露 formal `delegation_service` field；default app lifecycle / startup recovery 也已不再依赖该 compatibility field
+    - Runtime Center learning patch write path 已重新挂回 formal governance router，并显式关闭 main-brain auto-approval，恢复 `waiting-confirm` 审批语义
+    - 但 `src/copaw/kernel/delegation_service.py` 文件与 compatibility-focused tests 仍在，本条目状态不变，继续保持 `frozen`
 
 ### 3.1.5 donor-first 外接项目产品面：`/capability-market/projects/install*`、`project donor` taxonomy、Runtime Center donor 读面
 

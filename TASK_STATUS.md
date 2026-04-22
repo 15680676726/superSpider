@@ -580,6 +580,45 @@
   - 结果：`178 passed in 101.15s`
   - 验收层级：`L1 + L2`
 
+## 1.0.13 `2026-04-22` local executor physical-retirement slice（bootstrap demotion + Runtime Center gate repair）
+
+- 本轮继续推进了 actor/delegation compatibility 的正式生命周期退役，但没有把“本地执行脑已全部删除”提前写成完成：
+  - `src/copaw/app/runtime_bootstrap_models.py` 已删除 `delegation_service / actor_mailbox_service / actor_worker / actor_supervisor` 这 4 组 formal bootstrap fields
+  - `src/copaw/app/runtime_bootstrap_domains.py` 的 `RuntimeDomainServices` 已不再公开 `delegation_service`
+  - `src/copaw/app/runtime_service_graph.py` 已不再把 actor/delegation compatibility 对象写回 `RuntimeBootstrap`
+  - `src/copaw/app/_app.py` 与 `src/copaw/app/runtime_lifecycle.py` 已停止在 default app lifecycle / startup recovery 中传递 `actor_mailbox_service`、exception absorption 和 `actor_supervisor start/stop`
+- 这轮还顺手修掉了 default gate 暴露出的 Runtime Center 正式路由断链：
+  - `src/copaw/app/routers/runtime_center_routes_agents.py` 现重新提供 formal `/api/runtime-center/agents` 与 `/api/runtime-center/agents/{agent_id}`
+  - `src/copaw/app/routers/runtime_center_routes_governance.py` 现重新提供 formal `/api/runtime-center/learning/proposals`、`/learning/patches`、`/learning/patches/{patch_id}`、`/learning/growth` 等读面，以及 patch `approve / reject / apply / rollback` 写面
+  - acquisition approve / reject 现在会优先回传 finalized decision payload，不再把 stale repository snapshot 当最终结果
+  - Runtime Center patch mutation 现在显式带：
+    - `owner_agent_id = "runtime-center"`
+    - `disable_main_brain_auto_approval = true`
+    - 从而恢复 `waiting-confirm` 治理语义，不再被 main-brain auto-approval 抢过
+- 当前能诚实写出的结论：
+  - actor/delegation compatibility 已退出 default formal bootstrap / app lifecycle
+  - Runtime Center formal `agents + learning governance` 读写面已恢复，default gate 重新通过
+  - 这仍不等于本地执行脑已全部删除：
+    - `src/copaw/kernel/actor_mailbox.py` / `actor_worker.py` / `actor_supervisor.py` 文件仍在
+    - `src/copaw/kernel/delegation_service.py` 文件与 compatibility-focused tests 仍在
+    - browser / desktop / document-file-shell 本地产品/API surface 仍是 blocker，尚未被 external-executor product surface 替代
+- fresh focused regression：
+  - 命令：`python -m pytest tests/app/test_runtime_center_api.py tests/app/test_learning_api.py tests/app/test_operator_runtime_e2e.py tests/app/test_runtime_center_actor_api.py tests/app/runtime_center_api_parts/detail_environment.py tests/app/runtime_center_api_parts/overview_governance.py tests/app/test_runtime_bootstrap_helpers.py tests/app/test_runtime_bootstrap_split.py tests/app/test_runtime_lifecycle.py -q`
+  - 结果：`346 passed in 180.25s`
+  - 验收层级：`L1 + L2`
+- `default regression`：
+  - 命令：`python scripts/run_p0_runtime_terminal_gate.py`
+  - 结果：后端主链回归 `361 passed in 266.07s`；长跑与删旧回归 `84 passed in 427.67s`
+  - 验收层级：`L2`
+- frontend targeted regression：
+  - 命令：`cmd /c npm --prefix console run test -- src/pages/RuntimeCenter/MainBrainCockpitPanel.test.tsx src/components/RuntimeExecutionStrip.test.tsx src/pages/Predictions/index.test.ts src/pages/Knowledge/index.test.tsx`
+  - 结果：通过，`21 passed`
+  - 验收层级：`L2`
+- frontend build：
+  - 命令：`cmd /c npm --prefix console run build`
+  - 结果：通过
+  - 验收层级：`L2`
+
 ## 1.1.1 `2026-04-07` Buddy 领域能力阶段收口补充
 
 - Buddy 当前成长阶段的正式真相已从关系经验切到 active `BuddyDomainCapabilityRecord`

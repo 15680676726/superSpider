@@ -579,11 +579,6 @@ def test_domain_builder_wires_environment_service_into_fixed_sop_service(
     )
     monkeypatch.setattr(
         runtime_bootstrap_domains_module,
-        "TaskDelegationService",
-        lambda **kwargs: SimpleNamespace(),
-    )
-    monkeypatch.setattr(
-        runtime_bootstrap_domains_module,
         "KernelQueryExecutionService",
         lambda **kwargs: SimpleNamespace(),
     )

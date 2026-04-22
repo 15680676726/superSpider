@@ -32,7 +32,6 @@ from ..kernel import (
     KernelTaskStore,
     KernelToolBridge,
     KernelTurnExecutor,
-    TaskDelegationService,
 )
 from ..kernel.buddy_onboarding_reasoner import ModelDrivenBuddyOnboardingReasoner
 from ..kernel.buddy_runtime_focus import build_buddy_current_focus_resolver
@@ -810,7 +809,6 @@ def build_runtime_bootstrap(
     fixed_sop_service = domain_services.fixed_sop_service
     routine_service = domain_services.routine_service
     prediction_service = domain_services.prediction_service
-    delegation_service = domain_services.delegation_service
     query_execution_service = domain_services.query_execution_service
     main_brain_chat_service = domain_services.main_brain_chat_service
     main_brain_orchestrator = domain_services.main_brain_orchestrator
@@ -949,7 +947,6 @@ def build_runtime_bootstrap(
         operating_cycle_service=operating_cycle_service,
         assignment_service=assignment_service,
         agent_report_service=agent_report_service,
-        delegation_service=delegation_service,
         capability_service=capability_service,
         agent_profile_service=agent_profile_service,
         industry_service=industry_service,
@@ -968,9 +965,6 @@ def build_runtime_bootstrap(
         main_brain_chat_service=main_brain_chat_service,
         main_brain_orchestrator=main_brain_orchestrator,
         query_execution_service=query_execution_service,
-        actor_mailbox_service=actor_mailbox_service,
-        actor_worker=actor_worker,
-        actor_supervisor=actor_supervisor,
         external_runtime_service=external_runtime_service,
         executor_runtime_service=executor_runtime_service,
         executor_runtime_coordinator=executor_runtime_coordinator,
