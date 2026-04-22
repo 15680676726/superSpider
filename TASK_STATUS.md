@@ -662,6 +662,27 @@
   - 结果：`134 passed in 55.29s`
   - 验收层级：`L1 + L2`
 
+## 1.0.16 `2026-04-23` local executor physical-retirement slice（Runtime Center actor exception-absorption read-surface removal）
+
+- 本轮继续删 Runtime Center 主脑卡片里最后一段 actor supervisor 兼容读面，但没有把 actor kernel 文件本体误写成已删除：
+  - `src/copaw/app/runtime_center/overview_main_brain.py` 已停止读取 `actor_supervisor_snapshot / actor_supervisor.snapshot()` 来组装 `exception_absorption`
+  - main-brain card summary / meta / control-chain 已不再输出 `exception_absorption`
+  - 因此 Runtime Center main-brain card 不会再把本地 actor supervisor 的内部异常吸收摘要当正式治理真相
+- 当前能诚实写出的结论：
+  - Runtime Center main-brain 正式读面已不再依赖 actor runtime contract，也不再依赖 actor supervisor exception-absorption snapshot
+  - 这仍不等于 actor runtime 已物理删除：
+    - `actor_mailbox.py / actor_worker.py / actor_supervisor.py` 文件本体还在
+    - actor capability compatibility surface 与 mailbox continuity 兼容链还在
+    - browser / desktop / document-file-shell 本地产品面仍未替换
+- fresh focused regression：
+  - 命令：`python -m pytest tests/app/runtime_center_api_parts/overview_governance.py tests/app/test_runtime_center_main_brain_localization.py -q`
+  - 结果：`106 passed in 38.70s`
+  - 验收层级：`L1 + L2`
+- focused Runtime Center regression：
+  - 命令：`python -m pytest tests/app/test_runtime_center_api.py tests/app/runtime_center_api_parts/overview_governance.py tests/app/test_runtime_center_main_brain_localization.py tests/app/test_runtime_center_overview_group_builders.py -q`
+  - 结果：`237 passed in 85.57s`
+  - 验收层级：`L1 + L2`
+
 ## 1.1.1 `2026-04-07` Buddy 领域能力阶段收口补充
 
 - Buddy 当前成长阶段的正式真相已从关系经验切到 active `BuddyDomainCapabilityRecord`

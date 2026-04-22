@@ -792,10 +792,8 @@ def test_runtime_center_overview_uses_state_and_evidence_services():
     assert main_brain_entry["meta"]["patch_count"] == 3
     assert main_brain_entry["meta"]["evidence_count"] == 4
     assert main_brain_entry["meta"]["strategy_id"] == "strategy:industry:industry-v1-ops:copaw-agent-runner"
-    assert cards["main-brain"]["meta"]["exception_absorption"]["case_count"] == 2
-    assert cards["main-brain"]["meta"]["exception_absorption"]["human_required_case_count"] == 1
-    assert cards["main-brain"]["meta"]["exception_absorption"]["status"] == "human-required"
-    assert "absorbing internal execution pressure" in cards["main-brain"]["summary"]
+    assert "exception_absorption" not in cards["main-brain"]["meta"]
+    assert "absorbing internal execution pressure" not in cards["main-brain"]["summary"]
     assert cards["decisions"]["entries"][0]["status"] == "open"
     assert cards["decisions"]["entries"][0]["actions"]["approve"] == "/api/runtime-center/decisions/decision-1/approve"
     assert cards["patches"]["source"] == "learning_service"

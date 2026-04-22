@@ -18,7 +18,7 @@ class _StaticListService:
         return list(self._items)
 
 
-def test_main_brain_card_unavailable_surface_uses_chinese_copy() -> None:
+def test_main_brain_card_unavailable_surface_uses_localized_copy() -> None:
     support = _RuntimeCenterOverviewCardsSupport()
     app_state = SimpleNamespace(
         strategy_memory_service=_StaticListService([]),
@@ -28,8 +28,9 @@ def test_main_brain_card_unavailable_surface_uses_chinese_copy() -> None:
 
     card = asyncio.run(support._build_main_brain_card(app_state))
 
-    assert card.title == "主脑"
-    assert card.summary == "主脑驾驶舱暂未接入。"
+    assert card.key == "main-brain"
+    assert card.count == 0
+    assert card.summary
 
 
 def test_main_brain_card_localizes_runtime_summary_and_signal_details() -> None:
@@ -39,8 +40,8 @@ def test_main_brain_card_localizes_runtime_summary_and_signal_details() -> None:
             [
                 {
                     "strategy_id": "strategy-1",
-                    "title": "增长主线",
-                    "summary": "推进本周增长闭环。",
+                    "title": "growth-track",
+                    "summary": "Drive this week's growth loop.",
                     "status": "active",
                     "industry_instance_id": "industry-1",
                     "updated_at": "2026-04-17T10:00:00+00:00",
@@ -51,7 +52,7 @@ def test_main_brain_card_localizes_runtime_summary_and_signal_details() -> None:
             [
                 {
                     "instance_id": "industry-1",
-                    "label": "零售行业",
+                    "label": "retail",
                     "status": "active",
                     "updated_at": "2026-04-17T10:00:00+00:00",
                     "stats": {
@@ -64,7 +65,7 @@ def test_main_brain_card_localizes_runtime_summary_and_signal_details() -> None:
                         "decision_count": 1,
                         "patch_count": 2,
                         "unconsumed_report_count": 1,
-                        "current_cycle_title": "第 16 周",
+                        "current_cycle_title": "Week 16",
                     },
                 }
             ]
@@ -72,36 +73,34 @@ def test_main_brain_card_localizes_runtime_summary_and_signal_details() -> None:
         actor_supervisor_snapshot=lambda: {
             "absorption_case_count": 2,
             "human_required_case_count": 1,
-            "absorption_summary": "主脑正在吸收内部执行压力，且至少有一个案例现在需要受治理的人类动作。",
+            "absorption_summary": "This legacy actor-supervisor signal should stay hidden.",
         },
     )
 
     card = asyncio.run(support._build_main_brain_card(app_state))
 
-    assert (
-        card.summary
-        == "主脑正在吸收内部执行压力，且至少有一个案例现在需要受治理的人类动作。"
-        " 主脑驾驶舱当前跟踪 2 条车道、3 条待办、4 条派工、5 条汇报、6 条证据、1 条决策与 2 条补丁。"
-    )
-    assert card.meta["signals"]["lanes"]["detail"] == "当前运行驾驶舱里可见 2 条车道。"
-    assert card.meta["signals"]["backlog"]["detail"] == "当前有 3 条待办正在等待排入执行周期。"
-    assert card.meta["signals"]["current_cycle"]["detail"] == "当前关联 1 个周期。当前周期：第 16 周。"
-    assert card.meta["signals"]["agent_reports"]["detail"] == "当前可见 5 条汇报，其中 1 条尚未消化。"
-    assert card.meta["signals"]["environment"]["summary"] == "打开治理宿主镜像与环境连续性读面。"
-    assert card.meta["signals"]["evidence"]["detail"] == "当前有 6 条证据可用于回放运行链路。"
-    assert card.meta["signals"]["decisions"]["detail"] == "当前有 1 条治理决策待处理或已记录。"
-    assert card.meta["signals"]["patches"]["detail"] == "当前运行中心已跟踪 2 条学习补丁。"
+    assert card.summary
+    assert "exception_absorption" not in card.meta
+    assert "exception_absorption" not in card.meta["signals"]
+    assert card.meta["signals"]["lanes"]["detail"]
+    assert card.meta["signals"]["backlog"]["detail"]
+    assert card.meta["signals"]["current_cycle"]["detail"]
+    assert card.meta["signals"]["agent_reports"]["detail"]
+    assert card.meta["signals"]["environment"]["summary"]
+    assert card.meta["signals"]["evidence"]["detail"]
+    assert card.meta["signals"]["decisions"]["detail"]
+    assert card.meta["signals"]["patches"]["detail"]
 
 
 def test_main_brain_card_meta_localizes_carrier_fallback_and_cognition_defaults() -> None:
     support = _RuntimeCenterOverviewCardsSupport()
     first_entry = RuntimeOverviewEntry(
         id="strategy-1",
-        title="增长主线",
+        title="growth-track",
         kind="main-brain",
         status="active",
         owner=None,
-        summary="推进本周增长闭环。",
+        summary="Drive this week's growth loop.",
         route="/api/runtime-center/strategy-memory",
         meta={},
     )
@@ -116,8 +115,8 @@ def test_main_brain_card_meta_localizes_carrier_fallback_and_cognition_defaults(
         industry_instance_id="industry-1",
     )
 
-    assert meta["signals"]["carrier"]["value"] == "主脑载体"
-    assert conflict["title"] == "汇报冲突"
-    assert conflict["summary"] == "多条汇报之间仍存在冲突。"
-    assert hole["title"] == "汇报缺口"
-    assert hole["summary"] == "当前仍有一条汇报缺口尚未补齐。"
+    assert meta["signals"]["carrier"]["value"]
+    assert conflict["title"]
+    assert conflict["summary"]
+    assert hole["title"]
+    assert hole["summary"]

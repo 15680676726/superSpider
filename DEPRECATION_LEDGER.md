@@ -259,6 +259,10 @@
     - `RuntimeCenterAppStateView` 已删除 `actor_worker_runtime_contract / actor_supervisor_runtime_contract`
     - `overview_cards.py` main-brain governance 已停止在 query entropy 缺失时回退读取 actor runtime-contract sidecar memory
     - 因此 Runtime Center formal governance 读面已不再把 actor runtime contract 当 sidecar-memory 真相；但 actor supervisor snapshot / exception_absorption 读面与 actor kernel 文件仍在，本条目继续保持 `frozen`
+  - `2026-04-23` main-brain card 补充：
+    - `overview_main_brain.py` 已停止读取 `actor_supervisor_snapshot / actor_supervisor.snapshot()` 来生成 `exception_absorption`
+    - Runtime Center main-brain card summary / meta / control-chain 已不再输出 actor supervisor exception-absorption 摘要
+    - 因此 Runtime Center formal main-brain 读面已不再把 actor supervisor snapshot 当正式治理真相；但 actor kernel 文件、actor capability compatibility surface 与 mailbox continuity 兼容链仍在，本条目继续保持 `frozen`
 
 ### 3.1.4 `src/copaw/kernel/delegation_service.py`
 
