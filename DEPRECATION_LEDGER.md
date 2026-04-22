@@ -238,6 +238,10 @@
   - RuntimeExecutionStrip / AgentWorkbench 已删除 actor control affordance，capability governance 统一切到 agent formal surface
   - 当前条目可正式表述为：actor runtime 在 Runtime Center / Agent Workbench 链路上已降到 `read-only-compat`
   - 当前剩余边界不变：启动图仍保留 actor runtime，`delegation_service.py` 仍未退役，因此本条目继续保持 `frozen`，不得提前标记为 `ready-to-delete`
+- `2026-04-22` 状态补充：
+  - `runtime_bootstrap_execution.py` / `runtime_service_graph.py` 现已把 actor runtime 收进显式 compatibility wiring；default formal bootstrap 不再默认装配 `actor_mailbox_service / actor_worker / actor_supervisor`
+  - `_app.py` 现只会在 actor supervisor 被显式装配时启动 actor runtime lifecycle
+  - 因此 actor runtime 已退出 default formal startup graph，但 compatibility codepath 与显式 read surface 仍在；本条目继续保持 `frozen`，不得误写成 `deleted`
 
 ### 3.1.4 `src/copaw/kernel/delegation_service.py`
 
@@ -272,6 +276,12 @@
   - 因此 `delegation_service.py` 已不再是 primary assignment execution backend；formal assignment write path 现在锚定到 `Assignment -> ExecutorRuntime -> Event -> Evidence/Report`
   - `delegation_service.py` 仍保留为显式 compatibility child-task backend，且 child-task / mailbox / experience metadata 现统一标记 `execution_source = delegation-compat`
   - 当前状态因此仍保持 `frozen`：formal-backend retirement 已完成，但物理删除与显式 compatibility capability 退役尚未完成
+- `2026-04-22` 状态补充：
+  - child-task / mailbox / resume payload / Runtime Center child rollup 现统一补齐：
+    - `execution_source = delegation-compat`
+    - `formal_surface = false`
+    - `compatibility_mode = delegation-compat`
+  - 因此 delegation compatibility run 不再伪装成 formal assignment child backend；但 `delegation_service.py` 仍会创建 compatibility child task，因此本条目继续保持 `frozen`
 
 ### 3.1.5 donor-first 外接项目产品面：`/capability-market/projects/install*`、`project donor` taxonomy、Runtime Center donor 读面
 
@@ -311,6 +321,12 @@
   - `src/copaw/app/runtime_center/state_query.py` / `src/copaw/state/executor_runtime_service.py` / executor runtime repository 现已支持 formal provider inventory read path
   - 因此 formal `ExecutorProvider / control_surface_kind / default_protocol_kind` intake 已落地，donor/project install 不再是唯一也不再是假装 canonical 的 executor intake 前门
   - 但 donor/project product shell、donor state/trust/trial/retirement taxonomy 与 compatibility/acquisition-only 路由仍在；本条目因此继续保持 `frozen`，不得误写成“donor-first 产品面已删除”
+- `2026-04-22` 状态补充：
+  - `project_donor_contracts.py` 现把 nested `execution_shell` 也统一标记为 `compatibility/acquisition-only`
+  - Capability Market project install result 的 `runtime_contract` 与 Runtime Center donor projection 的 nested `runtime_contract` 现都会显式带：
+    - `compatibility_mode = compatibility/acquisition-only`
+    - `formal_surface = false`
+  - donor/project shell 因此不再返回“裸 runtime_contract”误导前台把 acquisition-only surface 当 active execution shell；但 donor-first taxonomy 与路由仍在，本条目继续保持 `frozen`
 
 ### 3.1.6 本地 browser 执行层：`src/copaw/agents/tools/browser_control.py`、`src/copaw/capabilities/browser_runtime.py`、`src/copaw/environments/surface_execution/browser/service.py`
 
@@ -333,6 +349,9 @@
 - `2026-04-20` 落点补充：
   - `Codex App Server` first adapter 已落地，但 browser local execution 还没有被 executor runtime 正式接管。
   - 因此本条目继续是 retirement target，不得误记为已替代或已删除。
+- `2026-04-22` 状态补充：
+  - `query_execution_runtime.py` 现已把 execution-core formal front-door 上的本地 browser/file/shell/document tool capability ids 默认移除
+  - 因此 browser local chain 不再作为 execution-core default formal surface 暴露；但 specialist/compatibility/internal path 仍在，本条目继续保持 `frozen`
 
 ### 3.1.7 本地 desktop 执行层：`src/copaw/agents/tools/desktop_actuation.py`、`src/copaw/adapters/desktop/windows_host.py`、`src/copaw/adapters/desktop/windows_mcp_server.py`、`src/copaw/environments/surface_execution/desktop/service.py`
 
@@ -355,6 +374,9 @@
 - `2026-04-20` 落点补充：
   - `Codex App Server` first adapter 已落地，但 desktop local execution 仍未切到 executor runtime 主链。
   - 因此本条目继续是 retirement target，不得误记为已替代或已删除。
+- `2026-04-22` 状态补充：
+  - execution-core formal front-door 现已不再默认暴露本地 desktop/document/browser/file tool capability ids
+  - 因此 desktop local chain 不再作为 execution-core default formal surface 暴露；但本地 desktop compatibility path 仍在，本条目继续保持 `frozen`
 
 ### 3.1.8 本地 document 执行层：`src/copaw/agents/tools/document_surface.py`、`src/copaw/environments/surface_execution/document/service.py`
 
@@ -377,6 +399,9 @@
 - `2026-04-20` 落点补充：
   - `Codex App Server` first adapter 已落地，但 document/file local execution 仍未切到 executor runtime 主链。
   - 因此本条目继续是 retirement target，不得误记为已替代或已删除。
+- `2026-04-22` 状态补充：
+  - `query_execution_runtime.py` 现已停止在 execution-core formal front-door 默认暴露 `tool:read_file / tool:write_file / tool:execute_shell_command / tool:document_surface`
+  - 因此 document/file local chain 已退出 execution-core default formal surface；但兼容执行链与底层 executor 仍在，本条目继续保持 `frozen`
 
 ---
 

@@ -360,6 +360,36 @@
   - donor/project state/trust/trial/retirement 全量 taxonomy 仍未全部退役；`/capability-market/projects/install*` 仍然保留 compatibility/acquisition-only 前门
   - `live external-provider smoke` 仍未对新 formal provider intake 做专项真实外部链路验证，不得混写成“所有 provider intake 都已 live 验证”
 
+## 1.0.8 `2026-04-22` external-executor hard-cut remaining-work plan Task 1-6 收口
+
+- 本轮按 `docs/superpowers/plans/2026-04-21-external-executor-hard-cut-remaining-work-plan.md` 连续完成并提交了 Task 1-6：
+  - `Task 1 / model governance contract`
+    - `a9eddfb`：`runtime_coordination.py` 现优先从 `binding.model_policy_id` 解析 formal model policy，不再误把 `execution_policy_id` 当 model-policy lookup key
+  - `Task 2 / executor runtime canonical truth`
+    - `b6703c8`：`ExecutorRuntimeService` 现直接持久化/查询 `ExecutorRuntimeInstanceRecord`，`ExternalCapabilityRuntimeService` 只剩 compatibility fallback
+  - `Task 3 / actor runtime bootstrap demotion`
+    - `6b79dbc`：default formal bootstrap 不再默认装配 `actor_mailbox_service / actor_worker / actor_supervisor`；`_app.py` 只会在显式 compatibility owner 存在时启动 actor supervisor
+  - `Task 4 / delegation compatibility isolation`
+    - `9c92fca`：delegation child-task / mailbox / resume payload / Runtime Center child rollup 现统一带 `execution_source = delegation-compat`、`formal_surface = false`、`compatibility_mode = delegation-compat`
+  - `Task 5 / donor execution shell acquisition-only`
+    - `2d38c65`：donor/project metadata、Capability Market project install `runtime_contract`、Runtime Center donor projection 的 nested execution shell 现统一补 `compatibility/acquisition-only`
+  - `Task 6 / execution-core front-door cutover`
+    - `d5c3c29`：`query_execution_runtime.py` 现默认移除 execution-core formal front-door 上的本地 browser/file/shell/document tool capability ids，只保留 formal system-op surface
+- 当前能诚实表述的结论：
+  - remaining-work plan 的 `Task 1-6` 代码切口已全部落地并各自独立提交
+  - execution-core formal front-door 现已锚定到 `system:dispatch_query / system:apply_role / system:discover_capabilities` 等正式系统能力，不再把本地 tool 链当 canonical execution surface
+  - donor/project 与 delegation child-run 现都只以显式 compatibility surface 存在，不再裸露成 formal executor intake / formal assignment child backend
+  - 这仍不等于 external-executor hard-cut 全部终态完成；Task 7 的 fresh live smoke / doc sync / push close口仍未做完
+- 当前 fresh focused regression 证据：
+  - focused regression：
+    - 命令：`python -m pytest tests/kernel/test_main_brain_executor_runtime_integration.py tests/app/test_capability_market_api.py tests/state/test_executor_runtime_service.py tests/state/test_external_runtime_service.py tests/app/test_runtime_center_executor_runtime_projection.py tests/kernel/test_executor_event_writeback_service.py tests/app/test_runtime_center_external_runtime_api.py tests/app/test_runtime_bootstrap_helpers.py tests/app/test_runtime_bootstrap_split.py tests/app/test_runtime_execution_provider_wiring.py tests/app/test_runtime_center_actor_api.py tests/kernel/test_assignment_envelope.py tests/kernel/test_task_execution_projection.py tests/app/test_runtime_center_task_delegation_api.py tests/capabilities/test_project_donor_contracts.py tests/kernel/query_execution_environment_parts/dispatch.py tests/app/test_capabilities_execution.py tests/app/test_mcp_runtime_contract.py tests/app/test_runtime_workflow_patch_bootstrap_wiring.py -q`
+    - 结果：`273 passed in 196.97s`
+    - 验收层级：`L1 + L2`
+- 当前仍然明确未完成：
+  - `live external-provider smoke` 仍未对 `/capability-market/executor-providers/search` + `/executor-providers/install` 跑真实外部 provider 链路
+  - `delegation_service.py`、actor runtime 代码与 donor/project taxonomy 仍保留 compatibility 遗留，尚未物理删除
+  - `/capability-market/projects/install*` compatibility/acquisition-only 前门仍在，不得误写成 donor-first 产品壳已删除
+
 ## 1.1.1 `2026-04-07` Buddy 领域能力阶段收口补充
 
 - Buddy 当前成长阶段的正式真相已从关系经验切到 active `BuddyDomainCapabilityRecord`
