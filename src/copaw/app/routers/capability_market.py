@@ -76,6 +76,7 @@ from ...capabilities.project_donor_contracts import (
     build_github_python_project_transport_chain,
     discover_installed_python_callable_actions,
     parse_pip_install_report_requested_distribution,
+    project_donor_execution_shell_metadata,
     project_donor_surface_metadata,
     resolve_installed_python_project_contract,
 )
@@ -1751,10 +1752,12 @@ async def _install_external_project_capability(
             "summary": install_summary,
             "compatibility_mode": PROJECT_DONOR_COMPATIBILITY_MODE,
             "formal_surface": False,
-            "runtime_contract": _serialize_installed_runtime_contract(
-                contract=resolved_contract,
-                execute_command=resolved_execute_command,
-                healthcheck_command=resolved_healthcheck_command,
+            "runtime_contract": project_donor_execution_shell_metadata(
+                _serialize_installed_runtime_contract(
+                    contract=resolved_contract,
+                    execute_command=resolved_execute_command,
+                    healthcheck_command=resolved_healthcheck_command,
+                )
             ),
             "adapter_contract": (
                 compiled_adapter_contract.model_dump(mode="json")
@@ -2204,7 +2207,7 @@ def _project_install_response_payload(
             for item in list(result.get("installed_capability_ids") or [])
             if str(item).strip()
         ],
-        "runtime_contract": (
+        "runtime_contract": project_donor_execution_shell_metadata(
             dict(result.get("runtime_contract"))
             if isinstance(result.get("runtime_contract"), dict)
             else {}

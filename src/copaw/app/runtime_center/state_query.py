@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
+from ...capabilities.project_donor_contracts import project_donor_surface_metadata
 from ...evidence import EvidenceLedger
 from ...industry.models import IndustrySeatCapabilityLayers
 from ...learning.skill_gap_detector import SkillGapDetector
@@ -1826,10 +1827,7 @@ class RuntimeCenterStateQueryService:
         self,
         payload: Mapping[str, object] | None,
     ) -> dict[str, object]:
-        serialized = dict(payload or {})
-        serialized.setdefault("compatibility_mode", "compatibility/acquisition-only")
-        serialized["formal_surface"] = False
-        return serialized
+        return project_donor_surface_metadata(dict(payload or {}))
 
     def _project_probe_projection(
         self,

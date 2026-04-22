@@ -178,6 +178,31 @@ def test_runtime_center_state_query_lists_formal_executor_provider_inventory(
     assert payload[0]["formal_surface"] is True
 
 
+def test_runtime_center_state_query_marks_nested_donor_runtime_contract_as_acquisition_only(
+    tmp_path,
+) -> None:
+    client, _runtime_service = _build_runtime_center_app(tmp_path)
+    query_service = client.app.state.state_query_service
+
+    payload = query_service._mark_donor_surface(
+        {
+            "candidate_id": "candidate-1",
+            "runtime_contract": {
+                "runtime_kind": "cli",
+                "supported_actions": ["describe", "run"],
+            },
+        }
+    )
+
+    assert payload["compatibility_mode"] == "compatibility/acquisition-only"
+    assert payload["formal_surface"] is False
+    assert payload["runtime_contract"]["formal_surface"] is False
+    assert (
+        payload["runtime_contract"]["compatibility_mode"]
+        == "compatibility/acquisition-only"
+    )
+
+
 def test_runtime_center_start_action_omits_null_runtime_id(tmp_path, monkeypatch) -> None:
     client, _ = _build_runtime_center_app(tmp_path)
     captured: dict[str, object] = {}

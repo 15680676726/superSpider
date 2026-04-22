@@ -20,12 +20,25 @@ from .external_adapter_contracts import (
 PROJECT_DONOR_COMPATIBILITY_MODE = "compatibility/acquisition-only"
 
 
+def project_donor_execution_shell_metadata(
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload = dict(metadata or {})
+    payload["compatibility_mode"] = PROJECT_DONOR_COMPATIBILITY_MODE
+    payload["formal_surface"] = False
+    return payload
+
+
 def project_donor_surface_metadata(
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload = dict(metadata or {})
     payload["compatibility_mode"] = PROJECT_DONOR_COMPATIBILITY_MODE
     payload["formal_surface"] = False
+    for key in ("runtime_contract", "adapter_contract", "execution_shell"):
+        nested = payload.get(key)
+        if isinstance(nested, dict):
+            payload[key] = project_donor_execution_shell_metadata(nested)
     return payload
 
 
@@ -935,6 +948,19 @@ def resolve_installed_python_project_contract(
                 "entry_source": "console-script" if preferred_console_script else "module",
                 "console_script": preferred_console_script,
                 "script_path": script_path,
+                "execution_shell": project_donor_execution_shell_metadata(
+                    {
+                        "runtime_kind": runtime_kind,
+                        "supported_actions": list(supported_actions),
+                        "scope_policy": _default_scope_policy(capability_kind),
+                        "ready_probe_kind": ready_probe_kind,
+                        "ready_probe_config": dict(ready_probe_config),
+                        "stop_strategy": "terminate",
+                        "startup_entry_ref": startup_entry_ref,
+                        "predicted_default_port": predicted_default_port,
+                        "predicted_health_path": predicted_health_path,
+                    }
+                ),
                 **_callable_surface_hints(
                     capability_kind=capability_kind,
                     console_entry_points=console_entry_points,

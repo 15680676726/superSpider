@@ -1995,6 +1995,11 @@ def test_capability_market_project_install_unwraps_kernel_output_payload(
     assert payload["name"] == "black"
     assert payload["source_url"] == "https://github.com/psf/black"
     assert payload["installed_capability_ids"] == ["project:black"]
+    assert payload["runtime_contract"]["formal_surface"] is False
+    assert (
+        payload["runtime_contract"]["compatibility_mode"]
+        == "compatibility/acquisition-only"
+    )
     assert payload["trial_attachment"]["scope_ref"] == "seat-1"
     assert payload["attachment"]["status"] == "attached"
     assert payload["attachment"]["attached_agent_ids"] == ["copaw-agent-runner"]
