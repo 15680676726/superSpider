@@ -14,6 +14,7 @@
 
 - Stay on `main`; do not create a branch or worktree.
 - Do not depend on customer PATH or manual `codex` installation.
+- Do not depend on manual shell auth on customer machines; sidecar credentials must come from formal CoPaw-managed config or provider injection.
 - Do not leave model selection to sidecar-local defaults.
 - Do not ship customer delivery on top of local websocket transport; move local sidecar control to `stdio`.
 - Do not treat version drift as best-effort; compatibility gating must fail closed.
@@ -25,7 +26,7 @@ All five are `P0`. Implementation order is:
 
 1. Managed sidecar install truth
 2. Local sidecar transport and launch cutover (`stdio`)
-3. Unified model governance enforced end-to-end
+3. Unified model and sidecar credential governance enforced end-to-end
 4. Approval / control / recovery closure
 5. Version compatibility and upgrade governance
 6. Full verification, docs sync, and customer-delivery closeout
@@ -40,6 +41,10 @@ All five are `P0`. Implementation order is:
   - Repository contracts for new sidecar state objects.
 - `src/copaw/state/repositories/sqlite_executor_runtime.py`
   - SQLite persistence for sidecar install / release / compatibility records.
+- `src/copaw/state/__init__.py`
+  - Re-export new formal sidecar records/services so the public state surface stays in sync.
+- `src/copaw/state/repositories/__init__.py`
+  - Re-export new repository contracts/implementations for sidecar state.
 - `src/copaw/state/store.py`
   - Schema migration surface for new sidecar tables.
 - `src/copaw/adapters/executors/codex_stdio_transport.py`
@@ -58,12 +63,20 @@ All five are `P0`. Implementation order is:
   - Persist sidecar approval / failure / restart evidence when needed.
 - `src/copaw/app/runtime_service_graph.py`
   - Build managed sidecar runtime port from installed sidecar truth, not PATH probing.
+- `src/copaw/app/runtime_bootstrap_models.py`
+  - Keep managed sidecar state/services in the formal bootstrap payload.
+- `src/copaw/app/runtime_state_bindings.py`
+  - Expose managed sidecar runtime services through `app.state` bindings without ad hoc lookups.
 - `src/copaw/app/startup_environment_preflight.py`
   - Fail fast on missing / incompatible sidecar install.
+- `src/copaw/app/_app.py`
+  - Ensure managed stdio sidecar lifecycle closes cleanly on app shutdown and restart paths.
 - `src/copaw/app/daemon_commands.py`
   - Add sidecar status / install / upgrade / rollback operator commands.
 - `src/copaw/app/routers/capability_market.py`
   - Keep provider install flow but bind provider to system-managed model/sidecar policies.
+- `src/copaw/capabilities/donor_provider_injection.py`
+  - Reuse the formal provider injection contract for sidecar auth env/arg/config shaping instead of manual shell state.
 - `TASK_STATUS.md`
   - Record exact acceptance evidence and remaining follow-up boundaries.
 - `DATA_MODEL_DRAFT.md`
@@ -79,7 +92,10 @@ All five are `P0`. Implementation order is:
 - `tests/adapters/test_codex_stdio_transport.py`
 - `tests/kernel/test_main_brain_executor_runtime_integration.py`
 - `tests/kernel/test_executor_event_writeback_service.py`
+- `tests/capabilities/test_donor_provider_injection.py`
 - `tests/app/test_runtime_execution_provider_wiring.py`
+- `tests/app/test_runtime_bootstrap_helpers.py`
+- `tests/app/test_runtime_bootstrap_split.py`
 - `tests/app/test_startup_environment_preflight.py`
 - `tests/app/test_capability_market_api.py`
 - `tests/app/test_external_executor_live_smoke.py`
@@ -94,9 +110,15 @@ All five are `P0`. Implementation order is:
 - Modify: `src/copaw/state/executor_runtime_service.py`
 - Modify: `src/copaw/state/repositories/base.py`
 - Modify: `src/copaw/state/repositories/sqlite_executor_runtime.py`
+- Modify: `src/copaw/state/__init__.py`
+- Modify: `src/copaw/state/repositories/__init__.py`
 - Modify: `src/copaw/state/store.py`
+- Modify: `src/copaw/app/runtime_bootstrap_models.py`
+- Modify: `src/copaw/app/runtime_state_bindings.py`
 - Test: `tests/state/test_executor_runtime_service.py`
 - Create: `tests/state/test_executor_sidecar_state.py`
+- Modify: `tests/app/test_runtime_bootstrap_helpers.py`
+- Modify: `tests/app/test_runtime_bootstrap_split.py`
 
 - [ ] **Step 1: Write failing tests for managed sidecar install truth**
 
@@ -104,11 +126,12 @@ Target assertions:
 - CoPaw can persist one active local sidecar install record.
 - Runtime bootstrap does not need PATH lookup when a managed install exists.
 - Compatibility policy can gate install status.
+- Bootstrap/state bindings expose managed sidecar truth through formal runtime surfaces.
 
 - [ ] **Step 2: Run the new state tests and verify they fail**
 
-Run: `python -m pytest tests/state/test_executor_sidecar_state.py tests/state/test_executor_runtime_service.py -q -k "sidecar or compatibility_policy"`
-Expected: FAIL on missing sidecar records / service methods.
+Run: `python -m pytest tests/state/test_executor_sidecar_state.py tests/state/test_executor_runtime_service.py tests/app/test_runtime_bootstrap_helpers.py tests/app/test_runtime_bootstrap_split.py -q -k "sidecar or compatibility_policy or executor_runtime"`
+Expected: FAIL on missing sidecar records / service methods / bootstrap bindings.
 
 - [ ] **Step 3: Add formal sidecar state objects**
 
@@ -123,10 +146,12 @@ Required capabilities:
 - upsert / get active sidecar install
 - resolve compatibility policy
 - mark install healthy / degraded / incompatible
+- re-export formal sidecar state through `src/copaw/state/__init__.py` and `src/copaw/state/repositories/__init__.py`
+- keep bootstrap models/state bindings aligned with the new sidecar truth surface
 
 - [ ] **Step 5: Re-run state tests and make them pass**
 
-Run: `python -m pytest tests/state/test_executor_sidecar_state.py tests/state/test_executor_runtime_service.py -q`
+Run: `python -m pytest tests/state/test_executor_sidecar_state.py tests/state/test_executor_runtime_service.py tests/app/test_runtime_bootstrap_helpers.py tests/app/test_runtime_bootstrap_split.py -q`
 Expected: PASS
 
 - [ ] **Step 6: Commit the sidecar truth slice**
@@ -140,10 +165,15 @@ Commit: `git commit -m "feat: add managed codex sidecar runtime state"`
 - Modify: `src/copaw/adapters/executors/codex_app_server_adapter.py`
 - Modify: `src/copaw/adapters/executors/codex_protocol.py`
 - Modify: `src/copaw/app/runtime_service_graph.py`
+- Modify: `src/copaw/app/runtime_bootstrap_models.py`
+- Modify: `src/copaw/app/runtime_state_bindings.py`
 - Modify: `src/copaw/app/startup_environment_preflight.py`
+- Modify: `src/copaw/app/_app.py`
 - Test: `tests/adapters/test_codex_stdio_transport.py`
 - Modify: `tests/adapters/test_codex_app_server_adapter.py`
 - Modify: `tests/app/test_runtime_execution_provider_wiring.py`
+- Modify: `tests/app/test_runtime_bootstrap_helpers.py`
+- Modify: `tests/app/test_runtime_bootstrap_split.py`
 - Modify: `tests/app/test_startup_environment_preflight.py`
 
 - [ ] **Step 1: Write failing tests for local `stdio` sidecar launch**
@@ -152,10 +182,11 @@ Target assertions:
 - default local provider uses managed install path, not PATH probing
 - local transport uses child process `stdin/stdout`
 - websocket transport is no longer the default local sidecar path
+- app shutdown closes the managed stdio child deterministically
 
 - [ ] **Step 2: Run transport/preflight tests and verify they fail**
 
-Run: `python -m pytest tests/adapters/test_codex_stdio_transport.py tests/app/test_runtime_execution_provider_wiring.py tests/app/test_startup_environment_preflight.py -q`
+Run: `python -m pytest tests/adapters/test_codex_stdio_transport.py tests/app/test_runtime_execution_provider_wiring.py tests/app/test_runtime_bootstrap_helpers.py tests/app/test_runtime_bootstrap_split.py tests/app/test_startup_environment_preflight.py -q`
 Expected: FAIL on missing stdio transport / old local websocket assumptions.
 
 - [ ] **Step 3: Implement managed stdio transport**
@@ -164,30 +195,34 @@ Required behavior:
 - launch bundled `codex CLI` via absolute path
 - perform initialize handshake over stdio
 - route responses, notifications, and shutdown cleanly
+- keep lifecycle shutdown compatible with app-level `close()` behavior
 
 - [ ] **Step 4: Cut runtime bootstrap to stdio-first**
 
 Required behavior:
 - local customer delivery path = managed install + stdio
 - websocket path stays only as explicit compatibility / remote override
+- bootstrap/state bindings continue exposing the active executor runtime port without PATH-based fallback
 
 - [ ] **Step 5: Re-run the transport/preflight tests and make them pass**
 
-Run: `python -m pytest tests/adapters/test_codex_stdio_transport.py tests/adapters/test_codex_app_server_adapter.py tests/app/test_runtime_execution_provider_wiring.py tests/app/test_startup_environment_preflight.py -q`
+Run: `python -m pytest tests/adapters/test_codex_stdio_transport.py tests/adapters/test_codex_app_server_adapter.py tests/app/test_runtime_execution_provider_wiring.py tests/app/test_runtime_bootstrap_helpers.py tests/app/test_runtime_bootstrap_split.py tests/app/test_startup_environment_preflight.py -q`
 Expected: PASS
 
 - [ ] **Step 6: Commit the stdio launch slice**
 
 Commit: `git commit -m "refactor: switch local codex sidecar to stdio transport"`
 
-### Task 3: Enforce System-Managed Model Governance
+### Task 3: Enforce System-Managed Model and Sidecar Credential Governance
 
 **Files:**
 - Modify: `src/copaw/state/models_executor_runtime.py`
 - Modify: `src/copaw/state/executor_runtime_service.py`
 - Modify: `src/copaw/app/routers/capability_market.py`
+- Modify: `src/copaw/capabilities/donor_provider_injection.py`
 - Modify: `src/copaw/kernel/runtime_coordination.py`
 - Modify: `src/copaw/adapters/executors/codex_protocol.py`
+- Modify: `tests/capabilities/test_donor_provider_injection.py`
 - Modify: `tests/app/test_capability_market_api.py`
 - Modify: `tests/kernel/test_main_brain_executor_runtime_integration.py`
 - Modify: `tests/state/test_executor_runtime_service.py`
@@ -198,11 +233,12 @@ Target assertions:
 - provider install persists `model_policy_id`
 - assignment start resolves a single system-owned model ref
 - protocol / launch payload cannot silently fall back to sidecar defaults
+- sidecar credential sourcing comes from formal provider/system-managed config, not operator shell state
 
 - [ ] **Step 2: Run the model-governance tests and verify they fail**
 
-Run: `python -m pytest tests/app/test_capability_market_api.py tests/kernel/test_main_brain_executor_runtime_integration.py tests/state/test_executor_runtime_service.py -q -k "model_policy or default_model_ref"`
-Expected: FAIL on missing hard enforcement.
+Run: `python -m pytest tests/capabilities/test_donor_provider_injection.py tests/app/test_capability_market_api.py tests/kernel/test_main_brain_executor_runtime_integration.py tests/state/test_executor_runtime_service.py -q -k "model_policy or default_model_ref or provider_auth"`
+Expected: FAIL on missing hard enforcement and missing managed sidecar credential path.
 
 - [ ] **Step 3: Expand formal model policy contract**
 
@@ -211,6 +247,7 @@ Minimum policy fields:
 - role override support
 - mismatch handling
 - ownership mode = `copaw_managed` or `hybrid` where needed
+- sidecar auth source and injection mode for bundled customer delivery
 
 - [ ] **Step 4: Enforce the resolved model at runtime start**
 
@@ -218,15 +255,17 @@ Required behavior:
 - runtime coordination must resolve one canonical model
 - transport / protocol layer must inject or pin that model
 - runtime metadata must record the effective model for post-run verification
+- sidecar launch/config path must resolve credentials from formal CoPaw-managed config or provider injection
 
 - [ ] **Step 5: Add mismatch detection**
 
 Required behavior:
 - if sidecar reports a different model, CoPaw records evidence and fails closed or degrades according to policy
+- if sidecar launch lacks required credentials, CoPaw records formal failure instead of depending on ambient shell env
 
 - [ ] **Step 6: Re-run model-governance tests and make them pass**
 
-Run: `python -m pytest tests/app/test_capability_market_api.py tests/kernel/test_main_brain_executor_runtime_integration.py tests/state/test_executor_runtime_service.py -q`
+Run: `python -m pytest tests/capabilities/test_donor_provider_injection.py tests/app/test_capability_market_api.py tests/kernel/test_main_brain_executor_runtime_integration.py tests/state/test_executor_runtime_service.py -q`
 Expected: PASS
 
 - [ ] **Step 7: Commit the model-governance slice**
@@ -241,6 +280,7 @@ Commit: `git commit -m "feat: enforce codex sidecar model governance"`
 - Modify: `src/copaw/adapters/executors/codex_app_server_adapter.py`
 - Modify: `src/copaw/kernel/runtime_coordination.py`
 - Modify: `src/copaw/kernel/executor_event_writeback_service.py`
+- Modify: `src/copaw/app/_app.py`
 - Modify: `src/copaw/app/daemon_commands.py`
 - Test: `tests/adapters/test_codex_stdio_transport.py`
 - Modify: `tests/kernel/test_main_brain_executor_runtime_integration.py`
@@ -360,7 +400,7 @@ Commit: `git commit -m "feat: add codex sidecar upgrade governance"`
 Run:
 
 ```bash
-python -m pytest tests/state/test_executor_runtime_service.py tests/state/test_executor_sidecar_state.py tests/adapters/test_codex_app_server_adapter.py tests/adapters/test_codex_stdio_transport.py tests/kernel/test_main_brain_executor_runtime_integration.py tests/kernel/test_executor_event_writeback_service.py tests/app/test_runtime_execution_provider_wiring.py tests/app/test_startup_environment_preflight.py tests/app/test_capability_market_api.py tests/app/test_daemon_commands.py tests/app/test_sidecar_release_service.py -q
+python -m pytest tests/state/test_executor_runtime_service.py tests/state/test_executor_sidecar_state.py tests/adapters/test_codex_app_server_adapter.py tests/adapters/test_codex_stdio_transport.py tests/kernel/test_main_brain_executor_runtime_integration.py tests/kernel/test_executor_event_writeback_service.py tests/capabilities/test_donor_provider_injection.py tests/app/test_runtime_execution_provider_wiring.py tests/app/test_runtime_bootstrap_helpers.py tests/app/test_runtime_bootstrap_split.py tests/app/test_startup_environment_preflight.py tests/app/test_capability_market_api.py tests/app/test_daemon_commands.py tests/app/test_sidecar_release_service.py -q
 ```
 
 Expected: PASS
@@ -391,6 +431,7 @@ Required doc outcomes:
 - `TASK_STATUS.md` records `L1 / L2 / L3 / L4` separately
 - design doc records `managed local codex CLI sidecar + stdio` as the customer-delivery boundary
 - `DATA_MODEL_DRAFT.md` records new sidecar truth objects if added
+- bootstrap/lifecycle/auth/exports are explicitly recorded as part of the managed sidecar boundary
 
 - [ ] **Step 6: Commit docs and verification updates**
 
@@ -419,7 +460,7 @@ This plan only counts as finished when all five `P0` concerns are covered by for
 
 1. Managed sidecar installation
 2. Local `stdio` transport
-3. System-owned model governance
+3. System-owned model and sidecar credential governance
 4. Approval/control/recovery closure
 5. Version compatibility and upgrade governance
 
