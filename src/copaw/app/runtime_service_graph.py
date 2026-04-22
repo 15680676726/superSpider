@@ -167,6 +167,7 @@ from .runtime_center import (
 )
 from .runtime_events import RuntimeEventBus
 from .runtime_health_service import RuntimeHealthService
+from .sidecar_release_service import SidecarReleaseService
 from .runtime_threads import SessionRuntimeThreadHistoryReader
 
 logger = logging.getLogger(__name__)
@@ -191,6 +192,18 @@ def _build_default_executor_runtime_port() -> object | None:
             return None
         command = (compatibility_bin, "app-server")
     else:
+        release_service = SidecarReleaseService(
+            executor_runtime_service=executor_runtime_service,
+        )
+        compatibility = release_service.evaluate_install_compatibility(
+            runtime_family=active_install.runtime_family,
+            channel=active_install.channel,
+            install=active_install,
+        )
+        if compatibility.get("status") != "compatible" and bool(
+            compatibility.get("fail_closed", True),
+        ):
+            return None
         command = (active_install.executable_path, "app-server")
     return CodexAppServerAdapter(
         transport=CodexStdioTransport(
@@ -579,6 +592,9 @@ def build_runtime_bootstrap(
         project_root=str(WORKING_DIR),
         executor_runtime_port=executor_runtime_port,
     )
+    sidecar_release_service = SidecarReleaseService(
+        executor_runtime_service=executor_runtime_service,
+    )
     weixin_ilink_runtime_state = WeixinILinkRuntimeState()
 
     provider_manager = ProviderManager()
@@ -829,6 +845,7 @@ def build_runtime_bootstrap(
         query_execution_service=query_execution_service,
         main_brain_chat_service=main_brain_chat_service,
         main_brain_orchestrator=main_brain_orchestrator,
+        sidecar_release_service=sidecar_release_service,
     )
     capability_service.set_turn_executor(turn_executor)
     runtime_health_service = RuntimeHealthService(
@@ -913,5 +930,6 @@ def build_runtime_bootstrap(
         executor_runtime_coordinator=executor_runtime_coordinator,
         executor_runtime_port=executor_runtime_port,
         executor_event_writeback_service=executor_event_writeback_service,
+        sidecar_release_service=sidecar_release_service,
         weixin_ilink_runtime_state=weixin_ilink_runtime_state,
     )

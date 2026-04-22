@@ -397,6 +397,16 @@ class ExecutorRuntimeService:
                 return record
         return None
 
+    def get_sidecar_install(
+        self,
+        install_id: str,
+    ) -> ExecutorSidecarInstallRecord | None:
+        repository = self._repository
+        if repository is not None:
+            installs = repository.list_sidecar_installs(limit=None)
+            return next((item for item in installs if item.install_id == install_id), None)
+        return self._sidecar_installs.get(install_id)
+
     def list_sidecar_installs(
         self,
         *,
@@ -544,6 +554,28 @@ class ExecutorRuntimeService:
             reverse=True,
         )
         return releases
+
+    def resolve_sidecar_release(
+        self,
+        *,
+        runtime_family: str,
+        channel: str | None = None,
+        release_id: str | None = None,
+        version: str | None = None,
+        status: str | None = None,
+    ) -> ExecutorSidecarReleaseRecord | None:
+        releases = self.list_sidecar_releases(
+            runtime_family=runtime_family,
+            channel=channel,
+            status=status,
+        )
+        for record in releases:
+            if release_id is not None and record.release_id != release_id:
+                continue
+            if version is not None and record.version != version:
+                continue
+            return record
+        return None
 
     def get_runtime(
         self,

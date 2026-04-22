@@ -316,6 +316,7 @@ class RuntimeBootstrap:
     executor_runtime_coordinator: AssignmentExecutorRuntimeCoordinator | None = None
     executor_runtime_port: Any | None = None
     executor_event_writeback_service: ExecutorEventWritebackService | None = None
+    sidecar_release_service: Any | None = None
     weixin_ilink_runtime_state: Any | None = None
     research_session_service: Any | None = None
     buddy_onboarding_service: BuddyOnboardingService | None = None

@@ -723,6 +723,7 @@ class KernelTurnExecutor:
         main_brain_chat_service: MainBrainChatService | None = None,
         main_brain_orchestrator: MainBrainOrchestrator | None = None,
         executor_runtime_coordinator: AssignmentExecutorRuntimeCoordinator | None = None,
+        sidecar_release_service: Any | None = None,
         restart_callback: Callable[[], Any] | None = None,
         in_type_converters: dict[str, Callable] | None = None,
         out_type_converters: dict[str, Callable] | None = None,
@@ -764,6 +765,7 @@ class KernelTurnExecutor:
             environment_service=environment_service,
         )
         self._restart_callback = restart_callback
+        self._sidecar_release_service = sidecar_release_service
         self._in_type_converters = in_type_converters
         self._out_type_converters = out_type_converters
 
@@ -869,6 +871,9 @@ class KernelTurnExecutor:
 
     def set_restart_callback(self, restart_callback: Callable[[], Any] | None) -> None:
         self._restart_callback = restart_callback
+
+    def set_sidecar_release_service(self, sidecar_release_service: Any | None) -> None:
+        self._sidecar_release_service = sidecar_release_service
 
     def set_in_type_converters(
         self,
@@ -1185,6 +1190,7 @@ class KernelTurnExecutor:
                         conversation_compaction_service=self._conversation_compaction_service,
                         restart_callback=self._restart_callback,
                         executor_runtime_coordinator=self._executor_runtime_coordinator,
+                        sidecar_release_service=self._sidecar_release_service,
                     ):
                         last_output_summary = summarize_stream_message(msg)
                         yield msg, last
@@ -1197,6 +1203,7 @@ class KernelTurnExecutor:
                             conversation_compaction_service=self._conversation_compaction_service,
                             restart_callback=self._restart_callback,
                             executor_runtime_coordinator=self._executor_runtime_coordinator,
+                            sidecar_release_service=self._sidecar_release_service,
                         ):
                             last_output_summary = summarize_stream_message(msg)
                             yield msg, last

@@ -153,6 +153,7 @@ def build_runtime_state_bindings(
         "executor_runtime_service": bootstrap.executor_runtime_service,
         "executor_runtime_coordinator": bootstrap.executor_runtime_coordinator,
         "executor_runtime_port": bootstrap.executor_runtime_port,
+        "sidecar_release_service": bootstrap.sidecar_release_service,
         "weixin_ilink_runtime_state": bootstrap.weixin_ilink_runtime_state,
         "automation_tasks": _materialize_automation_tasks(automation_tasks),
     }

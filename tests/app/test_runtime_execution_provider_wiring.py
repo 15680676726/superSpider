@@ -6,7 +6,10 @@ from copaw.app import runtime_service_graph as runtime_service_graph_module
 from copaw.app.runtime_bootstrap_execution import build_runtime_execution_stack
 from copaw.state import SQLiteStateStore
 from copaw.state.executor_runtime_service import ExecutorRuntimeService
-from copaw.state.models_executor_runtime import ExecutorSidecarInstallRecord
+from copaw.state.models_executor_runtime import (
+    ExecutorSidecarCompatibilityPolicyRecord,
+    ExecutorSidecarInstallRecord,
+)
 
 
 def _repositories() -> SimpleNamespace:
@@ -156,6 +159,17 @@ def test_build_default_executor_runtime_port_prefers_managed_sidecar_stdio(
             install_root=str(tmp_path / "runtime" / "codex" / "0.10.0"),
             executable_path=str(tmp_path / "runtime" / "codex" / "0.10.0" / "codex.exe"),
             install_status="ready",
+        )
+    )
+    executor_runtime_service.upsert_sidecar_compatibility_policy(
+        ExecutorSidecarCompatibilityPolicyRecord(
+            policy_id="codex-stable-policy",
+            runtime_family="codex",
+            channel="stable",
+            supported_version_range=">=0.10,<0.11",
+            required_copaw_version_range=">=0",
+            status="active",
+            metadata={"fail_closed": True},
         )
     )
 

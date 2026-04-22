@@ -8,6 +8,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from .sidecar_release_service import SidecarReleaseService
 from ..state import ExecutorRuntimeService, SQLiteStateStore
 
 
@@ -133,6 +134,46 @@ def _probe_managed_sidecar_executable(path: Path) -> dict[str, object]:
     }
 
 
+def _probe_managed_sidecar_compatibility(state_db_path: Path) -> dict[str, object]:
+    target = Path(state_db_path).expanduser().resolve()
+    service = ExecutorRuntimeService(state_store=SQLiteStateStore(target))
+    install = service.get_active_sidecar_install(runtime_family="codex")
+    if install is None:
+        return {
+            "status": "warn",
+            "summary": "Managed sidecar install record is not available for compatibility gating.",
+            "meta": {"path": str(target)},
+        }
+    release_service = SidecarReleaseService(executor_runtime_service=service)
+    governance = release_service.describe_version_governance(
+        runtime_family=install.runtime_family,
+        channel=install.channel,
+    )
+    compatibility = dict(governance.get("compatibility") or {})
+    blockers = list(compatibility.get("blockers") or [])
+    if compatibility.get("status") == "compatible":
+        return {
+            "status": "pass",
+            "summary": "Managed sidecar compatibility policy accepted the installed version.",
+            "meta": {
+                "version": install.version,
+                "runtime_family": install.runtime_family,
+                "channel": install.channel,
+            },
+        }
+    fail_closed = bool(compatibility.get("fail_closed", True))
+    return {
+        "status": "fail" if fail_closed else "warn",
+        "summary": " ".join(blockers) or "Managed sidecar compatibility check failed.",
+        "meta": {
+            "version": install.version,
+            "runtime_family": install.runtime_family,
+            "channel": install.channel,
+            "fail_closed": fail_closed,
+        },
+    }
+
+
 def _run_check(
     *,
     name: str,
@@ -212,6 +253,13 @@ def build_environment_preflight_report(
         )
         checks.append(check)
         fatal = fatal or fatal_check
+        compatibility_check, compatibility_fatal = _run_check(
+            name="managed_sidecar_compatibility",
+            fatal_on_fail=True,
+            probe=lambda: _probe_managed_sidecar_compatibility(state_db_path),
+        )
+        checks.append(compatibility_check)
+        fatal = fatal or compatibility_fatal
     if include_subprocess:
         check, _ = _run_check(
             name="subprocess_spawn",

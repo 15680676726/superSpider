@@ -33,6 +33,9 @@ DAEMON_SUBCOMMANDS = frozenset(
         "sidecar-interrupt",
         "sidecar-approve",
         "sidecar-reject",
+        "sidecar-version",
+        "sidecar-upgrade",
+        "sidecar-rollback",
     },
 )
 DAEMON_SHORT_ALIASES = {
@@ -47,6 +50,9 @@ DAEMON_SHORT_ALIASES = {
     "sidecar_interrupt": "sidecar-interrupt",
     "sidecar_approve": "sidecar-approve",
     "sidecar_reject": "sidecar-reject",
+    "sidecar_version": "sidecar-version",
+    "sidecar_upgrade": "sidecar-upgrade",
+    "sidecar_rollback": "sidecar-rollback",
 }
 
 
@@ -59,6 +65,7 @@ class DaemonContext:
     conversation_compaction_service: Optional[Any] = None
     restart_callback: Optional[RestartCallback] = None
     executor_runtime_coordinator: Optional[Any] = None
+    sidecar_release_service: Optional[Any] = None
 
 
 def _text(value: object | None) -> str | None:
@@ -276,6 +283,58 @@ def run_daemon_sidecar_approval(
     )
 
 
+def run_daemon_sidecar_version(context: DaemonContext) -> str:
+    service = context.sidecar_release_service
+    describe = getattr(service, "describe_version_governance", None)
+    if not callable(describe):
+        return (
+            "**Sidecar Version**\n\n"
+            "- Sidecar release service is not attached."
+        )
+    payload = _mapping(describe(runtime_family="codex", channel="stable"))
+    current_install = _mapping(payload.get("current_install"))
+    compatibility = _mapping(payload.get("compatibility"))
+    available_upgrade = _mapping(payload.get("available_upgrade"))
+    return (
+        "**Sidecar Version**\n\n"
+        f"- Current version: {_text(current_install.get('version')) or 'n/a'}\n"
+        f"- Compatibility: {_text(compatibility.get('status')) or 'unknown'}\n"
+        f"- Available upgrade: {_text(available_upgrade.get('version')) or 'none'}"
+    )
+
+
+def run_daemon_sidecar_upgrade(context: DaemonContext) -> str:
+    service = context.sidecar_release_service
+    upgrade = getattr(service, "upgrade_sidecar", None)
+    if not callable(upgrade):
+        return (
+            "**Sidecar Upgrade**\n\n"
+            "- Sidecar release service is not attached."
+        )
+    payload = _mapping(upgrade(runtime_family="codex", channel="stable"))
+    return (
+        "**Sidecar Upgrade**\n\n"
+        f"- Status: {_text(payload.get('status')) or 'unknown'}\n"
+        f"- Target version: {_text(payload.get('target_version')) or 'n/a'}"
+    )
+
+
+def run_daemon_sidecar_rollback(context: DaemonContext) -> str:
+    service = context.sidecar_release_service
+    rollback = getattr(service, "rollback_sidecar", None)
+    if not callable(rollback):
+        return (
+            "**Sidecar Rollback**\n\n"
+            "- Sidecar release service is not attached."
+        )
+    payload = _mapping(rollback(runtime_family="codex", channel="stable"))
+    return (
+        "**Sidecar Rollback**\n\n"
+        f"- Status: {_text(payload.get('status')) or 'unknown'}\n"
+        f"- Active version: {_text(payload.get('active_version')) or 'n/a'}"
+    )
+
+
 def parse_daemon_query(query: str) -> Optional[tuple[str, list[str]]]:
     """Parse `/daemon <sub>` or `/restart` style aliases."""
     if not query or not isinstance(query, str):
@@ -363,6 +422,12 @@ class DaemonCommandHandlerMixin:
                     decision="approved" if subcommand == "sidecar-approve" else "rejected",
                     reason=" ".join(args[1:]).strip() or None,
                 )
+        elif subcommand == "sidecar-version":
+            text = run_daemon_sidecar_version(context)
+        elif subcommand == "sidecar-upgrade":
+            text = run_daemon_sidecar_upgrade(context)
+        elif subcommand == "sidecar-rollback":
+            text = run_daemon_sidecar_rollback(context)
         else:
             text = "Unknown daemon subcommand."
         logger.info("handle_daemon_command %s completed", query)
@@ -386,8 +451,11 @@ __all__ = [
     "run_daemon_restart",
     "run_daemon_sidecar_approval",
     "run_daemon_sidecar_interrupt",
+    "run_daemon_sidecar_rollback",
     "run_daemon_sidecar_restart",
     "run_daemon_sidecar_status",
+    "run_daemon_sidecar_upgrade",
+    "run_daemon_sidecar_version",
     "run_daemon_status",
     "run_daemon_version",
 ]

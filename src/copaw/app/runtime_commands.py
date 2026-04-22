@@ -72,9 +72,11 @@ def infer_turn_capability_and_risk(query: str | None) -> tuple[str, str]:
         "sidecar-interrupt",
         "sidecar-approve",
         "sidecar-reject",
+        "sidecar-upgrade",
+        "sidecar-rollback",
     }:
         return "system:dispatch_command", "confirm"
-    if subcommand in {"logs", "status", "version", "sidecar-status"}:
+    if subcommand in {"logs", "status", "version", "sidecar-status", "sidecar-version"}:
         return "system:dispatch_command", "guarded"
     return "system:dispatch_command", "guarded"
 
@@ -101,6 +103,7 @@ async def run_command_path(
     conversation_compaction_service,
     restart_callback,
     executor_runtime_coordinator=None,
+    sidecar_release_service=None,
 ) -> AsyncIterator[tuple]:
     """Run daemon/conversation commands without entering the full query path."""
     query = get_last_user_text(msgs)
@@ -140,6 +143,7 @@ async def run_command_path(
             conversation_compaction_service=conversation_compaction_service,
             restart_callback=restart_callback,
             executor_runtime_coordinator=executor_runtime_coordinator,
+            sidecar_release_service=sidecar_release_service,
         )
         message = await handler.handle_daemon_command(query, context)
         yield message, True
