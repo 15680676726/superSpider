@@ -5,6 +5,8 @@ from types import SimpleNamespace
 from copaw.app import runtime_service_graph as runtime_service_graph_module
 from copaw.app.runtime_bootstrap_execution import build_runtime_execution_stack
 from copaw.state import SQLiteStateStore
+from copaw.state.executor_runtime_service import ExecutorRuntimeService
+from copaw.state.models_executor_runtime import ExecutorSidecarInstallRecord
 
 
 def _repositories() -> SimpleNamespace:
@@ -136,3 +138,91 @@ def test_build_kernel_runtime_forwards_runtime_provider_to_execution_stack(
     )
 
     assert captured["kwargs"]["runtime_provider"] == "provider-runtime-facade"
+
+
+def test_build_default_executor_runtime_port_prefers_managed_sidecar_stdio(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    captured: dict[str, object] = {}
+    state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    executor_runtime_service = ExecutorRuntimeService(state_store=state_store)
+    executor_runtime_service.upsert_sidecar_install(
+        ExecutorSidecarInstallRecord(
+            install_id="codex-stable-0.10.0",
+            runtime_family="codex",
+            channel="stable",
+            version="0.10.0",
+            install_root=str(tmp_path / "runtime" / "codex" / "0.10.0"),
+            executable_path=str(tmp_path / "runtime" / "codex" / "0.10.0" / "codex.exe"),
+            install_status="ready",
+        )
+    )
+
+    monkeypatch.delenv("COPAW_CODEX_APP_SERVER_WS_URL", raising=False)
+    monkeypatch.setenv("COPAW_CODEX_APP_SERVER_BIN", str(tmp_path / "should-not-be-used.exe"))
+    monkeypatch.setattr(
+        runtime_service_graph_module,
+        "_resolve_state_store",
+        lambda: state_store,
+    )
+    def _fake_stdio_transport(**kwargs):
+        captured["stdio_kwargs"] = kwargs
+        return "stdio-transport"
+
+    def _fake_ws_transport(**kwargs):
+        captured["ws_kwargs"] = kwargs
+        return "ws-transport"
+
+    monkeypatch.setattr(
+        runtime_service_graph_module,
+        "CodexStdioTransport",
+        _fake_stdio_transport,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        runtime_service_graph_module,
+        "CodexAppServerTransport",
+        _fake_ws_transport,
+    )
+    monkeypatch.setattr(
+        runtime_service_graph_module,
+        "CodexAppServerAdapter",
+        lambda transport: SimpleNamespace(transport=transport),
+    )
+
+    adapter = runtime_service_graph_module._build_default_executor_runtime_port()
+
+    assert adapter.transport == "stdio-transport"
+    assert "ws_kwargs" not in captured
+    assert captured["stdio_kwargs"]["codex_command"] == (
+        str(tmp_path / "runtime" / "codex" / "0.10.0" / "codex.exe"),
+        "app-server",
+    )
+
+
+def test_build_default_executor_runtime_port_keeps_explicit_websocket_override(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setenv("COPAW_CODEX_APP_SERVER_WS_URL", "ws://127.0.0.1:9000")
+    def _fake_ws_transport(**kwargs):
+        captured["ws_kwargs"] = kwargs
+        return "ws-transport"
+
+    monkeypatch.setattr(
+        runtime_service_graph_module,
+        "CodexAppServerTransport",
+        _fake_ws_transport,
+    )
+    monkeypatch.setattr(
+        runtime_service_graph_module,
+        "CodexAppServerAdapter",
+        lambda transport: SimpleNamespace(transport=transport),
+    )
+
+    adapter = runtime_service_graph_module._build_default_executor_runtime_port()
+
+    assert adapter.transport == "ws-transport"
+    assert captured["ws_kwargs"]["websocket_url"] == "ws://127.0.0.1:9000"

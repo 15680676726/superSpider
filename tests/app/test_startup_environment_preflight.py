@@ -104,3 +104,36 @@ def test_assert_startup_environment_ready_raises_clear_error(
 
     assert "state_db_write_access" in str(excinfo.value)
     assert "readonly database" in str(excinfo.value)
+
+
+def test_build_environment_preflight_report_includes_managed_sidecar_probe(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sidecar_path = tmp_path / "runtime" / "codex" / "codex.exe"
+    sidecar_path.parent.mkdir(parents=True, exist_ok=True)
+    sidecar_path.write_text("stub", encoding="utf-8")
+
+    monkeypatch.setattr(
+        preflight_module,
+        "_probe_managed_sidecar_executable",
+        lambda path: {
+            "status": "pass",
+            "summary": "Managed sidecar executable is available.",
+            "meta": {"path": str(path)},
+        },
+        raising=False,
+    )
+
+    report = build_environment_preflight_report(
+        working_dir=tmp_path,
+        log_path=tmp_path / "copaw.log",
+        state_db_path=tmp_path / "state.sqlite3",
+        evidence_db_path=tmp_path / "evidence.sqlite3",
+        include_subprocess=False,
+        managed_sidecar_executable_path=sidecar_path,
+    )
+
+    by_name = {item["name"]: item for item in report["checks"]}
+    assert by_name["managed_sidecar_executable"]["status"] == "pass"
+    assert by_name["managed_sidecar_executable"]["meta"]["path"] == str(sidecar_path)

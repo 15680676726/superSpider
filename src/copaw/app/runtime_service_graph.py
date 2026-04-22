@@ -3,11 +3,11 @@ from __future__ import annotations
 
 import logging
 import os
-import shutil
 from typing import Any
 
 from ..adapters.executors.codex_app_server_adapter import CodexAppServerAdapter
 from ..adapters.executors.codex_app_server_transport import CodexAppServerTransport
+from ..adapters.executors.codex_stdio_transport import CodexStdioTransport
 from ..capabilities import CapabilityService
 from ..constant import WORKING_DIR
 from ..evidence import EvidenceLedger
@@ -68,7 +68,7 @@ from ..providers.runtime_provider_facade import (
 )
 from ..routines import RoutineService
 from ..sop_kernel import FixedSopService
-from ..state import SQLiteStateStore
+from ..state import ExecutorRuntimeService, SQLiteStateStore
 from ..state.human_assist_task_service import HumanAssistTaskService
 from ..state.repositories_buddy import (
     SqliteBuddyDomainCapabilityRepository,
@@ -174,21 +174,29 @@ logger = logging.getLogger(__name__)
 
 def _build_default_executor_runtime_port() -> object | None:
     websocket_url = str(os.getenv("COPAW_CODEX_APP_SERVER_WS_URL") or "").strip() or None
-    codex_bin = str(os.getenv("COPAW_CODEX_APP_SERVER_BIN") or "").strip() or None
-    resolved_bin = codex_bin
-    if resolved_bin is None:
-        if os.name == "nt":
-            resolved_bin = shutil.which("codex.cmd") or shutil.which("codex")
-        else:
-            resolved_bin = shutil.which("codex")
-    if websocket_url is None and resolved_bin is None:
-        return None
-    command = None if resolved_bin is None else (resolved_bin, "app-server")
-    transport = CodexAppServerTransport(
-        websocket_url=websocket_url,
-        codex_command=command,
+    if websocket_url is not None:
+        return CodexAppServerAdapter(
+            transport=CodexAppServerTransport(
+                websocket_url=websocket_url,
+            ),
+        )
+    state_store = _resolve_state_store()
+    executor_runtime_service = ExecutorRuntimeService(state_store=state_store)
+    active_install = executor_runtime_service.get_active_sidecar_install(
+        runtime_family="codex",
     )
-    return CodexAppServerAdapter(transport=transport)
+    if active_install is None:
+        compatibility_bin = str(os.getenv("COPAW_CODEX_APP_SERVER_BIN") or "").strip() or None
+        if compatibility_bin is None:
+            return None
+        command = (compatibility_bin, "app-server")
+    else:
+        command = (active_install.executable_path, "app-server")
+    return CodexAppServerAdapter(
+        transport=CodexStdioTransport(
+            codex_command=command,
+        ),
+    )
 
 
 async def initialize_mcp_manager(

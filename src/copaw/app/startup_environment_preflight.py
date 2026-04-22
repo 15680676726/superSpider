@@ -8,6 +8,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from ..state import ExecutorRuntimeService, SQLiteStateStore
+
 
 class StartupEnvironmentPreflightError(RuntimeError):
     """Raised when the startup environment is not writable enough to boot."""
@@ -105,6 +107,32 @@ def _probe_subprocess_spawn(timeout_seconds: float = 2.0) -> dict[str, object]:
     }
 
 
+def _resolve_managed_sidecar_executable_path(state_db_path: Path) -> Path | None:
+    target = Path(state_db_path).expanduser().resolve()
+    try:
+        service = ExecutorRuntimeService(state_store=SQLiteStateStore(target))
+        install = service.get_active_sidecar_install(runtime_family="codex")
+    except Exception:
+        return None
+    executable_path = getattr(install, "executable_path", None)
+    if not executable_path:
+        return None
+    return Path(str(executable_path)).expanduser().resolve()
+
+
+def _probe_managed_sidecar_executable(path: Path) -> dict[str, object]:
+    target = Path(path).expanduser().resolve()
+    if not target.exists():
+        raise FileNotFoundError(f"Managed sidecar executable not found: {target}")
+    if not target.is_file():
+        raise RuntimeError(f"Managed sidecar executable is not a file: {target}")
+    return {
+        "status": "pass",
+        "summary": "Managed sidecar executable is available.",
+        "meta": {"path": str(target)},
+    }
+
+
 def _run_check(
     *,
     name: str,
@@ -138,9 +166,15 @@ def build_environment_preflight_report(
     state_db_path: Path,
     evidence_db_path: Path,
     include_subprocess: bool = False,
+    managed_sidecar_executable_path: Path | None = None,
 ) -> dict[str, Any]:
     checks: list[dict[str, object]] = []
     fatal = False
+    resolved_sidecar_path = (
+        Path(managed_sidecar_executable_path).expanduser().resolve()
+        if managed_sidecar_executable_path is not None
+        else _resolve_managed_sidecar_executable_path(state_db_path)
+    )
     for name, probe, fatal_on_fail in (
         (
             "workspace_write_access",
@@ -167,6 +201,14 @@ def build_environment_preflight_report(
             name=name,
             fatal_on_fail=fatal_on_fail,
             probe=probe,
+        )
+        checks.append(check)
+        fatal = fatal or fatal_check
+    if resolved_sidecar_path is not None:
+        check, fatal_check = _run_check(
+            name="managed_sidecar_executable",
+            fatal_on_fail=True,
+            probe=lambda: _probe_managed_sidecar_executable(resolved_sidecar_path),
         )
         checks.append(check)
         fatal = fatal or fatal_check
