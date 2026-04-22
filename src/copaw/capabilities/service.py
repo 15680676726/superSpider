@@ -49,8 +49,6 @@ class CapabilityService:
         override_repository: "SqliteCapabilityOverrideRepository | None" = None,
         agent_profile_service: "AgentProfileService | None" = None,
         agent_profile_override_repository: "SqliteAgentProfileOverrideRepository | None" = None,
-        actor_mailbox_service: object | None = None,
-        actor_supervisor: object | None = None,
         industry_service: object | None = None,
         skill_service: CapabilitySkillService | None = None,
         state_store: "SQLiteStateStore | None" = None,
@@ -75,8 +73,6 @@ class CapabilityService:
         self._override_repository = override_repository
         self._agent_profile_service = agent_profile_service
         self._agent_profile_override_repository = agent_profile_override_repository
-        self._actor_mailbox_service = actor_mailbox_service
-        self._actor_supervisor = actor_supervisor
         self._industry_service = industry_service
         self._skill_service = skill_service or default_skill_service
         self._state_store = state_store
@@ -127,8 +123,6 @@ class CapabilityService:
             agent_profile_service=self._agent_profile_service,
             agent_profile_override_repository=self._agent_profile_override_repository,
             industry_service=self._industry_service,
-            actor_mailbox_service=self._actor_mailbox_service,
-            actor_supervisor=self._actor_supervisor,
             capability_discovery_service=self._discovery_service,
             environment_service=self._environment_service,
             cron_manager=self._cron_manager,
@@ -289,14 +283,6 @@ class CapabilityService:
         self._state_store = state_store
         self._discovery_service.set_state_store(state_store)
         self._system_handler.set_state_store(state_store)
-
-    def set_actor_mailbox_service(self, actor_mailbox_service: object | None) -> None:
-        self._actor_mailbox_service = actor_mailbox_service
-        self._system_handler.set_actor_mailbox_service(actor_mailbox_service)
-
-    def set_actor_supervisor(self, actor_supervisor: object | None) -> None:
-        self._actor_supervisor = actor_supervisor
-        self._system_handler.set_actor_supervisor(actor_supervisor)
 
     def set_cron_manager(self, cron_manager: object | None) -> None:
         self._cron_manager = cron_manager

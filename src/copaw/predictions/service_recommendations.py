@@ -1872,16 +1872,12 @@ class _PredictionServiceRecommendationMixin:
                     priority=82,
                     confidence=min(0.93, confidence_baseline + 0.12),
                     risk_level="confirm",
-                    action_kind="system:pause_actor",
-                    executable=True,
+                    action_kind="manual:coordinate-main-brain",
+                    executable=False,
                     auto_eligible=False,
-                    status="proposed",
+                    status="manual-only",
                     target_agent_id=hottest_agent_id,
-                    action_payload={
-                        "agent_id": hottest_agent_id,
-                        "target_agent_id": hottest_agent_id,
-                        "reason": f"prediction:{case.case_id}:load-shedding",
-                    },
+                    action_payload={},
                     metadata=dict(hottest_agent),
                 )
 

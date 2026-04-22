@@ -240,6 +240,59 @@ class _MissingMCPRecommendationHarness(_PredictionServiceRecommendationMixin):
         return payload
 
 
+class _AgentLoadRecommendationHarness(_PredictionServiceRecommendationMixin):
+    def __init__(self) -> None:
+        self._capability_service = object()
+        self._skill_lifecycle_decision_service = _RecordingLifecycleDecisionService()
+
+    def _hottest_agent(self, facts: _FactPack):
+        _ = facts
+        return {
+            "agent_id": "industry-ops-hot",
+            "name": "Ops Hot Seat",
+            "failed_task_count": 1,
+            "active_task_count": 4,
+        }
+
+    def _case_confidence(self, signals, reviews):
+        _ = (signals, reviews)
+        return 0.58
+
+    def _team_role_gap_findings(self, *, case: PredictionCaseRecord, facts: _FactPack):
+        _ = (case, facts)
+        return {}
+
+    def _missing_donor_capability_findings(self, *, facts: _FactPack):
+        _ = facts
+        return []
+
+    def _capability_telemetry(self, *, case: PredictionCaseRecord, facts: _FactPack):
+        _ = (case, facts)
+        return {}
+
+    def _underperforming_donor_capability_findings(
+        self,
+        *,
+        facts: _FactPack,
+        telemetry: dict[tuple[str, str], dict[str, object]],
+    ):
+        _ = (facts, telemetry)
+        return []
+
+    def _trial_followup_findings(
+        self,
+        *,
+        case: PredictionCaseRecord,
+        facts: _FactPack,
+        telemetry: dict[tuple[str, str], dict[str, object]],
+    ):
+        _ = (case, facts, telemetry)
+        return []
+
+    def _json_safe(self, payload):
+        return payload
+
+
 def test_capability_candidate_service_normalizes_external_and_local_sources(
     tmp_path: Path,
 ) -> None:
@@ -1009,6 +1062,39 @@ def test_prediction_missing_mcp_recommendation_carries_shared_trial_contract_met
         "disable_mcp_client"
     )
     assert recommendation.action_payload["trial_contract"]["selected_scope"] == "seat"
+
+
+def test_prediction_hot_agent_load_shedding_recommendation_is_manual_only() -> None:
+    service = _AgentLoadRecommendationHarness()
+    case = PredictionCaseRecord(
+        case_id="case-agent-load",
+        title="Agent load pressure",
+        summary="One execution seat is overloaded and needs governance review.",
+        industry_instance_id="industry-demo",
+        owner_scope="industry-demo-scope",
+    )
+    facts = _FactPack(
+        scope_type="industry",
+        scope_id="industry-demo",
+        report={},
+        performance={},
+        goals=[],
+        tasks=[],
+        workflows=[],
+        agents=[],
+        capabilities=[],
+        strategy={},
+    )
+
+    recommendations = service._build_recommendations(case=case, facts=facts, signals=[])
+
+    recommendation = next(
+        item for item in recommendations if item.target_agent_id == "industry-ops-hot"
+    )
+    assert recommendation.action_kind == "manual:coordinate-main-brain"
+    assert recommendation.executable is False
+    assert recommendation.status == "manual-only"
+    assert recommendation.action_payload == {}
 
 
 def test_capability_candidate_service_persists_candidate_attribution_fields(

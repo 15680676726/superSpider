@@ -5,7 +5,6 @@ import inspect
 from typing import Any, Callable
 
 from .skill_service import CapabilitySkillService
-from .system_actor_handlers import SystemActorCapabilityFacade
 from .system_config_handlers import SystemConfigCapabilityFacade
 from .system_discovery_handlers import SystemCapabilityDiscoveryFacade
 from .system_dispatch import SystemDispatchFacade
@@ -14,15 +13,6 @@ from .system_routine_handlers import SystemRoutineCapabilityFacade
 from .system_schedule_handlers import SystemScheduleCapabilityFacade
 from .system_skill_handlers import SystemSkillCapabilityFacade
 from .system_team_handlers import SystemTeamCapabilityFacade
-
-_ACTOR_CAPABILITIES = {
-    "system:enqueue_task",
-    "system:pause_actor",
-    "system:resume_actor",
-    "system:cancel_actor_task",
-    "system:retry_actor_mailbox",
-    "system:list_teammates",
-}
 
 _CONFIG_CAPABILITIES = {
     "system:set_capability_enabled",
@@ -78,8 +68,6 @@ class SystemCapabilityHandler:
         agent_profile_service: object | None = None,
         agent_profile_override_repository: object | None = None,
         industry_service: object | None = None,
-        actor_mailbox_service: object | None = None,
-        actor_supervisor: object | None = None,
         capability_discovery_service: object | None = None,
         environment_service: object | None = None,
         cron_manager: object | None = None,
@@ -95,10 +83,6 @@ class SystemCapabilityHandler:
             agent_profile_service=agent_profile_service,
             agent_profile_override_repository=agent_profile_override_repository,
             industry_service=industry_service,
-        )
-        self._actor = SystemActorCapabilityFacade(
-            actor_mailbox_service=actor_mailbox_service,
-            actor_supervisor=actor_supervisor,
         )
         self._config = SystemConfigCapabilityFacade(
             load_config_fn=load_config_fn,
@@ -177,12 +161,6 @@ class SystemCapabilityHandler:
     def set_environment_service(self, environment_service: object | None) -> None:
         self._environment_service = environment_service
 
-    def set_actor_mailbox_service(self, actor_mailbox_service: object | None) -> None:
-        self._actor.set_actor_mailbox_service(actor_mailbox_service)
-
-    def set_actor_supervisor(self, actor_supervisor: object | None) -> None:
-        self._actor.set_actor_supervisor(actor_supervisor)
-
     async def execute(
         self,
         capability_id: str,
@@ -225,9 +203,6 @@ class SystemCapabilityHandler:
 
         if capability_id == "system:run_host_recovery":
             return await self._execute_host_recovery(resolved_payload)
-
-        if capability_id in _ACTOR_CAPABILITIES:
-            return await self._actor.execute(capability_id, resolved_payload)
 
         if capability_id in _SKILL_CAPABILITIES:
             return await self._execute_async_skill_capability(capability_id, resolved_payload)

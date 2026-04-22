@@ -263,6 +263,11 @@
     - `overview_main_brain.py` 已停止读取 `actor_supervisor_snapshot / actor_supervisor.snapshot()` 来生成 `exception_absorption`
     - Runtime Center main-brain card summary / meta / control-chain 已不再输出 actor supervisor exception-absorption 摘要
     - 因此 Runtime Center formal main-brain 读面已不再把 actor supervisor snapshot 当正式治理真相；但 actor kernel 文件、actor capability compatibility surface 与 mailbox continuity 兼容链仍在，本条目继续保持 `frozen`
+  - `2026-04-23` capability surface 补充：
+    - `src/copaw/capabilities/system_actor_handlers.py` 已物理删除
+    - `CapabilityService` / `SystemCapabilityHandler` 已删除 formal actor setter 与 actor-capability dispatch 残口
+    - `predictions/service_recommendations.py` 已停止输出 `system:pause_actor`，高负载执行位只会提示 `manual:coordinate-main-brain`
+    - 因此 formal actor capability surface 已不再处在 capability execution 主链；但 actor kernel 文件、`main_brain_chat_service.py` / `query_execution_runtime.py` 的 compatibility 接线与 mailbox continuity 链仍在，本条目继续保持 `frozen`
 
 ### 3.1.4 `src/copaw/kernel/delegation_service.py`
 

@@ -162,8 +162,6 @@ def _build_actor_app(tmp_path):
     )
     capability_service.set_agent_profile_service(agent_profile_service)
     capability_service.set_agent_profile_override_repository(override_repository)
-    capability_service.set_actor_mailbox_service(mailbox_service)
-    capability_service.set_actor_supervisor(supervisor)
     task_store = KernelTaskStore(
         task_repository=task_repository,
         task_runtime_repository=task_runtime_repository,

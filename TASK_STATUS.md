@@ -683,6 +683,28 @@
   - 结果：`237 passed in 85.57s`
   - 验收层级：`L1 + L2`
 
+## 1.0.17 `2026-04-23` local executor physical-retirement slice（formal actor capability surface deletion）
+
+- 本轮继续删 actor compatibility 残肢，但没有把 actor kernel 本体误写成已删除：
+  - `src/copaw/capabilities/system_actor_handlers.py` 已物理删除
+  - `src/copaw/capabilities/service.py` / `src/copaw/capabilities/system_handlers.py` 已删除 formal actor setter 与 actor-capability dispatch 残口
+  - `tests/capabilities/test_system_actor_handlers.py` 已退役；`tests/app/test_runtime_center_actor_api.py` 不再依赖 `CapabilityService.set_actor_mailbox_service / set_actor_supervisor`
+  - `src/copaw/predictions/service_recommendations.py` 也已停止输出 `system:pause_actor`，高负载 seat 现在只会落成 `manual:coordinate-main-brain`
+- 当前能诚实写出的结论：
+  - formal system actor capability surface 已从 capability execution 主链删除
+  - 这仍不等于 actor runtime 已物理删除：
+    - `actor_mailbox.py / actor_worker.py / actor_supervisor.py` 文件本体还在
+    - `query_execution_runtime.py` / `main_brain_chat_service.py` 仍保留 actor mailbox / actor supervisor compatibility 接线
+    - mailbox continuity 与 child-task compatibility 链仍在
+- fresh focused regression：
+  - 命令：`python -m pytest tests/app/test_capabilities_execution.py -q -k formal_delegation_setter`
+  - 结果：`1 passed, 61 deselected in 9.06s`
+  - 验收层级：`L1 + L2`
+- focused retirement regression：
+  - 命令：`python -m pytest tests/app/test_capabilities_execution.py tests/app/test_runtime_center_actor_api.py tests/app/test_runtime_bootstrap_split.py tests/app/test_runtime_bootstrap_helpers.py tests/app/test_industry_service_wiring.py tests/predictions/test_skill_candidate_service.py -q`
+  - 结果：`151 passed in 102.52s`
+  - 验收层级：`L1 + L2`
+
 ## 1.1.1 `2026-04-07` Buddy 领域能力阶段收口补充
 
 - Buddy 当前成长阶段的正式真相已从关系经验切到 active `BuddyDomainCapabilityRecord`
