@@ -515,6 +515,18 @@
 - 当前仍应保留的边界：
   - 这轮补的是 sidecar customer-delivery 剩余实现缺口，不是把 compatibility/deprecation 代码一并物理删除
   - `live smoke` 现在已能在真实本机 `codex CLI` 上复跑，但它仍然是 opt-in gated，不得混写成“默认回归已包含真实外部执行体”
+  - `2026-04-22` 补充：`tests/app/test_external_executor_live_smoke.py` 的 wait helper 现已补齐“`task_completed` 后 `message_emitted / evidence_emitted` 继续延迟写回”的时序口径，不再把 post-terminal evidence churn 误判成 live failure；对应新增时序回归：
+    - `test_wait_for_terminal_runtime_waits_for_post_terminal_message_events`
+    - `test_wait_for_terminal_runtime_returns_without_waiting_for_evidence_churn`
+  - 这轮 fresh 验收补充：
+    - focused regression：
+      - 命令：`python -m pytest tests/state/test_executor_runtime_service.py tests/state/test_executor_sidecar_state.py tests/adapters/test_codex_stdio_transport.py tests/adapters/test_codex_app_server_adapter.py tests/kernel/test_main_brain_executor_runtime_integration.py tests/kernel/test_executor_event_writeback_service.py tests/capabilities/test_donor_provider_injection.py tests/app/test_runtime_execution_provider_wiring.py tests/app/test_runtime_bootstrap_helpers.py tests/app/test_runtime_bootstrap_split.py tests/app/test_startup_environment_preflight.py tests/app/test_capability_market_api.py tests/app/test_daemon_commands.py tests/app/test_sidecar_release_service.py tests/app/test_external_executor_live_smoke.py -q`
+      - 结果：`174 passed, 1 skipped in 138.91s`
+      - 验收层级：`L1 + L2`
+    - `L3` live smoke：
+      - 命令：`COPAW_RUN_EXTERNAL_EXECUTOR_LIVE_SMOKE=1 python -m pytest tests/app/test_external_executor_live_smoke.py -q -k provider_intake_and_runtime_writeback`
+      - 结果：连续 `2` 轮分别为 `1 passed, 4 deselected in 78.56s`、`1 passed, 4 deselected in 47.29s`
+      - 验收层级：`L3 + selected L4`
 
 ## 1.1.1 `2026-04-07` Buddy 领域能力阶段收口补充
 

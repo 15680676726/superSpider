@@ -148,6 +148,8 @@ def _wait_for_terminal_runtime(
     deadline = time.monotonic() + timeout_seconds
     latest_events: list[object] = []
     latest_runtime = None
+    terminal_seen_at: float | None = None
+    terminal_grace_period_seconds = 3.0
     while time.monotonic() < deadline:
         latest_runtime = service.get_runtime(runtime_id)
         latest_events = service.list_event_records(thread_id=thread_id)
@@ -165,7 +167,15 @@ def _wait_for_terminal_runtime(
             and latest_runtime is not None
             and runtime_status in {"completed", "failed"}
         ):
-            return latest_events, latest_runtime
+            if terminal_seen_at is None:
+                terminal_seen_at = time.monotonic()
+            has_message = any(
+                getattr(event, "event_type", None) == "message_emitted"
+                and str(getattr(event, "payload", {}).get("message") or "").strip()
+                for event in latest_events
+            )
+            if has_message or time.monotonic() - terminal_seen_at >= terminal_grace_period_seconds:
+                return latest_events, latest_runtime
         time.sleep(0.5)
     raise AssertionError(
         f"Timed out waiting for executor runtime '{runtime_id}' to finish live smoke.",
@@ -205,6 +215,95 @@ def test_live_external_executor_smoke_uses_managed_stdio_transport(tmp_path: Pat
 
     assert sidecar["transport_kind"] == "stdio"
     assert sidecar["command"] == [active_install.executable_path, "app-server"]
+
+
+def test_wait_for_terminal_runtime_waits_for_post_terminal_message_events() -> None:
+    task_completed = SimpleNamespace(
+        event_type="task_completed",
+        source_type="turn",
+        payload={"status": "completed"},
+    )
+    message_emitted = SimpleNamespace(
+        event_type="message_emitted",
+        source_type="agentMessage",
+        payload={"message": _SMOKE_TOKEN},
+    )
+    completed_runtime = SimpleNamespace(runtime_status="completed")
+
+    class _SequencedRuntimeService:
+        def __init__(self) -> None:
+            self._event_reads = 0
+
+        def get_runtime(self, runtime_id: str):
+            _ = runtime_id
+            return completed_runtime
+
+        def list_event_records(self, *, thread_id: str):
+            _ = thread_id
+            self._event_reads += 1
+            if self._event_reads == 1:
+                return [task_completed]
+            return [task_completed, message_emitted]
+
+    service = _SequencedRuntimeService()
+
+    events, runtime = _wait_for_terminal_runtime(
+        service,
+        runtime_id="runtime-1",
+        thread_id="thread-1",
+        timeout_seconds=2.0,
+    )
+
+    assert runtime is completed_runtime
+    assert any(event.event_type == "message_emitted" for event in events)
+
+
+def test_wait_for_terminal_runtime_returns_without_waiting_for_evidence_churn() -> None:
+    task_completed = SimpleNamespace(
+        event_type="task_completed",
+        source_type="turn",
+        payload={"status": "completed"},
+    )
+    message_emitted = SimpleNamespace(
+        event_type="message_emitted",
+        source_type="agentMessage",
+        payload={"message": _SMOKE_TOKEN},
+    )
+    evidence_emitted = SimpleNamespace(
+        event_type="evidence_emitted",
+        source_type="evidence",
+        payload={"evidence_id": "ev-1"},
+    )
+    completed_runtime = SimpleNamespace(runtime_status="completed")
+
+    class _GrowingRuntimeService:
+        def __init__(self) -> None:
+            self._event_reads = 0
+
+        def get_runtime(self, runtime_id: str):
+            _ = runtime_id
+            return completed_runtime
+
+        def list_event_records(self, *, thread_id: str):
+            _ = thread_id
+            self._event_reads += 1
+            if self._event_reads == 1:
+                return [task_completed]
+            if self._event_reads == 2:
+                return [task_completed, message_emitted]
+            return [task_completed, message_emitted, evidence_emitted]
+
+    service = _GrowingRuntimeService()
+
+    events, runtime = _wait_for_terminal_runtime(
+        service,
+        runtime_id="runtime-2",
+        thread_id="thread-2",
+        timeout_seconds=2.0,
+    )
+
+    assert runtime is completed_runtime
+    assert any(event.event_type == "message_emitted" for event in events)
 
 
 @pytest.mark.skipif(
