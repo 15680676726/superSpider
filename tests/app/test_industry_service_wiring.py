@@ -467,7 +467,6 @@ def test_runtime_domain_builder_passes_memory_activation_service_to_industry_ser
         kernel_dispatcher=object(),
         kernel_tool_bridge=object(),
         actor_mailbox_service=object(),
-        actor_supervisor=object(),
     )
 
     assert (
@@ -1384,7 +1383,6 @@ def test_runtime_domain_builder_injects_research_session_service_into_main_brain
         kernel_dispatcher=object(),
         kernel_tool_bridge=object(),
         actor_mailbox_service=object(),
-        actor_supervisor=object(),
     )
 
     injected_service = captured.get("main_brain_research_session_service")

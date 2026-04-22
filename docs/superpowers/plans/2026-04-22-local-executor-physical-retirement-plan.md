@@ -139,6 +139,7 @@ These remain follow-up work because the current external executor seam exposes `
   - `runtime_center_dependencies.py` no longer exposes `_get_actor_mailbox_service(...)` or `_get_actor_supervisor(...)` dead compatibility getters
   - `runtime_center_payloads.py` no longer exposes `_actor_mailbox_payload(...)` dead compatibility helper
   - `runtime_center_actor_capabilities.py` / `runtime_center_routes_agents.py` no longer keep the dead `require_actor` branch on the formal agent capability assignment surface
+  - `runtime_bootstrap_domains.py` no longer accepts an `actor_supervisor` parameter, and `runtime_service_graph.py` no longer threads that value through default bootstrap
   - `actor_mailbox.py` / `actor_worker.py` / `actor_supervisor.py` files still exist, so the task remains `partial`
 
 ### Task 3: Re-state The Remaining Local-Tool Blockers Honestly

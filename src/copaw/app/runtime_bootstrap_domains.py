@@ -22,7 +22,6 @@ from ..industry import IndustryDraftGenerator, IndustryService
 from ..industry.service_context import build_industry_service_runtime_bindings
 from ..kernel import (
     ActorMailboxService,
-    ActorSupervisor,
     AgentProfileService,
     KernelDispatcher,
     KernelQueryExecutionService,
@@ -967,7 +966,6 @@ def build_runtime_domain_services(
     kernel_dispatcher: KernelDispatcher | None = None,
     kernel_tool_bridge: KernelToolBridge | None = None,
     actor_mailbox_service: ActorMailboxService | None = None,
-    actor_supervisor: ActorSupervisor | None = None,
     executor_runtime_coordinator: AssignmentExecutorRuntimeCoordinator | None = None,
 ) -> RuntimeDomainServices:
     strategy_planning_compiler = StrategyPlanningCompiler()

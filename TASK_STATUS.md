@@ -785,6 +785,21 @@
   - 结果：`35 passed in 41.78s`
   - 验收层级：`L1 + L2`
 
+## 1.0.23 `2026-04-23` local executor physical-retirement slice（bootstrap domain actor_supervisor parameter deletion）
+
+- 本轮继续删除 bootstrap domain builder 里的 dead actor_supervisor 形参：
+  - `src/copaw/app/runtime_bootstrap_domains.py` 已删除 `actor_supervisor` 参数
+  - `src/copaw/app/runtime_service_graph.py` 已停止向 `build_runtime_domain_services(...)` 透传 `actor_supervisor`
+- 当前能诚实写出的结论：
+  - default bootstrap domain build path 已进一步退出 actor supervisor compatibility surface
+  - 这仍不等于 actor runtime 已物理删除：
+    - `startup_recovery.py` / `delegation_service.py` / `service_lifecycle.py` 仍保留 actor mailbox 兼容写链
+    - `actor_mailbox.py / actor_worker.py / actor_supervisor.py` 文件本体还在
+- fresh focused regression：
+  - 命令：`python -m pytest tests/app/test_runtime_bootstrap_split.py tests/app/test_industry_service_wiring.py tests/app/test_runtime_bootstrap_helpers.py -q`
+  - 结果：`66 passed in 34.31s`
+  - 验收层级：`L1 + L2`
+
 ## 1.1.1 `2026-04-07` Buddy 领域能力阶段收口补充
 
 - Buddy 当前成长阶段的正式真相已从关系经验切到 active `BuddyDomainCapabilityRecord`

@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -59,6 +60,12 @@ def test_query_execution_runtime_mixin_inherits_split_runtime_seams() -> None:
     assert "copaw.kernel.query_execution_context_runtime" in base_modules
     assert "copaw.kernel.query_execution_resident_runtime" in base_modules
     assert "copaw.kernel.query_execution_usage_runtime" in base_modules
+
+
+def test_build_runtime_domain_services_drops_actor_supervisor_parameter() -> None:
+    assert "actor_supervisor" not in inspect.signature(
+        runtime_bootstrap_domains_module.build_runtime_domain_services,
+    ).parameters
 
 
 def test_industry_runtime_bindings_preserve_formal_planning_services() -> None:
@@ -625,7 +632,6 @@ def test_domain_builder_wires_environment_service_into_fixed_sop_service(
         kernel_dispatcher=kernel_dispatcher,
         kernel_tool_bridge=object(),
         actor_mailbox_service=object(),
-        actor_supervisor=object(),
     )
 
     assert captured["fixed_sop_init_kwargs"]["environment_service"] is environment_service

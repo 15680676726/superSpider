@@ -769,7 +769,6 @@ def build_runtime_bootstrap(
         kernel_dispatcher=kernel_dispatcher,
         kernel_tool_bridge=kernel_tool_bridge,
         actor_mailbox_service=actor_mailbox_service,
-        actor_supervisor=actor_supervisor,
         executor_runtime_coordinator=executor_runtime_coordinator,
     )
     if callable(configure_exception_absorption):
