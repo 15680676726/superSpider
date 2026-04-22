@@ -33,6 +33,8 @@ from copaw.app.runtime_service_graph import (
 from copaw.memory.models import MemoryBackendKind
 from copaw.discovery.models import DiscoveryActionRequest, DiscoverySourceSpec
 from copaw.state import SQLiteStateStore
+from copaw.state import models_executor_runtime as executor_models
+from copaw.state.executor_runtime_service import ExecutorRuntimeService
 from copaw.state.models_memory import MemoryRelationViewRecord
 
 
@@ -807,6 +809,52 @@ def test_build_runtime_state_bindings_exposes_executor_runtime_services() -> Non
     assert bindings["executor_runtime_service"] is executor_runtime_service
     assert bindings["executor_runtime_coordinator"] is executor_runtime_coordinator
     assert bindings["executor_runtime_port"] is executor_runtime_port
+
+
+def test_build_runtime_state_bindings_preserves_executor_runtime_sidecar_truth(
+    tmp_path,
+) -> None:
+    install_record_type = getattr(
+        executor_models,
+        "ExecutorSidecarInstallRecord",
+        None,
+    )
+    assert install_record_type is not None
+    service = ExecutorRuntimeService(state_store=SQLiteStateStore(tmp_path / "state.db"))
+    service.upsert_sidecar_install(
+        install_record_type(
+            install_id="codex-stable-0.10.0",
+            runtime_family="codex",
+            channel="stable",
+            version="0.10.0",
+            install_root="D:/word/copaw/runtime/codex/0.10.0",
+            executable_path="D:/word/copaw/runtime/codex/0.10.0/codex.exe",
+            install_status="ready",
+            metadata={"managed_by": "copaw"},
+        )
+    )
+
+    bootstrap = _build_bootstrap()
+    bootstrap_payload = {
+        field.name: getattr(bootstrap, field.name)
+        for field in dataclasses.fields(bootstrap)
+    }
+    bootstrap_payload["executor_runtime_service"] = service
+    proxy_bootstrap = SimpleNamespace(**bootstrap_payload)
+
+    bindings = build_runtime_state_bindings(
+        runtime_host=object(),
+        bootstrap=proxy_bootstrap,
+        manager_stack=RuntimeManagerStack(),
+        startup_recovery_summary={"reason": "startup"},
+    )
+
+    bound_service = bindings["executor_runtime_service"]
+    active_install = bound_service.get_active_sidecar_install(runtime_family="codex")
+
+    assert active_install is not None
+    assert active_install.install_id == "codex-stable-0.10.0"
+    assert active_install.executable_path.endswith("codex.exe")
 
 
 def test_build_runtime_state_bindings_preserves_automation_group_contract() -> None:

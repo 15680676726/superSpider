@@ -48,6 +48,9 @@ from ..models_executor_runtime import (
     ExecutorEventRecord,
     ExecutorProviderRecord,
     ExecutorRuntimeInstanceRecord,
+    ExecutorSidecarCompatibilityPolicyRecord,
+    ExecutorSidecarInstallRecord,
+    ExecutorSidecarReleaseRecord,
     ExecutorThreadBindingRecord,
     ExecutorTurnRecord,
     ModelInvocationPolicyRecord,
@@ -456,6 +459,67 @@ class BaseExecutorRuntimeRepository(ABC):
         self,
         record: ModelInvocationPolicyRecord,
     ) -> ModelInvocationPolicyRecord:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_active_sidecar_install(
+        self,
+        *,
+        runtime_family: str | None = None,
+        channel: str | None = None,
+    ) -> Optional[ExecutorSidecarInstallRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_sidecar_installs(
+        self,
+        *,
+        runtime_family: str | None = None,
+        channel: str | None = None,
+        install_status: str | None = None,
+        limit: int | None = None,
+    ) -> list[ExecutorSidecarInstallRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upsert_sidecar_install(
+        self,
+        record: ExecutorSidecarInstallRecord,
+    ) -> ExecutorSidecarInstallRecord:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_sidecar_compatibility_policy(
+        self,
+        *,
+        runtime_family: str,
+        channel: str | None = None,
+    ) -> Optional[ExecutorSidecarCompatibilityPolicyRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upsert_sidecar_compatibility_policy(
+        self,
+        record: ExecutorSidecarCompatibilityPolicyRecord,
+    ) -> ExecutorSidecarCompatibilityPolicyRecord:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_sidecar_releases(
+        self,
+        *,
+        runtime_family: str | None = None,
+        channel: str | None = None,
+        status: str | None = None,
+        limit: int | None = None,
+    ) -> list[ExecutorSidecarReleaseRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upsert_sidecar_release(
+        self,
+        record: ExecutorSidecarReleaseRecord,
+    ) -> ExecutorSidecarReleaseRecord:
         raise NotImplementedError
 
     @abstractmethod

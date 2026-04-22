@@ -5,6 +5,7 @@ from copaw.state import SQLiteStateStore
 from copaw.state.external_runtime_service import ExternalCapabilityRuntimeService
 from copaw.state.repositories import SqliteExternalCapabilityRuntimeRepository
 from copaw.state.executor_runtime_service import ExecutorRuntimeService
+from copaw.state import models_executor_runtime as executor_models
 from copaw.state.models_executor_runtime import (
     ExecutionPolicyRecord,
     ExecutorProviderRecord,
@@ -186,6 +187,42 @@ def test_executor_runtime_service_resolves_provider_binding_and_policy(tmp_path)
     assert service.resolve_executor_provider("codex-app-server") == provider
     assert service.resolve_role_executor_binding("backend-engineer") == binding
     assert service.resolve_model_invocation_policy("default") == policy
+
+
+def test_executor_runtime_service_marks_sidecar_install_status(tmp_path) -> None:
+    store = SQLiteStateStore(tmp_path / "sidecar-state.db")
+    service = ExecutorRuntimeService(state_store=store)
+    install_record_type = getattr(
+        executor_models,
+        "ExecutorSidecarInstallRecord",
+        None,
+    )
+    assert install_record_type is not None
+
+    service.upsert_sidecar_install(
+        install_record_type(
+            install_id="codex-stable-0.10.0",
+            runtime_family="codex",
+            channel="stable",
+            version="0.10.0",
+            install_root="D:/word/copaw/runtime/codex/0.10.0",
+            executable_path="D:/word/copaw/runtime/codex/0.10.0/codex.exe",
+            install_status="ready",
+            metadata={"managed_by": "copaw"},
+        )
+    )
+
+    degraded = service.mark_sidecar_install_status(
+        "codex-stable-0.10.0",
+        status="degraded",
+        metadata={"reason": "healthcheck_failed"},
+    )
+    active = service.get_active_sidecar_install(runtime_family="codex")
+
+    assert degraded.install_status == "degraded"
+    assert active is not None
+    assert active.install_status == "degraded"
+    assert active.metadata["reason"] == "healthcheck_failed"
 
 
 def test_mark_runtime_ready_persists_thread_binding_and_turn_record(tmp_path) -> None:

@@ -9,6 +9,9 @@ from ..models_executor_runtime import (
     ExecutorEventRecord,
     ExecutorProviderRecord,
     ExecutorRuntimeInstanceRecord,
+    ExecutorSidecarCompatibilityPolicyRecord,
+    ExecutorSidecarInstallRecord,
+    ExecutorSidecarReleaseRecord,
     ExecutorThreadBindingRecord,
     ExecutorTurnRecord,
     ModelInvocationPolicyRecord,
@@ -216,6 +219,181 @@ class SqliteExecutorRuntimeRepository(BaseExecutorRuntimeRepository):
             key_name="policy_id",
             record=record,
             json_fields=("role_overrides", "metadata"),
+        )
+        return record
+
+    def get_active_sidecar_install(
+        self,
+        *,
+        runtime_family: str | None = None,
+        channel: str | None = None,
+    ) -> ExecutorSidecarInstallRecord | None:
+        clauses = ["install_status NOT IN ('superseded', 'retired')"]
+        params: list[Any] = []
+        if runtime_family is not None:
+            clauses.append("runtime_family = ?")
+            params.append(runtime_family)
+        if channel is not None:
+            clauses.append("channel = ?")
+            params.append(channel)
+        query = (
+            "SELECT * FROM executor_sidecar_installs "
+            f"WHERE {' AND '.join(clauses)} "
+            "ORDER BY updated_at DESC, created_at DESC LIMIT 1"
+        )
+        with self._store.connection() as conn:
+            row = conn.execute(query, tuple(params)).fetchone()
+        return _model_from_row(
+            ExecutorSidecarInstallRecord,
+            row,
+            json_fields=("metadata",),
+        )
+
+    def list_sidecar_installs(
+        self,
+        *,
+        runtime_family: str | None = None,
+        channel: str | None = None,
+        install_status: str | None = None,
+        limit: int | None = None,
+    ) -> list[ExecutorSidecarInstallRecord]:
+        return _list_records(
+            store=self._store,
+            table_name="executor_sidecar_installs",
+            model_type=ExecutorSidecarInstallRecord,
+            order_by=(
+                "CASE WHEN install_status IN ('superseded', 'retired') THEN 1 ELSE 0 END, "
+                "updated_at DESC, created_at DESC"
+            ),
+            limit=limit,
+            json_fields=("metadata",),
+            filters=(
+                ("runtime_family", runtime_family),
+                ("channel", channel),
+                ("install_status", install_status),
+            ),
+        )
+
+    def upsert_sidecar_install(
+        self,
+        record: ExecutorSidecarInstallRecord,
+    ) -> ExecutorSidecarInstallRecord:
+        with self._store.connection() as conn:
+            if record.install_status not in {"superseded", "retired"}:
+                conn.execute(
+                    """
+                    UPDATE executor_sidecar_installs
+                    SET install_status = 'superseded',
+                        updated_at = ?
+                    WHERE runtime_family = ?
+                      AND channel = ?
+                      AND install_id != ?
+                      AND install_status NOT IN ('superseded', 'retired')
+                    """,
+                    (
+                        record.updated_at.isoformat().replace("+00:00", "Z"),
+                        record.runtime_family,
+                        record.channel,
+                        record.install_id,
+                    ),
+                )
+        _upsert_updated_record(
+            store=self._store,
+            table_name="executor_sidecar_installs",
+            key_name="install_id",
+            record=record,
+            json_fields=("metadata",),
+        )
+        return record
+
+    def get_sidecar_compatibility_policy(
+        self,
+        *,
+        runtime_family: str,
+        channel: str | None = None,
+    ) -> ExecutorSidecarCompatibilityPolicyRecord | None:
+        clauses = ["runtime_family = ?", "status = 'active'"]
+        params: list[Any] = [runtime_family]
+        if channel is not None:
+            clauses.append("channel = ?")
+            params.append(channel)
+        query = (
+            "SELECT * FROM executor_sidecar_compatibility_policies "
+            f"WHERE {' AND '.join(clauses)} "
+            "ORDER BY updated_at DESC, created_at DESC LIMIT 1"
+        )
+        with self._store.connection() as conn:
+            row = conn.execute(query, tuple(params)).fetchone()
+        return _model_from_row(
+            ExecutorSidecarCompatibilityPolicyRecord,
+            row,
+            json_fields=("metadata",),
+        )
+
+    def upsert_sidecar_compatibility_policy(
+        self,
+        record: ExecutorSidecarCompatibilityPolicyRecord,
+    ) -> ExecutorSidecarCompatibilityPolicyRecord:
+        with self._store.connection() as conn:
+            if record.status == "active":
+                conn.execute(
+                    """
+                    UPDATE executor_sidecar_compatibility_policies
+                    SET status = 'superseded',
+                        updated_at = ?
+                    WHERE runtime_family = ?
+                      AND channel = ?
+                      AND policy_id != ?
+                      AND status = 'active'
+                    """,
+                    (
+                        record.updated_at.isoformat().replace("+00:00", "Z"),
+                        record.runtime_family,
+                        record.channel,
+                        record.policy_id,
+                    ),
+                )
+        _upsert_updated_record(
+            store=self._store,
+            table_name="executor_sidecar_compatibility_policies",
+            key_name="policy_id",
+            record=record,
+            json_fields=("metadata",),
+        )
+        return record
+
+    def list_sidecar_releases(
+        self,
+        *,
+        runtime_family: str | None = None,
+        channel: str | None = None,
+        status: str | None = None,
+        limit: int | None = None,
+    ) -> list[ExecutorSidecarReleaseRecord]:
+        return _list_records(
+            store=self._store,
+            table_name="executor_sidecar_releases",
+            model_type=ExecutorSidecarReleaseRecord,
+            order_by="updated_at DESC, created_at DESC",
+            limit=limit,
+            json_fields=("metadata",),
+            filters=(
+                ("runtime_family", runtime_family),
+                ("channel", channel),
+                ("status", status),
+            ),
+        )
+
+    def upsert_sidecar_release(
+        self,
+        record: ExecutorSidecarReleaseRecord,
+    ) -> ExecutorSidecarReleaseRecord:
+        _upsert_updated_record(
+            store=self._store,
+            table_name="executor_sidecar_releases",
+            key_name="release_id",
+            record=record,
+            json_fields=("metadata",),
         )
         return record
 

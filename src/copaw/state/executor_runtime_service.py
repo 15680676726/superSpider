@@ -10,6 +10,9 @@ from .models_executor_runtime import (
     ExecutorEventRecord,
     ExecutorProviderRecord,
     ExecutorRuntimeInstanceRecord,
+    ExecutorSidecarCompatibilityPolicyRecord,
+    ExecutorSidecarInstallRecord,
+    ExecutorSidecarReleaseRecord,
     ExecutorThreadBindingRecord,
     ExecutorTurnRecord,
     ModelInvocationPolicyRecord,
@@ -24,6 +27,7 @@ from .store import SQLiteStateStore
 _EXECUTOR_RUNTIME_METADATA_KEY = "executor_runtime"
 _ACTIVE_RUNTIME_STATUSES = {"starting", "restarting", "ready", "degraded"}
 _TERMINAL_RUNTIME_STATUSES = {"completed", "stopped", "failed", "orphaned"}
+_INACTIVE_SIDECAR_INSTALL_STATUSES = {"superseded", "retired"}
 _TERMINAL_TURN_STATUS_BY_EVENT = {
     "task_completed": "completed",
     "task_failed": "failed",
@@ -220,6 +224,12 @@ class ExecutorRuntimeService:
         self._providers: dict[str, ExecutorProviderRecord] = {}
         self._role_bindings: dict[str, RoleExecutorBindingRecord] = {}
         self._model_policies: dict[str, ModelInvocationPolicyRecord] = {}
+        self._sidecar_installs: dict[str, ExecutorSidecarInstallRecord] = {}
+        self._sidecar_compatibility_policies: dict[
+            str,
+            ExecutorSidecarCompatibilityPolicyRecord,
+        ] = {}
+        self._sidecar_releases: dict[str, ExecutorSidecarReleaseRecord] = {}
         self._runtime_instances: dict[str, ExecutorRuntimeInstanceRecord] = {}
         self._thread_bindings: dict[str, ExecutorThreadBindingRecord] = {}
         self._turn_records: dict[str, ExecutorTurnRecord] = {}
@@ -340,6 +350,200 @@ class ExecutorRuntimeService:
         if repository is not None:
             return repository.get_model_invocation_policy(policy_id)
         return self._model_policies.get(policy_id)
+
+    def upsert_sidecar_install(
+        self,
+        record: ExecutorSidecarInstallRecord,
+    ) -> ExecutorSidecarInstallRecord:
+        repository = self._repository
+        if repository is not None:
+            return repository.upsert_sidecar_install(record)
+        if record.install_status not in _INACTIVE_SIDECAR_INSTALL_STATUSES:
+            for install_id, existing in list(self._sidecar_installs.items()):
+                if install_id == record.install_id:
+                    continue
+                if (
+                    existing.runtime_family == record.runtime_family
+                    and existing.channel == record.channel
+                    and existing.install_status not in _INACTIVE_SIDECAR_INSTALL_STATUSES
+                ):
+                    self._sidecar_installs[install_id] = existing.model_copy(
+                        update={
+                            "install_status": "superseded",
+                            "updated_at": record.updated_at,
+                        }
+                    )
+        self._sidecar_installs[record.install_id] = record
+        return record
+
+    def get_active_sidecar_install(
+        self,
+        *,
+        runtime_family: str | None = None,
+        channel: str | None = None,
+    ) -> ExecutorSidecarInstallRecord | None:
+        repository = self._repository
+        if repository is not None:
+            return repository.get_active_sidecar_install(
+                runtime_family=runtime_family,
+                channel=channel,
+            )
+        installs = self.list_sidecar_installs(
+            runtime_family=runtime_family,
+            channel=channel,
+        )
+        for record in installs:
+            if record.install_status not in _INACTIVE_SIDECAR_INSTALL_STATUSES:
+                return record
+        return None
+
+    def list_sidecar_installs(
+        self,
+        *,
+        runtime_family: str | None = None,
+        channel: str | None = None,
+        install_status: str | None = None,
+    ) -> list[ExecutorSidecarInstallRecord]:
+        repository = self._repository
+        if repository is not None:
+            return repository.list_sidecar_installs(
+                runtime_family=runtime_family,
+                channel=channel,
+                install_status=install_status,
+                limit=None,
+            )
+        installs = list(self._sidecar_installs.values())
+        if runtime_family is not None:
+            installs = [item for item in installs if item.runtime_family == runtime_family]
+        if channel is not None:
+            installs = [item for item in installs if item.channel == channel]
+        if install_status is not None:
+            installs = [item for item in installs if item.install_status == install_status]
+        installs.sort(
+            key=lambda item: (
+                item.install_status in _INACTIVE_SIDECAR_INSTALL_STATUSES,
+                -(item.updated_at or item.created_at).timestamp(),
+                -item.created_at.timestamp(),
+            )
+        )
+        return installs
+
+    def mark_sidecar_install_status(
+        self,
+        install_id: str,
+        *,
+        status: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> ExecutorSidecarInstallRecord:
+        repository = self._repository
+        current = None
+        if repository is not None:
+            installs = repository.list_sidecar_installs(limit=None)
+            current = next((item for item in installs if item.install_id == install_id), None)
+        else:
+            current = self._sidecar_installs.get(install_id)
+        if current is None:
+            raise KeyError(f"Sidecar install '{install_id}' not found")
+        updated = current.model_copy(
+            update={
+                "install_status": status,
+                "last_checked_at": _utc_now(),
+                "metadata": _merge_metadata(current.metadata, metadata),
+                "updated_at": _utc_now(),
+            }
+        )
+        return self.upsert_sidecar_install(updated)
+
+    def upsert_sidecar_compatibility_policy(
+        self,
+        record: ExecutorSidecarCompatibilityPolicyRecord,
+    ) -> ExecutorSidecarCompatibilityPolicyRecord:
+        repository = self._repository
+        if repository is not None:
+            return repository.upsert_sidecar_compatibility_policy(record)
+        if record.status == "active":
+            for policy_id, existing in list(self._sidecar_compatibility_policies.items()):
+                if policy_id == record.policy_id:
+                    continue
+                if (
+                    existing.runtime_family == record.runtime_family
+                    and existing.channel == record.channel
+                    and existing.status == "active"
+                ):
+                    self._sidecar_compatibility_policies[policy_id] = existing.model_copy(
+                        update={"status": "superseded", "updated_at": record.updated_at}
+                    )
+        self._sidecar_compatibility_policies[record.policy_id] = record
+        return record
+
+    def resolve_sidecar_compatibility_policy(
+        self,
+        *,
+        runtime_family: str,
+        channel: str | None = None,
+    ) -> ExecutorSidecarCompatibilityPolicyRecord | None:
+        repository = self._repository
+        if repository is not None:
+            return repository.get_sidecar_compatibility_policy(
+                runtime_family=runtime_family,
+                channel=channel,
+            )
+        policies = [
+            item
+            for item in self._sidecar_compatibility_policies.values()
+            if item.runtime_family == runtime_family
+            and item.status == "active"
+            and (channel is None or item.channel == channel)
+        ]
+        policies.sort(
+            key=lambda item: (
+                item.updated_at or item.created_at,
+                item.created_at,
+            ),
+            reverse=True,
+        )
+        return policies[0] if policies else None
+
+    def upsert_sidecar_release(
+        self,
+        record: ExecutorSidecarReleaseRecord,
+    ) -> ExecutorSidecarReleaseRecord:
+        repository = self._repository
+        if repository is not None:
+            return repository.upsert_sidecar_release(record)
+        self._sidecar_releases[record.release_id] = record
+        return record
+
+    def list_sidecar_releases(
+        self,
+        *,
+        runtime_family: str | None = None,
+        channel: str | None = None,
+        status: str | None = None,
+    ) -> list[ExecutorSidecarReleaseRecord]:
+        repository = self._repository
+        if repository is not None:
+            return repository.list_sidecar_releases(
+                runtime_family=runtime_family,
+                channel=channel,
+                status=status,
+                limit=None,
+            )
+        releases = list(self._sidecar_releases.values())
+        if runtime_family is not None:
+            releases = [item for item in releases if item.runtime_family == runtime_family]
+        if channel is not None:
+            releases = [item for item in releases if item.channel == channel]
+        if status is not None:
+            releases = [item for item in releases if item.status == status]
+        releases.sort(
+            key=lambda item: (
+                item.updated_at or item.created_at,
+                item.created_at,
+            ),
+            reverse=True,
+        )
+        return releases
 
     def get_runtime(
         self,

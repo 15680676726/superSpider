@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-STATE_SCHEMA_VERSION = 40
+STATE_SCHEMA_VERSION = 41
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS human_profiles (
@@ -313,6 +313,56 @@ CREATE TABLE IF NOT EXISTS executor_model_invocation_policies (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS executor_sidecar_installs (
+    install_id TEXT PRIMARY KEY,
+    runtime_family TEXT NOT NULL,
+    channel TEXT NOT NULL,
+    version TEXT NOT NULL,
+    install_root TEXT NOT NULL,
+    executable_path TEXT NOT NULL,
+    install_status TEXT NOT NULL DEFAULT 'installing',
+    last_checked_at TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_executor_sidecar_installs_runtime
+    ON executor_sidecar_installs(runtime_family, channel, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_executor_sidecar_installs_status
+    ON executor_sidecar_installs(install_status, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS executor_sidecar_compatibility_policies (
+    policy_id TEXT PRIMARY KEY,
+    runtime_family TEXT NOT NULL,
+    channel TEXT NOT NULL,
+    supported_version_range TEXT NOT NULL,
+    required_copaw_version_range TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'active',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_executor_sidecar_compatibility_family
+    ON executor_sidecar_compatibility_policies(runtime_family, channel, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS executor_sidecar_releases (
+    release_id TEXT PRIMARY KEY,
+    runtime_family TEXT NOT NULL,
+    channel TEXT NOT NULL,
+    version TEXT NOT NULL,
+    artifact_ref TEXT NOT NULL,
+    artifact_checksum TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'draft',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_executor_sidecar_releases_family
+    ON executor_sidecar_releases(runtime_family, channel, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS executor_runtime_instances (
     runtime_id TEXT PRIMARY KEY,
@@ -2834,6 +2884,9 @@ def _ensure_state_schema_ready(conn: sqlite3.Connection) -> None:
         "executor_providers",
         "executor_role_bindings",
         "executor_model_invocation_policies",
+        "executor_sidecar_installs",
+        "executor_sidecar_compatibility_policies",
+        "executor_sidecar_releases",
         "executor_thread_bindings",
         "executor_turn_records",
         "executor_event_records",

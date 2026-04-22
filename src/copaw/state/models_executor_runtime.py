@@ -23,6 +23,20 @@ ExecutorRuntimeStatus = Literal[
 ExecutorSelectionMode = Literal["single-runtime", "role-routed", "task-routed", "manual"]
 ModelInvocationOwnershipMode = Literal["runtime_owned", "copaw_managed", "hybrid"]
 ExecutorTurnStatus = Literal["queued", "running", "completed", "failed", "stopped"]
+ExecutorSidecarInstallStatus = Literal[
+    "installing",
+    "ready",
+    "degraded",
+    "incompatible",
+    "superseded",
+    "retired",
+]
+ExecutorSidecarReleaseStatus = Literal[
+    "draft",
+    "published",
+    "superseded",
+    "retired",
+]
 
 
 class RoleContractRecord(UpdatedRecord):
@@ -94,6 +108,39 @@ class ModelInvocationPolicyRecord(UpdatedRecord):
     task_overrides_allowed: bool = False
     cost_tracking_mode: str = "runtime-native"
     status: str = "active"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ExecutorSidecarInstallRecord(UpdatedRecord):
+    install_id: str = Field(default_factory=_new_record_id, min_length=1)
+    runtime_family: str = Field(min_length=1)
+    channel: str = Field(min_length=1)
+    version: str = Field(min_length=1)
+    install_root: str = Field(min_length=1)
+    executable_path: str = Field(min_length=1)
+    install_status: ExecutorSidecarInstallStatus = "installing"
+    last_checked_at: datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ExecutorSidecarCompatibilityPolicyRecord(UpdatedRecord):
+    policy_id: str = Field(default_factory=_new_record_id, min_length=1)
+    runtime_family: str = Field(min_length=1)
+    channel: str = Field(min_length=1)
+    supported_version_range: str = Field(min_length=1)
+    required_copaw_version_range: str = ""
+    status: str = "active"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ExecutorSidecarReleaseRecord(UpdatedRecord):
+    release_id: str = Field(default_factory=_new_record_id, min_length=1)
+    runtime_family: str = Field(min_length=1)
+    channel: str = Field(min_length=1)
+    version: str = Field(min_length=1)
+    artifact_ref: str = Field(min_length=1)
+    artifact_checksum: str = Field(min_length=1)
+    status: ExecutorSidecarReleaseStatus = "draft"
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
