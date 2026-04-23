@@ -50,6 +50,7 @@
 - Modify: `src/copaw/app/routers/runtime_center_actor_capabilities.py`
 - Modify: `src/copaw/kernel/agent_profile_service.py`
 - Modify: `src/copaw/app/runtime_center/conversations.py`
+- Modify: `src/copaw/app/runtime_bootstrap_domains.py`
 - Modify: `src/copaw/kernel/query_execution_context_runtime.py`
 - Modify: `src/copaw/kernel/query_execution_usage_runtime.py`
 - Modify: `src/copaw/kernel/query_execution_resident_runtime.py`
@@ -61,6 +62,9 @@
 - Test: `tests/app/test_runtime_center_actor_api.py`
 - Test: `tests/app/test_runtime_chat_thread_binding.py`
 - Test: `tests/app/test_runtime_conversations_api.py`
+- Test: `tests/app/test_runtime_bootstrap_helpers.py`
+- Test: `tests/app/test_runtime_bootstrap_split.py`
+- Test: `tests/app/test_runtime_execution_provider_wiring.py`
 - Test: `tests/kernel/test_agent_profile_service.py`
 - Test: `tests/kernel/test_main_brain_runtime_context_consumption.py`
 - Test: `tests/kernel/test_main_brain_runtime_context_buddy_prompt.py`
@@ -269,6 +273,7 @@ git commit -m "feat: cut formal execution off actor mailbox path"
 - Modify: `src/copaw/app/routers/runtime_center_actor_capabilities.py`
 - Modify: `src/copaw/kernel/agent_profile_service.py`
 - Modify: `src/copaw/app/runtime_center/conversations.py`
+- Modify: `src/copaw/app/runtime_bootstrap_domains.py`
 - Modify: `src/copaw/kernel/query_execution_context_runtime.py`
 - Modify: `src/copaw/kernel/query_execution_usage_runtime.py`
 - Modify: `src/copaw/kernel/query_execution_resident_runtime.py`
@@ -280,6 +285,9 @@ git commit -m "feat: cut formal execution off actor mailbox path"
 - Test: `tests/app/test_runtime_center_actor_api.py`
 - Test: `tests/app/test_runtime_chat_thread_binding.py`
 - Test: `tests/app/test_runtime_conversations_api.py`
+- Test: `tests/app/test_runtime_bootstrap_helpers.py`
+- Test: `tests/app/test_runtime_bootstrap_split.py`
+- Test: `tests/app/test_runtime_execution_provider_wiring.py`
 - Test: `tests/kernel/test_agent_profile_service.py`
 - Test: `tests/kernel/test_main_brain_runtime_context_consumption.py`
 - Test: `tests/kernel/test_main_brain_runtime_context_buddy_prompt.py`
@@ -300,13 +308,14 @@ for executor-backed execution truth.
 
 Also fail if:
 - `KernelQueryExecutionService` still reads actor runtime/checkpoint truth for formal continuity paths
+- `KernelQueryExecutionService` is not wired with `executor_runtime_service` during formal bootstrap
 - `copaw.state.models` still exposes actor runtime records as a formal live read contract
 
 - [ ] **Step 2: Run the focused read-surface tests to confirm RED**
 
 Run:
 ```powershell
-python -m pytest tests/app/test_runtime_center_actor_api.py tests/app/test_runtime_chat_thread_binding.py tests/app/test_runtime_conversations_api.py tests/kernel/test_agent_profile_service.py tests/kernel/test_main_brain_runtime_context_consumption.py tests/kernel/test_main_brain_runtime_context_buddy_prompt.py tests/kernel/test_query_usage_accounting.py tests/kernel/test_query_execution_runtime.py tests/kernel/query_execution_environment_parts/dispatch.py tests/industry/test_runtime_views_split.py -q
+python -m pytest tests/app/test_runtime_center_actor_api.py tests/app/test_runtime_chat_thread_binding.py tests/app/test_runtime_conversations_api.py tests/app/test_runtime_bootstrap_helpers.py tests/app/test_runtime_bootstrap_split.py tests/app/test_runtime_execution_provider_wiring.py tests/kernel/test_agent_profile_service.py tests/kernel/test_main_brain_runtime_context_consumption.py tests/kernel/test_main_brain_runtime_context_buddy_prompt.py tests/kernel/test_query_usage_accounting.py tests/kernel/test_query_execution_runtime.py tests/kernel/query_execution_environment_parts/dispatch.py tests/industry/test_runtime_views_split.py -q
 ```
 
 Expected: failures proving actor repositories are still formal dependencies.
@@ -316,6 +325,7 @@ Expected: failures proving actor repositories are still formal dependencies.
 Update:
 - `src/copaw/kernel/agent_profile_service.py`
 - `src/copaw/app/runtime_center/conversations.py`
+- `src/copaw/app/runtime_bootstrap_domains.py`
 - `src/copaw/app/routers/runtime_center_routes_core.py`
 - `src/copaw/app/routers/runtime_center_actor_capabilities.py`
 - `src/copaw/kernel/query_execution_context_runtime.py`
@@ -341,7 +351,7 @@ So actor repositories stop being exported as formal runtime state and dependency
 
 Run:
 ```powershell
-python -m pytest tests/app/test_runtime_center_actor_api.py tests/app/test_runtime_chat_thread_binding.py tests/app/test_runtime_conversations_api.py tests/kernel/test_agent_profile_service.py tests/kernel/test_main_brain_runtime_context_consumption.py tests/kernel/test_main_brain_runtime_context_buddy_prompt.py tests/kernel/test_query_usage_accounting.py tests/kernel/test_query_execution_runtime.py tests/kernel/query_execution_environment_parts/dispatch.py tests/industry/test_runtime_views_split.py -q
+python -m pytest tests/app/test_runtime_center_actor_api.py tests/app/test_runtime_chat_thread_binding.py tests/app/test_runtime_conversations_api.py tests/app/test_runtime_bootstrap_helpers.py tests/app/test_runtime_bootstrap_split.py tests/app/test_runtime_execution_provider_wiring.py tests/kernel/test_agent_profile_service.py tests/kernel/test_main_brain_runtime_context_consumption.py tests/kernel/test_main_brain_runtime_context_buddy_prompt.py tests/kernel/test_query_usage_accounting.py tests/kernel/test_query_execution_runtime.py tests/kernel/query_execution_environment_parts/dispatch.py tests/industry/test_runtime_views_split.py -q
 ```
 
 Expected: PASS
@@ -349,7 +359,7 @@ Expected: PASS
 - [ ] **Step 6: Commit**
 
 ```powershell
-git add src/copaw/app/runtime_state_bindings.py src/copaw/app/routers/runtime_center_dependencies.py src/copaw/app/routers/runtime_center_routes_core.py src/copaw/app/routers/runtime_center_actor_capabilities.py src/copaw/kernel/agent_profile_service.py src/copaw/app/runtime_center/conversations.py src/copaw/kernel/query_execution_context_runtime.py src/copaw/kernel/query_execution_usage_runtime.py src/copaw/kernel/query_execution_resident_runtime.py src/copaw/kernel/query_execution_runtime.py src/copaw/industry/service_runtime_views.py src/copaw/state/__init__.py src/copaw/state/models.py src/copaw/state/repositories/__init__.py tests/app/test_runtime_center_actor_api.py tests/app/test_runtime_chat_thread_binding.py tests/app/test_runtime_conversations_api.py tests/kernel/test_agent_profile_service.py tests/kernel/test_main_brain_runtime_context_consumption.py tests/kernel/test_main_brain_runtime_context_buddy_prompt.py tests/kernel/test_query_usage_accounting.py tests/kernel/test_query_execution_runtime.py tests/kernel/query_execution_environment_parts/dispatch.py tests/industry/test_runtime_views_split.py
+git add src/copaw/app/runtime_state_bindings.py src/copaw/app/routers/runtime_center_dependencies.py src/copaw/app/routers/runtime_center_routes_core.py src/copaw/app/routers/runtime_center_actor_capabilities.py src/copaw/app/runtime_center/conversations.py src/copaw/app/runtime_bootstrap_domains.py src/copaw/kernel/agent_profile_service.py src/copaw/kernel/query_execution_context_runtime.py src/copaw/kernel/query_execution_usage_runtime.py src/copaw/kernel/query_execution_resident_runtime.py src/copaw/kernel/query_execution_runtime.py src/copaw/industry/service_runtime_views.py src/copaw/state/__init__.py src/copaw/state/models.py src/copaw/state/repositories/__init__.py tests/app/test_runtime_center_actor_api.py tests/app/test_runtime_chat_thread_binding.py tests/app/test_runtime_conversations_api.py tests/app/test_runtime_bootstrap_helpers.py tests/app/test_runtime_bootstrap_split.py tests/app/test_runtime_execution_provider_wiring.py tests/kernel/test_agent_profile_service.py tests/kernel/test_main_brain_runtime_context_consumption.py tests/kernel/test_main_brain_runtime_context_buddy_prompt.py tests/kernel/test_query_usage_accounting.py tests/kernel/test_query_execution_runtime.py tests/kernel/query_execution_environment_parts/dispatch.py tests/industry/test_runtime_views_split.py
 git commit -m "feat: move formal read surfaces off actor runtime truth"
 ```
 
