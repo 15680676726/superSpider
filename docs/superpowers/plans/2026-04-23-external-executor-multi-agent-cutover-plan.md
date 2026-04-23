@@ -271,6 +271,10 @@ git commit -m "feat: cut formal execution off actor mailbox path"
 - focused regression:
   - `python -m pytest tests/app/runtime_center_api_parts/overview_governance.py -q -k "runtime_center_chat_run or runtime_center_chat_orchestrate_route_is_retired"`
   - `20 passed, 84 deselected in 14.66s`
+- `runtime_center_actor_capabilities.py` now falls back to `executor_runtime_service` for capability assignment/runtime payload projection when `app.state.agent_runtime_repository` is absent
+- focused regression:
+  - `python -m pytest tests/app/test_runtime_center_actor_api.py -q`
+  - `10 passed in 26.40s`
 
 `2026-04-23` progress note:
 - 已落地 query / conversation / bootstrap 这一刀：

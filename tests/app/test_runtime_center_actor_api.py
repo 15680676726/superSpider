@@ -18,6 +18,7 @@ from copaw.state import (
     AgentLeaseRecord,
     AgentRuntimeRecord,
     AgentThreadBindingRecord,
+    ExecutorRuntimeService,
     SQLiteStateStore,
 )
 from copaw.state.repositories import (
@@ -304,6 +305,56 @@ def test_runtime_center_actor_capability_assignment_route_uses_agent_surface(tmp
     assert len(lifecycle_tasks) == 1
     assert lifecycle_tasks[0].payload["target_agent_id"] == "agent-1"
     assert app.state.task_repository.list_tasks(task_type="system:apply_role") == []
+
+
+def test_runtime_center_agent_capability_assignment_uses_executor_runtime_when_actor_runtime_missing(
+    tmp_path,
+) -> None:
+    app, _item = _build_actor_app(tmp_path)
+    app.state.agent_runtime_repository = None
+    executor_runtime_service = ExecutorRuntimeService(
+        state_store=SQLiteStateStore(tmp_path / "actor-capability-executor.db"),
+    )
+    runtime = executor_runtime_service.create_or_reuse_runtime(
+        executor_id="codex",
+        protocol_kind="app_server",
+        scope_kind="assignment",
+        assignment_id="assign-agent-1",
+        role_id="operator",
+        thread_id="industry-chat:industry-v1-ops:operator",
+        metadata={"owner_agent_id": "agent-1"},
+        continuity_metadata={
+            "control_thread_id": "industry-chat:industry-v1-ops:operator",
+        },
+    )
+    executor_runtime_service.mark_runtime_ready(
+        runtime.runtime_id,
+        thread_id="industry-chat:industry-v1-ops:operator",
+        metadata={"owner_agent_id": "agent-1"},
+    )
+    app.state.executor_runtime_service = executor_runtime_service
+    client = TestClient(app)
+
+    response = client.put(
+        "/runtime-center/agents/agent-1/capabilities",
+        json={
+            "capabilities": ["tool:send_file_to_user"],
+            "mode": "replace",
+            "reason": "executor runtime capability assignment",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["updated"] is True
+    assert payload["runtime"]["kind"] == "executor-runtime"
+    assert payload["runtime"]["runtime_id"] == runtime.runtime_id
+    assert payload["runtime"]["status"] == "ready"
+    assert payload["runtime"]["formal_surface"] is True
+    assert payload["runtime"]["routes"] == {
+        "agent_capabilities": "/api/runtime-center/agents/agent-1/capabilities",
+    }
+    assert payload["runtime"]["agent_capabilities_route"] == "/api/runtime-center/agents/agent-1/capabilities"
 
 
 def test_runtime_center_actor_capability_surface_and_governed_assignment(tmp_path) -> None:

@@ -914,6 +914,27 @@
     - 结果：`20 passed, 84 deselected in 14.66s`
     - 验收层级：`L1 + L2`
 
+## 1.0.28 `2026-04-23` local executor physical-retirement slice（agent capability routes fall back to executor runtime truth）
+
+- 本轮继续收口 `Task 3 / formal read surface` 的 Runtime Center agent capability 路由：
+  - [src/copaw/app/routers/runtime_center_actor_capabilities.py](/D:/word/copaw/src/copaw/app/routers/runtime_center_actor_capabilities.py)
+    - capability assign / governed assign 现在不再把 `app.state.agent_runtime_repository` 当唯一 runtime 读面
+    - 当 actor runtime 缺席时，会回读 `executor_runtime_service` 并返回 formal executor runtime payload
+  - [tests/app/test_runtime_center_actor_api.py](/D:/word/copaw/tests/app/test_runtime_center_actor_api.py)
+    - 新增 RED/GREEN 测试，锁住“actor runtime 缺席时 agent capability route 仍能从 executor runtime truth 返回 runtime payload”的合同
+- 当前能诚实写出的结论：
+  - Runtime Center agent capability mutation 路由已经开始退出对 actor runtime app-state export 的单点依赖
+  - 这仍不等于 `runtime_center_actor_capabilities.py` 已完全切净，因为 capability surface 本身仍通过 `AgentProfileService` 读 actor runtime truth
+- fresh focused regression：
+  - RED 验证：
+    - 命令：`python -m pytest tests/app/test_runtime_center_actor_api.py::test_runtime_center_agent_capability_assignment_uses_executor_runtime_when_actor_runtime_missing -q`
+    - 结果：`1 failed`
+    - 验收层级：`L1`
+  - focused regression：
+    - 命令：`python -m pytest tests/app/test_runtime_center_actor_api.py -q`
+    - 结果：`10 passed in 26.40s`
+    - 验收层级：`L1 + L2`
+
 ## 1.1.1 `2026-04-07` Buddy 领域能力阶段收口补充
 
 - Buddy 当前成长阶段的正式真相已从关系经验切到 active `BuddyDomainCapabilityRecord`

@@ -10,6 +10,9 @@ from agentscope_runtime.engine.schemas.agent_schemas import AgentRequest
 from ...capabilities.lifecycle_assignment import (
     build_capability_lifecycle_assignment_payload,
 )
+from ..runtime_center.execution_runtime_projection import (
+    serialize_executor_runtime_record,
+)
 from .runtime_center_dependencies import (
     _get_agent_profile_service,
 )
@@ -41,6 +44,42 @@ def _get_agent_capability_surface(
     if surface is None:
         raise HTTPException(404, detail=f"Agent '{agent_id}' not found")
     return surface
+
+
+def _resolve_agent_runtime_payload(
+    request: Request,
+    *,
+    agent_id: str,
+    agent_profile: object | None,
+) -> dict[str, object] | None:
+    runtime_repository = getattr(request.app.state, "agent_runtime_repository", None)
+    runtime = runtime_repository.get_runtime(agent_id) if runtime_repository is not None else None
+    if runtime is not None:
+        return _actor_runtime_payload(runtime)
+    executor_runtime_service = getattr(request.app.state, "executor_runtime_service", None)
+    lister = getattr(executor_runtime_service, "list_runtimes", None)
+    if not callable(lister):
+        return None
+    role_id = str(getattr(agent_profile, "industry_role_id", "") or "").strip() or None
+    candidates = list(lister(role_id=role_id, formal_only=True) or [])
+    resolved = None
+    for candidate in candidates:
+        metadata = _model_dump_or_dict(getattr(candidate, "metadata", None)) or {}
+        if str(metadata.get("owner_agent_id") or "").strip() == agent_id:
+            resolved = candidate
+            break
+    if resolved is None and candidates:
+        resolved = candidates[0]
+    if resolved is None:
+        return None
+    payload = serialize_executor_runtime_record(resolved)
+    payload["formal_surface"] = True
+    agent_capabilities_route = f"/api/runtime-center/agents/{agent_id}/capabilities"
+    payload["agent_capabilities_route"] = agent_capabilities_route
+    payload["routes"] = {
+        "agent_capabilities": agent_capabilities_route,
+    }
+    return payload
 
 
 def _get_decision_payload(
@@ -120,8 +159,11 @@ async def _assign_agent_capabilities(
     agent = profile_service.get_agent(agent_id)
     if agent is None:
         raise HTTPException(404, detail=f"Agent '{agent_id}' not found")
-    runtime_repository = getattr(request.app.state, "agent_runtime_repository", None)
-    runtime = runtime_repository.get_runtime(agent_id) if runtime_repository is not None else None
+    runtime_payload = _resolve_agent_runtime_payload(
+        request,
+        agent_id=agent_id,
+        agent_profile=agent,
+    )
     lifecycle_payload = build_capability_lifecycle_assignment_payload(
         agent_profile_service=profile_service,
         target_agent_id=agent_id,
@@ -147,13 +189,17 @@ async def _assign_agent_capabilities(
     else:
         refreshed = profile_service.get_agent(agent_id)
         agent_payload = _public_agent_payload(refreshed) or {"agent_id": agent_id}
-    if runtime_repository is not None:
-        runtime = runtime_repository.get_runtime(agent_id)
+    refreshed_profile = profile_service.get_agent(agent_id)
+    runtime_payload = _resolve_agent_runtime_payload(
+        request,
+        agent_id=agent_id,
+        agent_profile=refreshed_profile,
+    )
     return {
         "updated": True,
         "result": result,
         "agent": agent_payload,
-        "runtime": _actor_runtime_payload(runtime) if runtime is not None else None,
+        "runtime": runtime_payload,
     }
 
 
@@ -167,8 +213,11 @@ async def _submit_governed_capabilities(
     agent = profile_service.get_agent(agent_id)
     if agent is None:
         raise HTTPException(404, detail=f"Agent '{agent_id}' not found")
-    runtime_repository = getattr(request.app.state, "agent_runtime_repository", None)
-    runtime = runtime_repository.get_runtime(agent_id) if runtime_repository is not None else None
+    runtime_payload = _resolve_agent_runtime_payload(
+        request,
+        agent_id=agent_id,
+        agent_profile=agent,
+    )
     surface = _get_agent_capability_surface(request, agent_id=agent_id)
     requested_capabilities = list(payload.capabilities)
     if not requested_capabilities and payload.use_recommended:
@@ -205,7 +254,7 @@ async def _submit_governed_capabilities(
             "result": result,
             "decision": decision,
             "capability_surface": refreshed_surface,
-            "runtime": _actor_runtime_payload(runtime) if runtime is not None else None,
+            "runtime": runtime_payload,
         }
     if not result.get("success"):
         raise HTTPException(400, detail=result.get("error") or "Governed capability assignment failed")
@@ -216,8 +265,12 @@ async def _submit_governed_capabilities(
     else:
         refreshed = profile_service.get_agent(agent_id)
         agent_payload = _public_agent_payload(refreshed) or {"agent_id": agent_id}
-    if runtime_repository is not None:
-        runtime = runtime_repository.get_runtime(agent_id)
+    refreshed_profile = profile_service.get_agent(agent_id)
+    runtime_payload = _resolve_agent_runtime_payload(
+        request,
+        agent_id=agent_id,
+        agent_profile=refreshed_profile,
+    )
     return {
         "submitted": True,
         "updated": True,
@@ -225,7 +278,7 @@ async def _submit_governed_capabilities(
         "decision": decision,
         "agent": agent_payload,
         "capability_surface": refreshed_surface,
-        "runtime": _actor_runtime_payload(runtime) if runtime is not None else None,
+        "runtime": runtime_payload,
     }
 
 
