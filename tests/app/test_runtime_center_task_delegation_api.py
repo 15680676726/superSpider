@@ -261,7 +261,9 @@ def test_runtime_center_task_detail_marks_delegation_children_as_compatibility(
     assert child_results[0]["compatibility_mode"] == "delegation-compat"
 
 
-def test_delegation_service_execute_true_still_lands_mailbox(tmp_path) -> None:
+def test_delegation_service_execute_true_avoids_mailbox_runtime_in_formal_path(
+    tmp_path,
+) -> None:
     store = SQLiteStateStore(tmp_path / "state.db")
     evidence_ledger = EvidenceLedger(tmp_path / "evidence.db")
     task_repository = SqliteTaskRepository(store)
@@ -363,14 +365,11 @@ def test_delegation_service_execute_true_still_lands_mailbox(tmp_path) -> None:
         ),
     )
 
-    assert result["mailbox_id"] is not None
+    assert result["mailbox_id"] is None
     assert result["dispatch_status"] == "completed"
     assert result["routes"]["mailbox"] is None
     assert result["latest_result_summary"]
-    mailbox_item = mailbox_repository.get_item(result["mailbox_id"])
-    assert mailbox_item is not None
-    assert mailbox_item.status == "completed"
-    assert mailbox_item.task_id == result["child_task_id"]
+    assert mailbox_repository.list_items(agent_id="worker", limit=10) == []
     memory = knowledge_service.retrieve_memory(
         query="Worker follow-up",
         agent_id="worker",
@@ -478,7 +477,7 @@ def test_delegation_service_blocks_shared_writer_scope_held_by_other_agent(
     assert "workbook:weekly-report" in str(exc_info.value)
 
 
-def test_delegation_service_execute_true_uses_supervisor_owned_completion_cleanup(
+def test_delegation_service_execute_true_uses_direct_child_run_completion_cleanup(
     tmp_path,
 ) -> None:
     store = SQLiteStateStore(tmp_path / "state.db")
@@ -534,7 +533,13 @@ def test_delegation_service_execute_true_uses_supervisor_owned_completion_cleanu
             return SimpleNamespace(phase="executing", summary="Queued delegated task")
 
         async def execute_task(self, task_id: str):
-            raise AssertionError("delegation service must not bypass the actor supervisor")
+            return KernelResult(
+                task_id=task_id,
+                trace_id="trace-direct-child-run",
+                success=True,
+                phase="completed",
+                summary=f"Completed {task_id}",
+            )
 
     class _CompletingSupervisor:
         def __init__(self) -> None:
@@ -542,28 +547,6 @@ def test_delegation_service_execute_true_uses_supervisor_owned_completion_cleanu
 
         async def run_agent_once(self, agent_id: str) -> bool:
             self.calls.append(agent_id)
-            mailbox_item = mailbox_service.list_items(agent_id=agent_id, limit=1)[0]
-            mailbox_service.start_item(
-                mailbox_item.id,
-                worker_id="copaw-actor-worker",
-                task_id=mailbox_item.task_id,
-            )
-            checkpoint = mailbox_service.create_checkpoint(
-                agent_id=agent_id,
-                mailbox_id=mailbox_item.id,
-                task_id=mailbox_item.task_id,
-                checkpoint_kind="task-result",
-                status="applied",
-                phase="completed",
-                conversation_thread_id=mailbox_item.conversation_thread_id,
-                summary=f"Completed {mailbox_item.task_id}",
-            )
-            mailbox_service.complete_item(
-                mailbox_item.id,
-                result_summary=f"Completed {mailbox_item.task_id}",
-                checkpoint_id=checkpoint.id if checkpoint is not None else None,
-                task_id=mailbox_item.task_id,
-            )
             return True
 
     supervisor = _CompletingSupervisor()
@@ -588,16 +571,15 @@ def test_delegation_service_execute_true_uses_supervisor_owned_completion_cleanu
         ),
     )
 
-    assert supervisor.calls == ["worker"]
+    assert supervisor.calls == []
     assert result["dispatch_status"] == "completed"
     assert result["dispatch_result"]["phase"] == "completed"
     assert result["latest_result_summary"] == f"Completed {result['child_task_id']}"
-    checkpoints = checkpoint_repository.list_checkpoints(agent_id="worker", limit=None)
-    assert len(checkpoints) == 1
-    assert checkpoints[0].phase == "completed"
+    assert checkpoint_repository.list_checkpoints(agent_id="worker", limit=None) == []
+    assert mailbox_repository.list_items(agent_id="worker", limit=10) == []
 
 
-def test_delegation_service_execute_true_keeps_mailbox_owned_by_worker_when_target_busy(
+def test_delegation_service_execute_true_ignores_stale_worker_runtime_and_skips_mailbox(
     tmp_path,
 ) -> None:
     store = SQLiteStateStore(tmp_path / "state.db")
@@ -653,7 +635,13 @@ def test_delegation_service_execute_true_keeps_mailbox_owned_by_worker_when_targ
             return SimpleNamespace(phase="executing", summary="Queued delegated task")
 
         async def execute_task(self, task_id: str):
-            raise AssertionError("delegation service must not take over worker-owned runs")
+            return KernelResult(
+                task_id=task_id,
+                trace_id="trace-direct-child-run",
+                success=True,
+                phase="completed",
+                summary=f"Completed {task_id}",
+            )
 
     class _BusySupervisor:
         def __init__(self) -> None:
@@ -685,15 +673,13 @@ def test_delegation_service_execute_true_keeps_mailbox_owned_by_worker_when_targ
         ),
     )
 
-    assert supervisor.calls == ["worker"]
-    assert result["dispatch_status"] == "queued"
+    assert supervisor.calls == []
+    assert result["dispatch_status"] == "completed"
     assert result["routes"]["mailbox"] is None
-    assert result["latest_result_summary"] == "Queued delegated task"
-    mailbox_item = mailbox_repository.get_item(result["mailbox_id"])
-    assert mailbox_item is not None
-    assert mailbox_item.status == "queued"
-    checkpoints = checkpoint_repository.list_checkpoints(agent_id="worker", limit=None)
-    assert checkpoints == []
+    assert result["latest_result_summary"] == f"Completed {result['child_task_id']}"
+    assert result["mailbox_id"] is None
+    assert mailbox_repository.list_items(agent_id="worker", limit=10) == []
+    assert checkpoint_repository.list_checkpoints(agent_id="worker", limit=None) == []
 
 
 def test_delegation_service_records_dispatch_request_envelope_for_dispatch_query(
@@ -781,7 +767,7 @@ def test_delegation_service_records_dispatch_request_envelope_for_dispatch_query
     assert request_context.get("request") is None
 
 
-def test_delegation_service_execute_true_marks_cancelled_child_mailbox_as_cancelled(
+def test_delegation_service_execute_true_surfaces_cancelled_child_run_without_mailbox(
     tmp_path,
 ) -> None:
     store = SQLiteStateStore(tmp_path / "state.db")
@@ -837,33 +823,13 @@ def test_delegation_service_execute_true_marks_cancelled_child_mailbox_as_cancel
             return SimpleNamespace(phase="executing", summary="Queued delegated task")
 
         async def execute_task(self, task_id: str):
-            raise AssertionError("delegation service must not bypass the actor supervisor")
-
-    class _CancellingSupervisor:
-        async def run_agent_once(self, agent_id: str) -> bool:
-            mailbox_item = mailbox_service.list_items(agent_id=agent_id, limit=1)[0]
-            mailbox_service.start_item(
-                mailbox_item.id,
-                worker_id="copaw-actor-worker",
-                task_id=mailbox_item.task_id,
-            )
-            checkpoint = mailbox_service.create_checkpoint(
-                agent_id=agent_id,
-                mailbox_id=mailbox_item.id,
-                task_id=mailbox_item.task_id,
-                checkpoint_kind="task-result",
-                status="abandoned",
+            return KernelResult(
+                task_id=task_id,
+                trace_id="trace-direct-child-run",
+                success=False,
                 phase="cancelled",
-                conversation_thread_id=mailbox_item.conversation_thread_id,
-                summary=f"Cancelled {mailbox_item.task_id}",
+                summary=f"Cancelled {task_id}",
             )
-            mailbox_service.cancel_item(
-                mailbox_item.id,
-                reason="Cancelled by delegated worker",
-                checkpoint_id=checkpoint.id if checkpoint is not None else None,
-                task_id=mailbox_item.task_id,
-            )
-            return True
 
     service = TaskDelegationService(
         task_repository=task_repository,
@@ -871,7 +837,6 @@ def test_delegation_service_execute_true_marks_cancelled_child_mailbox_as_cancel
         kernel_dispatcher=_CancelledDispatcher(),
         evidence_ledger=evidence_ledger,
         actor_mailbox_service=mailbox_service,
-        actor_supervisor=_CancellingSupervisor(),
     )
 
     result = asyncio.run(
@@ -886,17 +851,14 @@ def test_delegation_service_execute_true_marks_cancelled_child_mailbox_as_cancel
         ),
     )
 
-    assert result["mailbox_id"] is not None
+    assert result["mailbox_id"] is None
     assert result["dispatch_status"] == "cancelled"
-    mailbox_item = mailbox_repository.get_item(result["mailbox_id"])
-    assert mailbox_item is not None
-    assert mailbox_item.status == "cancelled"
-    checkpoints = checkpoint_repository.list_checkpoints(agent_id="worker", limit=None)
-    assert checkpoints[0].phase == "cancelled"
-    assert checkpoints[0].status == "abandoned"
+    assert result["dispatch_result"]["phase"] == "cancelled"
+    assert mailbox_repository.list_items(agent_id="worker", limit=10) == []
+    assert checkpoint_repository.list_checkpoints(agent_id="worker", limit=None) == []
 
 
-def test_delegation_service_execute_true_preserves_child_checkpoint_output_and_evidence(
+def test_delegation_service_execute_true_preserves_direct_child_run_output_and_evidence(
     tmp_path,
 ) -> None:
     store = SQLiteStateStore(tmp_path / "state.db")
@@ -952,47 +914,18 @@ def test_delegation_service_execute_true_preserves_child_checkpoint_output_and_e
             return SimpleNamespace(phase="executing", summary="Queued delegated task")
 
         async def execute_task(self, task_id: str):
-            raise AssertionError("delegation service must not bypass the actor supervisor")
-
-    class _CompletingSupervisor:
-        async def run_agent_once(self, agent_id: str) -> bool:
-            mailbox_item = mailbox_service.list_items(agent_id=agent_id, limit=1)[0]
-            mailbox_service.start_item(
-                mailbox_item.id,
-                worker_id="copaw-actor-worker",
-                task_id=mailbox_item.task_id,
-            )
-            checkpoint = mailbox_service.create_checkpoint(
-                agent_id=agent_id,
-                mailbox_id=mailbox_item.id,
-                task_id=mailbox_item.task_id,
-                checkpoint_kind="task-result",
-                status="applied",
+            return KernelResult(
+                task_id=task_id,
+                trace_id="trace-child",
+                success=True,
                 phase="completed",
-                conversation_thread_id=mailbox_item.conversation_thread_id,
-                summary=f"Completed {mailbox_item.task_id}",
-                snapshot_payload={
-                    "result": {
-                        "task_id": mailbox_item.task_id,
-                        "trace_id": "trace-child",
-                        "success": True,
-                        "phase": "completed",
-                        "summary": f"Completed {mailbox_item.task_id}",
-                        "evidence_id": "evidence-child-1",
-                        "output": {
-                            "artifact_path": "D:/word/copaw/out.md",
-                            "artifact_kind": "file",
-                        },
-                    },
+                summary=f"Completed {task_id}",
+                evidence_id="evidence-child-1",
+                output={
+                    "artifact_path": "D:/word/copaw/out.md",
+                    "artifact_kind": "file",
                 },
             )
-            mailbox_service.complete_item(
-                mailbox_item.id,
-                result_summary=f"Completed {mailbox_item.task_id}",
-                checkpoint_id=checkpoint.id if checkpoint is not None else None,
-                task_id=mailbox_item.task_id,
-            )
-            return True
 
     service = TaskDelegationService(
         task_repository=task_repository,
@@ -1000,7 +933,6 @@ def test_delegation_service_execute_true_preserves_child_checkpoint_output_and_e
         kernel_dispatcher=_QueuedDispatcher(),
         evidence_ledger=evidence_ledger,
         actor_mailbox_service=mailbox_service,
-        actor_supervisor=_CompletingSupervisor(),
     )
 
     result = asyncio.run(
@@ -1022,6 +954,7 @@ def test_delegation_service_execute_true_preserves_child_checkpoint_output_and_e
         "artifact_path": "D:/word/copaw/out.md",
         "artifact_kind": "file",
     }
+    assert result["mailbox_id"] is None
 
 
 def test_preview_delegation_ignores_cold_compiled_tasks_for_overload_and_conflicts(

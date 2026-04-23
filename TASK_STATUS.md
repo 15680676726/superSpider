@@ -814,6 +814,42 @@
   - 结果：`351 passed in 187.10s`
   - 验收层级：`L1 + L2`
 
+## 1.0.25 `2026-04-23` local executor physical-retirement slice（formal writer path exits actor mailbox/runtime truth）
+
+- 本轮继续推进“先切正式写链、再谈物理删除”：
+  - `src/copaw/kernel/delegation_service.py`
+    - `execute=True` child-run 现在直接走 `child_run_shell + KernelDispatcher.execute_task(...)`
+    - 不再为 formal child-run 创建 actor mailbox item，也不再依赖 actor supervisor `run_agent_once(...)`
+  - `src/copaw/app/_app.py` 与 `src/copaw/app/runtime_lifecycle.py`
+    - default startup / restart path 现在不再向 `run_startup_recovery(...)` 注入 `agent_runtime_repository`
+  - `src/copaw/app/runtime_bootstrap_domains.py`
+    - formal `IndustryService` runtime bindings 现在不再注入 `agent_runtime_repository / agent_thread_binding_repository / agent_mailbox_repository / agent_checkpoint_repository / agent_lease_repository`
+    - default `IndustryService` 也不再接收 `actor_mailbox_service`
+- 当前能诚实写出的结论：
+  - formal child-run compatibility 已退出 actor mailbox / actor supervisor 写链
+  - default startup / restart 与 default industry bootstrap composition 已进一步退出 actor runtime truth 注入
+  - 这仍不等于本地执行脑已物理删除：
+    - `src/copaw/app/startup_recovery.py` 仍保留 compatibility actor-mailbox recovery 代码
+    - `src/copaw/industry/service_lifecycle.py` 仍保留 actor mailbox compatibility 写链
+    - `src/copaw/kernel/actor_mailbox.py / actor_worker.py / actor_supervisor.py` 文件本体仍在
+- fresh focused regression：
+  - delegation compatibility focused：
+    - 命令：`python -m pytest tests/app/test_runtime_center_task_delegation_api.py tests/kernel/test_assignment_envelope.py -q`
+    - 结果：`13 passed in 29.29s`
+    - 验收层级：`L1 + L2`
+  - startup / industry wiring focused：
+    - 命令：`python -m pytest tests/app/test_runtime_lifecycle.py tests/app/test_startup_recovery.py tests/app/test_industry_service_wiring.py -q`
+    - 结果：`49 passed in 97.29s`
+    - 验收层级：`L1 + L2`
+  - industry API runtime slices：
+    - 命令：`python -m pytest tests/app/industry_api_parts/bootstrap_lifecycle.py -q`
+    - 结果：`54 passed in 334.21s`
+    - 验收层级：`L1 + L2`
+  - industry API runtime updates：
+    - 命令：`python -m pytest tests/app/industry_api_parts/runtime_updates.py -q`
+    - 结果：`48 passed in 344.93s`
+    - 验收层级：`L1 + L2`
+
 ## 1.1.1 `2026-04-07` Buddy 领域能力阶段收口补充
 
 - Buddy 当前成长阶段的正式真相已从关系经验切到 active `BuddyDomainCapabilityRecord`

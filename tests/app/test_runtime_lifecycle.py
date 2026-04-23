@@ -705,6 +705,7 @@ async def test_runtime_restart_coordinator_does_not_require_retired_actor_runtim
     startup_recovery_kwargs = captured["run_startup_recovery"]
     assert "actor_mailbox_service" not in startup_recovery_kwargs
     assert "exception_absorption_service" not in startup_recovery_kwargs
+    assert "runtime_repository" not in startup_recovery_kwargs
     assert captured["industry_schedule_runtime"]["schedule_writer"] == "job-repository"
     assert captured["workflow_schedule_runtime"]["cron_manager"] == "cron-manager"
 
@@ -827,6 +828,7 @@ async def test_app_lifespan_startup_recovery_does_not_thread_retired_actor_runti
     startup_recovery_kwargs = captured["run_startup_recovery"]
     assert "actor_mailbox_service" not in startup_recovery_kwargs
     assert "exception_absorption_service" not in startup_recovery_kwargs
+    assert "runtime_repository" not in startup_recovery_kwargs
     assert captured["industry_schedule_runtime"]["schedule_writer"] == "job-repository"
     assert captured["workflow_schedule_runtime"]["cron_manager"] == "cron-manager"
 

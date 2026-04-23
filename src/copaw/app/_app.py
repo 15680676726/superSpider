@@ -92,7 +92,6 @@ async def lifespan(
         kernel_dispatcher=bootstrap.kernel_dispatcher,
         kernel_task_store=bootstrap.kernel_task_store,
         schedule_repository=bootstrap.repositories.schedule_repository,
-        runtime_repository=bootstrap.repositories.agent_runtime_repository,
         human_assist_task_service=bootstrap.human_assist_task_service,
         backlog_item_repository=bootstrap.repositories.backlog_item_repository,
         assignment_repository=bootstrap.repositories.assignment_repository,

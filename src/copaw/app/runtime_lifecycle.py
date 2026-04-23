@@ -844,7 +844,6 @@ class RuntimeRestartCoordinator:
             kernel_dispatcher=self._bootstrap.kernel_dispatcher,
             kernel_task_store=getattr(self._app.state, "kernel_task_store", None),
             schedule_repository=getattr(self._app.state, "schedule_repository", None),
-            runtime_repository=getattr(self._app.state, "agent_runtime_repository", None),
             human_assist_task_service=getattr(self._app.state, "human_assist_task_service", None),
             backlog_item_repository=getattr(self._app.state, "backlog_item_repository", None),
             assignment_repository=getattr(self._app.state, "assignment_repository", None),

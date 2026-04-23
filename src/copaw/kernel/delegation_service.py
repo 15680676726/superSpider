@@ -251,49 +251,6 @@ class TaskDelegationService:
 
         admitted = self._kernel_dispatcher.submit(child_task)
         mailbox_item = None
-        if self._actor_mailbox_service is not None:
-            enqueue = getattr(self._actor_mailbox_service, "enqueue_item", None)
-            if callable(enqueue):
-                mailbox_item = enqueue(
-                    agent_id=resolved_agent_id,
-                    task_id=child_task.id,
-                    work_context_id=child_task.work_context_id,
-                    source_agent_id=owner_agent_id,
-                    parent_mailbox_id=None,
-                    envelope_type="delegation",
-                    title=title.strip(),
-                    summary=str(summary or prompt_text or title).strip(),
-                    capability_ref=capability_ref,
-                    conversation_thread_id=f"agent-chat:{resolved_agent_id}",
-                    payload={
-                        "capability_ref": capability_ref,
-                        "environment_ref": resolved_environment_ref,
-                        "risk_level": risk_level,
-                        "payload": child_payload,
-                    },
-                    metadata={
-                        "parent_task_id": parent_task.id,
-                        "work_context_id": child_task.work_context_id,
-                        "industry_instance_id": industry_instance_id,
-                        "industry_role_id": industry_role_id or resolution.role_id,
-                        "assignment_id": getattr(parent_task, "assignment_id", None),
-                        "execution_source": _DELEGATION_COMPAT_EXECUTION_SOURCE,
-                        "formal_surface": False,
-                        "compatibility_mode": _DELEGATION_COMPATIBILITY_MODE,
-                        "access_mode": access_mode,
-                        "lease_class": lease_class,
-                        "writer_lock_scope": writer_lock_scope,
-                        "environment_ref": resolved_environment_ref,
-                    },
-                )
-                if admitted.phase != "executing":
-                    blocker = getattr(self._actor_mailbox_service, "block_item", None)
-                    if callable(blocker):
-                        mailbox_item = blocker(
-                            mailbox_item.id,
-                            reason=admitted.summary or f"Task is in phase '{admitted.phase}'",
-                            task_id=child_task.id,
-                        )
         executed: KernelResult | None = None
         if execute and admitted.phase == "executing":
             executed = await self._execute_delegated_child_task(

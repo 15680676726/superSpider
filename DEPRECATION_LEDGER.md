@@ -353,6 +353,12 @@
     - `SystemCapabilityHandler` / `SystemTeamCapabilityFacade` 已删除 formal `system:delegate_task` dispatch branch 与 `handle_delegate_task(...)` facade
     - `CapabilityExecutionFacade` 也已删除仅为 `system:delegate_task` 保留的环境继承特判
     - 但 `src/copaw/kernel/delegation_service.py` 文件、本地 task-delegation compatibility API、以及 mailbox child-task continuity 兼容链仍在，因此本条目继续保持 `frozen`
+  - `2026-04-23` formal-writer-path 补充：
+    - `TaskDelegationService.execute=True` 现在直接走 `child_run_shell + KernelDispatcher.execute_task(...)`
+    - formal child-run 已不再创建 actor mailbox item，也不再调用 actor supervisor `run_agent_once(...)`
+    - default startup / restart 也已停止把 `agent_runtime_repository` 注入 `run_startup_recovery(...)`
+    - default `IndustryService` runtime bindings 也已停止注入 `agent_runtime_repository / agent_thread_binding_repository / agent_mailbox_repository / agent_checkpoint_repository / agent_lease_repository`
+    - 因此 delegation compatibility 已进一步退出 actor mailbox/runtime truth 的默认正式写链；但 `delegation_service.py` 文件、startup recovery compatibility path、以及 actor kernel 文件本体仍在，本条目状态继续保持 `frozen`
 
 ### 3.1.5 donor-first 外接项目产品面：`/capability-market/projects/install*`、`project donor` taxonomy、Runtime Center donor 读面
 

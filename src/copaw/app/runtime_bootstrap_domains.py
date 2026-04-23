@@ -1099,12 +1099,12 @@ def build_runtime_domain_services(
         operating_cycle_repository=repositories.operating_cycle_repository,
         assignment_repository=repositories.assignment_repository,
         agent_report_repository=repositories.agent_report_repository,
-        agent_runtime_repository=repositories.agent_runtime_repository,
-        agent_thread_binding_repository=repositories.agent_thread_binding_repository,
+        agent_runtime_repository=None,
+        agent_thread_binding_repository=None,
         schedule_repository=repositories.schedule_repository,
-        agent_mailbox_repository=repositories.agent_mailbox_repository,
-        agent_checkpoint_repository=repositories.agent_checkpoint_repository,
-        agent_lease_repository=repositories.agent_lease_repository,
+        agent_mailbox_repository=None,
+        agent_checkpoint_repository=None,
+        agent_lease_repository=None,
         strategy_memory_repository=repositories.strategy_memory_repository,
         workflow_run_repository=repositories.workflow_run_repository,
         prediction_case_repository=repositories.prediction_case_repository,
@@ -1146,7 +1146,7 @@ def build_runtime_domain_services(
         memory_activation_service=memory_activation_service,
         knowledge_service=knowledge_service,
         work_context_service=work_context_service,
-        actor_mailbox_service=actor_mailbox_service,
+        actor_mailbox_service=None,
     )
     capability_service.set_industry_service(industry_service)
 
