@@ -887,6 +887,33 @@
     - 结果：`171 passed in 97.23s`
     - 验收层级：`L1 + L2`
 
+## 1.0.27 `2026-04-23` local executor physical-retirement slice（runtime-center chat run falls back to executor runtime truth）
+
+- 本轮继续收口 `Task 3 / formal read surface` 的 Runtime Center chat run 读面：
+  - `src/copaw/app/routers/runtime_center_routes_core.py`
+    - `_resolve_runtime_chat_thread_metadata(...)` 现在会在 actor thread binding 缺席时回读 executor thread binding/runtime continuity
+    - `/runtime-center/chat/run` 因而能从 executor runtime truth 补齐 `work_context_id`
+  - `tests/app/runtime_center_api_parts/overview_governance.py`
+    - 新增 RED/GREEN 测试，锁住“actor binding 缺失时仍能从 executor runtime continuity 补齐 runtime chat request”的合同
+- 当前能诚实写出的结论：
+  - `RuntimeConversationFacade` 之外，Runtime Center chat run 正式读面也已开始退出 actor thread binding 单点依赖
+  - 这仍不等于整个 `Task 3` 已完成；剩余面仍包括：
+    - `runtime_state_bindings.py`
+    - `runtime_center_actor_capabilities.py`
+    - `agent_profile_service.py`
+    - `query_execution_resident_runtime.py`
+    - `industry/service_runtime_views.py`
+    - `state/__init__.py / state/models.py / state/repositories/__init__.py`
+- fresh focused regression：
+  - RED 验证：
+    - 命令：`python -m pytest tests/app/runtime_center_api_parts/overview_governance.py::test_runtime_center_chat_run_hydrates_work_context_from_executor_runtime_when_actor_binding_missing -q`
+    - 结果：`1 failed`
+    - 验收层级：`L1`
+  - focused regression：
+    - 命令：`python -m pytest tests/app/runtime_center_api_parts/overview_governance.py -q -k "runtime_center_chat_run or runtime_center_chat_orchestrate_route_is_retired"`
+    - 结果：`20 passed, 84 deselected in 14.66s`
+    - 验收层级：`L1 + L2`
+
 ## 1.1.1 `2026-04-07` Buddy 领域能力阶段收口补充
 
 - Buddy 当前成长阶段的正式真相已从关系经验切到 active `BuddyDomainCapabilityRecord`

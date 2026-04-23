@@ -252,6 +252,7 @@
     - `src/copaw/app/runtime_bootstrap_domains.py` / `src/copaw/app/runtime_service_graph.py` 现已把 formal `KernelQueryExecutionService` 明确接到 `executor_runtime_service`
     - `src/copaw/kernel/query_execution_context_runtime.py` / `src/copaw/kernel/query_execution_usage_runtime.py` 现已在 actor runtime 缺席时回读/写回 executor runtime truth
     - `src/copaw/app/runtime_center/conversations.py` 现已在 actor thread binding 缺席时回读 executor thread binding/runtime continuity
+    - `src/copaw/app/routers/runtime_center_routes_core.py` 现已在 `/runtime-center/chat/run` 归一化阶段，于 actor thread binding 缺席时回读 executor thread binding/runtime continuity，并补齐 formal `work_context_id`
     - 因此 query/conversation/bootstrap 这条 formal read 链已开始退出 actor runtime truth；但 `agent_profile_service.py`、`query_execution_resident_runtime.py`、`industry/service_runtime_views.py` 与 state export 面仍未一起切完，本条目继续保持 `frozen`
     - `runtime_center_payloads.py`、`agent_profile_service.py`、`capabilities/install_templates.py`、`capabilities/system_actor_handlers.py` 已停止生成 `/api/runtime-center/actors/*` dead routes
     - 但 `actor_mailbox.py` / `actor_worker.py` / `actor_supervisor.py` 及 overview/startup compatibility wiring 仍在，因此本条目状态不变，继续保持 `frozen`

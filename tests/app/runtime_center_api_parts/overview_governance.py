@@ -52,7 +52,7 @@ from copaw.providers.runtime_model_call import (
 )
 from copaw.app.runtime_center.service import RuntimeCenterQueryService
 from copaw.app.routers.runtime_center_shared import _encode_sse_event
-from copaw.state import SQLiteStateStore
+from copaw.state import ExecutorRuntimeService, SQLiteStateStore
 from copaw.state import MediaAnalysisRecord
 from copaw.state.repositories import (
     SqliteDecisionRequestRepository,
@@ -4747,6 +4747,62 @@ def test_runtime_center_chat_run_enriches_request_from_media_inputs(tmp_path) ->
         if isinstance(block, dict) and block.get("type") == "text"
     ]
     assert any("Attached analyzed materials are available below." in block for block in text_blocks)
+
+
+def test_runtime_center_chat_run_hydrates_work_context_from_executor_runtime_when_actor_binding_missing(
+    tmp_path,
+) -> None:
+    app = build_runtime_center_app()
+    turn_executor = FakeTurnExecutor()
+    app.state.turn_executor = turn_executor
+    app.state.agent_thread_binding_repository = None
+    state_store = SQLiteStateStore(tmp_path / "runtime-chat-executor.sqlite3")
+    executor_runtime_service = ExecutorRuntimeService(state_store=state_store)
+    runtime = executor_runtime_service.create_or_reuse_runtime(
+        executor_id="codex",
+        protocol_kind="app_server",
+        scope_kind="assignment",
+        assignment_id="assignment-runtime-chat",
+        role_id="execution-core",
+        thread_id="industry-chat:industry-v1-ops:execution-core",
+        metadata={"owner_agent_id": "execution-core-agent"},
+        continuity_metadata={
+            "control_thread_id": "industry-chat:industry-v1-ops:execution-core",
+            "session_id": "industry-chat:industry-v1-ops:execution-core",
+            "work_context_id": "ctx-runtime-chat-executor",
+        },
+    )
+    executor_runtime_service.mark_runtime_ready(
+        runtime.runtime_id,
+        thread_id="industry-chat:industry-v1-ops:execution-core",
+        metadata={"owner_agent_id": "execution-core-agent"},
+    )
+    app.state.executor_runtime_service = executor_runtime_service
+
+    client = TestClient(app)
+    response = client.post(
+        "/runtime-center/chat/run",
+        json={
+            "id": "req-runtime-chat-executor",
+            "session_id": "industry-chat:industry-v1-ops:execution-core",
+            "user_id": "ops-user",
+            "channel": "console",
+            "thread_id": "industry-chat:industry-v1-ops:execution-core",
+            "control_thread_id": "industry-chat:industry-v1-ops:execution-core",
+            "input": [
+                {
+                    "role": "user",
+                    "type": "message",
+                    "content": [{"type": "text", "text": "继续执行"}],
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    request_payload = turn_executor.stream_calls[0]["request_payload"]
+    request_data = request_payload.model_dump(mode="python")
+    assert request_data["work_context_id"] == "ctx-runtime-chat-executor"
 
 
 def test_runtime_center_chat_orchestrate_route_is_retired() -> None:

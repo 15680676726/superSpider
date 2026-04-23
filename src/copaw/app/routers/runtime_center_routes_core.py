@@ -259,6 +259,56 @@ def _resolve_runtime_chat_thread_metadata(
         metadata["work_context_id"] = _first_non_empty_text(
             getattr(binding, "work_context_id", None),
         )
+    executor_runtime_service = getattr(request.app.state, "executor_runtime_service", None)
+    lister = getattr(executor_runtime_service, "list_thread_bindings", None)
+    getter = getattr(executor_runtime_service, "get_runtime", None)
+    if callable(lister) and callable(getter):
+        for executor_binding in list(lister(thread_id=control_thread_id, limit=10) or []):
+            runtime_id = _first_non_empty_text(getattr(executor_binding, "runtime_id", None))
+            if runtime_id is None:
+                continue
+            try:
+                runtime = getter(runtime_id, formal_only=True)
+            except TypeError:
+                runtime = getter(runtime_id)
+            except Exception:
+                runtime = None
+            if runtime is None:
+                continue
+            runtime_metadata = _as_mapping(getattr(runtime, "metadata", None))
+            binding_metadata = _as_mapping(getattr(executor_binding, "metadata", None))
+            continuity = {
+                **_as_mapping(runtime_metadata.get("continuity")),
+                **_as_mapping(binding_metadata.get("continuity")),
+            }
+            metadata.setdefault(
+                "industry_instance_id",
+                _first_non_empty_text(binding_metadata.get("industry_instance_id")),
+            )
+            metadata.setdefault(
+                "industry_role_id",
+                _first_non_empty_text(
+                    binding_metadata.get("industry_role_id"),
+                    getattr(executor_binding, "role_id", None),
+                    getattr(runtime, "role_id", None),
+                ),
+            )
+            metadata.setdefault(
+                "owner_scope",
+                _first_non_empty_text(
+                    binding_metadata.get("owner_scope"),
+                    runtime_metadata.get("owner_scope"),
+                ),
+            )
+            metadata.setdefault(
+                "work_context_id",
+                _first_non_empty_text(
+                    continuity.get("work_context_id"),
+                    binding_metadata.get("work_context_id"),
+                    runtime_metadata.get("work_context_id"),
+                ),
+            )
+            break
     if not metadata.get("industry_instance_id") and control_thread_id.startswith("industry-chat:"):
         _, _, remainder = control_thread_id.partition("industry-chat:")
         instance_id, separator, role_id = remainder.rpartition(":")

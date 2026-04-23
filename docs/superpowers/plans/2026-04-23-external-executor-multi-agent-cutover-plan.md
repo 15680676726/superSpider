@@ -266,6 +266,12 @@ git commit -m "feat: cut formal execution off actor mailbox path"
 
 ### Task 3: Remove Actor Runtime Truth From Formal Read Surfaces
 
+`2026-04-23` additional Task 3 progress:
+- `runtime_center_routes_core.py` now hydrates `/runtime-center/chat/run` thread metadata from executor thread binding/runtime continuity when actor thread binding is absent
+- focused regression:
+  - `python -m pytest tests/app/runtime_center_api_parts/overview_governance.py -q -k "runtime_center_chat_run or runtime_center_chat_orchestrate_route_is_retired"`
+  - `20 passed, 84 deselected in 14.66s`
+
 `2026-04-23` progress note:
 - 已落地 query / conversation / bootstrap 这一刀：
   - `runtime_bootstrap_domains.py` / `runtime_service_graph.py` 已把 formal `KernelQueryExecutionService` 接上 `executor_runtime_service`
@@ -276,7 +282,6 @@ git commit -m "feat: cut formal execution off actor mailbox path"
   - `171 passed in 97.23s`
 - 仍未完成的 Task 3 剩余面：
   - `runtime_state_bindings.py`
-  - `runtime_center_routes_core.py`
   - `runtime_center_actor_capabilities.py`
   - `agent_profile_service.py`
   - `query_execution_resident_runtime.py`
