@@ -4,7 +4,7 @@
 
 **Goal:** Make external executor runtime the only formal execution backend for multi-agent work, then physically retire the local actor/delegation runtime.
 
-**Architecture:** First extend the formal `ExecutorRuntime` seam so it can carry the multi-agent semantics that still live in the local actor stack: child-run dispatch, continuity, checkpoint/resume, and recovery. Then cut production writers off the actor mailbox/supervisor path, migrate read surfaces away from actor runtime truth, and only then delete actor kernel/state files.
+**Architecture:** First extend the formal `ExecutorRuntime` seam so it can carry the multi-agent semantics that still live in the local actor stack: child-run dispatch, continuity, checkpoint/resume, and recovery. Then cut production writers off the actor mailbox/supervisor path, including the industry-owned runtime truth that still persists `AgentRuntimeRecord` and `AgentThreadBindingRecord`. After that, migrate formal read surfaces and bootstrap exports away from actor runtime truth, and only then delete actor kernel/state files plus the remaining state/repository/env glue that still imports those records.
 
 **Tech Stack:** Python, FastAPI, Pydantic, SQLite repositories, pytest
 
@@ -18,44 +18,74 @@
 - Modify: `src/copaw/state/models_executor_runtime.py`
 - Modify: `src/copaw/state/executor_runtime_service.py`
 - Modify: `src/copaw/adapters/executors/codex_app_server_adapter.py`
+- Test: `tests/state/test_executor_runtime_service.py`
+- Test: `tests/adapters/test_codex_app_server_adapter.py`
 - Test: `tests/kernel/test_main_brain_executor_runtime_integration.py`
 - Test: `tests/app/test_external_executor_live_smoke.py`
 
 **Production writers still using local actor/delegation**
 - Modify: `src/copaw/kernel/delegation_service.py`
 - Modify: `src/copaw/app/startup_recovery.py`
+- Modify: `src/copaw/app/_app.py`
+- Modify: `src/copaw/app/runtime_lifecycle.py`
 - Modify: `src/copaw/industry/service_lifecycle.py`
+- Modify: `src/copaw/industry/service_context.py`
+- Modify: `src/copaw/industry/service_team_runtime.py`
+- Modify: `src/copaw/industry/service_cleanup.py`
 - Modify: `src/copaw/kernel/query_execution_runtime.py`
 - Modify: `src/copaw/app/runtime_bootstrap_domains.py`
 - Modify: `src/copaw/app/runtime_service_graph.py`
 - Test: `tests/app/test_runtime_center_task_delegation_api.py`
 - Test: `tests/app/test_startup_recovery.py`
+- Test: `tests/app/test_runtime_lifecycle.py`
 - Test: `tests/app/test_industry_service_wiring.py`
+- Test: `tests/app/industry_api_parts/bootstrap_lifecycle.py`
+- Test: `tests/app/industry_api_parts/runtime_updates.py`
 - Test: `tests/kernel/test_assignment_envelope.py`
 
 **Actor runtime truth and read surfaces**
 - Modify: `src/copaw/app/runtime_state_bindings.py`
 - Modify: `src/copaw/app/routers/runtime_center_dependencies.py`
+- Modify: `src/copaw/app/routers/runtime_center_routes_core.py`
+- Modify: `src/copaw/app/routers/runtime_center_actor_capabilities.py`
 - Modify: `src/copaw/kernel/agent_profile_service.py`
 - Modify: `src/copaw/app/runtime_center/conversations.py`
+- Modify: `src/copaw/kernel/query_execution_context_runtime.py`
 - Modify: `src/copaw/kernel/query_execution_usage_runtime.py`
+- Modify: `src/copaw/kernel/query_execution_resident_runtime.py`
+- Modify: `src/copaw/industry/service_runtime_views.py`
 - Modify: `src/copaw/state/__init__.py`
+- Modify: `src/copaw/state/repositories/__init__.py`
 - Test: `tests/app/test_runtime_center_actor_api.py`
 - Test: `tests/app/test_runtime_chat_thread_binding.py`
 - Test: `tests/app/test_runtime_conversations_api.py`
 - Test: `tests/kernel/test_query_usage_accounting.py`
+- Test: `tests/industry/test_runtime_views_split.py`
 
 **Actor runtime state/kernel physical retirement**
 - Delete: `src/copaw/kernel/actor_mailbox.py`
 - Delete: `src/copaw/kernel/actor_worker.py`
 - Delete: `src/copaw/kernel/actor_supervisor.py`
 - Delete: `src/copaw/state/models_agents_runtime.py`
+- Modify: `src/copaw/app/runtime_bootstrap_models.py`
+- Modify: `src/copaw/app/runtime_bootstrap_repositories.py`
+- Modify: `src/copaw/app/runtime_center/recovery_projection.py`
 - Modify: `src/copaw/state/repositories/sqlite_governance_agents.py`
+- Modify: `src/copaw/state/models.py`
+- Modify: `src/copaw/state/repositories/base.py`
+- Modify: `src/copaw/state/repositories/sqlite_shared.py`
+- Modify: `src/copaw/environments/service.py`
+- Modify: `src/copaw/environments/lease_service.py`
 - Modify: `src/copaw/kernel/__init__.py`
 - Modify: `src/copaw/app/runtime_bootstrap_execution.py`
 - Test: `tests/kernel/test_actor_mailbox.py`
 - Test: `tests/kernel/test_actor_worker.py`
 - Test: `tests/kernel/test_actor_supervisor.py`
+- Test: `tests/kernel/test_query_execution_runtime.py`
+- Test: `tests/kernel/query_execution_environment_parts/lifecycle.py`
+- Test: `tests/app/test_startup_recovery.py`
+- Test: `tests/state/test_models_module_exports.py`
+- Test: `tests/state/test_sqlite_repositories.py`
 
 **Acceptance and docs**
 - Modify: `TASK_STATUS.md`
@@ -73,6 +103,8 @@
 - Modify: `src/copaw/state/models_executor_runtime.py`
 - Modify: `src/copaw/state/executor_runtime_service.py`
 - Modify: `src/copaw/adapters/executors/codex_app_server_adapter.py`
+- Test: `tests/state/test_executor_runtime_service.py`
+- Test: `tests/adapters/test_codex_app_server_adapter.py`
 - Test: `tests/kernel/test_main_brain_executor_runtime_integration.py`
 - Test: `tests/app/test_external_executor_live_smoke.py`
 
@@ -84,6 +116,8 @@ Add tests that prove external executor truth can represent:
 - restart/recovery metadata for a live runtime
 
 Use or extend:
+- `tests/state/test_executor_runtime_service.py`
+- `tests/adapters/test_codex_app_server_adapter.py`
 - `tests/kernel/test_main_brain_executor_runtime_integration.py`
 - `tests/app/test_external_executor_live_smoke.py`
 
@@ -91,7 +125,7 @@ Use or extend:
 
 Run:
 ```powershell
-python -m pytest tests/kernel/test_main_brain_executor_runtime_integration.py tests/app/test_external_executor_live_smoke.py -q
+python -m pytest tests/state/test_executor_runtime_service.py tests/adapters/test_codex_app_server_adapter.py tests/kernel/test_main_brain_executor_runtime_integration.py tests/app/test_external_executor_live_smoke.py -q
 ```
 
 Expected: failures showing missing child-run / continuity / recovery contract.
@@ -120,7 +154,7 @@ So the first formal adapter speaks the same child-run / continuity / recovery co
 
 Run:
 ```powershell
-python -m pytest tests/kernel/test_main_brain_executor_runtime_integration.py tests/app/test_external_executor_live_smoke.py -q
+python -m pytest tests/state/test_executor_runtime_service.py tests/adapters/test_codex_app_server_adapter.py tests/kernel/test_main_brain_executor_runtime_integration.py tests/app/test_external_executor_live_smoke.py -q
 ```
 
 Expected: PASS
@@ -128,7 +162,7 @@ Expected: PASS
 - [ ] **Step 6: Commit**
 
 ```powershell
-git add src/copaw/kernel/executor_runtime_port.py src/copaw/kernel/runtime_coordination.py src/copaw/state/models_executor_runtime.py src/copaw/state/executor_runtime_service.py src/copaw/adapters/executors/codex_app_server_adapter.py tests/kernel/test_main_brain_executor_runtime_integration.py tests/app/test_external_executor_live_smoke.py
+git add src/copaw/kernel/executor_runtime_port.py src/copaw/kernel/runtime_coordination.py src/copaw/state/models_executor_runtime.py src/copaw/state/executor_runtime_service.py src/copaw/adapters/executors/codex_app_server_adapter.py tests/state/test_executor_runtime_service.py tests/adapters/test_codex_app_server_adapter.py tests/kernel/test_main_brain_executor_runtime_integration.py tests/app/test_external_executor_live_smoke.py
 git commit -m "feat: extend executor runtime for multi-agent continuity"
 ```
 
@@ -137,13 +171,21 @@ git commit -m "feat: extend executor runtime for multi-agent continuity"
 **Files:**
 - Modify: `src/copaw/kernel/delegation_service.py`
 - Modify: `src/copaw/app/startup_recovery.py`
+- Modify: `src/copaw/app/_app.py`
+- Modify: `src/copaw/app/runtime_lifecycle.py`
 - Modify: `src/copaw/industry/service_lifecycle.py`
+- Modify: `src/copaw/industry/service_context.py`
+- Modify: `src/copaw/industry/service_team_runtime.py`
+- Modify: `src/copaw/industry/service_cleanup.py`
 - Modify: `src/copaw/kernel/query_execution_runtime.py`
 - Modify: `src/copaw/app/runtime_bootstrap_domains.py`
 - Modify: `src/copaw/app/runtime_service_graph.py`
 - Test: `tests/app/test_runtime_center_task_delegation_api.py`
 - Test: `tests/app/test_startup_recovery.py`
+- Test: `tests/app/test_runtime_lifecycle.py`
 - Test: `tests/app/test_industry_service_wiring.py`
+- Test: `tests/app/industry_api_parts/bootstrap_lifecycle.py`
+- Test: `tests/app/industry_api_parts/runtime_updates.py`
 - Test: `tests/kernel/test_assignment_envelope.py`
 
 - [ ] **Step 1: Write failing tests proving actor mailbox is still on the write path**
@@ -152,12 +194,14 @@ Add or tighten tests that fail if:
 - `TaskDelegationService` still enqueues mailbox items
 - startup recovery still needs actor mailbox for formal execution recovery
 - industry lifecycle still enqueues mailbox work for formal execution
+- industry runtime bootstrap/update paths still persist formal `AgentRuntimeRecord` / `AgentThreadBindingRecord`
+- app startup/restart still re-injects actor runtime truth into `run_startup_recovery(...)`
 
 - [ ] **Step 2: Run the focused writer-path tests to confirm RED**
 
 Run:
 ```powershell
-python -m pytest tests/app/test_runtime_center_task_delegation_api.py tests/app/test_startup_recovery.py tests/app/test_industry_service_wiring.py tests/kernel/test_assignment_envelope.py -q
+python -m pytest tests/app/test_runtime_center_task_delegation_api.py tests/app/test_startup_recovery.py tests/app/test_runtime_lifecycle.py tests/app/test_industry_service_wiring.py tests/app/industry_api_parts/bootstrap_lifecycle.py tests/app/industry_api_parts/runtime_updates.py tests/kernel/test_assignment_envelope.py -q
 ```
 
 Expected: failures tied to actor mailbox / supervisor dependency.
@@ -176,8 +220,11 @@ If a compatibility shell must remain temporarily, it must fail closed for formal
 Change:
 - `src/copaw/app/startup_recovery.py`
 - `src/copaw/industry/service_lifecycle.py`
+- `src/copaw/industry/service_context.py`
+- `src/copaw/industry/service_team_runtime.py`
+- `src/copaw/industry/service_cleanup.py`
 
-So recovery and industry bootstrap no longer write or recover formal execution through actor mailbox/runtime state.
+So recovery, industry bootstrap, runtime updates, and retirement paths no longer write or recover formal execution through actor mailbox/runtime state.
 
 - [ ] **Step 5: Remove leftover delegation wiring from query/bootstrap**
 
@@ -185,6 +232,8 @@ Change:
 - `src/copaw/kernel/query_execution_runtime.py`
 - `src/copaw/app/runtime_bootstrap_domains.py`
 - `src/copaw/app/runtime_service_graph.py`
+- `src/copaw/app/_app.py`
+- `src/copaw/app/runtime_lifecycle.py`
 
 So formal runtime composition no longer threads delegation/actor execution as a hidden fallback.
 
@@ -192,7 +241,7 @@ So formal runtime composition no longer threads delegation/actor execution as a 
 
 Run:
 ```powershell
-python -m pytest tests/app/test_runtime_center_task_delegation_api.py tests/app/test_startup_recovery.py tests/app/test_industry_service_wiring.py tests/kernel/test_assignment_envelope.py -q
+python -m pytest tests/app/test_runtime_center_task_delegation_api.py tests/app/test_startup_recovery.py tests/app/test_runtime_lifecycle.py tests/app/test_industry_service_wiring.py tests/app/industry_api_parts/bootstrap_lifecycle.py tests/app/industry_api_parts/runtime_updates.py tests/kernel/test_assignment_envelope.py -q
 ```
 
 Expected: PASS
@@ -200,7 +249,7 @@ Expected: PASS
 - [ ] **Step 7: Commit**
 
 ```powershell
-git add src/copaw/kernel/delegation_service.py src/copaw/app/startup_recovery.py src/copaw/industry/service_lifecycle.py src/copaw/kernel/query_execution_runtime.py src/copaw/app/runtime_bootstrap_domains.py src/copaw/app/runtime_service_graph.py tests/app/test_runtime_center_task_delegation_api.py tests/app/test_startup_recovery.py tests/app/test_industry_service_wiring.py tests/kernel/test_assignment_envelope.py
+git add src/copaw/kernel/delegation_service.py src/copaw/app/startup_recovery.py src/copaw/app/_app.py src/copaw/app/runtime_lifecycle.py src/copaw/industry/service_lifecycle.py src/copaw/industry/service_context.py src/copaw/industry/service_team_runtime.py src/copaw/industry/service_cleanup.py src/copaw/kernel/query_execution_runtime.py src/copaw/app/runtime_bootstrap_domains.py src/copaw/app/runtime_service_graph.py tests/app/test_runtime_center_task_delegation_api.py tests/app/test_startup_recovery.py tests/app/test_runtime_lifecycle.py tests/app/test_industry_service_wiring.py tests/app/industry_api_parts/bootstrap_lifecycle.py tests/app/industry_api_parts/runtime_updates.py tests/kernel/test_assignment_envelope.py
 git commit -m "feat: cut formal execution off actor mailbox path"
 ```
 
@@ -209,14 +258,21 @@ git commit -m "feat: cut formal execution off actor mailbox path"
 **Files:**
 - Modify: `src/copaw/app/runtime_state_bindings.py`
 - Modify: `src/copaw/app/routers/runtime_center_dependencies.py`
+- Modify: `src/copaw/app/routers/runtime_center_routes_core.py`
+- Modify: `src/copaw/app/routers/runtime_center_actor_capabilities.py`
 - Modify: `src/copaw/kernel/agent_profile_service.py`
 - Modify: `src/copaw/app/runtime_center/conversations.py`
+- Modify: `src/copaw/kernel/query_execution_context_runtime.py`
 - Modify: `src/copaw/kernel/query_execution_usage_runtime.py`
+- Modify: `src/copaw/kernel/query_execution_resident_runtime.py`
+- Modify: `src/copaw/industry/service_runtime_views.py`
 - Modify: `src/copaw/state/__init__.py`
+- Modify: `src/copaw/state/repositories/__init__.py`
 - Test: `tests/app/test_runtime_center_actor_api.py`
 - Test: `tests/app/test_runtime_chat_thread_binding.py`
 - Test: `tests/app/test_runtime_conversations_api.py`
 - Test: `tests/kernel/test_query_usage_accounting.py`
+- Test: `tests/industry/test_runtime_views_split.py`
 
 - [ ] **Step 1: Write failing tests for stale actor read surfaces**
 
@@ -232,7 +288,7 @@ for executor-backed execution truth.
 
 Run:
 ```powershell
-python -m pytest tests/app/test_runtime_center_actor_api.py tests/app/test_runtime_chat_thread_binding.py tests/app/test_runtime_conversations_api.py tests/kernel/test_query_usage_accounting.py -q
+python -m pytest tests/app/test_runtime_center_actor_api.py tests/app/test_runtime_chat_thread_binding.py tests/app/test_runtime_conversations_api.py tests/kernel/test_query_usage_accounting.py tests/industry/test_runtime_views_split.py -q
 ```
 
 Expected: failures proving actor repositories are still formal dependencies.
@@ -242,7 +298,12 @@ Expected: failures proving actor repositories are still formal dependencies.
 Update:
 - `src/copaw/kernel/agent_profile_service.py`
 - `src/copaw/app/runtime_center/conversations.py`
+- `src/copaw/app/routers/runtime_center_routes_core.py`
+- `src/copaw/app/routers/runtime_center_actor_capabilities.py`
+- `src/copaw/kernel/query_execution_context_runtime.py`
 - `src/copaw/kernel/query_execution_usage_runtime.py`
+- `src/copaw/kernel/query_execution_resident_runtime.py`
+- `src/copaw/industry/service_runtime_views.py`
 
 So they read executor thread/runtime truth instead of actor runtime truth for formal execution.
 
@@ -252,6 +313,7 @@ Update:
 - `src/copaw/app/runtime_state_bindings.py`
 - `src/copaw/app/routers/runtime_center_dependencies.py`
 - `src/copaw/state/__init__.py`
+- `src/copaw/state/repositories/__init__.py`
 
 So actor repositories stop being exported as formal runtime state and dependency surface.
 
@@ -259,7 +321,7 @@ So actor repositories stop being exported as formal runtime state and dependency
 
 Run:
 ```powershell
-python -m pytest tests/app/test_runtime_center_actor_api.py tests/app/test_runtime_chat_thread_binding.py tests/app/test_runtime_conversations_api.py tests/kernel/test_query_usage_accounting.py -q
+python -m pytest tests/app/test_runtime_center_actor_api.py tests/app/test_runtime_chat_thread_binding.py tests/app/test_runtime_conversations_api.py tests/kernel/test_query_usage_accounting.py tests/industry/test_runtime_views_split.py -q
 ```
 
 Expected: PASS
@@ -267,7 +329,7 @@ Expected: PASS
 - [ ] **Step 6: Commit**
 
 ```powershell
-git add src/copaw/app/runtime_state_bindings.py src/copaw/app/routers/runtime_center_dependencies.py src/copaw/kernel/agent_profile_service.py src/copaw/app/runtime_center/conversations.py src/copaw/kernel/query_execution_usage_runtime.py src/copaw/state/__init__.py tests/app/test_runtime_center_actor_api.py tests/app/test_runtime_chat_thread_binding.py tests/app/test_runtime_conversations_api.py tests/kernel/test_query_usage_accounting.py
+git add src/copaw/app/runtime_state_bindings.py src/copaw/app/routers/runtime_center_dependencies.py src/copaw/app/routers/runtime_center_routes_core.py src/copaw/app/routers/runtime_center_actor_capabilities.py src/copaw/kernel/agent_profile_service.py src/copaw/app/runtime_center/conversations.py src/copaw/kernel/query_execution_context_runtime.py src/copaw/kernel/query_execution_usage_runtime.py src/copaw/kernel/query_execution_resident_runtime.py src/copaw/industry/service_runtime_views.py src/copaw/state/__init__.py src/copaw/state/repositories/__init__.py tests/app/test_runtime_center_actor_api.py tests/app/test_runtime_chat_thread_binding.py tests/app/test_runtime_conversations_api.py tests/kernel/test_query_usage_accounting.py tests/industry/test_runtime_views_split.py
 git commit -m "feat: move formal read surfaces off actor runtime truth"
 ```
 
@@ -278,12 +340,22 @@ git commit -m "feat: move formal read surfaces off actor runtime truth"
 - Delete: `src/copaw/kernel/actor_worker.py`
 - Delete: `src/copaw/kernel/actor_supervisor.py`
 - Delete: `src/copaw/state/models_agents_runtime.py`
+- Modify: `src/copaw/app/runtime_bootstrap_models.py`
+- Modify: `src/copaw/app/runtime_bootstrap_repositories.py`
+- Modify: `src/copaw/app/runtime_center/recovery_projection.py`
 - Modify: `src/copaw/state/repositories/sqlite_governance_agents.py`
+- Modify: `src/copaw/state/models.py`
+- Modify: `src/copaw/state/repositories/base.py`
+- Modify: `src/copaw/state/repositories/sqlite_shared.py`
+- Modify: `src/copaw/environments/service.py`
+- Modify: `src/copaw/environments/lease_service.py`
 - Modify: `src/copaw/kernel/__init__.py`
 - Modify: `src/copaw/app/runtime_bootstrap_execution.py`
 - Test: `tests/kernel/test_actor_mailbox.py`
 - Test: `tests/kernel/test_actor_worker.py`
 - Test: `tests/kernel/test_actor_supervisor.py`
+- Test: `tests/state/test_models_module_exports.py`
+- Test: `tests/state/test_sqlite_repositories.py`
 
 - [ ] **Step 1: Write deletion-guard tests**
 
@@ -291,12 +363,15 @@ Add tests that prove:
 - bootstrap no longer builds actor runtime objects even as compatibility
 - kernel exports no longer expose actor runtime symbols
 - actor runtime model import path is gone from formal state
+- repository/export shims no longer import actor runtime records
+- environment lease APIs no longer depend on `AgentLeaseRecord`
+- interactive query runtime no longer acquires or heartbeats actor leases
 
 - [ ] **Step 2: Run the actor retirement tests to confirm RED**
 
 Run:
 ```powershell
-python -m pytest tests/kernel/test_actor_mailbox.py tests/kernel/test_actor_worker.py tests/kernel/test_actor_supervisor.py tests/app/test_runtime_bootstrap_helpers.py tests/app/test_runtime_bootstrap_split.py -q
+python -m pytest tests/kernel/test_actor_mailbox.py tests/kernel/test_actor_worker.py tests/kernel/test_actor_supervisor.py tests/kernel/test_query_execution_runtime.py tests/kernel/query_execution_environment_parts/lifecycle.py tests/app/test_startup_recovery.py tests/app/test_runtime_bootstrap_helpers.py tests/app/test_runtime_bootstrap_split.py tests/state/test_models_module_exports.py tests/state/test_sqlite_repositories.py -q
 ```
 
 Expected: failures because actor files and exports still exist.
@@ -304,7 +379,17 @@ Expected: failures because actor files and exports still exist.
 - [ ] **Step 3: Remove actor runtime construction and exports**
 
 Change:
+- `src/copaw/app/runtime_bootstrap_models.py`
+- `src/copaw/app/runtime_bootstrap_repositories.py`
 - `src/copaw/app/runtime_bootstrap_execution.py`
+- `src/copaw/app/runtime_center/recovery_projection.py`
+- `src/copaw/state/models.py`
+- `src/copaw/state/repositories/base.py`
+- `src/copaw/state/repositories/sqlite_shared.py`
+- `src/copaw/state/repositories/__init__.py`
+- `src/copaw/environments/service.py`
+- `src/copaw/environments/lease_service.py`
+- `src/copaw/kernel/query_execution_resident_runtime.py`
 - `src/copaw/kernel/__init__.py`
 - `src/copaw/state/repositories/sqlite_governance_agents.py`
 
@@ -320,6 +405,8 @@ Delete or replace:
 - `tests/kernel/test_actor_mailbox.py`
 - `tests/kernel/test_actor_worker.py`
 - `tests/kernel/test_actor_supervisor.py`
+- `tests/state/test_models_module_exports.py`
+- actor-only portions of `tests/state/test_sqlite_repositories.py`
 
 Do not keep stale “compatibility green” tests for code that no longer exists.
 
@@ -327,7 +414,7 @@ Do not keep stale “compatibility green” tests for code that no longer exists
 
 Run:
 ```powershell
-python -m pytest tests/app/test_runtime_bootstrap_helpers.py tests/app/test_runtime_bootstrap_split.py tests/app/test_runtime_execution_provider_wiring.py tests/app/test_runtime_workflow_patch_bootstrap_wiring.py -q
+python -m pytest tests/app/test_startup_recovery.py tests/app/test_runtime_bootstrap_helpers.py tests/app/test_runtime_bootstrap_split.py tests/app/test_runtime_execution_provider_wiring.py tests/app/test_runtime_workflow_patch_bootstrap_wiring.py tests/kernel/test_query_execution_runtime.py tests/kernel/query_execution_environment_parts/lifecycle.py tests/state/test_models_module_exports.py tests/state/test_sqlite_repositories.py -q
 ```
 
 Expected: PASS
@@ -335,7 +422,7 @@ Expected: PASS
 - [ ] **Step 6: Commit**
 
 ```powershell
-git add src/copaw/app/runtime_bootstrap_execution.py src/copaw/state/repositories/sqlite_governance_agents.py src/copaw/kernel/__init__.py tests/app/test_runtime_bootstrap_helpers.py tests/app/test_runtime_bootstrap_split.py tests/app/test_runtime_execution_provider_wiring.py tests/app/test_runtime_workflow_patch_bootstrap_wiring.py
+git add src/copaw/app/runtime_bootstrap_models.py src/copaw/app/runtime_bootstrap_repositories.py src/copaw/app/runtime_bootstrap_execution.py src/copaw/app/runtime_center/recovery_projection.py src/copaw/state/models.py src/copaw/state/repositories/base.py src/copaw/state/repositories/sqlite_shared.py src/copaw/state/repositories/__init__.py src/copaw/state/repositories/sqlite_governance_agents.py src/copaw/kernel/query_execution_resident_runtime.py src/copaw/kernel/__init__.py src/copaw/environments/service.py src/copaw/environments/lease_service.py tests/app/test_startup_recovery.py tests/app/test_runtime_bootstrap_helpers.py tests/app/test_runtime_bootstrap_split.py tests/app/test_runtime_execution_provider_wiring.py tests/app/test_runtime_workflow_patch_bootstrap_wiring.py tests/kernel/test_query_execution_runtime.py tests/kernel/query_execution_environment_parts/lifecycle.py tests/state/test_models_module_exports.py tests/state/test_sqlite_repositories.py
 git rm src/copaw/kernel/actor_mailbox.py src/copaw/kernel/actor_worker.py src/copaw/kernel/actor_supervisor.py src/copaw/state/models_agents_runtime.py tests/kernel/test_actor_mailbox.py tests/kernel/test_actor_worker.py tests/kernel/test_actor_supervisor.py
 git commit -m "feat: retire local actor runtime kernel"
 ```
@@ -352,7 +439,7 @@ git commit -m "feat: retire local actor runtime kernel"
 
 Run:
 ```powershell
-python -m pytest tests/kernel/test_main_brain_executor_runtime_integration.py tests/app/test_external_executor_live_smoke.py tests/app/test_runtime_center_task_delegation_api.py tests/app/test_startup_recovery.py tests/app/test_industry_service_wiring.py tests/app/test_runtime_center_actor_api.py tests/app/test_runtime_chat_thread_binding.py tests/app/test_runtime_conversations_api.py tests/app/test_runtime_bootstrap_helpers.py tests/app/test_runtime_bootstrap_split.py tests/app/test_runtime_execution_provider_wiring.py tests/kernel/test_query_usage_accounting.py -q
+python -m pytest tests/kernel/test_main_brain_executor_runtime_integration.py tests/app/test_external_executor_live_smoke.py tests/app/test_runtime_center_task_delegation_api.py tests/app/test_startup_recovery.py tests/app/test_runtime_lifecycle.py tests/app/test_industry_service_wiring.py tests/app/industry_api_parts/bootstrap_lifecycle.py tests/app/industry_api_parts/runtime_updates.py tests/app/test_runtime_center_actor_api.py tests/app/test_runtime_chat_thread_binding.py tests/app/test_runtime_conversations_api.py tests/app/test_runtime_bootstrap_helpers.py tests/app/test_runtime_bootstrap_split.py tests/app/test_runtime_execution_provider_wiring.py tests/app/test_runtime_workflow_patch_bootstrap_wiring.py tests/industry/test_runtime_views_split.py tests/kernel/test_query_execution_runtime.py tests/kernel/query_execution_environment_parts/lifecycle.py tests/kernel/test_query_usage_accounting.py tests/state/test_models_module_exports.py tests/state/test_sqlite_repositories.py -q
 ```
 
 Expected: PASS
