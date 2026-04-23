@@ -18,6 +18,49 @@ def _dict(value: object | None) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
 
 
+def _compact_mapping(value: Mapping[str, Any] | None) -> dict[str, Any]:
+    compacted: dict[str, Any] = {}
+    if not isinstance(value, Mapping):
+        return compacted
+    for key, item in value.items():
+        if isinstance(item, Mapping):
+            nested = _compact_mapping(item)
+            if nested:
+                compacted[key] = nested
+            continue
+        if isinstance(item, list):
+            if item:
+                compacted[key] = list(item)
+            continue
+        if item not in (None, ""):
+            compacted[key] = item
+    return compacted
+
+
+def _copaw_contract_metadata(
+    *,
+    assignment_id: str,
+    parent_runtime_id: str | None = None,
+    continuity_metadata: dict[str, Any] | None = None,
+    recovery_metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    continuity = _compact_mapping(continuity_metadata)
+    recovery = _compact_mapping(recovery_metadata)
+    if _string(parent_runtime_id) is None and not continuity and not recovery:
+        return {}
+    contract = _compact_mapping(
+        {
+            "assignment_id": assignment_id,
+            "parent_runtime_id": _string(parent_runtime_id),
+            "continuity": continuity,
+            "recovery": recovery,
+        }
+    )
+    if not contract:
+        return {}
+    return {"metadata": {"copaw": contract}}
+
+
 def _nested_lookup(
     payload: Mapping[str, Any],
     *paths: tuple[str, ...],
@@ -78,14 +121,24 @@ def build_thread_start_request(
     assignment_id: str,
     project_root: str,
     model_ref: str | None = None,
+    parent_runtime_id: str | None = None,
+    continuity_metadata: dict[str, Any] | None = None,
+    recovery_metadata: dict[str, Any] | None = None,
 ) -> tuple[str, dict[str, Any]]:
-    _ = assignment_id
     payload: dict[str, Any] = {
         "cwd": project_root,
     }
     resolved_model_ref = _string(model_ref)
     if resolved_model_ref is not None:
         payload["model"] = resolved_model_ref
+    payload.update(
+        _copaw_contract_metadata(
+            assignment_id=assignment_id,
+            parent_runtime_id=parent_runtime_id,
+            continuity_metadata=continuity_metadata,
+            recovery_metadata=recovery_metadata,
+        )
+    )
     return ("thread/start", payload)
 
 
@@ -96,8 +149,10 @@ def build_turn_start_request(
     assignment_id: str,
     project_root: str,
     model_ref: str | None = None,
+    parent_runtime_id: str | None = None,
+    continuity_metadata: dict[str, Any] | None = None,
+    recovery_metadata: dict[str, Any] | None = None,
 ) -> tuple[str, dict[str, Any]]:
-    _ = assignment_id
     payload: dict[str, Any] = {
         "threadId": thread_id,
         "input": _text_input(prompt),
@@ -106,6 +161,14 @@ def build_turn_start_request(
     resolved_model_ref = _string(model_ref)
     if resolved_model_ref is not None:
         payload["model"] = resolved_model_ref
+    payload.update(
+        _copaw_contract_metadata(
+            assignment_id=assignment_id,
+            parent_runtime_id=parent_runtime_id,
+            continuity_metadata=continuity_metadata,
+            recovery_metadata=recovery_metadata,
+        )
+    )
     return (
         "turn/start",
         payload,

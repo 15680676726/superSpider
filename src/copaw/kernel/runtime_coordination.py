@@ -124,6 +124,41 @@ def _resolve_assignment_id(request: Any) -> str | None:
     return None
 
 
+def _resolve_parent_runtime_id(request: Any) -> str | None:
+    for field in (
+        "parent_executor_runtime_id",
+        "parent_runtime_id",
+    ):
+        value = _text(getattr(request, field, None))
+        if value is not None:
+            return value
+    runtime_context = getattr(request, "_copaw_main_brain_runtime_context", None)
+    if isinstance(runtime_context, dict):
+        executor_runtime = _mapping(runtime_context.get("executor_runtime"))
+        return _text(executor_runtime.get("runtime_id"))
+    return None
+
+
+def _build_continuity_metadata(request: Any, *, enabled: bool) -> dict[str, Any]:
+    if not enabled:
+        return {}
+    return _compact_mapping(
+        {
+            "control_thread_id": _text(getattr(request, "control_thread_id", None)),
+            "session_id": _text(getattr(request, "session_id", None)),
+            "work_context_id": _text(getattr(request, "work_context_id", None)),
+            "kernel_task_id": _text(getattr(request, "_copaw_kernel_task_id", None)),
+        }
+    )
+
+
+def _build_recovery_metadata() -> dict[str, Any]:
+    return {
+        "strategy": "restart-once",
+        "entrypoint": _EXECUTOR_RUNTIME_ENTRYPOINT,
+    }
+
+
 @dataclass(slots=True)
 class ExecutorRuntimeSelection:
     assignment_id: str
@@ -263,6 +298,21 @@ class AssignmentExecutorRuntimeCoordinator:
                 "assignment_id": assignment_id,
                 "status": "selection-unavailable",
             }
+        parent_runtime_id = _resolve_parent_runtime_id(request)
+        enable_runtime_contract = any(
+            (
+                parent_runtime_id,
+                _text(getattr(request, "control_thread_id", None)),
+                _text(getattr(request, "work_context_id", None)),
+            )
+        )
+        continuity_metadata = _build_continuity_metadata(
+            request,
+            enabled=enable_runtime_contract,
+        )
+        if not continuity_metadata:
+            continuity_metadata = None
+        recovery_metadata = _build_recovery_metadata() if enable_runtime_contract else None
         runtime_service = self._executor_runtime_service
         if runtime_service is None:
             return {
@@ -291,6 +341,9 @@ class AssignmentExecutorRuntimeCoordinator:
                 "model_policy_id": selection.model_policy_id,
                 "model_ref": selection.model_ref,
             },
+            parent_runtime_id=parent_runtime_id,
+            continuity_metadata=continuity_metadata,
+            recovery_metadata=recovery_metadata,
         )
         provider_resolution_status = _text(
             _mapping(selection.sidecar_launch_payload).get("provider_resolution_status"),
@@ -338,6 +391,9 @@ class AssignmentExecutorRuntimeCoordinator:
                 thread_id=_text(getattr(runtime, "thread_id", None)),
                 model_ref=selection.model_ref,
                 sidecar_launch_payload=selection.sidecar_launch_payload,
+                parent_runtime_id=parent_runtime_id,
+                continuity_metadata=continuity_metadata,
+                recovery_metadata=recovery_metadata,
             )
         except Exception as exc:
             logger.debug("Executor runtime start failed for assignment %s", assignment_id, exc_info=True)
@@ -397,6 +453,9 @@ class AssignmentExecutorRuntimeCoordinator:
                 turn_id=started.turn_id,
                 runtime_metadata=dict(getattr(started, "runtime_metadata", {}) or {}),
                 model_ref=reported_model_ref,
+                parent_runtime_id=parent_runtime_id,
+                continuity_metadata=continuity_metadata,
+                recovery_metadata=recovery_metadata,
                 error=mismatch_error,
             )
             self._start_event_writeback(payload=payload)
@@ -422,6 +481,9 @@ class AssignmentExecutorRuntimeCoordinator:
             turn_id=started.turn_id,
             runtime_metadata=dict(getattr(started, "runtime_metadata", {}) or {}),
             model_ref=_text(getattr(started, "model_ref", None)) or selection.model_ref,
+            parent_runtime_id=parent_runtime_id,
+            continuity_metadata=continuity_metadata,
+            recovery_metadata=recovery_metadata,
         )
         self._start_event_writeback(payload=payload)
         return payload
@@ -911,6 +973,9 @@ class AssignmentExecutorRuntimeCoordinator:
         turn_id: str | None = None,
         runtime_metadata: dict[str, Any] | None = None,
         model_ref: str | None = None,
+        parent_runtime_id: str | None = None,
+        continuity_metadata: dict[str, Any] | None = None,
+        recovery_metadata: dict[str, Any] | None = None,
         error: str | None = None,
     ) -> dict[str, Any]:
         resolved_runtime_id = _text(getattr(runtime, "runtime_id", None))
@@ -976,6 +1041,12 @@ class AssignmentExecutorRuntimeCoordinator:
                 },
             },
         )
+        if parent_runtime_id is not None:
+            payload["executor_runtime"]["parent_runtime_id"] = parent_runtime_id
+        if continuity_metadata:
+            payload["executor_runtime"]["continuity"] = dict(continuity_metadata)
+        if recovery_metadata:
+            payload["executor_runtime"]["recovery"] = dict(recovery_metadata)
         return payload
 
     def _build_event_ingest_context(

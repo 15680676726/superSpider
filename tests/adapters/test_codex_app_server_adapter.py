@@ -255,3 +255,37 @@ def test_codex_adapter_forwards_model_ref_and_sidecar_launch_payload() -> None:
         }
     ]
     assert transport.requests[1][1]["model"] == "gpt-5-codex"
+
+
+def test_codex_adapter_forwards_parent_continuity_and_recovery_contract() -> None:
+    transport = _FakeTransport()
+    adapter = CodexAppServerAdapter(transport=transport)
+
+    adapter.start_assignment_turn(
+        assignment_id="assign-child-1",
+        project_root="D:/agents/codex-project",
+        prompt="Implement the child task",
+        parent_runtime_id="runtime-parent-1",
+        continuity_metadata={
+            "control_thread_id": "control-thread-1",
+            "session_id": "industry-chat:industry-1:execution-core",
+            "work_context_id": "ctx-1",
+        },
+        recovery_metadata={
+            "strategy": "restart-once",
+            "status": "ready",
+        },
+    )
+
+    assert transport.requests[0][1]["metadata"]["copaw"]["parent_runtime_id"] == (
+        "runtime-parent-1"
+    )
+    assert transport.requests[0][1]["metadata"]["copaw"]["continuity"] == {
+        "control_thread_id": "control-thread-1",
+        "session_id": "industry-chat:industry-1:execution-core",
+        "work_context_id": "ctx-1",
+    }
+    assert transport.requests[1][1]["metadata"]["copaw"]["recovery"] == {
+        "strategy": "restart-once",
+        "status": "ready",
+    }

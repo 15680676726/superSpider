@@ -263,6 +263,49 @@ def test_mark_runtime_ready_persists_thread_binding_and_turn_record(tmp_path) ->
     assert turns[0].completed_at is None
 
 
+def test_executor_runtime_service_persists_parent_linkage_continuity_and_recovery_contract(
+    tmp_path,
+) -> None:
+    service = _build_service(tmp_path)
+
+    runtime = service.create_or_reuse_runtime(
+        executor_id="codex-app-server",
+        protocol_kind="app_server",
+        scope_kind="assignment",
+        assignment_id="assign-child-1",
+        role_id="backend-engineer",
+        parent_runtime_id="runtime-parent-1",
+        continuity_metadata={
+            "control_thread_id": "control-thread-1",
+            "session_id": "industry-chat:industry-1:execution-core",
+            "work_context_id": "ctx-1",
+        },
+        recovery_metadata={
+            "strategy": "restart-once",
+            "status": "ready",
+        },
+    )
+    ready = service.mark_runtime_ready(
+        runtime.runtime_id,
+        thread_id="thread-child-1",
+        turn_id="turn-child-1",
+    )
+
+    bindings = service.list_thread_bindings(thread_id="thread-child-1")
+    turns = service.list_turn_records(thread_id="thread-child-1")
+
+    assert ready.metadata["parent_runtime_id"] == "runtime-parent-1"
+    assert ready.metadata["continuity"]["control_thread_id"] == "control-thread-1"
+    assert ready.metadata["continuity"]["work_context_id"] == "ctx-1"
+    assert ready.metadata["recovery"]["strategy"] == "restart-once"
+    assert bindings[0].metadata["parent_runtime_id"] == "runtime-parent-1"
+    assert bindings[0].metadata["continuity"]["session_id"] == (
+        "industry-chat:industry-1:execution-core"
+    )
+    assert turns[0].metadata["continuity"]["work_context_id"] == "ctx-1"
+    assert turns[0].metadata["recovery"]["status"] == "ready"
+
+
 def test_record_event_persists_formal_executor_event_and_updates_turn_terminal_state(
     tmp_path,
 ) -> None:

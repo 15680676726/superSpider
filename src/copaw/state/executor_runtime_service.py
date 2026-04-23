@@ -59,6 +59,53 @@ def _merge_metadata(
     return merged
 
 
+def _compact_mapping(value: dict[str, Any] | None) -> dict[str, Any]:
+    compacted: dict[str, Any] = {}
+    for key, item in dict(value or {}).items():
+        if isinstance(item, dict):
+            nested = _compact_mapping(item)
+            if nested:
+                compacted[key] = nested
+            continue
+        if isinstance(item, list):
+            if item:
+                compacted[key] = list(item)
+            continue
+        if item not in (None, ""):
+            compacted[key] = item
+    return compacted
+
+
+def _build_runtime_contract_metadata(
+    *,
+    parent_runtime_id: str | None = None,
+    continuity_metadata: dict[str, Any] | None = None,
+    recovery_metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    contract: dict[str, Any] = {}
+    normalized_parent = _text(parent_runtime_id)
+    if normalized_parent is not None:
+        contract["parent_runtime_id"] = normalized_parent
+    continuity = _compact_mapping(continuity_metadata)
+    if continuity:
+        contract["continuity"] = continuity
+    recovery = _compact_mapping(recovery_metadata)
+    if recovery:
+        contract["recovery"] = recovery
+    return contract
+
+
+def _runtime_contract_metadata_from_runtime(
+    runtime: ExecutorRuntimeInstanceRecord,
+) -> dict[str, Any]:
+    metadata = dict(runtime.metadata or {})
+    return _build_runtime_contract_metadata(
+        parent_runtime_id=_text(metadata.get("parent_runtime_id")),
+        continuity_metadata=dict(metadata.get("continuity") or {}),
+        recovery_metadata=dict(metadata.get("recovery") or {}),
+    )
+
+
 def _executor_capability_id(executor_id: str) -> str:
     normalized = str(executor_id).strip()
     if normalized.startswith("executor:"):
@@ -674,8 +721,21 @@ class ExecutorRuntimeService:
         project_profile_id: str | None = None,
         thread_id: str | None = None,
         metadata: dict[str, Any] | None = None,
+        parent_runtime_id: str | None = None,
+        continuity_metadata: dict[str, Any] | None = None,
+        recovery_metadata: dict[str, Any] | None = None,
     ) -> ExecutorRuntimeInstanceRecord:
-        runtime_metadata = _merge_metadata(metadata, {"executor_runtime_managed": True})
+        runtime_metadata = _merge_metadata(
+            metadata,
+            _merge_metadata(
+                _build_runtime_contract_metadata(
+                    parent_runtime_id=parent_runtime_id,
+                    continuity_metadata=continuity_metadata,
+                    recovery_metadata=recovery_metadata,
+                ),
+                {"executor_runtime_managed": True},
+            ),
+        )
         existing = self._resolve_active_runtime(
             executor_id=executor_id,
             scope_kind=scope_kind,
@@ -1074,7 +1134,10 @@ class ExecutorRuntimeService:
                 runtime_status=runtime.runtime_status,
                 last_turn_id=_text(last_turn_id),
                 last_seen_at=now,
-                metadata=dict(metadata or {}),
+                metadata=_merge_metadata(
+                    _runtime_contract_metadata_from_runtime(runtime),
+                    metadata,
+                ),
             )
         else:
             record = existing.model_copy(
@@ -1087,7 +1150,13 @@ class ExecutorRuntimeService:
                     "runtime_status": runtime.runtime_status,
                     "last_turn_id": _text(last_turn_id) or existing.last_turn_id,
                     "last_seen_at": now,
-                    "metadata": _merge_metadata(existing.metadata, metadata),
+                    "metadata": _merge_metadata(
+                        existing.metadata,
+                        _merge_metadata(
+                            _runtime_contract_metadata_from_runtime(runtime),
+                            metadata,
+                        ),
+                    ),
                     "updated_at": now,
                 }
             )
@@ -1135,7 +1204,10 @@ class ExecutorRuntimeService:
                 started_at=started_at,
                 completed_at=completed_at,
                 summary=_text(summary),
-                metadata=dict(metadata or {}),
+                metadata=_merge_metadata(
+                    _runtime_contract_metadata_from_runtime(runtime),
+                    metadata,
+                ),
             )
         else:
             record = existing.model_copy(
@@ -1147,7 +1219,13 @@ class ExecutorRuntimeService:
                     "started_at": started_at,
                     "completed_at": completed_at,
                     "summary": _text(summary) or existing.summary,
-                    "metadata": _merge_metadata(existing.metadata, metadata),
+                    "metadata": _merge_metadata(
+                        existing.metadata,
+                        _merge_metadata(
+                            _runtime_contract_metadata_from_runtime(runtime),
+                            metadata,
+                        ),
+                    ),
                     "updated_at": now,
                 }
             )
