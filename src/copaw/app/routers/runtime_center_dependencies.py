@@ -233,6 +233,11 @@ def _get_runtime_conversation_facade(request: Request) -> RuntimeConversationFac
             "agent_thread_binding_repository",
             None,
         ),
+        executor_runtime_service=getattr(
+            request.app.state,
+            "executor_runtime_service",
+            None,
+        ),
         human_assist_task_service=getattr(
             request.app.state,
             "human_assist_task_service",

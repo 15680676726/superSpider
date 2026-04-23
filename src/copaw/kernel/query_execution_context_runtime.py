@@ -193,6 +193,18 @@ class _QueryExecutionContextRuntimeMixin:
                 checkpoint_snapshot = _mapping_value(latest_checkpoint.snapshot_payload)
                 if checkpoint_snapshot:
                     context["resume_snapshot"] = checkpoint_snapshot
+        executor_contract = self._resolve_executor_runtime_contract(
+            owner_agent_id=agent_id,
+            conversation_thread_id=conversation_thread_id,
+            kernel_task_id=kernel_task_id,
+        )
+        if executor_contract:
+            executor_work_context_id = _first_non_empty(
+                executor_contract.get("work_context_id"),
+            )
+            if executor_work_context_id is not None:
+                context["work_context_id"] = executor_work_context_id
+            _merge_main_brain_runtime(executor_contract.get("main_brain_runtime"))
         _merge_main_brain_runtime(
             self._resolve_request_main_brain_runtime_context(request=request),
         )

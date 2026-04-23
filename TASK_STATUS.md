@@ -850,6 +850,43 @@
     - 结果：`48 passed in 344.93s`
     - 验收层级：`L1 + L2`
 
+## 1.0.26 `2026-04-23` local executor physical-retirement slice（query/conversation formal read path starts consuming executor runtime truth）
+
+- 本轮先把 `Task 3 / formal read surface` 里最容易继续卡住主链的 query / conversation / bootstrap 接线切到 executor runtime truth：
+  - `src/copaw/app/runtime_bootstrap_domains.py` 与 `src/copaw/app/runtime_service_graph.py`
+    - formal `KernelQueryExecutionService` 现在会显式注入 `executor_runtime_service`
+  - `src/copaw/kernel/query_execution_runtime.py`
+    - 新增 executor runtime contract 解析：可按 `thread_id / assignment_id / role_id` 回读 formal runtime continuity / recovery / owner
+  - `src/copaw/kernel/query_execution_context_runtime.py`
+    - formal execution context 现在会从 executor runtime truth 回读 `work_context_id` 与 `recovery`
+  - `src/copaw/kernel/query_execution_usage_runtime.py`
+    - 当 actor runtime 缺席时，query token usage 现在会直接写回 executor runtime metadata
+  - `src/copaw/app/runtime_center/conversations.py` 与 `src/copaw/app/routers/runtime_center_dependencies.py`
+    - Runtime Center conversation detail 现在不再强依赖 actor thread binding；actor binding 缺失时会回读 executor thread binding/runtime continuity
+  - `src/copaw/state/executor_runtime_service.py`
+    - 补了 formal runtime upsert 前门，供 query usage 写回复用
+- 当前能诚实写出的结论：
+  - query runtime continuity / recovery / usage 与 Runtime Center conversation detail 已开始正式消费 executor runtime truth
+  - `build_runtime_domain_services(...)` 的 formal bootstrap 接线已不再漏掉 `executor_runtime_service`
+  - 这仍不等于整个 `Task 3` 已完成：
+    - `runtime_state_bindings.py`
+    - `runtime_center_routes_core.py`
+    - `runtime_center_actor_capabilities.py`
+    - `agent_profile_service.py`
+    - `query_execution_resident_runtime.py`
+    - `industry/service_runtime_views.py`
+    - `state/__init__.py / state/models.py / state/repositories/__init__.py`
+    这些 formal read/export 面还没在这一轮一起切完
+- fresh focused regression：
+  - RED 验证：
+    - 命令：`python -m pytest tests/app/test_industry_service_wiring.py::test_runtime_domain_builder_wires_executor_runtime_service_into_query_execution_service tests/app/test_runtime_conversations_api.py::test_runtime_conversation_detail_resolves_executor_thread_binding_without_actor_binding tests/kernel/test_query_usage_accounting.py::test_record_turn_usage_persists_executor_runtime_when_actor_runtime_missing tests/kernel/test_query_execution_runtime.py::test_query_execution_runtime_resolves_execution_context_from_executor_runtime_contract -q`
+    - 结果：`4 passed in 14.28s`
+    - 验收层级：`L1`
+  - focused regression：
+    - 命令：`python -m pytest tests/app/test_industry_service_wiring.py tests/app/test_runtime_conversations_api.py tests/app/test_runtime_bootstrap_helpers.py tests/app/test_runtime_bootstrap_split.py tests/app/test_runtime_execution_provider_wiring.py tests/kernel/test_query_usage_accounting.py tests/kernel/test_query_execution_runtime.py tests/kernel/test_agent_profile_service.py tests/kernel/test_main_brain_runtime_context_consumption.py tests/kernel/test_main_brain_runtime_context_buddy_prompt.py tests/kernel/query_execution_environment_parts/dispatch.py -q`
+    - 结果：`171 passed in 97.23s`
+    - 验收层级：`L1 + L2`
+
 ## 1.1.1 `2026-04-07` Buddy 领域能力阶段收口补充
 
 - Buddy 当前成长阶段的正式真相已从关系经验切到 active `BuddyDomainCapabilityRecord`

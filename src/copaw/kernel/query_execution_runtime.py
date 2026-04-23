@@ -753,6 +753,7 @@ class _QueryExecutionRuntimeMixin(
         buddy_projection_service: Any | None = None,
         agent_checkpoint_repository: Any | None = None,
         agent_runtime_repository: Any | None = None,
+        executor_runtime_service: Any | None = None,
         governance_control_repository: Any | None = None,
         task_repository: Any | None = None,
         task_runtime_repository: Any | None = None,
@@ -783,6 +784,7 @@ class _QueryExecutionRuntimeMixin(
         self._buddy_projection_service = buddy_projection_service
         self._agent_checkpoint_repository = agent_checkpoint_repository
         self._agent_runtime_repository = agent_runtime_repository
+        self._executor_runtime_service = executor_runtime_service
         self._governance_control_repository = governance_control_repository
         self._task_repository = task_repository
         self._task_runtime_repository = task_runtime_repository
@@ -866,6 +868,9 @@ class _QueryExecutionRuntimeMixin(
     def set_agent_runtime_repository(self, agent_runtime_repository: Any | None) -> None:
         self._agent_runtime_repository = agent_runtime_repository
 
+    def set_executor_runtime_service(self, executor_runtime_service: Any | None) -> None:
+        self._executor_runtime_service = executor_runtime_service
+
     def set_governance_control_repository(
         self,
         governance_control_repository: Any | None,
@@ -895,6 +900,162 @@ class _QueryExecutionRuntimeMixin(
             memory_recall_service=self._memory_recall_service,
             conversation_compaction_service=self._conversation_compaction_service,
         )
+
+    def _get_executor_runtime_record(self, runtime_id: str | None) -> Any | None:
+        normalized_runtime_id = _first_non_empty(runtime_id)
+        if normalized_runtime_id is None:
+            return None
+        service = self._executor_runtime_service
+        getter = getattr(service, "get_runtime", None)
+        if not callable(getter):
+            return None
+        try:
+            runtime = getter(normalized_runtime_id, formal_only=True)
+        except TypeError:
+            runtime = getter(normalized_runtime_id)
+        if runtime is not None:
+            return runtime
+        try:
+            return getter(normalized_runtime_id)
+        except TypeError:
+            return None
+
+    def _resolve_executor_thread_binding(
+        self,
+        *,
+        owner_agent_id: str | None,
+        conversation_thread_id: str | None,
+    ) -> Any | None:
+        service = self._executor_runtime_service
+        lister = getattr(service, "list_thread_bindings", None)
+        if not callable(lister):
+            return None
+        candidate_thread_ids: list[str] = []
+        normalized_thread_id = _first_non_empty(conversation_thread_id)
+        if normalized_thread_id is not None:
+            candidate_thread_ids.append(normalized_thread_id)
+            if normalized_thread_id.startswith("industry-chat:"):
+                _, _, remainder = normalized_thread_id.partition("industry-chat:")
+                instance_id, separator, role_id = remainder.rpartition(":")
+                if instance_id and separator and role_id:
+                    normalized_role_id = normalize_industry_role_id(role_id)
+                    if normalized_role_id and normalized_role_id != role_id:
+                        candidate_thread_ids.append(
+                            f"industry-chat:{instance_id}:{normalized_role_id}",
+                        )
+        for candidate_thread_id in candidate_thread_ids:
+            for binding in list(lister(thread_id=candidate_thread_id, limit=10) or []):
+                runtime = self._get_executor_runtime_record(
+                    getattr(binding, "runtime_id", None),
+                )
+                if runtime is None:
+                    continue
+                runtime_metadata = _mapping_value(getattr(runtime, "metadata", None))
+                binding_metadata = _mapping_value(getattr(binding, "metadata", None))
+                resolved_owner_agent_id = _first_non_empty(
+                    runtime_metadata.get("owner_agent_id"),
+                    binding_metadata.get("owner_agent_id"),
+                    getattr(runtime, "role_id", None),
+                    getattr(binding, "role_id", None),
+                )
+                if (
+                    owner_agent_id is not None
+                    and resolved_owner_agent_id is not None
+                    and resolved_owner_agent_id != owner_agent_id
+                ):
+                    continue
+                return binding
+        return None
+
+    def _resolve_executor_runtime_contract(
+        self,
+        *,
+        owner_agent_id: str | None = None,
+        conversation_thread_id: str | None = None,
+        kernel_task_id: str | None = None,
+    ) -> dict[str, Any]:
+        service = self._executor_runtime_service
+        if service is None:
+            return {}
+        runtime = None
+        binding = self._resolve_executor_thread_binding(
+            owner_agent_id=owner_agent_id,
+            conversation_thread_id=conversation_thread_id,
+        )
+        if binding is not None:
+            runtime = self._get_executor_runtime_record(getattr(binding, "runtime_id", None))
+        if runtime is None:
+            lister = getattr(service, "list_runtimes", None)
+            if callable(lister):
+                seen_runtime_ids: set[str] = set()
+                candidate_runtimes: list[Any] = []
+                for selector in (
+                    {"assignment_id": _first_non_empty(kernel_task_id)},
+                    {"role_id": _first_non_empty(owner_agent_id)},
+                ):
+                    normalized_selector = {
+                        key: value
+                        for key, value in selector.items()
+                        if value is not None
+                    }
+                    if not normalized_selector:
+                        continue
+                    try:
+                        items = list(lister(formal_only=True, **normalized_selector) or [])
+                    except TypeError:
+                        items = list(lister(**normalized_selector) or [])
+                    for item in items:
+                        runtime_id = _first_non_empty(getattr(item, "runtime_id", None))
+                        if runtime_id is None or runtime_id in seen_runtime_ids:
+                            continue
+                        seen_runtime_ids.add(runtime_id)
+                        candidate_runtimes.append(item)
+                normalized_thread_id = _first_non_empty(conversation_thread_id)
+                for candidate in candidate_runtimes:
+                    candidate_metadata = _mapping_value(getattr(candidate, "metadata", None))
+                    continuity = _mapping_value(candidate_metadata.get("continuity"))
+                    if normalized_thread_id is not None and normalized_thread_id not in {
+                        _first_non_empty(getattr(candidate, "thread_id", None)),
+                        _first_non_empty(continuity.get("control_thread_id")),
+                        _first_non_empty(continuity.get("session_id")),
+                    }:
+                        continue
+                    runtime = candidate
+                    break
+        if runtime is None:
+            return {}
+        runtime_metadata = _mapping_value(getattr(runtime, "metadata", None))
+        binding_metadata = _mapping_value(getattr(binding, "metadata", None))
+        continuity = {
+            **_mapping_value(runtime_metadata.get("continuity")),
+            **_mapping_value(binding_metadata.get("continuity")),
+        }
+        recovery = {
+            **_mapping_value(runtime_metadata.get("recovery")),
+            **_mapping_value(binding_metadata.get("recovery")),
+        }
+        main_brain_runtime = self._merge_main_brain_runtime_contexts(
+            runtime_metadata.get("main_brain_runtime"),
+            binding_metadata.get("main_brain_runtime"),
+            {
+                "work_context_id": _first_non_empty(continuity.get("work_context_id")),
+                "recovery": recovery,
+            },
+        )
+        return {
+            "runtime": runtime,
+            "binding": binding,
+            "owner_agent_id": _first_non_empty(
+                runtime_metadata.get("owner_agent_id"),
+                binding_metadata.get("owner_agent_id"),
+                getattr(runtime, "role_id", None),
+                getattr(binding, "role_id", None),
+            ),
+            "work_context_id": _first_non_empty(continuity.get("work_context_id")),
+            "continuity": continuity,
+            "recovery": recovery,
+            "main_brain_runtime": main_brain_runtime,
+        }
 
     def _has_private_memory_surface(self) -> bool:
         checker = getattr(self._memory_surface_service, "has_private_memory_surface", None)

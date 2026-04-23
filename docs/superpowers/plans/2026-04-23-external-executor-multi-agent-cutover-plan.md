@@ -266,6 +266,25 @@ git commit -m "feat: cut formal execution off actor mailbox path"
 
 ### Task 3: Remove Actor Runtime Truth From Formal Read Surfaces
 
+`2026-04-23` progress note:
+- 已落地 query / conversation / bootstrap 这一刀：
+  - `runtime_bootstrap_domains.py` / `runtime_service_graph.py` 已把 formal `KernelQueryExecutionService` 接上 `executor_runtime_service`
+  - `query_execution_runtime.py` / `query_execution_context_runtime.py` / `query_execution_usage_runtime.py` 已开始从 executor runtime truth 读 continuity / recovery，并在 actor runtime 缺席时把 usage 写回 executor runtime metadata
+  - `runtime_center/conversations.py` / `runtime_center_dependencies.py` 已在 actor thread binding 缺席时回退到 executor thread binding/runtime continuity
+- 本轮 focused regression：
+  - `python -m pytest tests/app/test_industry_service_wiring.py tests/app/test_runtime_conversations_api.py tests/app/test_runtime_bootstrap_helpers.py tests/app/test_runtime_bootstrap_split.py tests/app/test_runtime_execution_provider_wiring.py tests/kernel/test_query_usage_accounting.py tests/kernel/test_query_execution_runtime.py tests/kernel/test_agent_profile_service.py tests/kernel/test_main_brain_runtime_context_consumption.py tests/kernel/test_main_brain_runtime_context_buddy_prompt.py tests/kernel/query_execution_environment_parts/dispatch.py -q`
+  - `171 passed in 97.23s`
+- 仍未完成的 Task 3 剩余面：
+  - `runtime_state_bindings.py`
+  - `runtime_center_routes_core.py`
+  - `runtime_center_actor_capabilities.py`
+  - `agent_profile_service.py`
+  - `query_execution_resident_runtime.py`
+  - `industry/service_runtime_views.py`
+  - `state/__init__.py`
+  - `state/models.py`
+  - `state/repositories/__init__.py`
+
 **Files:**
 - Modify: `src/copaw/app/runtime_state_bindings.py`
 - Modify: `src/copaw/app/routers/runtime_center_dependencies.py`

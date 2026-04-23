@@ -650,6 +650,12 @@ class ExecutorRuntimeService:
             return None
         return runtime
 
+    def upsert_runtime(
+        self,
+        record: ExecutorRuntimeInstanceRecord,
+    ) -> ExecutorRuntimeInstanceRecord:
+        return self._store_runtime_instance(record)
+
     def list_runtimes(
         self,
         *,

@@ -32,6 +32,7 @@ from copaw.kernel.main_brain_intake import MainBrainIntakeContract
 from copaw.kernel.query_execution import KernelQueryExecutionService
 from copaw.constant import MEMORY_COMPACT_KEEP_RECENT
 from copaw.state import AgentRuntimeRecord, SQLiteStateStore
+from copaw.state.executor_runtime_service import ExecutorRuntimeService
 from copaw.state.repositories import (
     SqliteAgentLeaseRepository,
     SqliteAgentRuntimeRepository,
@@ -311,6 +312,50 @@ def test_query_execution_runtime_resolves_execution_context_from_task_runtime_an
     assert resolved["main_brain_runtime"]["environment"]["ref"] == "desktop:request"
     assert resolved["main_brain_runtime"]["recovery"]["mode"] == "runtime-metadata"
     assert resolved["main_brain_runtime"]["recovery"]["reason"] == "request-bound"
+
+
+def test_query_execution_runtime_resolves_execution_context_from_executor_runtime_contract(
+    tmp_path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "query-runtime-executor-state.db")
+    executor_runtime_service = ExecutorRuntimeService(state_store=state_store)
+    runtime = executor_runtime_service.create_or_reuse_runtime(
+        executor_id="codex",
+        protocol_kind="app_server",
+        scope_kind="assignment",
+        assignment_id="assignment:query-runtime",
+        role_id="ops-agent",
+        thread_id="industry-chat:industry-v1-ops:execution-core",
+        metadata={"owner_agent_id": "ops-agent"},
+        continuity_metadata={
+            "control_thread_id": "industry-chat:industry-v1-ops:execution-core",
+            "session_id": "industry-chat:industry-v1-ops:execution-core",
+            "work_context_id": "work-context-executor",
+        },
+        recovery_metadata={
+            "mode": "resume-sidecar-stream",
+            "reason": "thread-rebind",
+        },
+    )
+    executor_runtime_service.mark_runtime_ready(
+        runtime.runtime_id,
+        thread_id="industry-chat:industry-v1-ops:execution-core",
+        metadata={"owner_agent_id": "ops-agent"},
+    )
+    service = KernelQueryExecutionService(
+        session_backend=object(),
+        executor_runtime_service=executor_runtime_service,
+    )
+
+    resolved = service._resolve_execution_task_context(  # pylint: disable=protected-access
+        request=None,
+        agent_id="ops-agent",
+        kernel_task_id=None,
+        conversation_thread_id="industry-chat:industry-v1-ops:execution-core",
+    )
+
+    assert resolved["work_context_id"] == "work-context-executor"
+    assert resolved["main_brain_runtime"]["recovery"]["mode"] == "resume-sidecar-stream"
 
 
 def test_query_execution_runtime_bypasses_actor_lease_when_same_task_is_already_current(

@@ -24,6 +24,8 @@ class _QueryExecutionUsageRuntimeMixin:
             owner_agent_id=owner_agent_id,
         )
         self._record_agent_runtime_usage(
+            request=request,
+            kernel_task_id=kernel_task_id,
             owner_agent_id=owner_agent_id,
             usage_payload=usage_payload,
             cost_estimate=cost_estimate,
@@ -43,16 +45,30 @@ class _QueryExecutionUsageRuntimeMixin:
     def _record_agent_runtime_usage(
         self,
         *,
+        request: Any,
+        kernel_task_id: str | None,
         owner_agent_id: str | None,
         usage_payload: dict[str, Any],
         cost_estimate: float | None,
         model_context: dict[str, Any],
         recorded_at: datetime,
     ) -> None:
-        if self._agent_runtime_repository is None or not owner_agent_id:
-            return
-        runtime = self._agent_runtime_repository.get_runtime(owner_agent_id)
+        runtime = None
+        runtime_updater = None
+        if self._agent_runtime_repository is not None and owner_agent_id:
+            runtime = self._agent_runtime_repository.get_runtime(owner_agent_id)
+            if runtime is not None:
+                runtime_updater = self._agent_runtime_repository.upsert_runtime
         if runtime is None:
+            executor_contract = self._resolve_executor_runtime_contract(
+                owner_agent_id=owner_agent_id,
+                conversation_thread_id=_first_non_empty(getattr(request, "session_id", None)),
+                kernel_task_id=kernel_task_id,
+            )
+            runtime = executor_contract.get("runtime")
+            executor_service = getattr(self, "_executor_runtime_service", None)
+            runtime_updater = getattr(executor_service, "upsert_runtime", None)
+        if runtime is None or not callable(runtime_updater):
             return
         metadata = dict(runtime.metadata or {})
         metadata["last_query_usage"] = usage_payload
@@ -70,7 +86,7 @@ class _QueryExecutionUsageRuntimeMixin:
             metadata.get("query_usage_totals"),
             usage_payload,
         )
-        self._agent_runtime_repository.upsert_runtime(
+        runtime_updater(
             runtime.model_copy(
                 update={
                     "metadata": metadata,

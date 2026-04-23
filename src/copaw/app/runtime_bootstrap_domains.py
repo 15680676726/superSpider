@@ -966,6 +966,7 @@ def build_runtime_domain_services(
     kernel_dispatcher: KernelDispatcher | None = None,
     kernel_tool_bridge: KernelToolBridge | None = None,
     actor_mailbox_service: ActorMailboxService | None = None,
+    executor_runtime_service: object | None = None,
     executor_runtime_coordinator: AssignmentExecutorRuntimeCoordinator | None = None,
 ) -> RuntimeDomainServices:
     strategy_planning_compiler = StrategyPlanningCompiler()
@@ -1255,6 +1256,7 @@ def build_runtime_domain_services(
         memory_activation_service=memory_activation_service,
         agent_checkpoint_repository=repositories.agent_checkpoint_repository,
         agent_runtime_repository=repositories.agent_runtime_repository,
+        executor_runtime_service=executor_runtime_service,
         governance_control_repository=repositories.governance_control_repository,
         task_repository=repositories.task_repository,
         task_runtime_repository=repositories.task_runtime_repository,

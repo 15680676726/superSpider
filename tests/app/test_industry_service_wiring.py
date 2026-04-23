@@ -1507,3 +1507,90 @@ def test_runtime_domain_builder_does_not_thread_actor_runtime_truth_into_formal_
     assert runtime_binding_kwargs["agent_checkpoint_repository"] is None
     assert runtime_binding_kwargs["agent_lease_repository"] is None
     assert captured["industry_service_kwargs"]["actor_mailbox_service"] is None
+
+
+def test_runtime_domain_builder_wires_executor_runtime_service_into_query_execution_service(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _RepoBag(SimpleNamespace):
+        def __getattr__(self, name: str):
+            value = object()
+            setattr(self, name, value)
+            return value
+
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "GoalService", lambda **kwargs: SimpleNamespace(set_agent_profile_service=lambda value: None))
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "AgentProfileService", lambda **kwargs: SimpleNamespace(backfill_industry_baseline_capabilities=lambda: None))
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "StateReportingService", lambda **kwargs: SimpleNamespace())
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "OperatingLaneService", lambda **kwargs: SimpleNamespace())
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "BacklogService", lambda **kwargs: SimpleNamespace())
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "OperatingCycleService", lambda **kwargs: SimpleNamespace())
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "AssignmentService", lambda **kwargs: SimpleNamespace())
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "AgentReportService", lambda **kwargs: SimpleNamespace())
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "MediaService", lambda **kwargs: SimpleNamespace())
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "IndustryService", lambda **kwargs: SimpleNamespace(set_prediction_service=lambda value: None))
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "WorkflowTemplateService", lambda **kwargs: SimpleNamespace())
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "FixedSopService", lambda **kwargs: SimpleNamespace(set_routine_service=lambda value: None))
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "RoutineService", lambda **kwargs: SimpleNamespace())
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "PredictionService", lambda **kwargs: SimpleNamespace())
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "KernelQueryExecutionService",
+        lambda **kwargs: captured.setdefault("query_execution_kwargs", kwargs) or SimpleNamespace(),
+    )
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "MainBrainChatService", lambda **kwargs: SimpleNamespace())
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "MainBrainOrchestrator", lambda **kwargs: SimpleNamespace())
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "BaiduPageResearchService", lambda **kwargs: SimpleNamespace(**kwargs))
+    monkeypatch.setattr(runtime_bootstrap_domains_module, "LearningRuntimeBindings", lambda **kwargs: SimpleNamespace())
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "build_industry_service_runtime_bindings",
+        lambda **kwargs: SimpleNamespace(),
+    )
+
+    executor_runtime_service = object()
+    runtime_bootstrap_domains_module.build_runtime_domain_services(
+        session_backend=object(),
+        conversation_compaction_service=object(),
+        mcp_manager=object(),
+        state_store=SQLiteStateStore(":memory:"),
+        repositories=_RepoBag(),
+        evidence_ledger=object(),
+        environment_service=SimpleNamespace(set_kernel_dispatcher=lambda value: None),
+        runtime_event_bus=object(),
+        runtime_provider=SimpleNamespace(get_active_chat_model=lambda: object()),
+        state_query_service=SimpleNamespace(
+            set_goal_service=lambda value: None,
+            set_learning_service=lambda value: None,
+            set_agent_profile_service=lambda value: None,
+        ),
+        strategy_memory_service=object(),
+        knowledge_service=object(),
+        derived_memory_index_service=SimpleNamespace(
+            set_reporting_service=lambda value: None,
+            set_learning_service=lambda value: None,
+        ),
+        memory_reflection_service=SimpleNamespace(set_learning_service=lambda value: None),
+        memory_recall_service=object(),
+        memory_retain_service=object(),
+        memory_activation_service=None,
+        agent_experience_service=None,
+        work_context_service=object(),
+        learning_service=SimpleNamespace(configure_bindings=lambda value: None),
+        capability_service=SimpleNamespace(
+            set_goal_service=lambda value: None,
+            set_agent_profile_service=lambda value: None,
+            set_industry_service=lambda value: None,
+            set_routine_service=lambda value: None,
+            set_fixed_sop_service=lambda value: None,
+            discovery=SimpleNamespace(set_fixed_sop_service=lambda service: None),
+            get_discovery_service=lambda: SimpleNamespace(set_fixed_sop_service=lambda service: None),
+        ),
+        kernel_dispatcher=object(),
+        kernel_tool_bridge=object(),
+        actor_mailbox_service=None,
+        executor_runtime_service=executor_runtime_service,
+    )
+
+    assert captured["query_execution_kwargs"]["executor_runtime_service"] is executor_runtime_service

@@ -21,6 +21,7 @@ from copaw.state import (
     SQLiteStateStore,
     WorkContextRecord,
 )
+from copaw.state.executor_runtime_service import ExecutorRuntimeService
 from copaw.state.human_assist_task_service import HumanAssistTaskService
 from copaw.state.repositories import SqliteHumanAssistTaskRepository
 
@@ -402,6 +403,7 @@ def _build_app(
     industry_service: _FakeIndustryService | None = None,
     human_assist_task_service: object | None = None,
     thread_binding_repository: object | None = None,
+    executor_runtime_service: object | None = None,
     task_repository: object | None = None,
     work_context_repository: object | None = None,
     session_backend: object | None = None,
@@ -416,6 +418,7 @@ def _build_app(
     app.state.agent_thread_binding_repository = (
         thread_binding_repository or _FakeThreadBindingRepository()
     )
+    app.state.executor_runtime_service = executor_runtime_service
     app.state.task_repository = task_repository or _FakeTaskRepository()
     app.state.task_runtime_repository = _FakeTaskRuntimeRepository()
     app.state.work_context_repository = work_context_repository or _FakeWorkContextRepository()
@@ -449,6 +452,50 @@ def test_runtime_conversation_detail_resolves_industry_thread() -> None:
     assert payload["messages"][0]["content"][0]["text"] == "history:copaw-agent-runner"
     assert history_reader.calls[0].session_id == "industry-chat:industry-v1-acme:execution-core"
     assert history_reader.calls[0].user_id == "copaw-agent-runner"
+
+
+def test_runtime_conversation_detail_resolves_executor_thread_binding_without_actor_binding(
+    tmp_path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    executor_runtime_service = ExecutorRuntimeService(state_store=state_store)
+    runtime = executor_runtime_service.create_or_reuse_runtime(
+        executor_id="codex",
+        protocol_kind="app_server",
+        scope_kind="assignment",
+        assignment_id="assignment-acme-exec",
+        role_id="execution-core",
+        thread_id="industry-chat:industry-v1-acme:execution-core",
+        metadata={"owner_agent_id": "copaw-agent-runner"},
+        continuity_metadata={
+            "control_thread_id": "industry-chat:industry-v1-acme:execution-core",
+            "session_id": "industry-chat:industry-v1-acme:execution-core",
+            "work_context_id": "ctx-executor-only-acme",
+        },
+    )
+    executor_runtime_service.mark_runtime_ready(
+        runtime.runtime_id,
+        thread_id="industry-chat:industry-v1-acme:execution-core",
+        metadata={"owner_agent_id": "copaw-agent-runner"},
+    )
+    app, history_reader = _build_app(
+        thread_binding_repository=None,
+        executor_runtime_service=executor_runtime_service,
+    )
+    app.state.agent_thread_binding_repository = None
+    client = TestClient(app)
+
+    response = client.get(
+        "/runtime-center/conversations/industry-chat:industry-v1-acme:execution-core",
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == "industry-chat:industry-v1-acme:execution-core"
+    assert payload["user_id"] == "copaw-agent-runner"
+    assert payload["meta"]["session_kind"] == "industry-control-thread"
+    assert payload["meta"]["work_context_id"] == "ctx-executor-only-acme"
+    assert history_reader.calls[0].session_id == "industry-chat:industry-v1-acme:execution-core"
 
 
 def test_runtime_conversation_detail_exposes_buddy_profile_id_for_buddy_control_thread() -> None:
