@@ -40,9 +40,9 @@ from ..kernel.surface_routing import (
 )
 from ..state import (
     AgentProfileOverrideRecord,
-    AgentRuntimeRecord,
-    AgentThreadBindingRecord,
     AgentReportRecord,
+    ExecutorRuntimeInstanceRecord,
+    ExecutorThreadBindingRecord,
     GoalOverrideRecord,
     GoalRecord,
     IndustryInstanceRecord,
@@ -56,6 +56,7 @@ from ..state import (
     StrategyMemoryRecord,
     TaskRecord,
     TaskRuntimeRecord,
+    ExecutorRuntimeService,
 )
 from ..state.main_brain_service import (
     AgentReportService,
@@ -67,13 +68,9 @@ from ..state.main_brain_service import (
 from ..state.strategy_memory_service import compact_strategy_payload
 from ..state.repositories import (
     SqliteAgentCheckpointRepository,
-    SqliteAgentLeaseRepository,
-    SqliteAgentMailboxRepository,
     SqliteAgentProfileOverrideRepository,
     SqliteAgentReportRepository,
-    SqliteAgentRuntimeRepository,
     SqliteAssignmentRepository,
-    SqliteAgentThreadBindingRepository,
     SqliteBacklogItemRepository,
     SqliteGoalOverrideRepository,
     SqliteIndustryInstanceRepository,
@@ -145,6 +142,13 @@ from .models import (
 logger = logging.getLogger(__name__)
 
 
+def _string(value: object | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 @dataclass(slots=True)
 class IndustryServiceRuntimeBindings:
     kernel_dispatcher: object | None = None
@@ -153,12 +157,9 @@ class IndustryServiceRuntimeBindings:
     operating_cycle_repository: SqliteOperatingCycleRepository | None = None
     assignment_repository: SqliteAssignmentRepository | None = None
     agent_report_repository: SqliteAgentReportRepository | None = None
-    agent_runtime_repository: SqliteAgentRuntimeRepository | None = None
-    agent_thread_binding_repository: SqliteAgentThreadBindingRepository | None = None
+    executor_runtime_service: ExecutorRuntimeService | None = None
     schedule_repository: SqliteScheduleRepository | None = None
-    agent_mailbox_repository: SqliteAgentMailboxRepository | None = None
     agent_checkpoint_repository: SqliteAgentCheckpointRepository | None = None
-    agent_lease_repository: SqliteAgentLeaseRepository | None = None
     strategy_memory_repository: SqliteStrategyMemoryRepository | None = None
     workflow_run_repository: SqliteWorkflowRunRepository | None = None
     prediction_case_repository: SqlitePredictionCaseRepository | None = None
@@ -189,12 +190,9 @@ def build_industry_service_runtime_bindings(
     operating_cycle_repository: SqliteOperatingCycleRepository | None = None,
     assignment_repository: SqliteAssignmentRepository | None = None,
     agent_report_repository: SqliteAgentReportRepository | None = None,
-    agent_runtime_repository: SqliteAgentRuntimeRepository | None = None,
-    agent_thread_binding_repository: SqliteAgentThreadBindingRepository | None = None,
+    executor_runtime_service: ExecutorRuntimeService | None = None,
     schedule_repository: SqliteScheduleRepository | None = None,
-    agent_mailbox_repository: SqliteAgentMailboxRepository | None = None,
     agent_checkpoint_repository: SqliteAgentCheckpointRepository | None = None,
-    agent_lease_repository: SqliteAgentLeaseRepository | None = None,
     strategy_memory_repository: SqliteStrategyMemoryRepository | None = None,
     workflow_run_repository: SqliteWorkflowRunRepository | None = None,
     prediction_case_repository: SqlitePredictionCaseRepository | None = None,
@@ -228,12 +226,8 @@ def build_industry_service_runtime_bindings(
     cycle_repository = operating_cycle_repository
     assignment_repo = assignment_repository
     report_repository = agent_report_repository
-    runtime_repository = agent_runtime_repository
-    thread_binding_repository = agent_thread_binding_repository
     schedules = schedule_repository
-    mailbox_repository = agent_mailbox_repository
     checkpoint_repository = agent_checkpoint_repository
-    lease_repository = agent_lease_repository
     strategy_repository = strategy_memory_repository
     workflow_repository = workflow_run_repository
     case_repository = prediction_case_repository
@@ -305,12 +299,9 @@ def build_industry_service_runtime_bindings(
         operating_cycle_repository=cycle_repository,
         assignment_repository=assignment_repo,
         agent_report_repository=report_repository,
-        agent_runtime_repository=runtime_repository,
-        agent_thread_binding_repository=thread_binding_repository,
+        executor_runtime_service=executor_runtime_service,
         schedule_repository=schedules,
-        agent_mailbox_repository=mailbox_repository,
         agent_checkpoint_repository=checkpoint_repository,
-        agent_lease_repository=lease_repository,
         strategy_memory_repository=strategy_repository,
         workflow_run_repository=workflow_repository,
         prediction_case_repository=case_repository,
@@ -330,6 +321,150 @@ def build_industry_service_runtime_bindings(
         report_replan_engine=report_replan_engine,
         memory_activation_service=memory_activation_service,
         knowledge_service=knowledge_service,
+    )
+
+
+def _industry_executor_metadata(
+    runtime: object | None,
+) -> dict[str, Any]:
+    metadata = getattr(runtime, "metadata", None)
+    return dict(metadata) if isinstance(metadata, dict) else {}
+
+
+def _industry_executor_owner_agent_id(runtime: object | None) -> str | None:
+    metadata = _industry_executor_metadata(runtime)
+    return _string(metadata.get("owner_agent_id")) or _string(metadata.get("agent_id"))
+
+
+def _industry_executor_instance_id(runtime: object | None) -> str | None:
+    metadata = _industry_executor_metadata(runtime)
+    return _string(metadata.get("industry_instance_id"))
+
+
+def _industry_executor_role_id(runtime: object | None) -> str | None:
+    return normalize_industry_role_id(
+        _string(getattr(runtime, "role_id", None))
+        or _string(_industry_executor_metadata(runtime).get("industry_role_id")),
+    )
+
+
+def _list_industry_executor_runtimes(
+    owner: object,
+    *,
+    industry_instance_id: str | None = None,
+    agent_id: str | None = None,
+    role_id: str | None = None,
+) -> list[ExecutorRuntimeInstanceRecord]:
+    service = getattr(owner, "_executor_runtime_service", None)
+    lister = getattr(service, "list_runtimes", None)
+    if not callable(lister):
+        return []
+    normalized_role_id = normalize_industry_role_id(role_id)
+    filters: dict[str, object] = {}
+    if normalized_role_id is not None:
+        filters["role_id"] = normalized_role_id
+    try:
+        candidates = list(lister(formal_only=True, **filters) or [])
+    except TypeError:
+        candidates = list(lister(**filters) or [])
+    except Exception:
+        return []
+    output: list[ExecutorRuntimeInstanceRecord] = []
+    normalized_instance_id = _string(industry_instance_id)
+    normalized_agent_id = _string(agent_id)
+    for runtime in candidates:
+        runtime_instance_id = _industry_executor_instance_id(runtime)
+        runtime_agent_id = _industry_executor_owner_agent_id(runtime)
+        runtime_role_id = _industry_executor_role_id(runtime)
+        if normalized_instance_id is not None and runtime_instance_id != normalized_instance_id:
+            continue
+        if normalized_agent_id is not None and runtime_agent_id != normalized_agent_id:
+            continue
+        if normalized_role_id is not None and runtime_role_id != normalized_role_id:
+            continue
+        output.append(runtime)
+    return output
+
+
+def _get_industry_executor_runtime(
+    owner: object,
+    *,
+    industry_instance_id: str | None = None,
+    agent_id: str | None = None,
+    role_id: str | None = None,
+) -> ExecutorRuntimeInstanceRecord | None:
+    runtimes = _list_industry_executor_runtimes(
+        owner,
+        industry_instance_id=industry_instance_id,
+        agent_id=agent_id,
+        role_id=role_id,
+    )
+    if not runtimes:
+        return None
+    return max(
+        runtimes,
+        key=lambda item: (
+            getattr(item, "updated_at", None) or getattr(item, "created_at", None),
+            getattr(item, "created_at", None),
+        ),
+    )
+
+
+def _list_industry_executor_thread_bindings(
+    owner: object,
+    *,
+    industry_instance_id: str | None = None,
+    agent_id: str | None = None,
+    role_id: str | None = None,
+    thread_id: str | None = None,
+) -> list[ExecutorThreadBindingRecord]:
+    service = getattr(owner, "_executor_runtime_service", None)
+    lister = getattr(service, "list_thread_bindings", None)
+    if not callable(lister):
+        return []
+    normalized_role_id = normalize_industry_role_id(role_id)
+    filters: dict[str, object] = {"limit": None}
+    if thread_id is not None:
+        filters["thread_id"] = thread_id
+    if normalized_role_id is not None:
+        filters["role_id"] = normalized_role_id
+    try:
+        candidates = list(lister(**filters) or [])
+    except Exception:
+        return []
+    normalized_instance_id = _string(industry_instance_id)
+    normalized_agent_id = _string(agent_id)
+    output: list[ExecutorThreadBindingRecord] = []
+    for binding in candidates:
+        metadata = dict(getattr(binding, "metadata", None) or {})
+        if normalized_instance_id is not None and _string(metadata.get("industry_instance_id")) != normalized_instance_id:
+            continue
+        if normalized_agent_id is not None and _string(metadata.get("owner_agent_id")) != normalized_agent_id:
+            continue
+        if normalized_role_id is not None:
+            binding_role_id = normalize_industry_role_id(
+                _string(metadata.get("industry_role_id")) or _string(getattr(binding, "role_id", None)),
+            )
+            if binding_role_id != normalized_role_id:
+                continue
+        output.append(binding)
+    return output
+
+
+def _get_industry_executor_thread_binding(
+    owner: object,
+    *,
+    thread_id: str,
+) -> ExecutorThreadBindingRecord | None:
+    bindings = _list_industry_executor_thread_bindings(owner, thread_id=thread_id)
+    if not bindings:
+        return None
+    return max(
+        bindings,
+        key=lambda item: (
+            getattr(item, "updated_at", None) or getattr(item, "created_at", None),
+            getattr(item, "created_at", None),
+        ),
     )
 
 _REMOTE_RECOMMENDATION_ROLE_LIMIT = 12

@@ -935,6 +935,35 @@
     - 结果：`10 passed in 26.40s`
     - 验收层级：`L1 + L2`
 
+## 1.0.29 `2026-04-24` external executor model governance correction（formal sidecar uses system model truth）
+
+- 本轮纠正的是 external executor 的模型治理边界，不是新增第二套执行链：
+  - `src/copaw/kernel/runtime_coordination.py`
+    - formal sidecar launch 现在只从 system runtime-provider facade 解析 `model_ref`
+    - 当 runtime provider facade 存在时，`RoleExecutorBinding.model_policy_id` 与默认 model-policy 不再驱动 live sidecar model selection
+    - formal payload 现明确把 executor runtime 的 `model_policy_id` 置空，并把 `model_ownership_mode` 收口到 `copaw_managed`
+  - `src/copaw/app/routers/capability_market.py`
+    - `POST /capability-market/executor-providers/install` 不再为 formal provider intake 持久化 executor-scoped `model_policy/default_model_ref`
+    - install API 仍可接受这些 compatibility 字段，但它们不再进入 formal binding truth
+  - `tests/app/test_external_executor_live_smoke.py`
+    - live smoke 现在会显式断言：真实 sidecar runtime 的 `model_ref` 来自 system runtime-provider contract，而不是 executor install payload 或 binding 上的专属模型配置
+- 当前能诚实写出的结论：
+  - external executor 的 formal model truth 已统一收口到系统模型配置
+  - executor-scoped model policy 仍可作为 compatibility 数据存在于 state/service 层，但不再驱动正式 sidecar 调用
+- fresh 验收证据：
+  - focused regression：
+    - 命令：`python -m pytest tests/app/test_capability_market_api.py tests/kernel/test_main_brain_executor_runtime_integration.py tests/app/test_external_executor_live_smoke.py tests/adapters/test_codex_stdio_transport.py -q`
+    - 结果：`84 passed, 1 skipped in 105.82s`
+    - 验收层级：`L1 + L2`
+  - `L3` live smoke：
+    - 命令：`COPAW_RUN_EXTERNAL_EXECUTOR_LIVE_SMOKE=1 python -m pytest tests/app/test_external_executor_live_smoke.py -q -k provider_intake_and_runtime_writeback`
+    - 结果：连续 `2` 轮分别为 `1 passed, 4 deselected in 31.05s`、`1 passed, 4 deselected in 20.84s`
+    - 验收层级：`L3 + selected L4`
+  - targeted RED/GREEN：
+    - 命令：`python -m pytest tests/app/test_capability_market_api.py -q -k executor_provider_install_persists_formal_provider_intake` 与 `python -m pytest tests/kernel/test_main_brain_executor_runtime_integration.py -q -k forwards_system_model_and_sidecar_provider_payload`
+    - 结果：先 RED，再 GREEN
+    - 验收层级：`L1`
+
 ## 1.1.1 `2026-04-07` Buddy 领域能力阶段收口补充
 
 - Buddy 当前成长阶段的正式真相已从关系经验切到 active `BuddyDomainCapabilityRecord`

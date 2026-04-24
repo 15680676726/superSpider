@@ -16,12 +16,12 @@ from copaw.app.runtime_threads import (
 from copaw.kernel.models import KernelTask
 from copaw.kernel.persistence import encode_kernel_task_metadata
 from copaw.state import (
-    AgentThreadBindingRecord,
+    ExecutorRuntimeInstanceRecord,
+    ExecutorThreadBindingRecord,
     HumanAssistTaskRecord,
     SQLiteStateStore,
     WorkContextRecord,
 )
-from copaw.state.executor_runtime_service import ExecutorRuntimeService
 from copaw.state.human_assist_task_service import HumanAssistTaskService
 from copaw.state.repositories import SqliteHumanAssistTaskRepository
 
@@ -152,43 +152,138 @@ class _FakeAgentProfileService:
         return None
 
 
-class _FakeThreadBindingRepository:
+class _FakeExecutorRuntimeService:
     def __init__(self) -> None:
-        bindings = [
-            AgentThreadBindingRecord(
-                thread_id="industry-chat:industry-v1-acme:execution-core",
-                agent_id="copaw-agent-runner",
-                session_id="industry-chat:industry-v1-acme:execution-core",
-                channel="console",
-                binding_kind="industry-role-alias",
-                industry_instance_id="industry-v1-acme",
-                industry_role_id="execution-core",
-                work_context_id="ctx-acme-execution-core",
-                owner_scope="pets-ops",
-            ),
-            AgentThreadBindingRecord(
-                thread_id="agent-chat:research-agent",
-                agent_id="research-agent",
-                session_id="agent-chat:research-agent",
-                channel="console",
-                binding_kind="agent-primary",
-            ),
-            # Binding with normalized (lowercase) role_id to test case-insensitive lookup
-            AgentThreadBindingRecord(
-                thread_id="industry-chat:industry-v1-acme:marketing-manager",
-                agent_id="marketing-agent",
-                session_id="industry-chat:industry-v1-acme:marketing-manager",
-                channel="console",
-                binding_kind="industry-role-alias",
-                industry_instance_id="industry-v1-acme",
-                industry_role_id="marketing-manager",
-                owner_scope="pets-ops",
-            ),
-        ]
-        self._bindings = {binding.thread_id: binding for binding in bindings}
+        self._runtimes: dict[str, ExecutorRuntimeInstanceRecord] = {}
+        self._bindings: dict[str, ExecutorThreadBindingRecord] = {}
+        self._register_thread(
+            thread_id="industry-chat:industry-v1-acme:execution-core",
+            agent_id="copaw-agent-runner",
+            role_id="execution-core",
+            industry_instance_id="industry-v1-acme",
+            owner_scope="pets-ops",
+            work_context_id="ctx-acme-execution-core",
+            agent_name="Execution Core",
+            role_name="Execution Core",
+        )
+        self._register_thread(
+            thread_id="agent-chat:research-agent",
+            agent_id="research-agent",
+            role_id=None,
+            industry_instance_id=None,
+            owner_scope=None,
+            work_context_id=None,
+            agent_name="Researcher",
+            role_name="Researcher",
+        )
+        self._register_thread(
+            thread_id="industry-chat:industry-v1-acme:marketing-manager",
+            agent_id="marketing-agent",
+            role_id="marketing-manager",
+            industry_instance_id="industry-v1-acme",
+            owner_scope="pets-ops",
+            work_context_id=None,
+            agent_name="Marketing Agent",
+            role_name="Marketing Manager",
+        )
 
-    def get_binding(self, thread_id: str):
-        return self._bindings.get(thread_id)
+    def _register_thread(
+        self,
+        *,
+        thread_id: str,
+        agent_id: str,
+        role_id: str | None,
+        industry_instance_id: str | None,
+        owner_scope: str | None,
+        work_context_id: str | None,
+        agent_name: str,
+        role_name: str | None,
+    ) -> None:
+        runtime_id = f"runtime:{thread_id}"
+        continuity = {
+            "control_thread_id": thread_id,
+            "session_id": thread_id,
+            "work_context_id": work_context_id,
+        }
+        if industry_instance_id is not None:
+            continuity["industry_instance_id"] = industry_instance_id
+        if role_id is not None:
+            continuity["industry_role_id"] = role_id
+        if owner_scope is not None:
+            continuity["owner_scope"] = owner_scope
+        runtime = ExecutorRuntimeInstanceRecord(
+            runtime_id=runtime_id,
+            executor_id="codex",
+            protocol_kind="app_server",
+            scope_kind="assignment",
+            assignment_id=f"assignment:{thread_id}",
+            role_id=role_id,
+            thread_id=thread_id,
+            runtime_status="ready",
+            metadata={
+                "owner_agent_id": agent_id,
+                "continuity": continuity,
+            },
+        )
+        binding = ExecutorThreadBindingRecord(
+            binding_id=f"binding:{thread_id}",
+            runtime_id=runtime_id,
+            role_id=role_id,
+            executor_provider_id="provider:codex",
+            assignment_id=f"assignment:{thread_id}",
+            thread_id=thread_id,
+            runtime_status="ready",
+            metadata={
+                "industry_instance_id": industry_instance_id,
+                "industry_role_id": role_id,
+                "owner_scope": owner_scope,
+                "agent_name": agent_name,
+                "role_name": role_name,
+                "continuity": continuity,
+            },
+        )
+        self._runtimes[runtime_id] = runtime
+        self._bindings[thread_id] = binding
+
+    def add_thread(
+        self,
+        *,
+        thread_id: str,
+        agent_id: str,
+        role_id: str | None,
+        industry_instance_id: str | None,
+        owner_scope: str | None,
+        work_context_id: str | None,
+        agent_name: str,
+        role_name: str | None,
+    ) -> None:
+        self._register_thread(
+            thread_id=thread_id,
+            agent_id=agent_id,
+            role_id=role_id,
+            industry_instance_id=industry_instance_id,
+            owner_scope=owner_scope,
+            work_context_id=work_context_id,
+            agent_name=agent_name,
+            role_name=role_name,
+        )
+
+    def get_runtime(self, runtime_id: str):
+        return self._runtimes.get(runtime_id)
+
+    def list_thread_bindings(
+        self,
+        *,
+        thread_id: str | None = None,
+        limit: int | None = None,
+        **_: object,
+    ):
+        bindings = list(self._bindings.values())
+        if isinstance(thread_id, str) and thread_id.strip():
+            bindings = [binding for binding in bindings if binding.thread_id == thread_id]
+        if isinstance(limit, int) and limit >= 0:
+            return bindings[:limit]
+        return bindings
 
     def list_bindings(
         self,
@@ -214,12 +309,47 @@ class _FakeThreadBindingRepository:
         return bindings
 
 
-class _FakeThreadBindingRepositoryWithoutWorkContext(_FakeThreadBindingRepository):
+class _FakeExecutorRuntimeServiceWithoutWorkContext(_FakeExecutorRuntimeService):
     def __init__(self) -> None:
         super().__init__()
         thread_id = "industry-chat:industry-v1-acme:execution-core"
         binding = self._bindings[thread_id]
-        self._bindings[thread_id] = binding.model_copy(update={"work_context_id": None})
+        runtime = self._runtimes[binding.runtime_id]
+        binding_continuity = dict(binding.metadata.get("continuity") or {})
+        binding_continuity["work_context_id"] = None
+        self._bindings[thread_id] = binding.model_copy(
+            update={
+                "metadata": {
+                    **dict(binding.metadata),
+                    "work_context_id": None,
+                    "continuity": binding_continuity,
+                },
+            },
+        )
+        runtime_continuity = dict(runtime.metadata.get("continuity") or {})
+        runtime_continuity["work_context_id"] = None
+        self._runtimes[binding.runtime_id] = runtime.model_copy(
+            update={
+                "metadata": {
+                    **dict(runtime.metadata),
+                    "continuity": runtime_continuity,
+                },
+            },
+        )
+
+    def list_thread_bindings(
+        self,
+        *,
+        thread_id: str | None = None,
+        limit: int | None = None,
+        **_: object,
+    ):
+        bindings = list(self._bindings.values())
+        if isinstance(thread_id, str) and thread_id.strip():
+            bindings = [binding for binding in bindings if binding.thread_id == thread_id]
+        if isinstance(limit, int) and limit >= 0:
+            return bindings[:limit]
+        return bindings
 
 
 class _FakeTaskRepository:
@@ -402,7 +532,6 @@ def _build_app(
     history_reader: _FakeHistoryReader | None = None,
     industry_service: _FakeIndustryService | None = None,
     human_assist_task_service: object | None = None,
-    thread_binding_repository: object | None = None,
     executor_runtime_service: object | None = None,
     task_repository: object | None = None,
     work_context_repository: object | None = None,
@@ -415,10 +544,7 @@ def _build_app(
     app.state.session_backend = session_backend
     app.state.industry_service = industry_service or _FakeIndustryService()
     app.state.agent_profile_service = _FakeAgentProfileService()
-    app.state.agent_thread_binding_repository = (
-        thread_binding_repository or _FakeThreadBindingRepository()
-    )
-    app.state.executor_runtime_service = executor_runtime_service
+    app.state.executor_runtime_service = executor_runtime_service or _FakeExecutorRuntimeService()
     app.state.task_repository = task_repository or _FakeTaskRepository()
     app.state.task_runtime_repository = _FakeTaskRuntimeRepository()
     app.state.work_context_repository = work_context_repository or _FakeWorkContextRepository()
@@ -457,32 +583,21 @@ def test_runtime_conversation_detail_resolves_industry_thread() -> None:
 def test_runtime_conversation_detail_resolves_executor_thread_binding_without_actor_binding(
     tmp_path,
 ) -> None:
-    state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
-    executor_runtime_service = ExecutorRuntimeService(state_store=state_store)
-    runtime = executor_runtime_service.create_or_reuse_runtime(
-        executor_id="codex",
-        protocol_kind="app_server",
-        scope_kind="assignment",
-        assignment_id="assignment-acme-exec",
+    _ = tmp_path
+    executor_runtime_service = _FakeExecutorRuntimeService()
+    executor_runtime_service.add_thread(
+        thread_id="industry-chat:industry-v1-acme:execution-core",
+        agent_id="copaw-agent-runner",
         role_id="execution-core",
-        thread_id="industry-chat:industry-v1-acme:execution-core",
-        metadata={"owner_agent_id": "copaw-agent-runner"},
-        continuity_metadata={
-            "control_thread_id": "industry-chat:industry-v1-acme:execution-core",
-            "session_id": "industry-chat:industry-v1-acme:execution-core",
-            "work_context_id": "ctx-executor-only-acme",
-        },
-    )
-    executor_runtime_service.mark_runtime_ready(
-        runtime.runtime_id,
-        thread_id="industry-chat:industry-v1-acme:execution-core",
-        metadata={"owner_agent_id": "copaw-agent-runner"},
+        industry_instance_id="industry-v1-acme",
+        owner_scope="pets-ops",
+        work_context_id="ctx-executor-only-acme",
+        agent_name="Execution Core",
+        role_name="Execution Core",
     )
     app, history_reader = _build_app(
-        thread_binding_repository=None,
         executor_runtime_service=executor_runtime_service,
     )
-    app.state.agent_thread_binding_repository = None
     client = TestClient(app)
 
     response = client.get(
@@ -499,21 +614,18 @@ def test_runtime_conversation_detail_resolves_executor_thread_binding_without_ac
 
 
 def test_runtime_conversation_detail_exposes_buddy_profile_id_for_buddy_control_thread() -> None:
-    repository = _FakeThreadBindingRepository()
-    repository._bindings["industry-chat:buddy:profile-1:domain-stock:execution-core"] = (
-        AgentThreadBindingRecord(
-            thread_id="industry-chat:buddy:profile-1:domain-stock:execution-core",
-            agent_id="copaw-agent-runner",
-            session_id="industry-chat:buddy:profile-1:domain-stock:execution-core",
-            channel="console",
-            binding_kind="industry-role-alias",
-            industry_instance_id="buddy:profile-1:domain-stock",
-            industry_role_id="execution-core",
-            work_context_id="ctx-buddy-stock",
-            owner_scope="profile-1",
-        )
+    executor_runtime_service = _FakeExecutorRuntimeService()
+    executor_runtime_service.add_thread(
+        thread_id="industry-chat:buddy:profile-1:domain-stock:execution-core",
+        agent_id="copaw-agent-runner",
+        role_id="execution-core",
+        industry_instance_id="buddy:profile-1:domain-stock",
+        owner_scope="profile-1",
+        work_context_id="ctx-buddy-stock",
+        agent_name="Execution Core",
+        role_name="Execution Core",
     )
-    app, _ = _build_app(thread_binding_repository=repository)
+    app, _ = _build_app(executor_runtime_service=executor_runtime_service)
     client = TestClient(app)
 
     response = client.get(
@@ -553,7 +665,7 @@ def test_runtime_conversation_detail_resolves_buddy_control_thread_without_bindi
             return super().get_instance_detail(instance_id)
 
     app, history_reader = _build_app(
-        thread_binding_repository=_FakeThreadBindingRepositoryWithoutWorkContext(),
+        executor_runtime_service=_FakeExecutorRuntimeServiceWithoutWorkContext(),
         industry_service=_BuddyIndustryService(),
     )
     client = TestClient(app)
@@ -846,7 +958,7 @@ def test_runtime_conversation_detail_rejects_task_thread_ids() -> None:
 
 def test_runtime_conversation_detail_infers_bound_context_from_control_thread() -> None:
     app, _history_reader = _build_app(
-        thread_binding_repository=_FakeThreadBindingRepositoryWithoutWorkContext(),
+        executor_runtime_service=_FakeExecutorRuntimeServiceWithoutWorkContext(),
     )
     client = TestClient(app)
 

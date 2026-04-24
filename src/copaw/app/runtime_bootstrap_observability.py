@@ -42,9 +42,6 @@ def build_runtime_observability(
         ArtifactStore(ledger=evidence_ledger),
     )
     environment_service.set_runtime_event_bus(runtime_event_bus)
-    environment_service.set_agent_lease_repository(
-        repositories.agent_lease_repository,
-    )
     return (
         evidence_ledger,
         environment_registry,

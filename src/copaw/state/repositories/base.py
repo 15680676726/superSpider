@@ -8,12 +8,8 @@ from typing import Optional, Sequence
 
 from ..models import (
     AgentCheckpointRecord,
-    AgentLeaseRecord,
-    AgentMailboxRecord,
     AgentReportRecord,
     AssignmentRecord,
-    AgentRuntimeRecord,
-    AgentThreadBindingRecord,
     AutomationLoopRuntimeRecord,
     BacklogItemRecord,
     DecisionRequestRecord,
@@ -86,63 +82,8 @@ from ..models_surface_learning import (
 from ..models_work_context import WorkContextRecord
 
 
-class BaseAgentRuntimeRepository(ABC):
-    """Abstract repository for persisted actor runtime records."""
-
-    @abstractmethod
-    def get_runtime(self, agent_id: str) -> Optional[AgentRuntimeRecord]:
-        raise NotImplementedError
-
-    @abstractmethod
-    def list_runtimes(
-        self,
-        *,
-        runtime_status: str | None = None,
-        desired_state: str | None = None,
-        industry_instance_id: str | None = None,
-        limit: int | None = None,
-    ) -> list[AgentRuntimeRecord]:
-        raise NotImplementedError
-
-    @abstractmethod
-    def upsert_runtime(self, runtime: AgentRuntimeRecord) -> AgentRuntimeRecord:
-        raise NotImplementedError
-
-    @abstractmethod
-    def delete_runtime(self, agent_id: str) -> bool:
-        raise NotImplementedError
-
-
-class BaseAgentMailboxRepository(ABC):
-    """Abstract repository for actor mailbox entries."""
-
-    @abstractmethod
-    def get_item(self, item_id: str) -> Optional[AgentMailboxRecord]:
-        raise NotImplementedError
-
-    @abstractmethod
-    def list_items(
-        self,
-        *,
-        agent_id: str | None = None,
-        status: str | None = None,
-        conversation_thread_id: str | None = None,
-        work_context_id: str | None = None,
-        limit: int | None = None,
-    ) -> list[AgentMailboxRecord]:
-        raise NotImplementedError
-
-    @abstractmethod
-    def upsert_item(self, item: AgentMailboxRecord) -> AgentMailboxRecord:
-        raise NotImplementedError
-
-    @abstractmethod
-    def delete_item(self, item_id: str) -> bool:
-        raise NotImplementedError
-
-
 class BaseAgentCheckpointRepository(ABC):
-    """Abstract repository for actor execution checkpoints."""
+    """Abstract repository for execution continuity checkpoints."""
 
     @abstractmethod
     def get_checkpoint(self, checkpoint_id: str) -> Optional[AgentCheckpointRecord]:
@@ -169,64 +110,6 @@ class BaseAgentCheckpointRepository(ABC):
 
     @abstractmethod
     def delete_checkpoint(self, checkpoint_id: str) -> bool:
-        raise NotImplementedError
-
-
-class BaseAgentLeaseRepository(ABC):
-    """Abstract repository for persisted actor lease records."""
-
-    @abstractmethod
-    def get_lease(self, lease_id: str) -> Optional[AgentLeaseRecord]:
-        raise NotImplementedError
-
-    @abstractmethod
-    def list_leases(
-        self,
-        *,
-        agent_id: str | None = None,
-        lease_status: str | None = None,
-        lease_kind: str | None = None,
-        limit: int | None = None,
-    ) -> list[AgentLeaseRecord]:
-        raise NotImplementedError
-
-    @abstractmethod
-    def upsert_lease(self, lease: AgentLeaseRecord) -> AgentLeaseRecord:
-        raise NotImplementedError
-
-    @abstractmethod
-    def delete_lease(self, lease_id: str) -> bool:
-        raise NotImplementedError
-
-
-class BaseAgentThreadBindingRepository(ABC):
-    """Abstract repository for actor-first thread binding records."""
-
-    @abstractmethod
-    def get_binding(self, thread_id: str) -> Optional[AgentThreadBindingRecord]:
-        raise NotImplementedError
-
-    @abstractmethod
-    def list_bindings(
-        self,
-        *,
-        agent_id: str | None = None,
-        industry_instance_id: str | None = None,
-        work_context_id: str | None = None,
-        active_only: bool = False,
-        limit: int | None = None,
-    ) -> list[AgentThreadBindingRecord]:
-        raise NotImplementedError
-
-    @abstractmethod
-    def upsert_binding(
-        self,
-        binding: AgentThreadBindingRecord,
-    ) -> AgentThreadBindingRecord:
-        raise NotImplementedError
-
-    @abstractmethod
-    def delete_binding(self, thread_id: str) -> bool:
         raise NotImplementedError
 
 
@@ -387,6 +270,10 @@ class BaseExecutorRuntimeRepository(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def delete_runtime(self, runtime_id: str) -> bool:
+        raise NotImplementedError
+
+    @abstractmethod
     def get_role_contract(self, role_id: str) -> Optional[RoleContractRecord]:
         raise NotImplementedError
 
@@ -539,6 +426,10 @@ class BaseExecutorRuntimeRepository(ABC):
         self,
         record: ExecutorThreadBindingRecord,
     ) -> ExecutorThreadBindingRecord:
+        raise NotImplementedError
+
+    @abstractmethod
+    def delete_thread_binding(self, binding_id: str) -> bool:
         raise NotImplementedError
 
     @abstractmethod

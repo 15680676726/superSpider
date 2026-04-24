@@ -935,11 +935,21 @@ class AssignmentExecutorRuntimeCoordinator:
             or _text(assignment_metadata.get("current_risk_level"))
         )
         sidecar_launch_payload = None
-        if model_ownership_mode in {"copaw_managed", "hybrid"}:
+        if self._provider_runtime_facade is not None:
             sidecar_launch_payload = build_sidecar_provider_injection_payload(
                 provider_runtime_facade=self._provider_runtime_facade,
-                model_ref=model_ref,
+                model_ref=None,
             )
+            # Formal sidecar execution uses the system runtime-provider model as the
+            # single model truth; executor-scoped model policies remain compatibility
+            # data and do not drive the live launch payload.
+            model_policy_id = None
+            model_ownership_mode = "copaw_managed"
+            operator_payload = _mapping(sidecar_launch_payload.get("operator_payload"))
+            provider_payload = _mapping(operator_payload.get("provider"))
+            resolved_model_ref = _text(provider_payload.get("model"))
+            if resolved_model_ref is not None:
+                model_ref = resolved_model_ref
         return ExecutorRuntimeSelection(
             assignment_id=assignment_id,
             role_id=role_id,

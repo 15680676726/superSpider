@@ -33,11 +33,7 @@ from .sqlite_predictions import (
 )
 from .sqlite_governance_agents import (
     SqliteAgentCheckpointRepository,
-    SqliteAgentLeaseRepository,
-    SqliteAgentMailboxRepository,
     SqliteAgentProfileOverrideRepository,
-    SqliteAgentRuntimeRepository,
-    SqliteAgentThreadBindingRepository,
     SqliteCapabilityOverrideRepository,
     SqliteDecisionRequestRepository,
     SqliteGoalOverrideRepository,

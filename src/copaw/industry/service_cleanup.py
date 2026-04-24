@@ -156,26 +156,26 @@ class _IndustryCleanupMixin:
                 snapshot = override.model_dump(mode="json")
         if snapshot is None:
             return None
-        if self._agent_runtime_repository is not None:
-            runtime = self._agent_runtime_repository.get_runtime(agent_id)
-            if runtime is not None:
-                snapshot.update(
-                    {
-                        "actor_key": runtime.actor_key,
-                        "actor_fingerprint": runtime.actor_fingerprint,
-                        "runtime_status": runtime.runtime_status,
-                        "desired_state": runtime.desired_state,
-                        "queue_depth": runtime.queue_depth,
-                        "current_mailbox_id": runtime.current_mailbox_id,
-                        "current_environment_id": runtime.current_environment_id,
-                        "last_checkpoint_id": runtime.last_checkpoint_id,
-                    },
-                )
-        if self._agent_thread_binding_repository is not None:
-            bindings = self._agent_thread_binding_repository.list_bindings(
-                agent_id=agent_id,
-                active_only=False,
+        runtime = _get_industry_executor_runtime(self, agent_id=agent_id)
+        if runtime is not None:
+            metadata = _industry_executor_metadata(runtime)
+            snapshot.update(
+                {
+                    "actor_key": _string(metadata.get("actor_key")),
+                    "actor_fingerprint": _string(metadata.get("actor_fingerprint")),
+                    "runtime_status": _string(metadata.get("seat_runtime_status"))
+                    or _string(getattr(runtime, "runtime_status", None)),
+                    "desired_state": _string(metadata.get("desired_state")),
+                    "queue_depth": int(metadata.get("queue_depth") or 0),
+                    "current_environment_id": _string(metadata.get("current_environment_id")),
+                    "last_checkpoint_id": _string(metadata.get("last_checkpoint_id")),
+                },
             )
+        bindings = _list_industry_executor_thread_bindings(
+            self,
+            agent_id=agent_id,
+        )
+        if bindings:
             snapshot["thread_bindings"] = [
                 binding.model_dump(mode="json")
                 for binding in bindings
@@ -656,26 +656,21 @@ class _IndustryCleanupMixin:
             agent_id = _string(override.agent_id)
             if agent_id is not None:
                 agent_ids.add(agent_id)
-        if self._agent_runtime_repository is not None:
-            for runtime in self._agent_runtime_repository.list_runtimes(
-                industry_instance_id=record.instance_id,
-                limit=None,
-            ):
-                agent_id = _string(runtime.agent_id)
-                if agent_id is not None:
-                    agent_ids.add(agent_id)
+        for runtime in _list_industry_executor_runtimes(
+            self,
+            industry_instance_id=record.instance_id,
+        ):
+            agent_id = _industry_executor_owner_agent_id(runtime)
+            if agent_id is not None:
+                agent_ids.add(agent_id)
         return sorted(agent_ids)
 
     def _resolve_instance_thread_ids(self, instance_id: str) -> list[str]:
-        repository = self._agent_thread_binding_repository
-        if repository is None:
-            return []
         return [
             binding.thread_id
-            for binding in repository.list_bindings(
+            for binding in _list_industry_executor_thread_bindings(
+                self,
                 industry_instance_id=instance_id,
-                active_only=False,
-                limit=None,
             )
         ]
 
@@ -1250,24 +1245,30 @@ class _IndustryCleanupMixin:
         instance_id: str,
         reason: str,
     ) -> None:
-        repository = self._agent_runtime_repository
-        if repository is None:
+        service = self._executor_runtime_service
+        if service is None:
             return
         retired_at = _utc_now()
-        for runtime in repository.list_runtimes(
+        for runtime in _list_industry_executor_runtimes(
+            self,
             industry_instance_id=instance_id,
-            limit=None,
         ):
-            repository.upsert_runtime(
+            metadata = _industry_executor_metadata(runtime)
+            metadata.update(
+                {
+                    "desired_state": "retired",
+                    "seat_runtime_status": "retired",
+                    "queue_depth": 0,
+                    "current_task_id": None,
+                    "last_stopped_at": retired_at.isoformat(),
+                    "last_error_summary": reason,
+                },
+            )
+            service.upsert_runtime(
                 runtime.model_copy(
                     update={
-                        "desired_state": "retired",
-                        "runtime_status": "retired",
-                        "queue_depth": 0,
-                        "current_task_id": None,
-                        "current_mailbox_id": None,
-                        "last_stopped_at": retired_at,
-                        "last_error_summary": reason,
+                        "runtime_status": "stopped",
+                        "metadata": metadata,
                         "updated_at": retired_at,
                     },
                 ),
@@ -1287,8 +1288,8 @@ class _IndustryCleanupMixin:
         return deleted
 
     def _delete_instance_agent_runtimes(self, agent_ids: list[str]) -> int:
-        repository = self._agent_runtime_repository
-        if repository is None:
+        service = self._executor_runtime_service
+        if service is None:
             return 0
         deleted = 0
         for agent_id in {
@@ -1298,8 +1299,12 @@ class _IndustryCleanupMixin:
             and agent_id.strip()
             and not is_execution_core_agent_id(agent_id)
         }:
-            if repository.delete_runtime(agent_id):
-                deleted += 1
+            for runtime in _list_industry_executor_runtimes(
+                self,
+                agent_id=agent_id,
+            ):
+                if service.delete_runtime(runtime.runtime_id):
+                    deleted += 1
         return deleted
 
     def _delete_instance_mailbox_items(
@@ -1308,29 +1313,8 @@ class _IndustryCleanupMixin:
         agent_ids: list[str],
         thread_ids: list[str],
     ) -> int:
-        repository = self._agent_mailbox_repository
-        if repository is None:
-            return 0
-        deleted_item_ids: set[str] = set()
-        non_execution_agent_ids = [
-            agent_id
-            for agent_id in agent_ids
-            if not is_execution_core_agent_id(agent_id)
-        ]
-        for agent_id in non_execution_agent_ids:
-            for item in repository.list_items(agent_id=agent_id, limit=None):
-                deleted_item_ids.add(item.id)
-        for thread_id in thread_ids:
-            for item in repository.list_items(
-                conversation_thread_id=thread_id,
-                limit=None,
-            ):
-                deleted_item_ids.add(item.id)
-        deleted = 0
-        for item_id in deleted_item_ids:
-            if repository.delete_item(item_id):
-                deleted += 1
-        return deleted
+        _ = agent_ids, thread_ids
+        return 0
 
     def _delete_instance_checkpoints(
         self,
@@ -1360,34 +1344,19 @@ class _IndustryCleanupMixin:
         return deleted
 
     def _delete_instance_leases(self, agent_ids: list[str]) -> int:
-        repository = self._agent_lease_repository
-        if repository is None:
-            return 0
-        deleted = 0
-        for agent_id in {
-            agent_id.strip()
-            for agent_id in agent_ids
-            if isinstance(agent_id, str)
-            and agent_id.strip()
-            and not is_execution_core_agent_id(agent_id)
-        }:
-            for lease in repository.list_leases(agent_id=agent_id, limit=None):
-                if repository.delete_lease(lease.id):
-                    deleted += 1
-
-        return deleted
+        _ = agent_ids
+        return 0
 
     def _delete_instance_thread_bindings(self, instance_id: str) -> int:
-        repository = self._agent_thread_binding_repository
-        if repository is None:
+        service = self._executor_runtime_service
+        if service is None:
             return 0
         deleted = 0
-        for binding in repository.list_bindings(
+        for binding in _list_industry_executor_thread_bindings(
+            self,
             industry_instance_id=instance_id,
-            active_only=False,
-            limit=None,
         ):
-            if repository.delete_binding(binding.thread_id):
+            if service.delete_thread_binding(binding.binding_id):
                 deleted += 1
         return deleted
 

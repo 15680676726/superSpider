@@ -252,3 +252,158 @@ def test_stdio_transport_restart_reports_recovery_state(tmp_path) -> None:
     assert restart_status["restart_count"] == 1
     assert after_restart["connected"] is False
     assert recovered["connected"] is True
+
+
+def test_stdio_transport_injects_writable_default_codex_home_for_managed_codex_launch(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    module = importlib.import_module("copaw.adapters.executors.codex_stdio_transport")
+    transport_type = getattr(module, "CodexStdioTransport")
+    managed_root = tmp_path / "managed-sidecar"
+    managed_root.mkdir(parents=True, exist_ok=True)
+    codex_cmd = managed_root / "codex.cmd"
+    codex_cmd.write_text("@ECHO off\n", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    class _DummyPipe:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+        def write(self, _text: str) -> None:
+            return None
+
+        def flush(self) -> None:
+            return None
+
+        def readline(self) -> str:
+            return ""
+
+    class _DummyProcess:
+        def __init__(self, command, **kwargs) -> None:
+            captured["command"] = list(command)
+            captured["env"] = dict(kwargs.get("env") or {})
+            self.stdin = _DummyPipe()
+            self.stdout = _DummyPipe()
+            self.pid = 321
+
+        def poll(self):
+            return None
+
+        def terminate(self) -> None:
+            return None
+
+        def wait(self, timeout=None) -> int:
+            return 0
+
+        def kill(self) -> None:
+            return None
+
+    class _DummyThread:
+        def __init__(self, *args, **kwargs) -> None:
+            return None
+
+        def start(self) -> None:
+            return None
+
+    monkeypatch.setattr(module.subprocess, "Popen", _DummyProcess)
+    monkeypatch.setattr(module.threading, "Thread", _DummyThread)
+    user_home = tmp_path / "user-home"
+    monkeypatch.setattr(module.Path, "home", lambda: user_home)
+
+    transport = transport_type(
+        codex_command=(str(codex_cmd), "app-server"),
+        request_timeout_seconds=2.0,
+        startup_timeout_seconds=2.0,
+    )
+
+    try:
+        transport._ensure_connection()
+    finally:
+        transport.close()
+
+    launch_env = dict(captured["env"])
+    codex_home = Path(str(launch_env["CODEX_HOME"]))
+    assert codex_home.exists()
+    assert codex_home.is_dir()
+    assert codex_home.parent == managed_root
+
+
+def test_stdio_transport_prefers_existing_user_codex_home_for_managed_codex_launch(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    module = importlib.import_module("copaw.adapters.executors.codex_stdio_transport")
+    transport_type = getattr(module, "CodexStdioTransport")
+    managed_root = tmp_path / "managed-sidecar"
+    managed_root.mkdir(parents=True, exist_ok=True)
+    codex_cmd = managed_root / "codex.cmd"
+    codex_cmd.write_text("@ECHO off\n", encoding="utf-8")
+    user_home = tmp_path / "user-home"
+    user_codex_home = user_home / ".codex"
+    user_codex_home.mkdir(parents=True, exist_ok=True)
+    captured: dict[str, object] = {}
+
+    class _DummyPipe:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+        def write(self, _text: str) -> None:
+            return None
+
+        def flush(self) -> None:
+            return None
+
+        def readline(self) -> str:
+            return ""
+
+    class _DummyProcess:
+        def __init__(self, command, **kwargs) -> None:
+            captured["command"] = list(command)
+            captured["env"] = dict(kwargs.get("env") or {})
+            self.stdin = _DummyPipe()
+            self.stdout = _DummyPipe()
+            self.pid = 321
+
+        def poll(self):
+            return None
+
+        def terminate(self) -> None:
+            return None
+
+        def wait(self, timeout=None) -> int:
+            return 0
+
+        def kill(self) -> None:
+            return None
+
+    class _DummyThread:
+        def __init__(self, *args, **kwargs) -> None:
+            return None
+
+        def start(self) -> None:
+            return None
+
+    monkeypatch.setattr(module.subprocess, "Popen", _DummyProcess)
+    monkeypatch.setattr(module.threading, "Thread", _DummyThread)
+    monkeypatch.setattr(module.Path, "home", lambda: user_home)
+
+    transport = transport_type(
+        codex_command=(str(codex_cmd), "app-server"),
+        request_timeout_seconds=2.0,
+        startup_timeout_seconds=2.0,
+    )
+
+    try:
+        transport._ensure_connection()
+    finally:
+        transport.close()
+
+    launch_env = dict(captured["env"])
+    assert Path(str(launch_env["CODEX_HOME"])) == user_codex_home

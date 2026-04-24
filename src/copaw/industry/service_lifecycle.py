@@ -73,7 +73,6 @@ class _IndustryLifecycleMixin:
         media_service: object | None = None,
         memory_retain_service: object | None = None,
         work_context_service: object | None = None,
-        actor_mailbox_service: object | None = None,
         session_backend: object | None = None,
     ) -> None:
         self._goal_service = goal_service
@@ -94,12 +93,9 @@ class _IndustryLifecycleMixin:
         self._operating_cycle_repository = bindings.operating_cycle_repository
         self._assignment_repository = bindings.assignment_repository
         self._agent_report_repository = bindings.agent_report_repository
-        self._agent_runtime_repository = bindings.agent_runtime_repository
-        self._agent_thread_binding_repository = bindings.agent_thread_binding_repository
+        self._executor_runtime_service = bindings.executor_runtime_service
         self._schedule_repository = bindings.schedule_repository
-        self._agent_mailbox_repository = bindings.agent_mailbox_repository
         self._agent_checkpoint_repository = bindings.agent_checkpoint_repository
-        self._agent_lease_repository = bindings.agent_lease_repository
         self._strategy_memory_repository = bindings.strategy_memory_repository
         self._workflow_run_repository = bindings.workflow_run_repository
         self._prediction_case_repository = bindings.prediction_case_repository
@@ -119,7 +115,6 @@ class _IndustryLifecycleMixin:
         ] = {}
         self._schedule_writer = schedule_writer
         self._cron_manager = cron_manager
-        self._actor_mailbox_service = actor_mailbox_service
         self._operating_lane_service = bindings.operating_lane_service
         self._backlog_service = bindings.backlog_service
         self._operating_cycle_service = bindings.operating_cycle_service
@@ -2131,22 +2126,19 @@ class _IndustryLifecycleMixin:
         primary_assignment: AssignmentRecord | None,
         goal_link: tuple[str, str] | None,
     ) -> str:
-        existing = (
-            self._agent_runtime_repository.get_runtime(agent_id)
-            if self._agent_runtime_repository is not None
-            else None
-        )
+        existing = _get_industry_executor_runtime(self, agent_id=agent_id)
+        existing_metadata = _industry_executor_metadata(existing)
+        seat_runtime_status = _string(existing_metadata.get("seat_runtime_status"))
         if primary_assignment is not None:
             if primary_assignment.status == "running":
                 return "running"
             return "waiting"
-        if existing is not None and existing.runtime_status == "blocked":
+        if existing is not None and seat_runtime_status == "blocked":
             return "blocked"
         if existing is not None and (
-            existing.runtime_status == "running"
-            or existing.current_task_id
-            or existing.current_mailbox_id
-            or int(existing.queue_depth or 0) > 0
+            seat_runtime_status == "running"
+            or _string(existing_metadata.get("current_task_id")) is not None
+            or int(existing_metadata.get("queue_depth") or 0) > 0
         ):
             return "running"
         return "idle"
@@ -2651,8 +2643,6 @@ class _IndustryLifecycleMixin:
         )
         continued_terminal_task_ids: list[str] = []
         created_task_ids: list[str] = []
-        enqueue = getattr(self._actor_mailbox_service, "enqueue_item", None)
-        block_mailbox = getattr(self._actor_mailbox_service, "block_item", None)
         for current_assignment_id, assignment in assignments.items():
             next_step_index, latest_task = self._assignment_followup_step_index(
                 tasks=tasks_by_assignment_id.get(current_assignment_id, []),
@@ -2718,41 +2708,6 @@ class _IndustryLifecycleMixin:
                             },
                         ),
                     )
-                mailbox_item = None
-                if callable(enqueue):
-                    mailbox_item = enqueue(
-                        agent_id=task.owner_agent_id,
-                        task_id=task.id,
-                        work_context_id=task.work_context_id,
-                        source_agent_id=EXECUTION_CORE_AGENT_ID,
-                        parent_mailbox_id=None,
-                        envelope_type="task",
-                        title=assignment.title,
-                        summary=assignment.summary or assignment.title,
-                        capability_ref=task.capability_ref,
-                        conversation_thread_id=f"agent-chat:{task.owner_agent_id}",
-                        payload={
-                            "capability_ref": task.capability_ref,
-                            "environment_ref": task.environment_ref,
-                            "risk_level": task.risk_level,
-                            "payload": dict(task.payload or {}),
-                        },
-                        metadata={
-                            "industry_instance_id": record.instance_id,
-                            "industry_role_id": assignment.owner_role_id,
-                            "assignment_id": assignment.id,
-                            "lane_id": assignment.lane_id,
-                            "cycle_id": assignment.cycle_id,
-                            "work_context_id": task.work_context_id,
-                            "execution_source": "assignment-followup",
-                        },
-                    )
-                    if admitted.phase != "executing" and callable(block_mailbox):
-                        block_mailbox(
-                            mailbox_item.id,
-                            reason=admitted.summary or f"Task is in phase '{admitted.phase}'",
-                            task_id=task.id,
-                        )
                 created_task_ids.append(task.id)
                 primary_task_id = primary_task_id or task.id
                 admitted_phase = admitted.phase
@@ -3604,13 +3559,15 @@ class _IndustryLifecycleMixin:
             instance_id=record.instance_id,
             session_id=session_id,
         )
-        control_thread_binding = (
-            self._agent_thread_binding_repository.get_binding(control_thread_id)
-            if self._agent_thread_binding_repository is not None
-            else None
+        control_thread_binding = _get_industry_executor_thread_binding(
+            self,
+            thread_id=control_thread_id,
+        )
+        control_thread_binding_metadata = _mapping(
+            getattr(control_thread_binding, "metadata", None),
         )
         control_thread_work_context_id = _string(
-            getattr(control_thread_binding, "work_context_id", None),
+            control_thread_binding_metadata.get("work_context_id"),
         )
         chat_writeback_channel = _string(channel) or "console"
         chat_writeback_environment_ref = (
@@ -4977,49 +4934,12 @@ class _IndustryLifecycleMixin:
             kernel_tasks = compiler.compile_to_kernel_tasks(unit, specs=compiled_specs)
             if not kernel_tasks:
                 continue
-            enqueue = getattr(self._actor_mailbox_service, "enqueue_item", None)
-            block_mailbox = getattr(self._actor_mailbox_service, "block_item", None)
             primary_task_id: str | None = None
             for compiled_task in kernel_tasks:
                 task = compiled_task.model_copy(update={"title": assignment.title})
                 admitted = dispatcher.submit(task)
                 execution_result = None
-                mailbox_item = None
-                if callable(enqueue):
-                    mailbox_item = enqueue(
-                        agent_id=owner_agent_id,
-                        task_id=task.id,
-                        work_context_id=task.work_context_id,
-                        source_agent_id=EXECUTION_CORE_AGENT_ID,
-                        parent_mailbox_id=None,
-                        envelope_type="task",
-                        title=assignment.title,
-                        summary=assignment.summary or assignment.title,
-                        capability_ref=task.capability_ref,
-                        conversation_thread_id=f"agent-chat:{owner_agent_id}",
-                        payload={
-                            "capability_ref": task.capability_ref,
-                            "environment_ref": task.environment_ref,
-                            "risk_level": task.risk_level,
-                            "payload": dict(task.payload or {}),
-                        },
-                        metadata={
-                            "industry_instance_id": record.instance_id,
-                            "industry_role_id": owner_role_id,
-                            "assignment_id": assignment.id,
-                            "lane_id": assignment.lane_id,
-                            "cycle_id": assignment.cycle_id,
-                            "work_context_id": task.work_context_id,
-                            "execution_source": "assignment",
-                        },
-                    )
-                    if admitted.phase != "executing" and callable(block_mailbox):
-                        mailbox_item = block_mailbox(
-                            mailbox_item.id,
-                            reason=admitted.summary or f"Task is in phase '{admitted.phase}'",
-                            task_id=task.id,
-                        )
-                elif admitted.phase == "executing" and not execute_background:
+                if admitted.phase == "executing" and not execute_background:
                     execution_result = await dispatcher.execute_task(task.id)
                 created_task_ids.append(task.id)
                 primary_task_id = primary_task_id or task.id
@@ -5038,7 +4958,7 @@ class _IndustryLifecycleMixin:
                             if execution_result is not None
                             else admitted.summary
                         ),
-                        "mailbox_id": getattr(mailbox_item, "id", None),
+                        "mailbox_id": None,
                     },
                 )
             if primary_task_id is not None and self._assignment_repository is not None:

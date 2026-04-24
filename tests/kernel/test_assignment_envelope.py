@@ -10,15 +10,11 @@ from copaw.kernel import KernelDispatcher, TaskDelegationService
 from copaw.kernel.persistence import KernelTaskStore, decode_kernel_task_metadata
 from copaw.state import SQLiteStateStore, TaskRecord, TaskRuntimeRecord
 from copaw.state.repositories import (
-    SqliteAgentCheckpointRepository,
-    SqliteAgentMailboxRepository,
-    SqliteAgentRuntimeRepository,
     SqliteDecisionRequestRepository,
     SqliteRuntimeFrameRepository,
     SqliteTaskRepository,
     SqliteTaskRuntimeRepository,
 )
-from copaw.kernel import ActorMailboxService
 
 
 class _FakeCapabilityService:
@@ -62,9 +58,6 @@ def test_delegate_task_inherits_assignment_execution_envelope_without_mailbox_ru
     task_runtime_repository = SqliteTaskRuntimeRepository(store)
     runtime_frame_repository = SqliteRuntimeFrameRepository(store)
     decision_repository = SqliteDecisionRequestRepository(store)
-    runtime_repository = SqliteAgentRuntimeRepository(store)
-    mailbox_repository = SqliteAgentMailboxRepository(store)
-    checkpoint_repository = SqliteAgentCheckpointRepository(store)
 
     task_repository.upsert_task(
         TaskRecord(
@@ -103,18 +96,12 @@ def test_delegate_task_inherits_assignment_execution_envelope_without_mailbox_ru
         task_store=task_store,
         capability_service=_FakeCapabilityService(),
     )
-    mailbox_service = ActorMailboxService(
-        mailbox_repository=mailbox_repository,
-        runtime_repository=runtime_repository,
-        checkpoint_repository=checkpoint_repository,
-    )
     service = TaskDelegationService(
         task_repository=task_repository,
         task_runtime_repository=task_runtime_repository,
         kernel_dispatcher=dispatcher,
         evidence_ledger=evidence_ledger,
         industry_service=_FakeIndustryService(),
-        actor_mailbox_service=mailbox_service,
     )
 
     result = asyncio.run(
@@ -139,9 +126,8 @@ def test_delegate_task_inherits_assignment_execution_envelope_without_mailbox_ru
     payload_meta = metadata["payload"]["meta"]
     assert metadata["payload"]["assignment_id"] == "assignment-1"
     assert payload_meta["assignment_id"] == "assignment-1"
-    assert payload_meta["execution_source"] == "delegation-compat"
-    assert payload_meta["formal_surface"] is False
-    assert payload_meta["compatibility_mode"] == "delegation-compat"
+    assert payload_meta["execution_source"] == "executor-runtime"
+    assert payload_meta["formal_surface"] is True
+    assert "compatibility_mode" not in payload_meta
 
     assert result["mailbox_id"] is None
-    assert mailbox_repository.list_items(agent_id="worker", limit=10) == []

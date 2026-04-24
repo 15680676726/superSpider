@@ -32,6 +32,10 @@
     - 全局默认执行体
     - 按职业绑定执行体
     - 统一模型调用治理
+  - `2026-04-24` 纠偏补充：
+    - formal external-executor launch 不再从 `/capability-market/executor-providers/install` 持久化的 `default_model_ref / model_policy_id` 读取 live model
+    - system runtime-provider facade 现在是 external executor `model_ref` 的唯一正式来源
+    - executor binding 上残留的 `model_policy_id` 只允许作为 compatibility 字段存在，不得再被误读成 live sidecar model truth
   - Runtime Center、Chat、`/industry`、AgentWorkbench 不允许各自发明第二套 executor 状态或模型路由真相
 - `2026-04-07` Buddy 补充：
   - `POST /buddy/onboarding/direction-transition-preview` 已成为换方向时的正式 preview 前门，返回 `recommended_action + archived_matches + current_domain`

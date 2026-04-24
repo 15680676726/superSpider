@@ -8,7 +8,6 @@ from copaw.state import (
     AgentReportService,
     AgentReportRecord,
     AgentProfileOverrideRecord,
-    AgentRuntimeRecord,
     AssignmentRecord,
     BacklogItemRecord,
     CapabilityOverrideRecord,
@@ -40,7 +39,6 @@ from copaw.state import (
 from copaw.state.repositories import (
     SqliteAgentReportRepository,
     SqliteAgentProfileOverrideRepository,
-    SqliteAgentRuntimeRepository,
     SqliteAssignmentRepository,
     SqliteBacklogItemRepository,
     SqliteCapabilityOverrideRepository,
@@ -67,6 +65,10 @@ from copaw.state.repositories import (
     SqliteTaskRepository,
     SqliteTaskRuntimeRepository,
     SqliteWorkContextRepository,
+)
+from tests.shared.executor_runtime_compat import (
+    AgentRuntimeRecord,
+    SqliteAgentRuntimeRepository,
 )
 
 
@@ -284,7 +286,7 @@ def test_sqlite_agent_runtime_repository_recovers_after_live_state_db_is_deleted
                 "SELECT name FROM sqlite_master WHERE type = 'table'",
             ).fetchall()
         }
-    assert "agent_runtimes" in tables
+    assert "executor_runtime_instances" in tables
 
 
 def test_sqlite_human_assist_task_repository_round_trip(tmp_path) -> None:

@@ -21,7 +21,6 @@ from .runtime_center_mutation_helpers import (
     _get_runtime_center_facade_attr,
 )
 from .runtime_center_payloads import (
-    _actor_runtime_payload,
     _model_dump_or_dict,
     _public_agent_payload,
 )
@@ -52,10 +51,6 @@ def _resolve_agent_runtime_payload(
     agent_id: str,
     agent_profile: object | None,
 ) -> dict[str, object] | None:
-    runtime_repository = getattr(request.app.state, "agent_runtime_repository", None)
-    runtime = runtime_repository.get_runtime(agent_id) if runtime_repository is not None else None
-    if runtime is not None:
-        return _actor_runtime_payload(runtime)
     executor_runtime_service = getattr(request.app.state, "executor_runtime_service", None)
     lister = getattr(executor_runtime_service, "list_runtimes", None)
     if not callable(lister):
@@ -68,8 +63,6 @@ def _resolve_agent_runtime_payload(
         if str(metadata.get("owner_agent_id") or "").strip() == agent_id:
             resolved = candidate
             break
-    if resolved is None and candidates:
-        resolved = candidates[0]
     if resolved is None:
         return None
     payload = serialize_executor_runtime_record(resolved)

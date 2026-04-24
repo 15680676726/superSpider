@@ -238,27 +238,6 @@ def _resolve_runtime_chat_thread_metadata(
     control_thread_id: str,
 ) -> dict[str, object]:
     metadata: dict[str, object] = {}
-    repository = getattr(request.app.state, "agent_thread_binding_repository", None)
-    binding = None
-    getter = getattr(repository, "get_binding", None)
-    if callable(getter):
-        try:
-            binding = getter(control_thread_id)
-        except Exception:
-            binding = None
-    if binding is not None:
-        metadata["industry_instance_id"] = _first_non_empty_text(
-            getattr(binding, "industry_instance_id", None),
-        )
-        metadata["industry_role_id"] = _first_non_empty_text(
-            getattr(binding, "industry_role_id", None),
-        )
-        metadata["owner_scope"] = _first_non_empty_text(
-            getattr(binding, "owner_scope", None),
-        )
-        metadata["work_context_id"] = _first_non_empty_text(
-            getattr(binding, "work_context_id", None),
-        )
     executor_runtime_service = getattr(request.app.state, "executor_runtime_service", None)
     lister = getattr(executor_runtime_service, "list_thread_bindings", None)
     getter = getattr(executor_runtime_service, "get_runtime", None)

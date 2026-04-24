@@ -7,21 +7,21 @@ from copaw.kernel.agent_profile_service import AgentProfileService
 from copaw.kernel import KernelTask, KernelTaskStore
 from copaw.state import (
     AgentCheckpointRecord,
-    AgentMailboxRecord,
     DecisionRequestRecord,
     AgentProfileOverrideRecord,
-    AgentRuntimeRecord,
     TaskRecord,
     SQLiteStateStore,
 )
 from copaw.state.repositories import (
     SqliteAgentCheckpointRepository,
-    SqliteAgentMailboxRepository,
     SqliteAgentProfileOverrideRepository,
-    SqliteAgentRuntimeRepository,
     SqliteDecisionRequestRepository,
     SqliteTaskRepository,
     SqliteTaskRuntimeRepository,
+)
+from tests.shared.executor_runtime_compat import (
+    AgentRuntimeRecord,
+    SqliteAgentRuntimeRepository,
 )
 
 
@@ -161,7 +161,7 @@ def test_agent_profile_service_projects_runtime_only_actor(tmp_path) -> None:
         ),
     )
 
-    service = AgentProfileService(agent_runtime_repository=runtime_repo)
+    service = AgentProfileService(executor_runtime_service=runtime_repo.service)
     profile = service.get_agent("agent-1")
 
     assert profile is not None
@@ -224,7 +224,7 @@ def test_agent_profile_service_capability_surface_for_runtime_only_actor(tmp_pat
     )
 
     service = AgentProfileService(
-        agent_runtime_repository=runtime_repo,
+        executor_runtime_service=runtime_repo.service,
         task_repository=task_repo,
         task_runtime_repository=task_runtime_repo,
         decision_request_repository=decision_repo,
@@ -307,7 +307,7 @@ def test_agent_profile_service_capability_surface_reuses_mount_lookup_instead_of
 
     capability_service = _CountingCapabilityService()
     service = AgentProfileService(
-        agent_runtime_repository=runtime_repo,
+        executor_runtime_service=runtime_repo.service,
         capability_service=capability_service,
     )
 
@@ -386,7 +386,7 @@ def test_agent_profile_service_capability_surface_prefers_capability_lookup_api_
 
     capability_service = _LookupCapabilityService()
     service = AgentProfileService(
-        agent_runtime_repository=runtime_repo,
+        executor_runtime_service=runtime_repo.service,
         capability_service=capability_service,
     )
 
@@ -479,7 +479,7 @@ def test_agent_profile_service_capability_surfaces_batch_reuses_lookup_once(
 
     capability_service = _LookupCapabilityService()
     service = AgentProfileService(
-        agent_runtime_repository=runtime_repo,
+        executor_runtime_service=runtime_repo.service,
         capability_service=capability_service,
     )
 
@@ -566,10 +566,9 @@ def test_agent_profile_service_hides_legacy_goal_dispatch_from_prompt_projection
     )
 
 
-def test_agent_profile_service_prefers_runtime_mailbox_checkpoint_projection(tmp_path) -> None:
+def test_agent_profile_service_prefers_runtime_and_checkpoint_projection(tmp_path) -> None:
     store = SQLiteStateStore(tmp_path / "state.db")
     runtime_repo = SqliteAgentRuntimeRepository(store)
-    mailbox_repo = SqliteAgentMailboxRepository(store)
     checkpoint_repo = SqliteAgentCheckpointRepository(store)
     task_repo = SqliteTaskRepository(store)
     task_runtime_repo = SqliteTaskRuntimeRepository(store)
@@ -586,32 +585,14 @@ def test_agent_profile_service_prefers_runtime_mailbox_checkpoint_projection(tmp
             industry_role_id="operator",
             display_name="Ops Agent",
             role_name="Operations",
-            current_task_id="task-runtime",
-            current_mailbox_id="mailbox-1",
-            current_environment_id="session:industry:ops",
-            queue_depth=1,
-            last_result_summary="Runtime result",
             metadata={
                 "current_focus_kind": "assignment",
                 "current_focus_id": "assignment-runtime",
                 "current_focus": "Runtime projected assignment",
-            },
-        ),
-    )
-    mailbox_repo.upsert_item(
-        AgentMailboxRecord(
-            id="mailbox-1",
-            agent_id="agent-1",
-            task_id="task-mailbox",
-            title="Mailbox task",
-            summary="Mailbox summary",
-            status="running",
-            capability_ref="system:dispatch_query",
-            payload={"environment_ref": "session:industry:ops"},
-            metadata={
-                "current_focus_kind": "assignment",
-                "current_focus_id": "assignment-mailbox",
-                "current_focus": "Mailbox projected assignment",
+                "current_query": {"task_id": "task-runtime"},
+                "continuity": {"environment_ref": "session:industry:ops"},
+                "last_query_summary": "Runtime result",
+                "last_query_checkpoint_id": "checkpoint-1",
             },
         ),
     )
@@ -619,7 +600,6 @@ def test_agent_profile_service_prefers_runtime_mailbox_checkpoint_projection(tmp
         AgentCheckpointRecord(
             id="checkpoint-1",
             agent_id="agent-1",
-            mailbox_id="mailbox-1",
             task_id="task-checkpoint",
             checkpoint_kind="worker-step",
             status="ready",
@@ -637,8 +617,7 @@ def test_agent_profile_service_prefers_runtime_mailbox_checkpoint_projection(tmp
     service = AgentProfileService(
         task_repository=task_repo,
         task_runtime_repository=task_runtime_repo,
-        agent_runtime_repository=runtime_repo,
-        agent_mailbox_repository=mailbox_repo,
+        executor_runtime_service=runtime_repo.service,
         agent_checkpoint_repository=checkpoint_repo,
     )
     profile = service.get_agent("agent-1")
@@ -650,19 +629,18 @@ def test_agent_profile_service_prefers_runtime_mailbox_checkpoint_projection(tmp
     assert hasattr(profile, "current_goal_id") is False
     assert hasattr(profile, "current_goal") is False
     assert profile.current_task_id == "task-runtime"
-    assert profile.current_mailbox_id == "mailbox-1"
+    assert profile.current_mailbox_id is None
     assert profile.current_environment_id == "session:industry:ops"
-    assert profile.queue_depth == 1
+    assert profile.queue_depth == 0
     assert profile.today_output_summary == "Runtime result"
     assert profile.last_checkpoint_id == "checkpoint-1"
 
 
-def test_agent_profile_service_ignores_runtime_legacy_goal_focus_and_keeps_mailbox_checkpoint_compat(
+def test_agent_profile_service_ignores_runtime_legacy_goal_focus_and_keeps_checkpoint_compat(
     tmp_path,
 ) -> None:
     store = SQLiteStateStore(tmp_path / "state.db")
     runtime_repo = SqliteAgentRuntimeRepository(store)
-    mailbox_repo = SqliteAgentMailboxRepository(store)
     checkpoint_repo = SqliteAgentCheckpointRepository(store)
 
     runtime_repo.upsert_runtime(
@@ -683,22 +661,10 @@ def test_agent_profile_service_ignores_runtime_legacy_goal_focus_and_keeps_mailb
             },
         ),
     )
-    mailbox_repo.upsert_item(
-        AgentMailboxRecord(
-            id="mailbox-1",
-            agent_id="agent-1",
-            title="Mailbox task",
-            summary="Mailbox summary",
-            status="running",
-            capability_ref="system:dispatch_query",
-            metadata={"goal_id": "goal-mailbox", "goal_title": "Legacy mailbox goal"},
-        ),
-    )
     checkpoint_repo.upsert_checkpoint(
         AgentCheckpointRecord(
             id="checkpoint-1",
             agent_id="agent-1",
-            mailbox_id="mailbox-1",
             checkpoint_kind="worker-step",
             status="ready",
             phase="query-streaming",
@@ -711,8 +677,7 @@ def test_agent_profile_service_ignores_runtime_legacy_goal_focus_and_keeps_mailb
     )
 
     service = AgentProfileService(
-        agent_runtime_repository=runtime_repo,
-        agent_mailbox_repository=mailbox_repo,
+        executor_runtime_service=runtime_repo.service,
         agent_checkpoint_repository=checkpoint_repo,
     )
     profile = service.get_agent("agent-1")
@@ -728,7 +693,6 @@ def test_agent_profile_service_does_not_overlay_current_focus_with_legacy_goal_m
 ) -> None:
     store = SQLiteStateStore(tmp_path / "state.db")
     override_repo = SqliteAgentProfileOverrideRepository(store)
-    mailbox_repo = SqliteAgentMailboxRepository(store)
     checkpoint_repo = SqliteAgentCheckpointRepository(store)
 
     override_repo.upsert_override(
@@ -741,22 +705,10 @@ def test_agent_profile_service_does_not_overlay_current_focus_with_legacy_goal_m
             current_focus="Stale assignment",
         ),
     )
-    mailbox_repo.upsert_item(
-        AgentMailboxRecord(
-            id="mailbox-1",
-            agent_id="agent-1",
-            title="Mailbox task",
-            summary="Mailbox summary",
-            status="running",
-            capability_ref="system:dispatch_query",
-            metadata={"goal_id": "goal-mailbox", "goal_title": "Legacy mailbox goal"},
-        ),
-    )
     checkpoint_repo.upsert_checkpoint(
         AgentCheckpointRecord(
             id="checkpoint-1",
             agent_id="agent-1",
-            mailbox_id="mailbox-1",
             checkpoint_kind="worker-step",
             status="ready",
             phase="query-streaming",
@@ -770,7 +722,6 @@ def test_agent_profile_service_does_not_overlay_current_focus_with_legacy_goal_m
 
     service = AgentProfileService(
         override_repository=override_repo,
-        agent_mailbox_repository=mailbox_repo,
         agent_checkpoint_repository=checkpoint_repo,
     )
     profile = service.get_agent("agent-1")
@@ -781,12 +732,11 @@ def test_agent_profile_service_does_not_overlay_current_focus_with_legacy_goal_m
     assert profile.current_focus == "Stale assignment"
 
 
-def test_agent_profile_service_uses_mailbox_current_focus_when_runtime_focus_missing(
+def test_agent_profile_service_uses_checkpoint_current_focus_when_runtime_focus_missing(
     tmp_path,
 ) -> None:
     store = SQLiteStateStore(tmp_path / "state.db")
     runtime_repo = SqliteAgentRuntimeRepository(store)
-    mailbox_repo = SqliteAgentMailboxRepository(store)
     checkpoint_repo = SqliteAgentCheckpointRepository(store)
 
     runtime_repo.upsert_runtime(
@@ -804,26 +754,10 @@ def test_agent_profile_service_uses_mailbox_current_focus_when_runtime_focus_mis
             metadata={},
         ),
     )
-    mailbox_repo.upsert_item(
-        AgentMailboxRecord(
-            id="mailbox-1",
-            agent_id="agent-1",
-            title="Mailbox task",
-            summary="Mailbox summary",
-            status="running",
-            capability_ref="system:dispatch_query",
-            metadata={
-                "current_focus_kind": "assignment",
-                "current_focus_id": "assignment-mailbox",
-                "current_focus": "Mailbox projected assignment",
-            },
-        ),
-    )
     checkpoint_repo.upsert_checkpoint(
         AgentCheckpointRecord(
             id="checkpoint-1",
             agent_id="agent-1",
-            mailbox_id="mailbox-1",
             checkpoint_kind="worker-step",
             status="ready",
             phase="query-streaming",
@@ -837,38 +771,28 @@ def test_agent_profile_service_uses_mailbox_current_focus_when_runtime_focus_mis
     )
 
     service = AgentProfileService(
-        agent_runtime_repository=runtime_repo,
-        agent_mailbox_repository=mailbox_repo,
+        executor_runtime_service=runtime_repo.service,
         agent_checkpoint_repository=checkpoint_repo,
     )
     profile = service.get_agent("agent-1")
 
     assert profile is not None
     assert profile.current_focus_kind == "assignment"
-    assert profile.current_focus_id == "assignment-mailbox"
-    assert profile.current_focus == "Mailbox projected assignment"
+    assert profile.current_focus_id == "assignment-checkpoint"
+    assert profile.current_focus == "Checkpoint projected assignment"
 
 
-def test_agent_profile_service_uses_checkpoint_current_focus_when_runtime_and_mailbox_missing(
+def test_agent_profile_service_uses_checkpoint_current_focus_when_runtime_missing(
     tmp_path,
 ) -> None:
     store = SQLiteStateStore(tmp_path / "state.db")
-    runtime_repo = SqliteAgentRuntimeRepository(store)
+    override_repo = SqliteAgentProfileOverrideRepository(store)
     checkpoint_repo = SqliteAgentCheckpointRepository(store)
-
-    runtime_repo.upsert_runtime(
-        AgentRuntimeRecord(
+    override_repo.upsert_override(
+        AgentProfileOverrideRecord(
             agent_id="agent-1",
-            actor_key="industry-v1-ops:operator",
-            actor_fingerprint="fp-agent-1",
-            actor_class="industry-dynamic",
-            desired_state="active",
-            runtime_status="running",
-            industry_instance_id="industry-v1-ops",
-            industry_role_id="operator",
-            display_name="Ops Agent",
+            name="Ops Agent",
             role_name="Operations",
-            metadata={},
         ),
     )
     checkpoint_repo.upsert_checkpoint(
@@ -888,7 +812,7 @@ def test_agent_profile_service_uses_checkpoint_current_focus_when_runtime_and_ma
     )
 
     service = AgentProfileService(
-        agent_runtime_repository=runtime_repo,
+        override_repository=override_repo,
         agent_checkpoint_repository=checkpoint_repo,
     )
     profile = service.get_agent("agent-1")
@@ -926,7 +850,7 @@ def test_agent_profile_service_ignores_legacy_focus_alias_fields_without_current
         ),
     )
 
-    service = AgentProfileService(agent_runtime_repository=runtime_repo)
+    service = AgentProfileService(executor_runtime_service=runtime_repo.service)
     profile = service.get_agent("agent-legacy-focus")
 
     assert profile is not None
@@ -970,7 +894,7 @@ def test_agent_profile_service_detail_stats_drop_goal_count(tmp_path) -> None:
     service = AgentProfileService(
         task_repository=task_repo,
         task_runtime_repository=task_runtime_repo,
-        agent_runtime_repository=runtime_repo,
+        executor_runtime_service=runtime_repo.service,
     )
     detail = service.get_agent_detail("agent-1")
 
@@ -1044,7 +968,7 @@ def test_agent_profile_service_detail_reuses_canonical_evidence_projection(tmp_p
     service = AgentProfileService(
         task_repository=task_repo,
         task_runtime_repository=task_runtime_repo,
-        agent_runtime_repository=runtime_repo,
+        executor_runtime_service=runtime_repo.service,
         evidence_ledger=evidence_ledger,
     )
     detail = service.get_agent_detail("agent-1")

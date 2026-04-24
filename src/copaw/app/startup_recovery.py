@@ -21,12 +21,6 @@ class StartupRecoverySummary(BaseModel):
     recovered_at: datetime = Field(default_factory=_utc_now)
     reaped_expired_leases: int = 0
     recovered_orphaned_leases: int = 0
-    reaped_expired_actor_leases: int = 0
-    recovered_orphaned_actor_leases: int = 0
-    recovered_orphaned_mailbox_items: int = 0
-    requeued_orphaned_mailbox_items: int = 0
-    blocked_orphaned_mailbox_items: int = 0
-    resolved_orphaned_mailbox_items: int = 0
     expired_decisions: int = 0
     pending_decisions: int = 0
     hydrated_waiting_confirm_tasks: int = 0
@@ -436,7 +430,6 @@ def _recover_legacy_execution_core_chat_writebacks(
 def run_startup_recovery(
     *,
     environment_service: Any | None,
-    actor_mailbox_service: Any | None,
     decision_request_repository: Any | None,
     kernel_dispatcher: Any | None,
     kernel_task_store: Any | None,
@@ -471,18 +464,6 @@ def run_startup_recovery(
             )
         except Exception as exc:  # pragma: no cover - guardrail
             summary.notes.append(f"recover_orphaned_leases failed: {exc}")
-        try:
-            summary.reaped_expired_actor_leases = int(
-                environment_service.reap_expired_actor_leases(),
-            )
-        except Exception as exc:  # pragma: no cover - guardrail
-            summary.notes.append(f"reap_expired_actor_leases failed: {exc}")
-        try:
-            summary.recovered_orphaned_actor_leases = int(
-                environment_service.recover_orphaned_actor_leases(),
-            )
-        except Exception as exc:  # pragma: no cover - guardrail
-            summary.notes.append(f"recover_orphaned_actor_leases failed: {exc}")
 
     if decision_request_repository is not None:
         decisions = list(decision_request_repository.list_decision_requests())
@@ -529,34 +510,6 @@ def run_startup_recovery(
                 if task is not None and getattr(task, "phase", None) == "waiting-confirm":
                     summary.hydrated_waiting_confirm_tasks += 1
 
-    if actor_mailbox_service is not None:
-        recover_items = getattr(actor_mailbox_service, "recover_orphaned_items", None)
-        task_reader = None
-        if kernel_dispatcher is not None:
-            lifecycle = getattr(kernel_dispatcher, "lifecycle", None)
-            task_reader = getattr(lifecycle, "get_task", None)
-        if not callable(task_reader) and kernel_task_store is not None:
-            task_reader = getattr(kernel_task_store, "get", None)
-        if callable(recover_items):
-            try:
-                mailbox_summary = recover_items(task_reader=task_reader)
-                summary.recovered_orphaned_mailbox_items = int(
-                    mailbox_summary.get("total", 0),
-                )
-                summary.requeued_orphaned_mailbox_items = int(
-                    mailbox_summary.get("requeued", 0),
-                )
-                summary.blocked_orphaned_mailbox_items = int(
-                    mailbox_summary.get("blocked", 0),
-                )
-                summary.resolved_orphaned_mailbox_items = (
-                    int(mailbox_summary.get("completed", 0))
-                    + int(mailbox_summary.get("failed", 0))
-                    + int(mailbox_summary.get("cancelled", 0))
-                )
-            except Exception as exc:  # pragma: no cover - guardrail
-                summary.notes.append(f"recover_orphaned_mailbox_items failed: {exc}")
-
     _recover_legacy_execution_core_chat_writebacks(
         summary=summary,
         backlog_item_repository=backlog_item_repository,
@@ -580,17 +533,12 @@ def run_startup_recovery(
             summary.notes.append(f"schedule scan failed: {exc}")
 
     if exception_absorption_service is not None:
-        resolved_runtime_repository = runtime_repository or getattr(
-            actor_mailbox_service,
-            "_runtime_repository",
-            None,
-        )
+        resolved_runtime_repository = runtime_repository
         list_runtimes = getattr(resolved_runtime_repository, "list_runtimes", None)
-        list_items = getattr(actor_mailbox_service, "list_items", None)
         list_human_assist = getattr(human_assist_task_service, "list_tasks", None)
         try:
             runtimes = list(list_runtimes(limit=None) if callable(list_runtimes) else [])
-            mailbox_items = list(list_items(limit=None) if callable(list_items) else [])
+            mailbox_items: list[Any] = []
             human_assist_tasks = list(
                 list_human_assist(limit=None) if callable(list_human_assist) else []
             )

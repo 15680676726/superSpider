@@ -752,7 +752,6 @@ class _QueryExecutionRuntimeMixin(
         memory_activation_service: Any | None = None,
         buddy_projection_service: Any | None = None,
         agent_checkpoint_repository: Any | None = None,
-        agent_runtime_repository: Any | None = None,
         executor_runtime_service: Any | None = None,
         governance_control_repository: Any | None = None,
         task_repository: Any | None = None,
@@ -783,7 +782,6 @@ class _QueryExecutionRuntimeMixin(
         self._memory_activation_service = memory_activation_service
         self._buddy_projection_service = buddy_projection_service
         self._agent_checkpoint_repository = agent_checkpoint_repository
-        self._agent_runtime_repository = agent_runtime_repository
         self._executor_runtime_service = executor_runtime_service
         self._governance_control_repository = governance_control_repository
         self._task_repository = task_repository
@@ -864,9 +862,6 @@ class _QueryExecutionRuntimeMixin(
 
     def set_agent_checkpoint_repository(self, agent_checkpoint_repository: Any | None) -> None:
         self._agent_checkpoint_repository = agent_checkpoint_repository
-
-    def set_agent_runtime_repository(self, agent_runtime_repository: Any | None) -> None:
-        self._agent_runtime_repository = agent_runtime_repository
 
     def set_executor_runtime_service(self, executor_runtime_service: Any | None) -> None:
         self._executor_runtime_service = executor_runtime_service
@@ -1010,16 +1005,37 @@ class _QueryExecutionRuntimeMixin(
                             continue
                         seen_runtime_ids.add(runtime_id)
                         candidate_runtimes.append(item)
+                if owner_agent_id is not None:
+                    try:
+                        owner_items = list(lister(formal_only=True) or [])
+                    except TypeError:
+                        owner_items = list(lister() or [])
+                    for item in owner_items:
+                        runtime_id = _first_non_empty(getattr(item, "runtime_id", None))
+                        if runtime_id is None or runtime_id in seen_runtime_ids:
+                            continue
+                        candidate_metadata = _mapping_value(getattr(item, "metadata", None))
+                        if _first_non_empty(candidate_metadata.get("owner_agent_id")) != owner_agent_id:
+                            continue
+                        seen_runtime_ids.add(runtime_id)
+                        candidate_runtimes.append(item)
                 normalized_thread_id = _first_non_empty(conversation_thread_id)
                 for candidate in candidate_runtimes:
                     candidate_metadata = _mapping_value(getattr(candidate, "metadata", None))
+                    candidate_owner_agent_id = _first_non_empty(
+                        candidate_metadata.get("owner_agent_id"),
+                    )
                     continuity = _mapping_value(candidate_metadata.get("continuity"))
                     if normalized_thread_id is not None and normalized_thread_id not in {
                         _first_non_empty(getattr(candidate, "thread_id", None)),
                         _first_non_empty(continuity.get("control_thread_id")),
                         _first_non_empty(continuity.get("session_id")),
                     }:
-                        continue
+                        if (
+                            owner_agent_id is None
+                            or candidate_owner_agent_id != owner_agent_id
+                        ):
+                            continue
                     runtime = candidate
                     break
         if runtime is None:
@@ -1262,7 +1278,6 @@ class _QueryExecutionRuntimeMixin(
     ) -> AsyncIterator[tuple[Msg, bool]]:
         agent = None
         lease = None
-        actor_lease = None
         session_state_loaded = False
         final_summary: str | None = None
         final_error: str | None = None
@@ -1308,36 +1323,6 @@ class _QueryExecutionRuntimeMixin(
                 execution_context=execution_context,
             )
             prep_timings.append(("mark_query_started", perf_counter() - segment_started_at))
-            try:
-                segment_started_at = perf_counter()
-                actor_lease = self._acquire_actor_runtime_lease(
-                    agent_id=owner_agent_id,
-                    task_id=kernel_task_id,
-                    conversation_thread_id=session_id,
-                )
-                prep_timings.append(("actor_lease", perf_counter() - segment_started_at))
-            except RuntimeError as exc:
-                lowered = str(exc).lower()
-                if "already leased by" in lowered:
-                    busy_msg = Msg(
-                        name="Spider Mesh",
-                        role="assistant",
-                        content=[
-                            TextBlock(
-                                type="text",
-                                text=(
-                                    "**执行编排暂时不可用（执行位正忙）**\n\n"
-                                    "- 当前执行核正在处理其它任务，为避免环境/会话冲突，本轮无法进入执行编排。\n"
-                                    "- 建议：等待当前执行完成后再重试；或在 AgentWorkbench / 运行面板里停止正在执行的任务后再发起。"
-                                ),
-                            )
-                        ],
-                    )
-                    final_summary = _message_preview(busy_msg)
-                    final_error = "actor_runtime_busy"
-                    yield busy_msg, True
-                    return
-                raise
             segment_started_at = perf_counter()
             self._assert_bound_chat_context(
                 request=request,
@@ -1598,7 +1583,6 @@ class _QueryExecutionRuntimeMixin(
 
             heartbeat = self._build_query_lease_heartbeat(
                 session_lease=lease,
-                actor_lease=actor_lease,
             )
             capability_trial_attribution = _normalize_capability_trial_attribution(
                 _mapping_value((execution_context or {}).get("capability_trial_attribution")),
@@ -1772,7 +1756,6 @@ class _QueryExecutionRuntimeMixin(
                     lease_token=lease.lease_token,
                     reason="query turn completed",
                 )
-            self._release_actor_runtime_lease(actor_lease)
             self._mark_actor_query_finished(
                 agent_id=owner_agent_id,
                 task_id=kernel_task_id,
@@ -2370,8 +2353,13 @@ class _QueryExecutionRuntimeMixin(
         channel: str,
         execution_context: dict[str, Any] | None = None,
     ) -> None:
-        runtime_repository = self._agent_runtime_repository
-        runtime = runtime_repository.get_runtime(agent_id) if runtime_repository is not None else None
+        executor_contract = self._resolve_executor_runtime_contract(
+            owner_agent_id=agent_id,
+            conversation_thread_id=conversation_thread_id,
+            kernel_task_id=task_id,
+        )
+        runtime = executor_contract.get("runtime")
+        runtime_updater = getattr(self._executor_runtime_service, "upsert_runtime", None)
         now = _utc_now()
         checkpoint = self._record_query_checkpoint(
             agent_id=agent_id,
@@ -2387,7 +2375,7 @@ class _QueryExecutionRuntimeMixin(
             execution_context=execution_context,
         )
         checkpoint_id = getattr(checkpoint, "id", None) if checkpoint is not None else None
-        if runtime is None or runtime_repository is None:
+        if runtime is None or not callable(runtime_updater):
             return
         degradation = _mapping_value((execution_context or {}).get("degradation"))
         main_brain_runtime = self._merge_main_brain_runtime_contexts(
@@ -2417,16 +2405,27 @@ class _QueryExecutionRuntimeMixin(
             metadata.pop("runtime_degradation", None)
         if main_brain_runtime is not None:
             metadata["main_brain_runtime"] = main_brain_runtime
-        runtime_repository.upsert_runtime(
+        runtime_updater(
             runtime.model_copy(
                 update={
-                    "runtime_status": "running",
-                    "current_task_id": task_id or runtime.current_task_id,
-                    "last_started_at": now,
-                    "last_heartbeat_at": now,
-                    "last_error_summary": None,
-                    "last_checkpoint_id": checkpoint_id or runtime.last_checkpoint_id,
-                    "metadata": metadata,
+                    "runtime_status": (
+                        getattr(runtime, "runtime_status", None)
+                        if getattr(runtime, "runtime_status", None) in {"starting", "restarting"}
+                        else "ready"
+                    ),
+                    "metadata": {
+                        **metadata,
+                        "current_query": {
+                            "task_id": task_id,
+                            "session_id": session_id,
+                            "user_id": user_id,
+                            "thread_id": conversation_thread_id,
+                            "channel": channel,
+                            "started_at": now.isoformat(),
+                            "checkpoint_id": checkpoint_id,
+                        },
+                    },
+                    "updated_at": now,
                 },
             ),
         )
@@ -2445,8 +2444,13 @@ class _QueryExecutionRuntimeMixin(
         execution_context: dict[str, Any] | None = None,
         stream_step_count: int = 0,
     ) -> None:
-        runtime_repository = self._agent_runtime_repository
-        runtime = runtime_repository.get_runtime(agent_id) if runtime_repository is not None else None
+        executor_contract = self._resolve_executor_runtime_contract(
+            owner_agent_id=agent_id,
+            conversation_thread_id=conversation_thread_id,
+            kernel_task_id=task_id,
+        )
+        runtime = executor_contract.get("runtime")
+        runtime_updater = getattr(self._executor_runtime_service, "upsert_runtime", None)
         now = _utc_now()
         resolved_error = normalize_runtime_summary(error)
         final_summary = normalize_runtime_summary(summary) or resolved_error or "交互查询已完成"
@@ -2470,7 +2474,7 @@ class _QueryExecutionRuntimeMixin(
             },
         )
         checkpoint_id = getattr(checkpoint, "id", None) if checkpoint is not None else None
-        if runtime is None or runtime_repository is None:
+        if runtime is None or not callable(runtime_updater):
             return
         blocking_error = resolved_error if should_block_runtime_error(resolved_error) else None
         degradation = _mapping_value((execution_context or {}).get("degradation"))
@@ -2548,23 +2552,25 @@ class _QueryExecutionRuntimeMixin(
             metadata.pop("runtime_degradation", None)
         if main_brain_runtime is not None:
             metadata["main_brain_runtime"] = main_brain_runtime
-        runtime_repository.upsert_runtime(
+        runtime_updater(
             runtime.model_copy(
                 update={
                     "runtime_status": (
-                        "paused"
-                        if runtime.desired_state == "paused"
-                        else "blocked"
+                        "failed"
                         if blocking_error
-                        else "idle"
+                        else "degraded"
+                        if degradation
+                        else "completed"
                     ),
-                    "current_task_id": None,
-                    "last_heartbeat_at": now,
-                    "last_stopped_at": now,
-                    "last_result_summary": runtime.last_result_summary if resolved_error else final_summary,
-                    "last_error_summary": resolved_error,
-                    "last_checkpoint_id": checkpoint_id or runtime.last_checkpoint_id,
-                    "metadata": metadata,
+                    "metadata": {
+                        **metadata,
+                        "current_query": None,
+                        "last_query_finished_at": now.isoformat(),
+                        "last_query_summary": final_summary,
+                        "last_query_error": resolved_error,
+                        "last_query_checkpoint_id": checkpoint_id,
+                    },
+                    "updated_at": now,
                 },
             ),
         )
@@ -2589,12 +2595,7 @@ class _QueryExecutionRuntimeMixin(
         checkpoint_repository = self._agent_checkpoint_repository
         if checkpoint_repository is None:
             return None
-        runtime = (
-            self._agent_runtime_repository.get_runtime(agent_id)
-            if self._agent_runtime_repository is not None
-            else None
-        )
-        mailbox_id = getattr(runtime, "current_mailbox_id", None) if runtime is not None else None
+        mailbox_id = None
         work_context_id = _first_non_empty((execution_context or {}).get("work_context_id"))
         task_segment = _mapping_value((execution_context or {}).get("task_segment"))
         resume_point = _mapping_value((execution_context or {}).get("resume_point"))
@@ -2832,11 +2833,9 @@ class _QueryExecutionRuntimeMixin(
             owner_agent_id=owner_agent_id,
         )
         if runtime_capability_layers is not None:
-            runtime = (
-                self._agent_runtime_repository.get_runtime(owner_agent_id)
-                if self._agent_runtime_repository is not None
-                else None
-            )
+            runtime = self._resolve_executor_runtime_contract(
+                owner_agent_id=owner_agent_id,
+            ).get("runtime")
             runtime_metadata = _mapping_value(getattr(runtime, "metadata", None))
             effective_capability_ids = set(
                 resolve_runtime_effective_capability_ids(runtime_metadata),
@@ -2884,11 +2883,9 @@ class _QueryExecutionRuntimeMixin(
         *,
         owner_agent_id: str,
     ) -> IndustrySeatCapabilityLayers | None:
-        repository = self._agent_runtime_repository
-        getter = getattr(repository, "get_runtime", None)
-        if not callable(getter):
-            return None
-        runtime = getter(owner_agent_id)
+        runtime = self._resolve_executor_runtime_contract(
+            owner_agent_id=owner_agent_id,
+        ).get("runtime")
         if runtime is None:
             return None
         metadata = _mapping_value(getattr(runtime, "metadata", None))

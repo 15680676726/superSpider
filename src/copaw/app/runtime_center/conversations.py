@@ -48,7 +48,6 @@ class RuntimeConversationFacade:
         history_reader: SessionRuntimeThreadHistoryReader,
         industry_service: object | None = None,
         agent_profile_service: object | None = None,
-        agent_thread_binding_repository: object | None = None,
         executor_runtime_service: object | None = None,
         human_assist_task_service: object | None = None,
         work_context_repository: object | None = None,
@@ -56,7 +55,6 @@ class RuntimeConversationFacade:
         self._history_reader = history_reader
         self._industry_service = industry_service
         self._agent_profile_service = agent_profile_service
-        self._agent_thread_binding_repository = agent_thread_binding_repository
         self._executor_runtime_service = executor_runtime_service
         self._human_assist_task_service = human_assist_task_service
         self._work_context_repository = work_context_repository
@@ -247,105 +245,7 @@ class RuntimeConversationFacade:
         )
 
     def _resolve_bound_conversation(self, conversation_id: str) -> RuntimeThreadSpec | None:
-        repository = self._agent_thread_binding_repository
-        binding = None
-        if repository is not None and callable(getattr(repository, "get_binding", None)):
-            binding = repository.get_binding(conversation_id)
-            if binding is None and conversation_id.startswith("industry-chat:"):
-                _, _, remainder = conversation_id.partition("industry-chat:")
-                instance_id, separator, role_id = remainder.rpartition(":")
-                if instance_id and separator and role_id:
-                    normalized_role_id = normalize_industry_role_id(role_id)
-                    if normalized_role_id and normalized_role_id != role_id:
-                        normalized_id = f"industry-chat:{instance_id}:{normalized_role_id}"
-                        binding = repository.get_binding(normalized_id)
-        if binding is None:
-            return self._resolve_executor_bound_conversation(conversation_id)
-        canonical_thread_id = _first_non_empty(
-            binding.session_id,
-            binding.alias_of_thread_id,
-            binding.thread_id,
-        )
-        agent_profile = self._get_agent_profile(binding.agent_id)
-        industry_detail = None
-        if binding.industry_instance_id and self._industry_service is not None:
-            industry_detail = _call_optional(
-                self._industry_service,
-                "get_instance_detail",
-                binding.industry_instance_id,
-            )
-        agent_name = _first_non_empty(
-            _field_value(agent_profile, "name"),
-            _field_value(binding.metadata, "agent_name"),
-            binding.agent_id,
-        )
-        role_name = _first_non_empty(
-            _field_value(agent_profile, "role_name"),
-            _field_value(binding.metadata, "role_name"),
-            binding.industry_role_id,
-        )
-        industry_label = _field_value(industry_detail, "label")
-        control_thread_id = _industry_control_thread_id(
-            industry_instance_id=binding.industry_instance_id,
-            industry_role_id=binding.industry_role_id,
-            agent_id=binding.agent_id,
-        )
-        session_kind = "agent-chat"
-        if binding.industry_instance_id and binding.industry_role_id:
-            session_kind = (
-                "industry-control-thread"
-                if canonical_thread_id == control_thread_id
-                else "industry-agent-chat"
-            )
-        meta = _compact_mapping(
-            {
-                "session_kind": session_kind,
-                "entry_source": (
-                    "industry"
-                    if binding.binding_kind == "industry-role-alias"
-                    else "agent-workbench"
-                ),
-                "requested_thread_id": conversation_id,
-                "agent_id": binding.agent_id,
-                "agent_name": agent_name,
-                "industry_instance_id": binding.industry_instance_id,
-                "industry_label": industry_label,
-                "industry_role_id": binding.industry_role_id,
-                "industry_role_name": role_name,
-                "owner_scope": binding.owner_scope,
-                "buddy_profile_id": _resolve_buddy_profile_id(
-                    industry_instance_id=binding.industry_instance_id,
-                    owner_scope=binding.owner_scope,
-                ),
-                "current_focus_kind": _field_value(agent_profile, "current_focus_kind"),
-                "current_focus_id": _field_value(agent_profile, "current_focus_id"),
-                "current_focus": _field_value(agent_profile, "current_focus"),
-                "thread_binding_kind": binding.binding_kind,
-                "canonical_thread_id": canonical_thread_id,
-                "control_thread_id": control_thread_id,
-                **self._resolve_work_context_contract(
-                    work_context_id=binding.work_context_id,
-                    context_key=(
-                        f"control-thread:{control_thread_id}"
-                        if control_thread_id is not None
-                        else None
-                    ),
-                ),
-            },
-        )
-        name = (
-            f"{industry_label} - {role_name}"
-            if industry_label and role_name
-            else (f"{agent_name} - {role_name}" if role_name else agent_name)
-        )
-        return RuntimeThreadSpec(
-            id=_required_text(canonical_thread_id, field_name="thread_id"),
-            name=name,
-            session_id=_required_text(canonical_thread_id, field_name="session_id"),
-            user_id=binding.agent_id,
-            channel=binding.channel or DEFAULT_CHANNEL,
-            meta=meta,
-        )
+        return self._resolve_executor_bound_conversation(conversation_id)
 
     def _resolve_executor_bound_conversation(
         self,
@@ -450,6 +350,12 @@ class RuntimeConversationFacade:
                 agent_id=owner_agent_id,
             ),
         )
+        owner_scope = _first_non_empty(
+            continuity.get("owner_scope"),
+            binding_metadata.get("owner_scope"),
+            runtime_metadata.get("owner_scope"),
+        )
+        entry_source = "industry" if industry_instance_id else "executor-runtime"
         session_kind = (
             "industry-control-thread"
             if industry_instance_id and canonical_thread_id == control_thread_id
@@ -460,7 +366,7 @@ class RuntimeConversationFacade:
         meta = _compact_mapping(
             {
                 "session_kind": session_kind,
-                "entry_source": "executor-runtime",
+                "entry_source": entry_source,
                 "requested_thread_id": conversation_id,
                 "agent_id": owner_agent_id,
                 "agent_name": agent_name,
@@ -468,6 +374,14 @@ class RuntimeConversationFacade:
                 "industry_label": industry_label,
                 "industry_role_id": industry_role_id,
                 "industry_role_name": role_name,
+                "owner_scope": owner_scope,
+                "buddy_profile_id": _resolve_buddy_profile_id(
+                    industry_instance_id=industry_instance_id,
+                    owner_scope=owner_scope,
+                ),
+                "current_focus_kind": _field_value(agent_profile, "current_focus_kind"),
+                "current_focus_id": _field_value(agent_profile, "current_focus_id"),
+                "current_focus": _field_value(agent_profile, "current_focus"),
                 "thread_binding_kind": "executor-runtime",
                 "canonical_thread_id": canonical_thread_id,
                 "control_thread_id": control_thread_id,

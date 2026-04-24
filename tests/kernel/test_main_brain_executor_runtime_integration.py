@@ -83,7 +83,7 @@ class _FakeExecutorRuntimePort:
         return SimpleNamespace(
             thread_id="thread-1",
             turn_id="turn-1",
-            model_ref="gpt-5-codex",
+            model_ref=model_ref or "gpt-5-codex",
             runtime_metadata={"source": "test-port"},
         )
 
@@ -619,11 +619,106 @@ async def test_main_brain_orchestrator_forwards_system_model_and_sidecar_provide
         )
     ]
 
-    assert executor_port.start_calls[0]["model_ref"] == "gpt-5-codex"
+    assert executor_port.start_calls[0]["model_ref"] == "gpt-5.2"
     provider_payload = executor_port.start_calls[0]["sidecar_launch_payload"]
     assert provider_payload["provider_resolution_status"] == "resolved"
-    assert provider_payload["env"]["COPAW_PROVIDER_MODEL"] == "gpt-5-codex"
+    assert provider_payload["env"]["COPAW_PROVIDER_MODEL"] == "gpt-5.2"
     assert provider_payload["env"]["COPAW_PROVIDER_API_KEY"] == "sk-test-secret"
+    runtime_context = getattr(request, "_copaw_main_brain_runtime_context")
+    assert runtime_context["executor_runtime"]["model_policy_id"] is None
+    assert runtime_context["executor_runtime"]["model_ref"] == "gpt-5.2"
+    assert runtime_context["executor_runtime"]["model_ownership_mode"] == "copaw_managed"
+
+
+@pytest.mark.asyncio
+async def test_main_brain_orchestrator_falls_back_to_system_model_when_executor_policy_is_missing(
+    tmp_path: Path,
+) -> None:
+    from copaw.app.runtime_bootstrap_execution import build_executor_runtime_coordination
+
+    query_execution_service = _FakeQueryExecutionService()
+    executor_runtime_service = _build_executor_runtime_service(tmp_path)
+    executor_runtime_service.upsert_executor_provider(
+        ExecutorProviderRecord(
+            provider_id="codex-app-server",
+            provider_kind="external-executor",
+            runtime_family="codex",
+            control_surface_kind="app_server",
+            default_protocol_kind="app_server",
+        )
+    )
+    executor_runtime_service.upsert_role_executor_binding(
+        RoleExecutorBindingRecord(
+            role_id="backend-engineer",
+            executor_provider_id="codex-app-server",
+            selection_mode="role-routed",
+        )
+    )
+    executor_port = _FakeExecutorRuntimePort()
+    assignment_service = SimpleNamespace(
+        get_assignment=lambda assignment_id: SimpleNamespace(
+            id=assignment_id,
+            owner_role_id="backend-engineer",
+            owner_agent_id="agent-1",
+            title="Implement runtime seam",
+            summary="Route assignment into executor runtime",
+            metadata={"project_profile_id": "carrier-main"},
+        )
+    )
+    _service, coordinator = build_executor_runtime_coordination(
+        assignment_service=assignment_service,
+        external_runtime_service=executor_runtime_service._external_runtime_service,
+        project_root=str(tmp_path),
+        executor_runtime_port=executor_port,
+        default_executor_provider_id="codex-app-server",
+    )
+    coordinator.set_executor_runtime_service(executor_runtime_service)
+    coordinator.set_provider_runtime_facade(
+        _FakeRuntimeProviderFacade(contract=_resolved_runtime_contract()),
+    )
+
+    async def _resolver(**_kwargs):
+        return _make_contract()
+
+    orchestrator = MainBrainOrchestrator(
+        query_execution_service=query_execution_service,
+        intake_contract_resolver=_resolver,
+        executor_runtime_coordinator=coordinator,
+    )
+    request = AgentRequest(
+        id="req-executor-runtime-system-model-fallback",
+        session_id="industry-chat:industry-1:execution-core",
+        user_id="user-1",
+        channel="console",
+        input=[],
+    )
+    request.assignment_id = "assign-1"
+    msgs = [
+        Msg(
+            name="user",
+            role="user",
+            content="Implement the assignment in Codex and then report back.",
+        )
+    ]
+
+    _ = [
+        item
+        async for item in orchestrator.execute_stream(
+            msgs=msgs,
+            request=request,
+            kernel_task_id="kernel-task-runtime",
+        )
+    ]
+
+    assert executor_port.start_calls[0]["model_ref"] == "gpt-5.2"
+    provider_payload = executor_port.start_calls[0]["sidecar_launch_payload"]
+    assert provider_payload["provider_resolution_status"] == "resolved"
+    assert provider_payload["env"]["COPAW_PROVIDER_MODEL"] == "gpt-5.2"
+    assert provider_payload["env"]["COPAW_PROVIDER_API_KEY"] == "sk-test-secret"
+    runtime_context = getattr(request, "_copaw_main_brain_runtime_context")
+    assert runtime_context["executor_runtime"]["model_policy_id"] is None
+    assert runtime_context["executor_runtime"]["model_ref"] == "gpt-5.2"
+    assert runtime_context["executor_runtime"]["model_ownership_mode"] == "copaw_managed"
 
 
 @pytest.mark.asyncio

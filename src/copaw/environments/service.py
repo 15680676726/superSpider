@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from ..state import AgentLeaseRecord
 from .artifact_service import EnvironmentArtifactService
 from .browser_channel_policy import resolve_browser_channel_policy
 from .cooperative import (
@@ -45,7 +44,6 @@ class EnvironmentService:
         self._artifact_store: ArtifactStore | None = None
         self._lease_ttl_seconds = max(30, lease_ttl_seconds)
         self._runtime_event_bus = None
-        self._agent_lease_repository = None
         self._kernel_dispatcher = None
         self._latest_recovery_report: dict[str, object] | None = None
         self._latest_recovery_report_sink = None
@@ -98,9 +96,6 @@ class EnvironmentService:
             runtime_event_bus=runtime_event_bus,
         )
         self._rebind_cooperative_runtimes()
-
-    def set_agent_lease_repository(self, agent_lease_repository) -> None:
-        self._agent_lease_repository = agent_lease_repository
 
     def set_kernel_dispatcher(self, kernel_dispatcher) -> None:
         self._kernel_dispatcher = kernel_dispatcher
@@ -701,63 +696,6 @@ class EnvironmentService:
             now=now,
             allow_cross_process_recovery=allow_cross_process_recovery,
         )
-
-    def acquire_actor_lease(
-        self,
-        *,
-        agent_id: str,
-        owner: str,
-        ttl_seconds: int | None = None,
-        metadata: dict[str, object] | None = None,
-    ) -> AgentLeaseRecord:
-        return self._lease_service.acquire_actor_lease(
-            agent_id=agent_id,
-            owner=owner,
-            ttl_seconds=ttl_seconds,
-            metadata=metadata,
-        )
-
-    def heartbeat_actor_lease(
-        self,
-        lease_id: str,
-        *,
-        lease_token: str | None,
-        ttl_seconds: int | None = None,
-        metadata: dict[str, object] | None = None,
-    ) -> AgentLeaseRecord:
-        return self._lease_service.heartbeat_actor_lease(
-            lease_id,
-            lease_token=lease_token,
-            ttl_seconds=ttl_seconds,
-            metadata=metadata,
-        )
-
-    def release_actor_lease(
-        self,
-        lease_id: str,
-        *,
-        lease_token: str | None = None,
-        reason: str | None = None,
-    ) -> AgentLeaseRecord | None:
-        return self._lease_service.release_actor_lease(
-            lease_id,
-            lease_token=lease_token,
-            reason=reason,
-        )
-
-    def reap_expired_actor_leases(
-        self,
-        *,
-        now=None,
-    ) -> int:
-        return self._lease_service.reap_expired_actor_leases(now=now)
-
-    def recover_orphaned_actor_leases(
-        self,
-        *,
-        now=None,
-    ) -> int:
-        return self._lease_service.recover_orphaned_actor_leases(now=now)
 
     def list_observations(
         self,

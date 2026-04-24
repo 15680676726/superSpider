@@ -26,6 +26,11 @@
 - sidecar 审批与恢复仍不新增第二套一级对象；`approval_requested / approval_resolved / restart / interrupt` 继续通过 `ExecutorEventRecord + EvidenceRecord + runtime metadata` 回流
 - 模型统一治理仍锚定在 `RoleExecutorBinding.model_policy_id -> ModelInvocationPolicy`，执行体不得自带一套不受主脑约束的本地默认模型真相
 
+`2026-04-24` supplement:
+- formal external-executor launches now resolve `model_ref` from the system runtime-provider contract
+- executor-provider intake may still receive `model_policy_id / default_model_ref` as compatibility input, but those fields no longer drive live sidecar model selection
+- `RoleExecutorBinding.model_policy_id` remains compatibility state only unless a future formal system-owned policy bridge explicitly reintroduces it
+
 `2026-03-26` supplement:
 - `docs/superpowers/specs/2026-03-26-agent-body-grid-computer-runtime.md` is an execution-side supplement only
 - it must not replace the formal object model in this draft

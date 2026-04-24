@@ -359,8 +359,6 @@ def test_live_external_executor_provider_intake_and_runtime_writeback(
                 "source_ref": "codex://app-server",
                 "role_id": "execution-core",
                 "selection_mode": "role-routed",
-                "model_policy_id": "codex-default",
-                "default_model_ref": "gpt-5.4",
             },
         )
         assert install_response.status_code == 201
@@ -374,16 +372,18 @@ def test_live_external_executor_provider_intake_and_runtime_writeback(
             for item in search_response.json()
         )
 
+        runtime_provider_facade = build_compat_runtime_provider_facade()
+        expected_runtime_contract = runtime_provider_facade.resolve_runtime_provider_contract()
+
         _service, coordinator = build_executor_runtime_coordination(
             assignment_service=assignment_service,
             external_runtime_service=executor_runtime_service._external_runtime_service,
             project_root=str(Path(__file__).resolve().parents[2]),
             executor_runtime_port=adapter,
             default_executor_provider_id="codex-app-server",
-            default_model_policy_id="codex-default",
         )
         coordinator.set_executor_runtime_service(executor_runtime_service)
-        coordinator.set_provider_runtime_facade(build_compat_runtime_provider_facade())
+        coordinator.set_provider_runtime_facade(runtime_provider_facade)
         coordinator.set_executor_event_writeback_service(
             ExecutorEventWritebackService(
                 evidence_ledger=evidence_ledger,
@@ -423,6 +423,10 @@ def test_live_external_executor_provider_intake_and_runtime_writeback(
         thread_id = runtime_payload["thread_id"]
         assert runtime_id
         assert thread_id
+        assert runtime_payload["provider_resolution_status"] == "resolved"
+        assert runtime_payload["model_policy_id"] is None
+        assert runtime_payload["model_ownership_mode"] == "copaw_managed"
+        assert runtime_payload["model_ref"] == expected_runtime_contract["model"]
 
         stored_events, stored_runtime = _wait_for_terminal_runtime(
             executor_runtime_service,

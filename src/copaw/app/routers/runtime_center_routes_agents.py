@@ -14,6 +14,7 @@ from .runtime_center_actor_capabilities import (
 from .runtime_center_dependencies import _get_agent_profile_service
 from .runtime_center_payloads import _public_agent_detail_payload, _public_agent_payload
 from .runtime_center_shared import router
+from ...industry.identity import EXECUTION_CORE_AGENT_ID, EXECUTION_CORE_ROLE_ID
 from ...utils.runtime_routes import agent_route
 
 
@@ -23,6 +24,14 @@ def _normalized_agent_payload(agent_id: str, payload: object | None) -> dict[str
         return None
     normalized.setdefault("route", agent_route(agent_id))
     return normalized
+
+
+def _exclude_from_agent_list(payload: dict[str, object] | None) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    agent_id = str(payload.get("agent_id") or "").strip()
+    role_id = str(payload.get("industry_role_id") or "").strip().lower()
+    return agent_id == EXECUTION_CORE_AGENT_ID or role_id == EXECUTION_CORE_ROLE_ID
 
 
 @router.get("/agents", response_model=list[dict[str, object]])
@@ -53,7 +62,7 @@ async def list_agents(
             or ""
         ).strip()
         normalized = _normalized_agent_payload(agent_id, item)
-        if normalized is not None:
+        if normalized is not None and not _exclude_from_agent_list(normalized):
             payload.append(normalized)
     return payload
 

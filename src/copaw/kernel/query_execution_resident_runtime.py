@@ -111,106 +111,14 @@ class _QueryExecutionResidentRuntimeMixin:
             json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8"),
         ).hexdigest()
 
-    def _acquire_actor_runtime_lease(
-        self,
-        *,
-        agent_id: str,
-        task_id: str | None,
-        conversation_thread_id: str | None,
-    ) -> Any | None:
-        if self._should_bypass_actor_runtime_lease(
-            agent_id=agent_id,
-            task_id=task_id,
-        ):
-            return None
-        if self._environment_service is None:
-            return None
-        acquire = getattr(self._environment_service, "acquire_actor_lease", None)
-        if not callable(acquire):
-            return None
-        try:
-            return acquire(
-                agent_id=agent_id,
-                owner=_first_non_empty(conversation_thread_id, task_id, agent_id) or agent_id,
-                ttl_seconds=180,
-                metadata={
-                    "task_id": task_id,
-                    "thread_id": conversation_thread_id,
-                    "lease_kind": "interactive-query",
-                },
-            )
-        except RuntimeError as exc:
-            message = str(exc).lower()
-            if "not available" in message:
-                return None
-            logger.info(
-                "Actor runtime lease acquisition blocked for '%s': %s",
-                agent_id,
-                exc,
-            )
-            raise
-        except Exception:
-            logger.exception("Actor runtime lease acquisition failed")
-            return None
-
-    def _should_bypass_actor_runtime_lease(
-        self,
-        *,
-        agent_id: str,
-        task_id: str | None,
-    ) -> bool:
-        if not task_id:
-            return False
-        runtime_repository = getattr(self, "_agent_runtime_repository", None)
-        if runtime_repository is None:
-            return False
-        get_runtime = getattr(runtime_repository, "get_runtime", None)
-        if not callable(get_runtime):
-            return False
-        try:
-            runtime = get_runtime(agent_id)
-        except Exception:
-            logger.debug("Failed to resolve runtime before actor lease acquisition.", exc_info=True)
-            return False
-        if runtime is None:
-            return False
-        current_task_id = _first_non_empty(getattr(runtime, "current_task_id", None))
-        return current_task_id == task_id
-
-    def _heartbeat_actor_runtime_lease(self, lease: Any | None) -> None:
-        if lease is None or self._environment_service is None:
-            return
-        heartbeat = getattr(self._environment_service, "heartbeat_actor_lease", None)
-        if not callable(heartbeat):
-            return
-        try:
-            heartbeat(lease.id, lease_token=lease.lease_token, ttl_seconds=180)
-        except Exception:
-            logger.exception("Actor runtime lease heartbeat failed")
-
-    def _release_actor_runtime_lease(self, lease: Any | None) -> None:
-        if lease is None or self._environment_service is None:
-            return
-        release = getattr(self._environment_service, "release_actor_lease", None)
-        if not callable(release):
-            return
-        try:
-            release(lease.id, lease_token=lease.lease_token, reason="interactive query completed")
-        except Exception:
-            logger.exception("Actor runtime lease release failed")
-
     def _build_query_lease_heartbeat(
         self,
         *,
         session_lease: Any | None,
-        actor_lease: Any | None,
     ) -> LeaseHeartbeat | None:
-        if session_lease is None and actor_lease is None:
+        if session_lease is None:
             return None
-        lease_state = {
-            "session_lease": session_lease,
-            "actor_lease": actor_lease,
-        }
+        lease_state = {"session_lease": session_lease}
         return LeaseHeartbeat(
             label="interactive-query",
             interval_seconds=self._lease_heartbeat_interval_seconds,
@@ -218,7 +126,6 @@ class _QueryExecutionResidentRuntimeMixin:
                 "session_lease",
                 self._heartbeat_query_leases(
                     session_lease=lease_state.get("session_lease"),
-                    actor_lease=lease_state.get("actor_lease"),
                 ),
             ),
         )
@@ -227,7 +134,6 @@ class _QueryExecutionResidentRuntimeMixin:
         self,
         *,
         session_lease: Any | None,
-        actor_lease: Any | None,
     ) -> Any | None:
         if session_lease is not None and self._environment_service is not None:
             try:
@@ -240,5 +146,4 @@ class _QueryExecutionResidentRuntimeMixin:
                     session_lease = None
                 else:
                     raise
-        self._heartbeat_actor_runtime_lease(actor_lease)
         return session_lease

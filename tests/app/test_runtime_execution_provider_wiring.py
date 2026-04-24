@@ -68,18 +68,6 @@ def test_build_runtime_execution_stack_passes_runtime_provider_to_capability_ser
         def __init__(self, **kwargs) -> None:
             captured["kernel_dispatcher_kwargs"] = kwargs
 
-    class _ActorMailboxService:
-        def __init__(self, **kwargs) -> None:
-            captured["actor_mailbox_kwargs"] = kwargs
-
-    class _ActorWorker:
-        def __init__(self, **kwargs) -> None:
-            captured["actor_worker_kwargs"] = kwargs
-
-    class _ActorSupervisor:
-        def __init__(self, **kwargs) -> None:
-            captured["actor_supervisor_kwargs"] = kwargs
-
     build_runtime_execution_stack(
         mcp_manager=object(),
         environment_service=object(),
@@ -98,9 +86,6 @@ def test_build_runtime_execution_stack_passes_runtime_provider_to_capability_ser
         kernel_tool_bridge_cls=_KernelToolBridge,
         capability_service_cls=_CapabilityService,
         kernel_dispatcher_cls=_KernelDispatcher,
-        actor_mailbox_service_cls=_ActorMailboxService,
-        actor_worker_cls=_ActorWorker,
-        actor_supervisor_cls=_ActorSupervisor,
     )
 
     assert (
@@ -124,9 +109,6 @@ def test_build_kernel_runtime_forwards_runtime_provider_to_execution_stack(
             "tool-bridge",
             "capability-service",
             "dispatcher",
-            "mailbox",
-            "worker",
-            "supervisor",
         ),
     )
 

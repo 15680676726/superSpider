@@ -16,9 +16,6 @@ from ..environments import EnvironmentRegistry, EnvironmentService
 from ..goals import GoalService
 from ..industry import IndustryDraftGenerator, IndustryService
 from ..kernel import (
-    ActorMailboxService,
-    ActorSupervisor,
-    ActorWorker,
     AgentProfileService,
     BuddyDomainCapabilityGrowthService,
     BuddyOnboardingService,
@@ -100,13 +97,9 @@ from ..state.external_runtime_service import ExternalCapabilityRuntimeService
 from ..state.work_context_service import WorkContextService
 from ..state.repositories import (
     SqliteAgentCheckpointRepository,
-    SqliteAgentLeaseRepository,
-    SqliteAgentMailboxRepository,
     SqliteAgentProfileOverrideRepository,
     SqliteAgentReportRepository,
-    SqliteAgentRuntimeRepository,
     SqliteAssignmentRepository,
-    SqliteAgentThreadBindingRepository,
     SqliteBacklogItemRepository,
     SqliteCapabilityOverrideRepository,
     SqliteDecisionRequestRepository,
@@ -484,7 +477,6 @@ def _build_kernel_runtime(
     work_context_service: WorkContextService,
     runtime_provider: object | None,
     external_runtime_service: object | None = None,
-    enable_actor_runtime: bool = False,
 ) -> tuple[
     LearningService,
     GovernanceService,
@@ -492,9 +484,6 @@ def _build_kernel_runtime(
     KernelToolBridge,
     CapabilityService,
     KernelDispatcher,
-    ActorMailboxService | None,
-    ActorWorker | None,
-    ActorSupervisor | None,
 ]:
     return build_runtime_execution_stack_components(
         mcp_manager=mcp_manager,
@@ -516,10 +505,6 @@ def _build_kernel_runtime(
         kernel_tool_bridge_cls=KernelToolBridge,
         capability_service_cls=CapabilityService,
         kernel_dispatcher_cls=KernelDispatcher,
-        actor_mailbox_service_cls=ActorMailboxService,
-        actor_worker_cls=ActorWorker,
-        actor_supervisor_cls=ActorSupervisor,
-        enable_actor_runtime=enable_actor_runtime,
     )
 
 
@@ -716,9 +701,6 @@ def build_runtime_bootstrap(
         kernel_tool_bridge,
         capability_service,
         kernel_dispatcher,
-        actor_mailbox_service,
-        actor_worker,
-        actor_supervisor,
     ) = _build_kernel_runtime(
         mcp_manager=mcp_manager,
         environment_service=environment_service,
@@ -732,10 +714,8 @@ def build_runtime_bootstrap(
         work_context_service=work_context_service,
         runtime_provider=runtime_provider,
         external_runtime_service=external_runtime_service,
-        enable_actor_runtime=False,
     )
     exception_absorption_service = MainBrainExceptionAbsorptionService()
-    configure_exception_absorption = getattr(actor_supervisor, "configure_exception_absorption", None)
 
     domain_services = build_runtime_domain_services(
         session_backend=session_backend,
@@ -768,16 +748,9 @@ def build_runtime_bootstrap(
         skill_lifecycle_decision_service=skill_lifecycle_decision_service,
         kernel_dispatcher=kernel_dispatcher,
         kernel_tool_bridge=kernel_tool_bridge,
-        actor_mailbox_service=actor_mailbox_service,
         executor_runtime_service=executor_runtime_service,
         executor_runtime_coordinator=executor_runtime_coordinator,
     )
-    if callable(configure_exception_absorption):
-        configure_exception_absorption(
-            exception_absorption_service=exception_absorption_service,
-            human_assist_task_service=human_assist_task_service,
-            report_replan_engine=getattr(domain_services, "report_replan_engine", None),
-        )
     goal_service = domain_services.goal_service
     agent_profile_service = domain_services.agent_profile_service
     reporting_service = domain_services.reporting_service
@@ -802,9 +775,6 @@ def build_runtime_bootstrap(
     set_dispatcher_industry_service = getattr(kernel_dispatcher, "set_industry_service", None)
     if callable(set_dispatcher_industry_service):
         set_dispatcher_industry_service(industry_service)
-    set_actor_worker_industry_service = getattr(actor_worker, "set_industry_service", None)
-    if callable(set_actor_worker_industry_service):
-        set_actor_worker_industry_service(industry_service)
     workflow_template_service = domain_services.workflow_template_service
     fixed_sop_service = domain_services.fixed_sop_service
     routine_service = domain_services.routine_service

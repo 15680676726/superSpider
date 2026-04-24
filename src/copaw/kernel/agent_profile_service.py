@@ -17,11 +17,7 @@ from ..industry.identity import EXECUTION_CORE_AGENT_ID, EXECUTION_CORE_ROLE_ID
 from ..utils.runtime_action_links import build_decision_actions
 from ..state.repositories import (
     SqliteAgentCheckpointRepository,
-    SqliteAgentLeaseRepository,
-    SqliteAgentMailboxRepository,
     SqliteAgentProfileOverrideRepository,
-    SqliteAgentRuntimeRepository,
-    SqliteAgentThreadBindingRepository,
     SqliteDecisionRequestRepository,
     SqliteIndustryInstanceRepository,
     SqliteTaskRepository,
@@ -105,11 +101,8 @@ class AgentProfileService:
         override_repository: SqliteAgentProfileOverrideRepository | None = None,
         task_repository: SqliteTaskRepository | None = None,
         task_runtime_repository: SqliteTaskRuntimeRepository | None = None,
-        agent_runtime_repository: SqliteAgentRuntimeRepository | None = None,
-        agent_mailbox_repository: SqliteAgentMailboxRepository | None = None,
         agent_checkpoint_repository: SqliteAgentCheckpointRepository | None = None,
-        agent_lease_repository: SqliteAgentLeaseRepository | None = None,
-        agent_thread_binding_repository: SqliteAgentThreadBindingRepository | None = None,
+        executor_runtime_service: object | None = None,
         decision_request_repository: SqliteDecisionRequestRepository | None = None,
         evidence_ledger: EvidenceLedger | None = None,
         environment_service: EnvironmentService | None = None,
@@ -121,11 +114,8 @@ class AgentProfileService:
         self._override_repository = override_repository
         self._task_repository = task_repository
         self._task_runtime_repository = task_runtime_repository
-        self._agent_runtime_repository = agent_runtime_repository
-        self._agent_mailbox_repository = agent_mailbox_repository
         self._agent_checkpoint_repository = agent_checkpoint_repository
-        self._agent_lease_repository = agent_lease_repository
-        self._agent_thread_binding_repository = agent_thread_binding_repository
+        self._executor_runtime_service = executor_runtime_service
         self._decision_request_repository = decision_request_repository
         self._evidence_ledger = evidence_ledger
         self._environment_service = environment_service
@@ -133,6 +123,65 @@ class AgentProfileService:
         self._learning_service = learning_service
         self._goal_service = goal_service
         self._industry_instance_repository = industry_instance_repository
+
+    def _list_executor_runtimes(self, **filters: object) -> list[object]:
+        service = self._executor_runtime_service
+        lister = getattr(service, "list_runtimes", None)
+        if not callable(lister):
+            return []
+        normalized_filters = {
+            key: value
+            for key, value in filters.items()
+            if value is not None
+        }
+        try:
+            return list(lister(formal_only=True, **normalized_filters) or [])
+        except TypeError:
+            return list(lister(**normalized_filters) or [])
+        except Exception:
+            return []
+
+    def _get_executor_runtime_for_agent(self, agent_id: str) -> object | None:
+        normalized_agent_id = _coerce_non_empty_str(agent_id)
+        if normalized_agent_id is None:
+            return None
+        for runtime in self._list_executor_runtimes(limit=None):
+            metadata = _mapping(getattr(runtime, "metadata", None))
+            resolved_owner = _coerce_non_empty_str(
+                metadata.get("owner_agent_id"),
+            ) or _coerce_non_empty_str(metadata.get("agent_id"))
+            if resolved_owner == normalized_agent_id:
+                return runtime
+            if _coerce_non_empty_str(getattr(runtime, "role_id", None)) == normalized_agent_id:
+                return runtime
+        return None
+
+    def _list_executor_thread_bindings(
+        self,
+        *,
+        runtime_id: str | None = None,
+        thread_id: str | None = None,
+    ) -> list[object]:
+        service = self._executor_runtime_service
+        lister = getattr(service, "list_thread_bindings", None)
+        if not callable(lister):
+            return []
+        filters = {
+            "runtime_id": _coerce_non_empty_str(runtime_id),
+            "thread_id": _coerce_non_empty_str(thread_id),
+            "limit": None,
+        }
+        normalized_filters = {
+            key: value
+            for key, value in filters.items()
+            if value is not None
+        }
+        try:
+            return list(lister(**normalized_filters) or [])
+        except TypeError:
+            return list(lister(thread_id=normalized_filters.get("thread_id"), limit=None) or [])
+        except Exception:
+            return []
 
     def list_agents(
         self,
@@ -238,11 +287,15 @@ class AgentProfileService:
         role_id = getattr(current, "industry_role_id", None)
         if (
             (not isinstance(role_id, str) or not role_id.strip())
-            and self._agent_runtime_repository is not None
         ):
-            runtime = self._agent_runtime_repository.get_runtime(agent_id)
-            if runtime is not None and isinstance(runtime.industry_role_id, str):
-                role_id = runtime.industry_role_id
+            runtime = self._get_executor_runtime_for_agent(agent_id)
+            runtime_role_id = _coerce_non_empty_str(
+                getattr(runtime, "role_id", None),
+            ) or _coerce_non_empty_str(
+                _mapping(getattr(runtime, "metadata", None)).get("industry_role_id"),
+            )
+            if runtime_role_id is not None:
+                role_id = runtime_role_id
         if (not isinstance(role_id, str) or not role_id.strip()) and agent_id == EXECUTION_CORE_AGENT_ID:
             role_id = EXECUTION_CORE_ROLE_ID
         normalized = self._normalize_capabilities_for_role(requested, role_id)
@@ -260,12 +313,9 @@ class AgentProfileService:
             else None
         )
         if override is None or not self._is_override_visible(override):
-            runtime = (
-                self._agent_runtime_repository.get_runtime(agent_id)
-                if self._agent_runtime_repository is not None
-                else None
-            )
-            if runtime is None or runtime.desired_state == "retired":
+            runtime = self._get_executor_runtime_for_agent(agent_id)
+            runtime_metadata = _mapping(getattr(runtime, "metadata", None))
+            if runtime is None or _coerce_non_empty_str(runtime_metadata.get("desired_state")) == "retired":
                 return None
             return self._project_agent(self._build_runtime_seed_profile(runtime))
         seed = AgentProfile(
@@ -281,11 +331,7 @@ class AgentProfileService:
         if profile is None:
             return None
 
-        runtime = (
-            self._agent_runtime_repository.get_runtime(agent_id)
-            if self._agent_runtime_repository is not None
-            else None
-        )
+        runtime = self._get_executor_runtime_for_agent(agent_id)
         tasks = (
             self._task_repository.list_tasks(owner_agent_id=agent_id)
             if self._task_repository is not None
@@ -344,36 +390,17 @@ class AgentProfileService:
             environment_refs=environment_refs,
             current_environment_id=current_environment_id,
         )
-        mailbox_items = (
-            self._agent_mailbox_repository.list_items(agent_id=agent_id, limit=20)
-            if self._agent_mailbox_repository is not None
-            else []
-        )
         checkpoints = (
             self._agent_checkpoint_repository.list_checkpoints(agent_id=agent_id, limit=20)
             if self._agent_checkpoint_repository is not None
             else []
         )
-        leases = (
-            self._agent_lease_repository.list_leases(agent_id=agent_id, limit=20)
-            if self._agent_lease_repository is not None
-            else []
-        )
-        thread_bindings = (
-            self._agent_thread_binding_repository.list_bindings(
-                agent_id=agent_id,
-                active_only=False,
-                limit=None,
-            )
-            if self._agent_thread_binding_repository is not None
-            else []
-        )
+        thread_bindings = []
+        runtime_id = _coerce_non_empty_str(getattr(runtime, "runtime_id", None))
+        if runtime_id is not None:
+            thread_bindings = list(self._list_executor_thread_bindings(runtime_id=runtime_id))
         teammates = self._list_teammates(profile)
-        latest_collaboration = [
-            item.model_dump(mode="json")
-            for item in mailbox_items
-            if item.source_agent_id or item.parent_mailbox_id
-        ][:10]
+        latest_collaboration: list[dict[str, object]] = []
         capability_surface = self.get_capability_surface(agent_id)
 
         return {
@@ -381,10 +408,8 @@ class AgentProfileService:
             "runtime": runtime.model_dump(mode="json") if runtime is not None else None,
             "goals": goals,
             "tasks": task_payload,
-            "mailbox": [item.model_dump(mode="json") for item in mailbox_items],
             "checkpoints": [item.model_dump(mode="json") for item in checkpoints],
-            "leases": [item.model_dump(mode="json") for item in leases],
-            "thread_bindings": [item.model_dump(mode="json") for item in thread_bindings],
+            "thread_bindings": [_model_dump_or_dict(item) for item in thread_bindings],
             "teammates": teammates,
             "latest_collaboration": latest_collaboration,
             "decisions": decisions[:20],
@@ -396,9 +421,7 @@ class AgentProfileService:
             "capability_surface": capability_surface,
             "stats": {
                 "task_count": len(task_payload),
-                "mailbox_count": len(mailbox_items),
                 "checkpoint_count": len(checkpoints),
-                "lease_count": len(leases),
                 "binding_count": len(thread_bindings),
                 "teammate_count": len(teammates),
                 "decision_count": len(decisions),
@@ -463,11 +486,7 @@ class AgentProfileService:
         profile = self.get_agent(agent_id)
         if profile is None:
             return None
-        runtime = (
-            self._agent_runtime_repository.get_runtime(agent_id)
-            if self._agent_runtime_repository is not None
-            else None
-        )
+        runtime = self._get_executor_runtime_for_agent(agent_id)
         override = (
             self._override_repository.get_override(agent_id)
             if self._override_repository is not None
@@ -747,7 +766,12 @@ class AgentProfileService:
         role_id_candidates = {
             value
             for value in (
-                normalize_role(getattr(runtime, "industry_role_id", None)),
+                normalize_role(
+                    _coerce_non_empty_str(getattr(runtime, "role_id", None))
+                    or _coerce_non_empty_str(
+                        _mapping(getattr(runtime, "metadata", None)).get("industry_role_id"),
+                    ),
+                ),
                 normalize_role(profile.industry_role_id),
             )
             if value
@@ -994,11 +1018,28 @@ class AgentProfileService:
         metadata = getattr(runtime, "metadata", None)
         if not isinstance(metadata, dict):
             metadata = {}
-        agent_id = str(getattr(runtime, "agent_id", "") or "").strip()
-        display_name = getattr(runtime, "display_name", None)
-        role_name = getattr(runtime, "role_name", None)
-        industry_role_id = getattr(runtime, "industry_role_id", None)
-        runtime_role_id = industry_role_id if isinstance(industry_role_id, str) else None
+        agent_id = (
+            _coerce_non_empty_str(metadata.get("owner_agent_id"))
+            or _coerce_non_empty_str(metadata.get("agent_id"))
+            or _coerce_non_empty_str(getattr(runtime, "role_id", None))
+            or _coerce_non_empty_str(getattr(runtime, "runtime_id", None))
+            or "executor-runtime"
+        )
+        display_name = (
+            metadata.get("display_name")
+            or metadata.get("agent_name")
+            or getattr(runtime, "display_name", None)
+        )
+        role_name = (
+            metadata.get("role_name")
+            or metadata.get("industry_role_name")
+            or getattr(runtime, "role_name", None)
+            or getattr(runtime, "role_id", None)
+        )
+        runtime_role_id = (
+            _coerce_non_empty_str(metadata.get("industry_role_id"))
+            or _coerce_non_empty_str(getattr(runtime, "role_id", None))
+        )
         normalized_name = (
             display_name.strip()
             if isinstance(display_name, str) and display_name.strip()
@@ -1009,17 +1050,14 @@ class AgentProfileService:
             if isinstance(role_name, str) and role_name.strip()
             else runtime_role_id or ""
         )
-        activation_mode = getattr(runtime, "activation_mode", None)
+        activation_mode = metadata.get("activation_mode")
         if activation_mode not in {"persistent", "on-demand"}:
             activation_mode = "persistent"
-        employment_mode = getattr(runtime, "employment_mode", None)
+        employment_mode = metadata.get("employment_mode")
         if employment_mode not in {"career", "temporary"}:
             employment_mode = "career"
-        actor_class = getattr(runtime, "actor_class", None)
         agent_class = (
-            "system"
-            if actor_class == "system" or agent_id in PLATFORM_SYSTEM_AGENT_IDS
-            else "business"
+            "system" if agent_id in PLATFORM_SYSTEM_AGENT_IDS else "business"
         )
         updated_at = getattr(runtime, "updated_at", None)
         if not isinstance(updated_at, datetime):
@@ -1039,27 +1077,19 @@ class AgentProfileService:
             current_focus_kind=_coerce_non_empty_str(metadata.get("current_focus_kind")),
             current_focus_id=_coerce_non_empty_str(metadata.get("current_focus_id")),
             current_focus=_coerce_non_empty_str(metadata.get("current_focus")) or "",
-            industry_instance_id=getattr(runtime, "industry_instance_id", None),
+            actor_key=_coerce_non_empty_str(getattr(runtime, "runtime_id", None)),
+            actor_fingerprint=_coerce_non_empty_str(getattr(runtime, "executor_id", None)),
+            desired_state=_coerce_non_empty_str(metadata.get("desired_state")),
+            runtime_status=_coerce_non_empty_str(getattr(runtime, "runtime_status", None)),
+            resident=True,
+            industry_instance_id=_coerce_non_empty_str(metadata.get("industry_instance_id")),
             industry_role_id=runtime_role_id,
             capabilities=self._baseline_capabilities_for_role(runtime_role_id),
             updated_at=updated_at,
         )
 
     def _apply_runtime_projection(self, profile: AgentProfile) -> AgentProfile:
-        actor_runtime = (
-            self._agent_runtime_repository.get_runtime(profile.agent_id)
-            if self._agent_runtime_repository is not None
-            else None
-        )
-        mailbox_items = (
-            self._agent_mailbox_repository.list_items(
-                agent_id=profile.agent_id,
-                limit=50,
-            )
-            if self._agent_mailbox_repository is not None
-            else []
-        )
-        mailbox_items.sort(key=lambda item: item.updated_at, reverse=True)
+        executor_runtime = self._get_executor_runtime_for_agent(profile.agent_id)
         checkpoints = (
             self._agent_checkpoint_repository.list_checkpoints(
                 agent_id=profile.agent_id,
@@ -1069,46 +1099,32 @@ class AgentProfileService:
             else []
         )
         checkpoints.sort(key=lambda item: item.updated_at, reverse=True)
-
-        active_mailbox = next(
-            (
-                item
-                for item in mailbox_items
-                if item.id == getattr(actor_runtime, "current_mailbox_id", None)
-            ),
-            None,
-        )
-        if active_mailbox is None:
-            active_mailbox = next(
-                (
-                    item
-                    for item in mailbox_items
-                    if item.status in {"running", "leased", "queued", "retry-wait", "blocked"}
-                ),
-                None,
-            )
-        latest_mailbox_result = next(
-            (item for item in mailbox_items if _coerce_non_empty_str(item.result_summary)),
-            None,
-        )
-        latest_mailbox_error = next(
-            (item for item in mailbox_items if _coerce_non_empty_str(item.error_summary)),
-            None,
-        )
         current_checkpoint = next(
             (
                 item
                 for item in checkpoints
-                if item.id == getattr(actor_runtime, "last_checkpoint_id", None)
+                if item.id == _coerce_non_empty_str(
+                    _mapping(getattr(executor_runtime, "metadata", None)).get(
+                        "last_query_checkpoint_id",
+                    ),
+                )
             ),
             None,
         )
         if current_checkpoint is None and checkpoints:
             current_checkpoint = checkpoints[0]
 
+        runtime_metadata = _mapping(getattr(executor_runtime, "metadata", None))
+        continuity = _mapping(runtime_metadata.get("continuity"))
+        current_query = _mapping(runtime_metadata.get("current_query"))
+        latest_query_summary = _coerce_non_empty_str(
+            runtime_metadata.get("last_query_summary"),
+        )
+        latest_query_error = _coerce_non_empty_str(
+            runtime_metadata.get("last_query_error"),
+        )
         active_task_id = (
-            _coerce_non_empty_str(getattr(actor_runtime, "current_task_id", None))
-            or _coerce_non_empty_str(getattr(active_mailbox, "task_id", None))
+            _coerce_non_empty_str(current_query.get("task_id"))
             or _coerce_non_empty_str(getattr(current_checkpoint, "task_id", None))
             or profile.current_task_id
         )
@@ -1136,9 +1152,6 @@ class AgentProfileService:
             else None
         )
 
-        runtime_metadata = dict(actor_runtime.metadata) if actor_runtime is not None else {}
-        mailbox_payload = dict(active_mailbox.payload) if active_mailbox is not None else {}
-        mailbox_metadata = dict(active_mailbox.metadata) if active_mailbox is not None else {}
         checkpoint_resume = (
             dict(current_checkpoint.resume_payload)
             if current_checkpoint is not None
@@ -1149,28 +1162,18 @@ class AgentProfileService:
             if current_checkpoint is not None
             else {}
         )
-        runtime_layers = IndustrySeatCapabilityLayers.from_metadata(
-            runtime_metadata.get("capability_layers"),
-        )
-
         explicit_focus_kind = (
             _coerce_non_empty_str(runtime_metadata.get("current_focus_kind"))
-            or _coerce_non_empty_str(mailbox_metadata.get("current_focus_kind"))
-            or _coerce_non_empty_str(mailbox_payload.get("current_focus_kind"))
             or _coerce_non_empty_str(checkpoint_resume.get("current_focus_kind"))
             or _coerce_non_empty_str(checkpoint_snapshot.get("current_focus_kind"))
         )
         explicit_focus_id = (
             _coerce_non_empty_str(runtime_metadata.get("current_focus_id"))
-            or _coerce_non_empty_str(mailbox_metadata.get("current_focus_id"))
-            or _coerce_non_empty_str(mailbox_payload.get("current_focus_id"))
             or _coerce_non_empty_str(checkpoint_resume.get("current_focus_id"))
             or _coerce_non_empty_str(checkpoint_snapshot.get("current_focus_id"))
         )
         explicit_focus = (
             _coerce_non_empty_str(runtime_metadata.get("current_focus"))
-            or _coerce_non_empty_str(mailbox_metadata.get("current_focus"))
-            or _coerce_non_empty_str(mailbox_payload.get("current_focus"))
             or _coerce_non_empty_str(checkpoint_resume.get("current_focus"))
             or _coerce_non_empty_str(checkpoint_snapshot.get("current_focus"))
         )
@@ -1179,8 +1182,7 @@ class AgentProfileService:
         current_focus = explicit_focus or profile.current_focus
 
         current_environment_id = (
-            _coerce_non_empty_str(getattr(actor_runtime, "current_environment_id", None))
-            or _coerce_non_empty_str(mailbox_payload.get("environment_ref"))
+            _coerce_non_empty_str(continuity.get("environment_ref"))
             or _coerce_non_empty_str(getattr(current_checkpoint, "environment_ref", None))
             or (
                 task_runtime.active_environment_id
@@ -1189,53 +1191,31 @@ class AgentProfileService:
             )
             or getattr(profile, "current_environment_id", None)
         )
-        queue_depth = (
-            actor_runtime.queue_depth
-            if actor_runtime is not None
-            else sum(
-                1
-                for item in mailbox_items
-                if item.status in {"queued", "leased", "running", "retry-wait", "blocked"}
-            )
-        )
         latest_checkpoint_id = (
-            getattr(actor_runtime, "last_checkpoint_id", None)
+            _coerce_non_empty_str(runtime_metadata.get("last_query_checkpoint_id"))
             or (current_checkpoint.id if current_checkpoint is not None else None)
         )
-        result_summary = _coerce_non_empty_str(
-            getattr(actor_runtime, "last_result_summary", None),
-        )
+        result_summary = latest_query_summary
         if result_summary is None and current_checkpoint is not None and current_checkpoint.status == "applied":
             result_summary = _coerce_non_empty_str(getattr(current_checkpoint, "summary", None))
         if result_summary is None:
             result_summary = (
-                _coerce_non_empty_str(
-                    latest_mailbox_result.result_summary if latest_mailbox_result is not None else None,
-                )
-                or (
+                (
                     task_runtime.last_result_summary
                     if task_runtime is not None and task_runtime.last_result_summary
                     else None
                 )
                 or profile.today_output_summary
             )
-        error_summary = _coerce_non_empty_str(
-            getattr(actor_runtime, "last_error_summary", None),
-        )
+        error_summary = latest_query_error
         if error_summary is None and current_checkpoint is not None and current_checkpoint.status == "failed":
             error_summary = _coerce_non_empty_str(getattr(current_checkpoint, "summary", None))
-        if error_summary is None:
-            error_summary = _coerce_non_empty_str(
-                latest_mailbox_error.error_summary if latest_mailbox_error is not None else None,
-            )
         if error_summary is None and task_runtime is not None and task_runtime.last_error_summary:
             error_summary = task_runtime.last_error_summary
 
         updated_candidates = [profile.updated_at]
-        if actor_runtime is not None:
-            updated_candidates.append(actor_runtime.updated_at)
-        if active_mailbox is not None:
-            updated_candidates.append(active_mailbox.updated_at)
+        if executor_runtime is not None:
+            updated_candidates.append(executor_runtime.updated_at)
         if current_checkpoint is not None:
             updated_candidates.append(current_checkpoint.updated_at)
         if task_runtime is not None:
@@ -1254,25 +1234,30 @@ class AgentProfileService:
         )
         if merged_runtime_capabilities:
             update["capabilities"] = merged_runtime_capabilities
-        if actor_runtime is not None:
+        if executor_runtime is not None:
+            runtime_status = _coerce_non_empty_str(getattr(executor_runtime, "runtime_status", None))
             update.update(
                 {
-                    "actor_key": actor_runtime.actor_key,
-                    "actor_fingerprint": actor_runtime.actor_fingerprint,
-                    "desired_state": actor_runtime.desired_state,
-                    "runtime_status": actor_runtime.runtime_status,
-                    "resident": actor_runtime.persistent,
-                    "status": _derive_actor_status(
-                        actor_runtime.runtime_status,
-                        fallback=profile.status,
+                    "actor_key": _coerce_non_empty_str(getattr(executor_runtime, "runtime_id", None)),
+                    "actor_fingerprint": _coerce_non_empty_str(getattr(executor_runtime, "executor_id", None)),
+                    "desired_state": _coerce_non_empty_str(runtime_metadata.get("desired_state")),
+                    "runtime_status": runtime_status,
+                    "resident": True,
+                    "status": (
+                        "blocked"
+                        if runtime_status in {"failed", "degraded"}
+                        else "running"
+                        if runtime_status in {"starting", "restarting", "ready"}
+                        and active_task_id is not None
+                        else "idle"
                     ),
-                    "employment_mode": actor_runtime.employment_mode,
-                    "activation_mode": actor_runtime.activation_mode,
-                    "current_task_id": active_task_id or actor_runtime.current_task_id or profile.current_task_id,
-                    "current_mailbox_id": actor_runtime.current_mailbox_id or getattr(active_mailbox, "id", None),
-                    "queue_depth": queue_depth,
-                    "industry_instance_id": actor_runtime.industry_instance_id or profile.industry_instance_id,
-                    "industry_role_id": actor_runtime.industry_role_id or profile.industry_role_id,
+                    "employment_mode": _coerce_non_empty_str(runtime_metadata.get("employment_mode")) or profile.employment_mode,
+                    "activation_mode": _coerce_non_empty_str(runtime_metadata.get("activation_mode")) or profile.activation_mode,
+                    "current_task_id": active_task_id or profile.current_task_id,
+                    "current_mailbox_id": None,
+                    "queue_depth": 0,
+                    "industry_instance_id": _coerce_non_empty_str(runtime_metadata.get("industry_instance_id")) or profile.industry_instance_id,
+                    "industry_role_id": _coerce_non_empty_str(getattr(executor_runtime, "role_id", None)) or profile.industry_role_id,
                     "environment_summary": current_environment_id or profile.environment_summary,
                     "current_environment_id": current_environment_id,
                     "last_checkpoint_id": latest_checkpoint_id,
@@ -1293,7 +1278,11 @@ class AgentProfileService:
                         runtime_status=(
                             task_runtime.runtime_status
                             if task_runtime is not None
-                            else (actor_runtime.runtime_status if actor_runtime is not None else None)
+                            else (
+                                _coerce_non_empty_str(getattr(executor_runtime, "runtime_status", None))
+                                if executor_runtime is not None
+                                else None
+                            )
                         ),
                     ),
                     "risk_level": (
@@ -1318,63 +1307,43 @@ class AgentProfileService:
                     ),
                 },
             )
-        elif actor_runtime is None and active_mailbox is not None:
-            update.update(
-                {
-                    "status": (
-                        "blocked"
-                        if active_mailbox.status == "blocked"
-                        else "executing"
-                        if active_mailbox.status == "running"
-                        else "claimed"
-                        if active_mailbox.status == "leased"
-                        else "queued"
-                    ),
-                    "current_task_id": active_task_id,
-                    "current_mailbox_id": active_mailbox.id,
-                    "queue_depth": queue_depth,
-                    "environment_summary": current_environment_id or profile.environment_summary,
-                    "current_environment_id": current_environment_id,
-                    "last_checkpoint_id": latest_checkpoint_id,
-                    "today_output_summary": result_summary or profile.today_output_summary,
-                    "latest_evidence_summary": (
-                        result_summary
-                        or error_summary
-                        or profile.latest_evidence_summary
-                    ),
-                    "thread_id": self._resolve_primary_thread_id(profile.agent_id),
-                },
-            )
         return profile.model_copy(update=update)
 
     def _resolve_primary_thread_id(self, agent_id: str) -> str | None:
-        if self._agent_thread_binding_repository is None:
+        runtime = self._get_executor_runtime_for_agent(agent_id)
+        runtime_id = _coerce_non_empty_str(getattr(runtime, "runtime_id", None))
+        if runtime_id is None:
             return None
-        bindings = self._agent_thread_binding_repository.list_bindings(
-            agent_id=agent_id,
-            active_only=True,
-            limit=None,
-        )
+        bindings = self._list_executor_thread_bindings(runtime_id=runtime_id)
         for binding in bindings:
-            if binding.binding_kind == "agent-primary":
-                return binding.thread_id
-        return bindings[0].thread_id if bindings else None
+            metadata = _mapping(getattr(binding, "metadata", None))
+            if _coerce_non_empty_str(metadata.get("binding_kind")) == "agent-primary":
+                return _coerce_non_empty_str(getattr(binding, "thread_id", None))
+        if not bindings:
+            return None
+        return _coerce_non_empty_str(getattr(bindings[0], "thread_id", None))
 
     def _list_teammates(self, profile: AgentProfile) -> list[dict[str, object]]:
-        if self._agent_runtime_repository is None or not profile.industry_instance_id:
+        if not profile.industry_instance_id:
             return []
         payload: list[dict[str, object]] = []
-        for runtime in self._agent_runtime_repository.list_runtimes(
-            industry_instance_id=profile.industry_instance_id,
-            limit=None,
-        ):
-            if runtime.agent_id == profile.agent_id or runtime.desired_state == "retired":
+        for runtime in self._list_executor_runtimes(limit=None):
+            metadata = _mapping(getattr(runtime, "metadata", None))
+            if _coerce_non_empty_str(metadata.get("industry_instance_id")) != profile.industry_instance_id:
+                continue
+            teammate_agent_id = (
+                _coerce_non_empty_str(metadata.get("owner_agent_id"))
+                or _coerce_non_empty_str(metadata.get("agent_id"))
+                or _coerce_non_empty_str(getattr(runtime, "role_id", None))
+            )
+            if teammate_agent_id == profile.agent_id:
                 continue
             item = {
-                **runtime.model_dump(mode="json"),
-                "thread_id": self._resolve_primary_thread_id(runtime.agent_id),
+                **_mapping(runtime),
+                "agent_id": teammate_agent_id,
+                "thread_id": self._resolve_primary_thread_id(teammate_agent_id or ""),
             }
-            teammate_profile = self.get_agent(runtime.agent_id)
+            teammate_profile = self.get_agent(teammate_agent_id or "")
             if teammate_profile is not None:
                 item["name"] = teammate_profile.name
                 item["role_name"] = teammate_profile.role_name
@@ -1697,6 +1666,21 @@ def _coerce_non_empty_str(value: object) -> str | None:
         return None
     normalized = value.strip()
     return normalized or None
+
+
+def _mapping(value: object) -> dict[str, object]:
+    if isinstance(value, dict):
+        return dict(value)
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        payload = model_dump(mode="json")
+        if isinstance(payload, dict):
+            return dict(payload)
+    return {}
+
+
+def _model_dump_or_dict(value: object) -> dict[str, object]:
+    return _mapping(value)
 
 
 def _string_list(value: object) -> list[str]:

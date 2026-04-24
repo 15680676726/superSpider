@@ -76,6 +76,14 @@ class SqliteExecutorRuntimeRepository(BaseExecutorRuntimeRepository):
         )
         return record
 
+    def delete_runtime(self, runtime_id: str) -> bool:
+        with self._store.connection() as conn:
+            cursor = conn.execute(
+                "DELETE FROM executor_runtime_instances WHERE runtime_id = ?",
+                (runtime_id,),
+            )
+        return cursor.rowcount > 0
+
     def get_role_contract(self, role_id: str) -> RoleContractRecord | None:
         return _get_single(
             store=self._store,
@@ -433,6 +441,14 @@ class SqliteExecutorRuntimeRepository(BaseExecutorRuntimeRepository):
             json_fields=("metadata",),
         )
         return record
+
+    def delete_thread_binding(self, binding_id: str) -> bool:
+        with self._store.connection() as conn:
+            cursor = conn.execute(
+                "DELETE FROM executor_thread_bindings WHERE binding_id = ?",
+                (binding_id,),
+            )
+        return cursor.rowcount > 0
 
     def list_turn_records(
         self,

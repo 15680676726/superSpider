@@ -7,9 +7,6 @@ from ..capabilities import CapabilityService
 from ..evidence import EvidenceLedger
 from ..environments import EnvironmentService
 from ..kernel import (
-    ActorMailboxService,
-    ActorSupervisor,
-    ActorWorker,
     ExecutorEventWritebackService,
     GovernanceService,
     KernelDispatcher,
@@ -39,9 +36,6 @@ RuntimeExecutionStack: TypeAlias = tuple[
     KernelToolBridge,
     CapabilityService,
     KernelDispatcher,
-    ActorMailboxService | None,
-    ActorWorker | None,
-    ActorSupervisor | None,
 ]
 
 ExecutorRuntimeCoordination: TypeAlias = tuple[
@@ -86,10 +80,6 @@ def build_runtime_execution_stack(
     kernel_tool_bridge_cls: type[KernelToolBridge] = KernelToolBridge,
     capability_service_cls: type[CapabilityService] = CapabilityService,
     kernel_dispatcher_cls: type[KernelDispatcher] = KernelDispatcher,
-    actor_mailbox_service_cls: type[ActorMailboxService] = ActorMailboxService,
-    actor_worker_cls: type[ActorWorker] = ActorWorker,
-    actor_supervisor_cls: type[ActorSupervisor] = ActorSupervisor,
-    enable_actor_runtime: bool = False,
 ) -> RuntimeExecutionStack:
     patch_executor = patch_executor_cls(
         capability_override_repository=repositories.capability_override_repository,
@@ -166,37 +156,6 @@ def build_runtime_execution_stack(
         governance_service=governance_service,
         learning_service=learning_service,
     )
-    actor_mailbox_service: ActorMailboxService | None = None
-    actor_worker: ActorWorker | None = None
-    actor_supervisor: ActorSupervisor | None = None
-    if enable_actor_runtime:
-        actor_mailbox_service = actor_mailbox_service_cls(
-            mailbox_repository=repositories.agent_mailbox_repository,
-            runtime_repository=repositories.agent_runtime_repository,
-            checkpoint_repository=repositories.agent_checkpoint_repository,
-            thread_binding_repository=repositories.agent_thread_binding_repository,
-            kernel_dispatcher=kernel_dispatcher,
-            runtime_event_bus=runtime_event_bus,
-        )
-        actor_worker = actor_worker_cls(
-            worker_id="copaw-actor-worker",
-            mailbox_service=actor_mailbox_service,
-            kernel_dispatcher=kernel_dispatcher,
-            environment_service=environment_service,
-            agent_runtime_repository=repositories.agent_runtime_repository,
-            experience_memory_service=experience_memory_service,
-        )
-        actor_supervisor = actor_supervisor_cls(
-            runtime_repository=repositories.agent_runtime_repository,
-            mailbox_service=actor_mailbox_service,
-            worker=actor_worker,
-            runtime_event_bus=runtime_event_bus,
-        )
-        runtime_contract = _build_runtime_contract(
-            conversation_compaction_service=conversation_compaction_service,
-        )
-        setattr(actor_worker, "runtime_contract", dict(runtime_contract))
-        setattr(actor_supervisor, "runtime_contract", dict(runtime_contract))
     governance_service.set_kernel_dispatcher(kernel_dispatcher)
     return (
         learning_service,
@@ -205,9 +164,6 @@ def build_runtime_execution_stack(
         kernel_tool_bridge,
         capability_service,
         kernel_dispatcher,
-        actor_mailbox_service,
-        actor_worker,
-        actor_supervisor,
     )
 
 

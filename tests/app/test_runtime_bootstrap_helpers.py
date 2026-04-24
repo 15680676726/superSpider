@@ -98,11 +98,7 @@ def _build_bootstrap() -> RuntimeBootstrap:
         governance_control_repository=object(),
         capability_override_repository=object(),
         agent_profile_override_repository=object(),
-        agent_runtime_repository=object(),
-        agent_mailbox_repository=object(),
         agent_checkpoint_repository=object(),
-        agent_lease_repository=object(),
-        agent_thread_binding_repository=object(),
         industry_instance_repository=object(),
         media_analysis_repository=object(),
         goal_override_repository=object(),
@@ -820,6 +816,29 @@ def test_runtime_bootstrap_model_does_not_expose_retired_local_executor_fields()
     assert "actor_supervisor" not in field_names
 
 
+def test_runtime_repositories_do_not_expose_retired_actor_runtime_truth() -> None:
+    field_names = {field.name for field in dataclasses.fields(RuntimeRepositories)}
+
+    assert "agent_runtime_repository" not in field_names
+    assert "agent_mailbox_repository" not in field_names
+    assert "agent_lease_repository" not in field_names
+    assert "agent_thread_binding_repository" not in field_names
+
+
+def test_build_runtime_state_bindings_do_not_publish_retired_actor_runtime_truth() -> None:
+    bindings = build_runtime_state_bindings(
+        runtime_host=object(),
+        bootstrap=_build_bootstrap(),
+        manager_stack=RuntimeManagerStack(),
+        startup_recovery_summary={"reason": "startup"},
+    )
+
+    assert "agent_runtime_repository" not in bindings
+    assert "agent_mailbox_repository" not in bindings
+    assert "agent_lease_repository" not in bindings
+    assert "agent_thread_binding_repository" not in bindings
+
+
 def test_build_runtime_state_bindings_preserves_executor_runtime_sidecar_truth(
     tmp_path,
 ) -> None:
@@ -1011,18 +1030,6 @@ def test_build_kernel_runtime_threads_state_store_into_capability_service(
         def __init__(self, **kwargs) -> None:
             captured["kernel_dispatcher_kwargs"] = kwargs
 
-    class _FakeActorMailboxService:
-        def __init__(self, **kwargs) -> None:
-            captured["actor_mailbox_service_kwargs"] = kwargs
-
-    class _FakeActorWorker:
-        def __init__(self, **kwargs) -> None:
-            captured["actor_worker_kwargs"] = kwargs
-
-    class _FakeActorSupervisor:
-        def __init__(self, **kwargs) -> None:
-            captured["actor_supervisor_kwargs"] = kwargs
-
     monkeypatch.setattr(runtime_service_graph_module, "PatchExecutor", _FakePatchExecutor)
     monkeypatch.setattr(runtime_service_graph_module, "LearningService", _FakeLearningService)
     monkeypatch.setattr(runtime_service_graph_module, "GovernanceService", _FakeGovernanceService)
@@ -1030,9 +1037,6 @@ def test_build_kernel_runtime_threads_state_store_into_capability_service(
     monkeypatch.setattr(runtime_service_graph_module, "KernelToolBridge", _FakeKernelToolBridge)
     monkeypatch.setattr(runtime_service_graph_module, "CapabilityService", _FakeCapabilityService)
     monkeypatch.setattr(runtime_service_graph_module, "KernelDispatcher", _FakeKernelDispatcher)
-    monkeypatch.setattr(runtime_service_graph_module, "ActorMailboxService", _FakeActorMailboxService)
-    monkeypatch.setattr(runtime_service_graph_module, "ActorWorker", _FakeActorWorker)
-    monkeypatch.setattr(runtime_service_graph_module, "ActorSupervisor", _FakeActorSupervisor)
 
     state_store = SQLiteStateStore(tmp_path / "state.db")
     repositories = SimpleNamespace(
@@ -1046,10 +1050,7 @@ def test_build_kernel_runtime_threads_state_store_into_capability_service(
         governance_control_repository=object(),
         task_runtime_repository=object(),
         runtime_frame_repository=object(),
-        agent_mailbox_repository=object(),
-        agent_runtime_repository=object(),
         agent_checkpoint_repository=object(),
-        agent_thread_binding_repository=object(),
     )
     state_query_service = SimpleNamespace()
 
@@ -1083,18 +1084,6 @@ def test_build_kernel_runtime_demotes_actor_runtime_from_default_bootstrap(
         def __init__(self, **kwargs) -> None:
             captured["capability_service_kwargs"] = kwargs
 
-    class _FakeActorMailboxService:
-        def __init__(self, **kwargs) -> None:
-            captured["actor_mailbox_service_kwargs"] = kwargs
-
-    class _FakeActorWorker:
-        def __init__(self, **kwargs) -> None:
-            captured["actor_worker_kwargs"] = kwargs
-
-    class _FakeActorSupervisor:
-        def __init__(self, **kwargs) -> None:
-            captured["actor_supervisor_kwargs"] = kwargs
-
     monkeypatch.setattr(runtime_service_graph_module, "PatchExecutor", lambda **kwargs: object())
     monkeypatch.setattr(runtime_service_graph_module, "LearningService", lambda **kwargs: object())
     monkeypatch.setattr(
@@ -1106,9 +1095,6 @@ def test_build_kernel_runtime_demotes_actor_runtime_from_default_bootstrap(
     monkeypatch.setattr(runtime_service_graph_module, "KernelToolBridge", lambda **kwargs: object())
     monkeypatch.setattr(runtime_service_graph_module, "CapabilityService", _FakeCapabilityService)
     monkeypatch.setattr(runtime_service_graph_module, "KernelDispatcher", lambda **kwargs: object())
-    monkeypatch.setattr(runtime_service_graph_module, "ActorMailboxService", _FakeActorMailboxService)
-    monkeypatch.setattr(runtime_service_graph_module, "ActorWorker", _FakeActorWorker)
-    monkeypatch.setattr(runtime_service_graph_module, "ActorSupervisor", _FakeActorSupervisor)
 
     state_store = SQLiteStateStore(tmp_path / "state.db")
     repositories = SimpleNamespace(
@@ -1122,10 +1108,7 @@ def test_build_kernel_runtime_demotes_actor_runtime_from_default_bootstrap(
         governance_control_repository=object(),
         task_runtime_repository=object(),
         runtime_frame_repository=object(),
-        agent_mailbox_repository=object(),
-        agent_runtime_repository=object(),
         agent_checkpoint_repository=object(),
-        agent_thread_binding_repository=object(),
     )
 
     runtime_stack = _build_kernel_runtime(
@@ -1142,12 +1125,10 @@ def test_build_kernel_runtime_demotes_actor_runtime_from_default_bootstrap(
         runtime_provider=object(),
     )
 
-    assert runtime_stack[6] is None
-    assert runtime_stack[7] is None
-    assert runtime_stack[8] is None
-    assert "actor_mailbox_service_kwargs" not in captured
-    assert "actor_worker_kwargs" not in captured
-    assert "actor_supervisor_kwargs" not in captured
+    assert len(runtime_stack) == 6
+    assert not hasattr(runtime_service_graph_module, "ActorMailboxService")
+    assert not hasattr(runtime_service_graph_module, "ActorWorker")
+    assert not hasattr(runtime_service_graph_module, "ActorSupervisor")
 
 
 def test_build_kernel_runtime_threads_external_runtime_service_into_capability_service(
@@ -1160,14 +1141,6 @@ def test_build_kernel_runtime_threads_external_runtime_service_into_capability_s
         def __init__(self, **kwargs) -> None:
             captured["capability_service_kwargs"] = kwargs
 
-    class _FakeActorWorker:
-        def __init__(self, **kwargs) -> None:
-            captured["actor_worker_kwargs"] = kwargs
-
-    class _FakeActorSupervisor:
-        def __init__(self, **kwargs) -> None:
-            captured["actor_supervisor_kwargs"] = kwargs
-
     monkeypatch.setattr(runtime_service_graph_module, "PatchExecutor", lambda **kwargs: object())
     monkeypatch.setattr(runtime_service_graph_module, "LearningService", lambda **kwargs: object())
     monkeypatch.setattr(
@@ -1179,9 +1152,6 @@ def test_build_kernel_runtime_threads_external_runtime_service_into_capability_s
     monkeypatch.setattr(runtime_service_graph_module, "KernelToolBridge", lambda **kwargs: object())
     monkeypatch.setattr(runtime_service_graph_module, "CapabilityService", _FakeCapabilityService)
     monkeypatch.setattr(runtime_service_graph_module, "KernelDispatcher", lambda **kwargs: object())
-    monkeypatch.setattr(runtime_service_graph_module, "ActorMailboxService", lambda **kwargs: object())
-    monkeypatch.setattr(runtime_service_graph_module, "ActorWorker", _FakeActorWorker)
-    monkeypatch.setattr(runtime_service_graph_module, "ActorSupervisor", _FakeActorSupervisor)
 
     state_store = SQLiteStateStore(tmp_path / "state.db")
     external_runtime_service = object()
@@ -1196,10 +1166,7 @@ def test_build_kernel_runtime_threads_external_runtime_service_into_capability_s
         governance_control_repository=object(),
         task_runtime_repository=object(),
         runtime_frame_repository=object(),
-        agent_mailbox_repository=object(),
-        agent_runtime_repository=object(),
         agent_checkpoint_repository=object(),
-        agent_thread_binding_repository=object(),
     )
 
     _build_kernel_runtime(

@@ -6,7 +6,6 @@ from copaw.industry.chat_writeback import build_chat_writeback_plan
 from copaw.kernel.governance import GovernanceService
 from copaw.kernel.models import KernelTask
 from copaw.state import (
-    AgentRuntimeRecord,
     AgentReportRecord,
     AssignmentRecord,
     BacklogItemRecord,
@@ -18,6 +17,7 @@ from copaw.state import (
 from copaw.state.repositories import SqliteGovernanceControlRepository
 from copaw.state.human_assist_task_service import HumanAssistTaskService
 from copaw.state.repositories import SqliteHumanAssistTaskRepository
+from tests.shared.executor_runtime_compat import AgentRuntimeRecord
 
 
 def test_industry_service_facade_reads_runtime_detail_from_view_service() -> None:

@@ -6,7 +6,6 @@ from fastapi import APIRouter
 
 from ..runtime_center import apply_runtime_center_surface_headers
 from .runtime_center_actor_capabilities import *  # noqa: F401,F403
-from .runtime_center_actor_focus import *  # noqa: F401,F403
 from .runtime_center_dependencies import *  # noqa: F401,F403
 from .runtime_center_mutation_helpers import *  # noqa: F401,F403
 from .runtime_center_payloads import *  # noqa: F401,F403

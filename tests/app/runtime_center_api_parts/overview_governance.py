@@ -5409,7 +5409,6 @@ def test_runtime_center_agents_endpoint_supports_business_and_system_views() -> 
     assert all_response.status_code == 200
     assert {item["agent_id"] for item in all_response.json()} == {
         "ops-agent",
-        "copaw-agent-runner",
         "copaw-scheduler",
         "copaw-governance",
     }

@@ -1999,15 +1999,14 @@ class _IndustryRuntimeViewsMixin:
         if not isinstance(agent, dict):
             return agent
         agent_id = _string(agent.get("agent_id"))
-        repository = getattr(self, "_agent_runtime_repository", None)
         runtime = (
-            repository.get_runtime(agent_id)
-            if agent_id is not None and repository is not None
+            _get_industry_executor_runtime(self, agent_id=agent_id)
+            if agent_id is not None
             else None
         )
         if runtime is None:
             return agent
-        metadata = _mapping(getattr(runtime, "metadata", None))
+        metadata = _industry_executor_metadata(runtime)
         capability_layers = IndustrySeatCapabilityLayers.from_metadata(
             metadata.get("capability_layers"),
         )
@@ -2044,7 +2043,7 @@ class _IndustryRuntimeViewsMixin:
             layers=capability_layers,
             current_capability_trial=current_capability_trial,
             target_role_id=(
-                _string(getattr(runtime, "industry_role_id", None))
+                _industry_executor_role_id(runtime)
                 or _string(agent.get("role_id"))
                 or _string(agent.get("industry_role_id"))
             ),
@@ -2088,15 +2087,16 @@ class _IndustryRuntimeViewsMixin:
                 "governance_result": governance_result,
                 "lifecycle": {
                     "employment_mode": (
-                        _string(getattr(runtime, "employment_mode", None))
+                        _string(metadata.get("employment_mode"))
                         or _string(agent.get("employment_mode"))
                     ),
                     "activation_mode": (
-                        _string(getattr(runtime, "activation_mode", None))
+                        _string(metadata.get("activation_mode"))
                         or _string(agent.get("activation_mode"))
                     ),
-                    "desired_state": _string(getattr(runtime, "desired_state", None)),
-                    "runtime_status": _string(getattr(runtime, "runtime_status", None)),
+                    "desired_state": _string(metadata.get("desired_state")),
+                    "runtime_status": _string(metadata.get("seat_runtime_status"))
+                    or _string(getattr(runtime, "runtime_status", None)),
                     "status": _string(agent.get("status")),
                 },
             },

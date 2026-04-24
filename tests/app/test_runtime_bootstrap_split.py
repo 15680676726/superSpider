@@ -92,11 +92,6 @@ def test_build_runtime_bootstrap_assembles_domain_services_via_domain_builder(
     tmp_path,
 ) -> None:
     calls: dict[str, object] = {}
-    class _ActorSupervisor:
-        def configure_exception_absorption(self, **kwargs) -> None:
-            calls["exception_absorption_config"] = kwargs
-
-    actor_supervisor = _ActorSupervisor()
     repositories = SimpleNamespace(
         work_context_repository=object(),
         schedule_repository=object(),
@@ -215,9 +210,6 @@ def test_build_runtime_bootstrap_assembles_domain_services_via_domain_builder(
             "kernel-tool-bridge",
             capability_service,
             "kernel-dispatcher",
-            "actor-mailbox-service",
-            "actor-worker",
-            actor_supervisor,
         ),
     )
 
@@ -283,12 +275,6 @@ def test_build_runtime_bootstrap_assembles_domain_services_via_domain_builder(
     assert (
         calls["turn_executor_kwargs"]["conversation_compaction_service"]
         == "conversation-compaction-service"
-    )
-    assert calls["exception_absorption_config"]["human_assist_task_service"] is not None
-    assert calls["exception_absorption_config"]["report_replan_engine"] == "report-replan-engine"
-    assert (
-        calls["exception_absorption_config"]["exception_absorption_service"].__class__.__name__
-        == "MainBrainExceptionAbsorptionService"
     )
     assert bootstrap.goal_service == "goal-service"
     assert bootstrap.memory_activation_service == "memory-activation-service"
@@ -437,12 +423,6 @@ def test_domain_builder_wires_environment_service_into_fixed_sop_service(
 
         def set_delegation_service(self, value) -> None:
             captured["delegation_service"] = value
-
-        def set_actor_mailbox_service(self, value) -> None:
-            captured["actor_mailbox_service"] = value
-
-        def set_actor_supervisor(self, value) -> None:
-            captured["actor_supervisor"] = value
 
         def get_discovery_service(self):
             return self.discovery
@@ -631,7 +611,6 @@ def test_domain_builder_wires_environment_service_into_fixed_sop_service(
         skill_lifecycle_decision_service=object(),
         kernel_dispatcher=kernel_dispatcher,
         kernel_tool_bridge=object(),
-        actor_mailbox_service=object(),
     )
 
     assert captured["fixed_sop_init_kwargs"]["environment_service"] is environment_service
@@ -651,5 +630,3 @@ def test_domain_builder_wires_environment_service_into_fixed_sop_service(
     assert captured["routine_service_kwargs"]["capability_service"] is not None
     assert callable(captured["main_brain_orchestrator_kwargs"]["intake_contract_resolver"])
     assert "delegation_service" not in captured
-    assert "actor_mailbox_service" not in captured
-    assert "actor_supervisor" not in captured

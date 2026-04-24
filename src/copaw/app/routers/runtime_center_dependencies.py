@@ -44,38 +44,10 @@ def _get_agent_profile_service(request: Request):
     return service
 
 
-def _get_agent_runtime_repository(request: Request):
-    repository = getattr(request.app.state, "agent_runtime_repository", None)
-    if repository is None:
-        raise HTTPException(503, detail="Agent runtime repository is not available")
-    return repository
-
-
-def _get_agent_mailbox_repository(request: Request):
-    repository = getattr(request.app.state, "agent_mailbox_repository", None)
-    if repository is None:
-        raise HTTPException(503, detail="Agent mailbox repository is not available")
-    return repository
-
-
 def _get_agent_checkpoint_repository(request: Request):
     repository = getattr(request.app.state, "agent_checkpoint_repository", None)
     if repository is None:
         raise HTTPException(503, detail="Agent checkpoint repository is not available")
-    return repository
-
-
-def _get_agent_lease_repository(request: Request):
-    repository = getattr(request.app.state, "agent_lease_repository", None)
-    if repository is None:
-        raise HTTPException(503, detail="Agent lease repository is not available")
-    return repository
-
-
-def _get_agent_thread_binding_repository(request: Request):
-    repository = getattr(request.app.state, "agent_thread_binding_repository", None)
-    if repository is None:
-        raise HTTPException(503, detail="Agent thread binding repository is not available")
     return repository
 
 
@@ -228,11 +200,6 @@ def _get_runtime_conversation_facade(request: Request) -> RuntimeConversationFac
         history_reader=reader,
         industry_service=getattr(request.app.state, "industry_service", None),
         agent_profile_service=getattr(request.app.state, "agent_profile_service", None),
-        agent_thread_binding_repository=getattr(
-            request.app.state,
-            "agent_thread_binding_repository",
-            None,
-        ),
         executor_runtime_service=getattr(
             request.app.state,
             "executor_runtime_service",

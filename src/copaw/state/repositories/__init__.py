@@ -4,12 +4,8 @@ from __future__ import annotations
 
 from .base import (
     BaseAgentCheckpointRepository,
-    BaseAgentLeaseRepository,
-    BaseAgentMailboxRepository,
     BaseAgentReportRepository,
-    BaseAgentRuntimeRepository,
     BaseAssignmentRepository,
-    BaseAgentThreadBindingRepository,
     BaseAutomationLoopRuntimeRepository,
     BaseBacklogItemRepository,
     BaseDecisionRequestRepository,
@@ -53,13 +49,9 @@ from .base import (
 )
 from .sqlite import (
     SqliteAgentCheckpointRepository,
-    SqliteAgentLeaseRepository,
-    SqliteAgentMailboxRepository,
     SqliteAgentProfileOverrideRepository,
     SqliteAgentReportRepository,
-    SqliteAgentRuntimeRepository,
     SqliteAssignmentRepository,
-    SqliteAgentThreadBindingRepository,
     SqliteAutomationLoopRuntimeRepository,
     SqliteBacklogItemRepository,
     SqliteCapabilityOverrideRepository,
@@ -106,12 +98,8 @@ from .sqlite import (
 
 __all__ = [
     "BaseAgentCheckpointRepository",
-    "BaseAgentLeaseRepository",
-    "BaseAgentMailboxRepository",
     "BaseAgentReportRepository",
-    "BaseAgentRuntimeRepository",
     "BaseAssignmentRepository",
-    "BaseAgentThreadBindingRepository",
     "BaseAutomationLoopRuntimeRepository",
     "BaseBacklogItemRepository",
     "BaseDecisionRequestRepository",
@@ -153,13 +141,9 @@ __all__ = [
     "BaseWorkflowRunRepository",
     "BaseWorkflowTemplateRepository",
     "SqliteAgentCheckpointRepository",
-    "SqliteAgentLeaseRepository",
-    "SqliteAgentMailboxRepository",
     "SqliteAgentProfileOverrideRepository",
     "SqliteAgentReportRepository",
-    "SqliteAgentRuntimeRepository",
     "SqliteAssignmentRepository",
-    "SqliteAgentThreadBindingRepository",
     "SqliteAutomationLoopRuntimeRepository",
     "SqliteBacklogItemRepository",
     "SqliteCapabilityOverrideRepository",

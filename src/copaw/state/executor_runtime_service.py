@@ -866,6 +866,24 @@ class ExecutorRuntimeService:
             self._store_thread_binding(updated_binding)
         return runtime
 
+    def delete_runtime(self, runtime_id: str) -> bool:
+        repository = self._repository
+        if repository is not None:
+            return repository.delete_runtime(runtime_id)
+        return self._runtime_instances.pop(runtime_id, None) is not None
+
+    def upsert_thread_binding(
+        self,
+        record: ExecutorThreadBindingRecord,
+    ) -> ExecutorThreadBindingRecord:
+        return self._store_thread_binding(record)
+
+    def delete_thread_binding(self, binding_id: str) -> bool:
+        repository = self._repository
+        if repository is not None:
+            return repository.delete_thread_binding(binding_id)
+        return self._thread_bindings.pop(binding_id, None) is not None
+
     def _store_runtime_instance(
         self,
         record: ExecutorRuntimeInstanceRecord,

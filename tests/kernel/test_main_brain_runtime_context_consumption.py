@@ -7,6 +7,7 @@ from copaw.kernel.query_execution_confirmation import (
     build_query_resume_request,
     query_confirmation_request_context,
 )
+from copaw.state.executor_runtime_service import ExecutorRuntimeService
 
 from .query_execution_environment_parts.shared import *  # noqa: F401,F403
 
@@ -54,6 +55,39 @@ def _sample_main_brain_runtime_context() -> dict[str, object]:
             ],
         },
     }
+
+
+def _seed_executor_runtime(
+    state_store: SQLiteStateStore,
+    *,
+    agent_id: str,
+    thread_id: str,
+) -> ExecutorRuntimeService:
+    service = ExecutorRuntimeService(state_store=state_store)
+    runtime = service.create_or_reuse_runtime(
+        executor_id="codex",
+        protocol_kind="app_server",
+        scope_kind="role",
+        role_id=agent_id,
+        thread_id=thread_id,
+        metadata={
+            "owner_agent_id": agent_id,
+            "display_name": "Ops Agent",
+            "role_name": "Operations lead",
+            "industry_instance_id": "industry-v1-ops",
+            "industry_role_id": "execution-core",
+        },
+        continuity_metadata={
+            "control_thread_id": thread_id,
+            "session_id": thread_id,
+        },
+    )
+    service.mark_runtime_ready(
+        runtime.runtime_id,
+        thread_id=thread_id,
+        metadata={"owner_agent_id": agent_id},
+    )
+    return service
 
 
 def test_query_confirmation_resume_request_preserves_main_brain_runtime_context() -> None:
@@ -107,28 +141,12 @@ def test_query_execution_service_formally_consumes_main_brain_runtime_context_in
     )
 
     state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
-    runtime_repository = SqliteAgentRuntimeRepository(state_store)
-    runtime_repository.upsert_runtime(
-        AgentRuntimeRecord(
-            agent_id="ops-agent",
-            actor_key="industry-v1-ops:execution-core",
-            actor_fingerprint="fp-ops",
-            actor_class="industry-dynamic",
-            desired_state="active",
-            runtime_status="idle",
-            industry_instance_id="industry-v1-ops",
-            industry_role_id="execution-core",
-            display_name="Ops Agent",
-            role_name="Operations lead",
-        ),
+    executor_runtime_service = _seed_executor_runtime(
+        state_store,
+        agent_id="ops-agent",
+        thread_id="industry-chat:industry-v1-ops:execution-core",
     )
-    mailbox_repository = SqliteAgentMailboxRepository(state_store)
     checkpoint_repository = SqliteAgentCheckpointRepository(state_store)
-    mailbox_service = ActorMailboxService(
-        mailbox_repository=mailbox_repository,
-        runtime_repository=runtime_repository,
-        checkpoint_repository=checkpoint_repository,
-    )
 
     service = KernelQueryExecutionService(
         session_backend=_FakeSessionBackend(),
@@ -136,7 +154,7 @@ def test_query_execution_service_formally_consumes_main_brain_runtime_context_in
         agent_profile_service=_FakeAgentProfileService(),
         industry_service=_FakeIndustryService(),
         agent_checkpoint_repository=checkpoint_repository,
-        agent_runtime_repository=runtime_repository,
+        executor_runtime_service=executor_runtime_service,
     )
 
     runtime_context = _sample_main_brain_runtime_context()
@@ -191,7 +209,10 @@ def test_query_execution_service_formally_consumes_main_brain_runtime_context_in
     assert restored_context["main_brain_runtime"]["recovery"]["reason"] == "session-lease"
     assert restored_context["main_brain_runtime"]["knowledge_graph"]["scope_id"] == "ctx-approval"
 
-    runtime = runtime_repository.get_runtime("ops-agent")
+    runtime = next(
+        iter(executor_runtime_service.list_runtimes(role_id="ops-agent")),
+        None,
+    )
     assert runtime is not None
     assert runtime.metadata["main_brain_runtime"]["intent"]["mode"] == "environment-bound"
     assert runtime.metadata["main_brain_runtime"]["environment"]["ref"] == "desktop:session-1"

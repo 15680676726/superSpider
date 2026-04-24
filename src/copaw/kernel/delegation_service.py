@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import inspect
 from typing import Any
 
 from ..evidence import EvidenceLedger, EvidenceRecord
@@ -27,8 +26,7 @@ _ACTIVE_TASK_STATUSES = frozenset(
 _INFLIGHT_TASK_STATUSES = frozenset({"queued", "running", "waiting", "blocked", "needs-confirm"})
 _INFLIGHT_RUNTIME_STATUSES = frozenset({"active", "hydrating", "waiting-confirm"})
 _INFLIGHT_RUNTIME_PHASES = frozenset({"risk-check", "executing", "waiting-confirm"})
-_DELEGATION_COMPAT_EXECUTION_SOURCE = "delegation-compat"
-_DELEGATION_COMPATIBILITY_MODE = "delegation-compat"
+_DELEGATION_EXECUTION_SOURCE = "executor-runtime"
 
 
 class DelegationError(ValueError):
@@ -99,8 +97,6 @@ class TaskDelegationService:
         industry_service: object | None = None,
         environment_service: object | None = None,
         mcp_manager: object | None = None,
-        actor_mailbox_service: object | None = None,
-        actor_supervisor: object | None = None,
         runtime_event_bus: object | None = None,
         experience_memory_service: object | None = None,
         overload_threshold: int = 5,
@@ -113,8 +109,6 @@ class TaskDelegationService:
         self._industry_service = industry_service
         self._environment_service = environment_service
         self._mcp_manager = mcp_manager
-        self._actor_mailbox_service = actor_mailbox_service
-        self._actor_supervisor = actor_supervisor
         self._runtime_event_bus = runtime_event_bus
         self._experience_memory_service = experience_memory_service
         self._overload_threshold = max(1, overload_threshold)
@@ -250,12 +244,10 @@ class TaskDelegationService:
         )
 
         admitted = self._kernel_dispatcher.submit(child_task)
-        mailbox_item = None
         executed: KernelResult | None = None
         if execute and admitted.phase == "executing":
             executed = await self._execute_delegated_child_task(
                 child_task,
-                mailbox_item=mailbox_item,
             )
 
         self._append_parent_evidence(
@@ -274,18 +266,11 @@ class TaskDelegationService:
                 "owner_agent_id": resolved_agent_id,
                 "execute": execute,
                 "blocked": governance["blocked"],
-                "mailbox_id": getattr(mailbox_item, "id", None),
             },
         )
 
         child_record = self._task_repository.get_task(child_task.id)
         child_runtime = self._task_runtime_repository.get_runtime(child_task.id)
-        if mailbox_item is not None and self._actor_mailbox_service is not None:
-            get_item = getattr(self._actor_mailbox_service, "get_item", None)
-            if callable(get_item):
-                refreshed_item = get_item(mailbox_item.id)
-                if refreshed_item is not None:
-                    mailbox_item = refreshed_item
         return {
             "parent_task": self._task_payload(parent_task.id),
             "child_task": (
@@ -302,25 +287,12 @@ class TaskDelegationService:
             "target_agent": self._agent_payload(resolved_agent_id),
             "target_agent_id": resolved_agent_id,
             "child_task_id": child_task.id,
-            "mailbox_id": getattr(mailbox_item, "id", None),
-            "dispatch_status": (
-                executed.phase
-                if executed is not None
-                else (
-                    getattr(mailbox_item, "status", None)
-                    or ("queued" if mailbox_item is not None else admitted.phase)
-                )
-            ),
+            "mailbox_id": None,
+            "dispatch_status": executed.phase if executed is not None else admitted.phase,
             "latest_result_summary": (
                 executed.summary
                 if executed is not None
-                else (
-                    getattr(mailbox_item, "result_summary", None)
-                    or getattr(mailbox_item, "error_summary", None)
-                    or getattr(admitted, "summary", None)
-                    or getattr(mailbox_item, "summary", None)
-                    or getattr(admitted, "phase", None)
-                )
+                else getattr(admitted, "summary", None) or getattr(admitted, "phase", None)
             ),
             "routes": {
                 "parent_task": f"/api/runtime-center/tasks/{parent_task.id}",
@@ -332,63 +304,41 @@ class TaskDelegationService:
     async def _execute_delegated_child_task(
         self,
         child_task: KernelTask,
-        *,
-        mailbox_item: object | None,
     ) -> KernelResult | None:
-        if mailbox_item is None or self._actor_mailbox_service is None:
-            contract = resolve_child_run_writer_contract(
-                payload=child_task.payload,
-                environment_ref=child_task.environment_ref,
-            )
-            mcp_overlay_contract = resolve_child_run_mcp_overlay_contract(
-                payload=child_task.payload,
-            )
-            mcp_manager = resolve_child_run_mcp_manager(
-                kernel_dispatcher=self._kernel_dispatcher,
-                mcp_manager=self._mcp_manager,
-            )
-            result = await run_child_task_with_writer_lease(
-                label=f"delegation:{child_task.owner_agent_id}",
-                execute=lambda: self._kernel_dispatcher.execute_task(child_task.id),
-                environment_service=self._environment_service,
-                owner_agent_id=child_task.owner_agent_id,
-                worker_id=None,
-                contract=contract,
-                mcp_manager=mcp_manager,
-                mcp_overlay_contract=mcp_overlay_contract,
-                ttl_seconds=180,
-                heartbeat_interval_seconds=15.0,
-            )
-            self._maybe_write_experience(
-                child_task=child_task,
-                mailbox_item=mailbox_item,
-                result=result,
-                checkpoint_id=None,
-            )
-            return result
-
-        if self._actor_supervisor is None:
-            return None
-        runner = getattr(self._actor_supervisor, "run_agent_once", None)
-        if not callable(runner):
-            return None
-        maybe_result = runner(child_task.owner_agent_id)
-        if inspect.isawaitable(maybe_result):
-            await maybe_result
-        snapshot = self._child_task_result_from_state(
-            child_task,
-            mailbox_item=mailbox_item,
-            fallback_summary="Queued delegated task",
+        contract = resolve_child_run_writer_contract(
+            payload=child_task.payload,
+            environment_ref=child_task.environment_ref,
         )
-        return snapshot
+        mcp_overlay_contract = resolve_child_run_mcp_overlay_contract(
+            payload=child_task.payload,
+        )
+        mcp_manager = resolve_child_run_mcp_manager(
+            kernel_dispatcher=self._kernel_dispatcher,
+            mcp_manager=self._mcp_manager,
+        )
+        result = await run_child_task_with_writer_lease(
+            label=f"delegation:{child_task.owner_agent_id}",
+            execute=lambda: self._kernel_dispatcher.execute_task(child_task.id),
+            environment_service=self._environment_service,
+            owner_agent_id=child_task.owner_agent_id,
+            worker_id=None,
+            contract=contract,
+            mcp_manager=mcp_manager,
+            mcp_overlay_contract=mcp_overlay_contract,
+            ttl_seconds=180,
+            heartbeat_interval_seconds=15.0,
+        )
+        self._maybe_write_experience(
+            child_task=child_task,
+            result=result,
+        )
+        return result
 
     def _maybe_write_experience(
         self,
         *,
         child_task: KernelTask,
-        mailbox_item: object | None,
         result: KernelResult,
-        checkpoint_id: str | None,
     ) -> None:
         remember = getattr(self._experience_memory_service, "remember_outcome", None)
         if (
@@ -402,16 +352,14 @@ class TaskDelegationService:
         if callable(getter):
             profile = getter(child_task.owner_agent_id)
         payload = child_task.payload if isinstance(child_task.payload, dict) else {}
-        metadata = dict(getattr(mailbox_item, "metadata", None) or {})
+        metadata = {}
         metadata.update(
             {
-                "checkpoint_id": checkpoint_id,
                 "trace_id": child_task.trace_id,
                 "parent_task_id": child_task.parent_task_id,
                 "assignment_id": payload.get("assignment_id"),
-                "execution_source": _DELEGATION_COMPAT_EXECUTION_SOURCE,
-                "formal_surface": False,
-                "compatibility_mode": _DELEGATION_COMPATIBILITY_MODE,
+                "execution_source": _DELEGATION_EXECUTION_SOURCE,
+                "formal_surface": True,
             },
         )
         remember(
@@ -421,13 +369,9 @@ class TaskDelegationService:
             summary=result.summary,
             error_summary=result.error,
             capability_ref=child_task.capability_ref,
-            mailbox_id=str(getattr(mailbox_item, "id", "") or "").strip() or None,
+            mailbox_id=None,
             task_id=child_task.id,
-            source_agent_id=(
-                str(getattr(mailbox_item, "source_agent_id", "") or "").strip()
-                or str(metadata.get("source_agent_id") or "").strip()
-                or None
-            ),
+            source_agent_id=str(metadata.get("source_agent_id") or "").strip() or None,
             industry_instance_id=str(payload.get("industry_instance_id") or "").strip() or None,
             industry_role_id=str(payload.get("industry_role_id") or "").strip() or None,
             role_name=str(getattr(profile, "role_name", "") or "").strip() or None,
@@ -542,184 +486,6 @@ class TaskDelegationService:
             return False
         return status in _INFLIGHT_TASK_STATUSES
 
-    def _child_task_result_from_state(
-        self,
-        child_task: KernelTask,
-        *,
-        mailbox_item: object | None,
-        fallback_summary: str,
-    ) -> KernelResult | None:
-        refreshed_mailbox = self._refresh_mailbox_item(mailbox_item)
-        mailbox_status = str(getattr(refreshed_mailbox, "status", "") or "")
-        mailbox_phase = self._mailbox_status_to_phase(mailbox_status)
-        if mailbox_phase is None:
-            return None
-
-        child_record = self._task_repository.get_task(child_task.id)
-        child_runtime = self._task_runtime_repository.get_runtime(child_task.id)
-        runtime_phase = _canonical_child_result_phase(
-            getattr(child_runtime, "current_phase", None),
-        )
-        checkpoint = self._latest_child_result_checkpoint(
-            child_task,
-            mailbox_item=refreshed_mailbox,
-        )
-        checkpoint_result = self._checkpoint_result_payload(checkpoint)
-        phase = (
-            self._checkpoint_result_phase(checkpoint_result)
-            or runtime_phase
-            or mailbox_phase
-        )
-        summary = (
-            _non_empty_text(checkpoint_result.get("summary")) if checkpoint_result else None
-        ) or (
-            _non_empty_text(getattr(checkpoint, "summary", None)) if checkpoint is not None else None
-        ) or (
-            str(getattr(refreshed_mailbox, "result_summary", "") or "").strip()
-            or str(getattr(refreshed_mailbox, "error_summary", "") or "").strip()
-            or str(getattr(child_runtime, "last_result_summary", "") or "").strip()
-            or str(getattr(child_runtime, "last_error_summary", "") or "").strip()
-            or str(getattr(child_record, "summary", "") or "").strip()
-            or fallback_summary
-        )
-        checkpoint_error = (
-            _non_empty_text(checkpoint_result.get("error"))
-            if checkpoint_result is not None
-            else None
-        )
-        error = (
-            None
-            if phase == "completed"
-            else checkpoint_error
-            or str(getattr(refreshed_mailbox, "error_summary", "") or "").strip()
-            or str(getattr(child_runtime, "last_error_summary", "") or "").strip()
-            or None
-        )
-        explicit_success = (
-            checkpoint_result.get("success")
-            if checkpoint_result is not None
-            else None
-        )
-        success = (
-            explicit_success
-            if isinstance(explicit_success, bool)
-            else phase == "completed"
-        )
-        if phase != "completed":
-            success = False
-        evidence_id = (
-            _non_empty_text(checkpoint_result.get("evidence_id"))
-            if checkpoint_result is not None
-            else None
-        )
-        decision_request_id = (
-            _non_empty_text(checkpoint_result.get("decision_request_id"))
-            if checkpoint_result is not None
-            else None
-        )
-        output_payload = (
-            dict(checkpoint_result.get("output"))
-            if checkpoint_result is not None
-            and isinstance(checkpoint_result.get("output"), dict)
-            else None
-        )
-        return KernelResult(
-            task_id=child_task.id,
-            trace_id=(
-                _non_empty_text(checkpoint_result.get("trace_id"))
-                if checkpoint_result is not None
-                else None
-            )
-            or child_task.trace_id,
-            success=success,
-            phase=phase,  # type: ignore[arg-type]
-            summary=summary,
-            evidence_id=evidence_id,
-            decision_request_id=decision_request_id,
-            error=error,
-            output=output_payload,
-        )
-
-    def _latest_child_result_checkpoint(
-        self,
-        child_task: KernelTask,
-        *,
-        mailbox_item: object | None,
-    ) -> object | None:
-        if self._actor_mailbox_service is None:
-            return None
-        lister = getattr(self._actor_mailbox_service, "list_checkpoints", None)
-        if not callable(lister):
-            return None
-        mailbox_id = _non_empty_text(getattr(mailbox_item, "id", None))
-        checkpoints = lister(
-            agent_id=child_task.owner_agent_id,
-            mailbox_id=mailbox_id,
-            task_id=child_task.id,
-            limit=20,
-        )
-        for checkpoint in checkpoints:
-            if str(getattr(checkpoint, "checkpoint_kind", "") or "") == "task-result":
-                return checkpoint
-        return None
-
-    def _checkpoint_result_payload(
-        self,
-        checkpoint: object | None,
-    ) -> dict[str, object] | None:
-        snapshot_payload = getattr(checkpoint, "snapshot_payload", None)
-        if not isinstance(snapshot_payload, dict):
-            return None
-        result = snapshot_payload.get("result")
-        if not isinstance(result, dict):
-            return None
-        return dict(result)
-
-    def _checkpoint_result_phase(
-        self,
-        checkpoint_result: dict[str, object] | None,
-    ) -> str | None:
-        if checkpoint_result is None:
-            return None
-        output_payload = checkpoint_result.get("output")
-        if isinstance(output_payload, dict):
-            phase = _canonical_child_result_phase(output_payload.get("dispatch_status"))
-            if phase is not None:
-                return phase
-            phase = _canonical_child_result_phase(output_payload.get("phase"))
-            if phase is not None:
-                return phase
-            phase = _canonical_child_result_phase(output_payload.get("status"))
-            if phase is not None:
-                return phase
-        phase = _canonical_child_result_phase(checkpoint_result.get("dispatch_status"))
-        if phase is not None:
-            return phase
-        phase = _canonical_child_result_phase(checkpoint_result.get("phase"))
-        if phase is not None:
-            return phase
-        return _canonical_child_result_phase(checkpoint_result.get("status"))
-
-    def _refresh_mailbox_item(self, mailbox_item: object | None) -> object | None:
-        mailbox_id = getattr(mailbox_item, "id", None)
-        if not (isinstance(mailbox_id, str) and mailbox_id.strip()):
-            return mailbox_item
-        getter = getattr(self._actor_mailbox_service, "get_item", None)
-        if not callable(getter):
-            return mailbox_item
-        return getter(mailbox_id) or mailbox_item
-
-    def _mailbox_status_to_phase(self, mailbox_status: str) -> str | None:
-        if mailbox_status == "completed":
-            return "completed"
-        if mailbox_status == "blocked":
-            return "waiting-confirm"
-        if mailbox_status == "cancelled":
-            return "cancelled"
-        if mailbox_status == "failed":
-            return "failed"
-        return None
-
     def _build_child_payload(
         self,
         *,
@@ -749,7 +515,7 @@ class TaskDelegationService:
         lease_class: str | None,
         writer_lock_scope: str | None,
     ) -> dict[str, object]:
-        execution_source = _DELEGATION_COMPAT_EXECUTION_SOURCE
+        execution_source = _DELEGATION_EXECUTION_SOURCE
 
         def _apply_execution_envelope(base_payload: dict[str, object]) -> dict[str, object]:
             payload_meta = dict(base_payload.get("meta") or {})
@@ -762,8 +528,7 @@ class TaskDelegationService:
                     "context_key": context_key,
                     "assignment_id": assignment_id,
                     "execution_source": execution_source,
-                    "formal_surface": False,
-                    "compatibility_mode": _DELEGATION_COMPATIBILITY_MODE,
+                    "formal_surface": True,
                     "lane_id": lane_id,
                     "cycle_id": cycle_id,
                     "report_back_mode": report_back_mode,
@@ -783,8 +548,7 @@ class TaskDelegationService:
                 ("lane_id", lane_id),
                 ("cycle_id", cycle_id),
                 ("report_back_mode", report_back_mode),
-                ("formal_surface", False),
-                ("compatibility_mode", _DELEGATION_COMPATIBILITY_MODE),
+                ("formal_surface", True),
             ):
                 if value is not None and key not in base_payload:
                     base_payload[key] = value

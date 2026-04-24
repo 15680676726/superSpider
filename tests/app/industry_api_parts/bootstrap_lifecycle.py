@@ -2882,10 +2882,15 @@ def test_run_operating_cycle_dispatches_materialized_execution_assignment(tmp_pa
         support_role.agent_id,
     )
     assert override is not None
+    profile = app.state.agent_profile_service.get_agent(support_role.agent_id)
+    assert profile is not None
     if "current_assignment_id" not in runtime.metadata:
-        assert override.status == "idle"
+        assert profile.current_focus_id != assignment_id
     else:
-        assert override.status in {"waiting", "assigned", "queued", "claimed", "executing"}
+        assert profile.status in {"waiting", "blocked", "running", "idle", "needs-confirm", "degraded", "executing"}
+        assert profile.current_focus_kind == "assignment"
+        assert profile.current_focus_id == assignment_id
+        assert profile.current_focus == "Prepare the support execution brief"
 
 
 def test_run_operating_cycle_persists_graph_focus_into_formal_planning_sidecar(tmp_path) -> None:

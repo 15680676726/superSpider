@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import inspect
+from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -11,24 +12,17 @@ from copaw.app.routers import runtime_center_dependencies as runtime_center_depe
 from copaw.app.routers.runtime_center import router as runtime_center_router
 from copaw.capabilities import CapabilityService
 from copaw.evidence import EvidenceLedger
-from copaw.kernel import ActorMailboxService, KernelDispatcher
+from copaw.kernel import KernelDispatcher
 from copaw.kernel.agent_profile_service import AgentProfileService
 from copaw.kernel.persistence import KernelTaskStore
 from copaw.state import (
-    AgentLeaseRecord,
-    AgentRuntimeRecord,
-    AgentThreadBindingRecord,
     ExecutorRuntimeService,
     SQLiteStateStore,
 )
 from copaw.state.repositories import (
     SqliteAgentCheckpointRepository,
     SqliteDecisionRequestRepository,
-    SqliteAgentLeaseRepository,
-    SqliteAgentMailboxRepository,
     SqliteAgentProfileOverrideRepository,
-    SqliteAgentRuntimeRepository,
-    SqliteAgentThreadBindingRepository,
     SqliteRuntimeFrameRepository,
     SqliteTaskRepository,
     SqliteTaskRuntimeRepository,
@@ -54,112 +48,61 @@ def test_runtime_center_actor_fixture_drops_legacy_actor_state(tmp_path) -> None
 
     assert not hasattr(app.state, "actor_mailbox_service")
     assert not hasattr(app.state, "actor_supervisor")
+    assert not hasattr(app.state, "agent_runtime_repository")
+    assert not hasattr(app.state, "agent_mailbox_repository")
+    assert not hasattr(app.state, "agent_lease_repository")
+    assert not hasattr(app.state, "agent_thread_binding_repository")
 
 
 def _build_actor_app(tmp_path):
     state_store = SQLiteStateStore(tmp_path / "actor-state.db")
-    runtime_repository = SqliteAgentRuntimeRepository(state_store)
-    mailbox_repository = SqliteAgentMailboxRepository(state_store)
     checkpoint_repository = SqliteAgentCheckpointRepository(state_store)
-    lease_repository = SqliteAgentLeaseRepository(state_store)
-    thread_binding_repository = SqliteAgentThreadBindingRepository(state_store)
     override_repository = SqliteAgentProfileOverrideRepository(state_store)
     task_repository = SqliteTaskRepository(state_store)
     task_runtime_repository = SqliteTaskRuntimeRepository(state_store)
     runtime_frame_repository = SqliteRuntimeFrameRepository(state_store)
     decision_request_repository = SqliteDecisionRequestRepository(state_store)
-
-    runtime_repository.upsert_runtime(
-        AgentRuntimeRecord(
-            agent_id="agent-1",
-            actor_key="industry-v1-ops:operator",
-            actor_fingerprint="fp-agent-1",
-            actor_class="industry-dynamic",
-            desired_state="active",
-            runtime_status="idle",
-            industry_instance_id="industry-v1-ops",
-            industry_role_id="operator",
-            display_name="Ops Agent",
-            role_name="Operations",
-        ),
-    )
-    runtime_repository.upsert_runtime(
-        AgentRuntimeRecord(
-            agent_id="agent-2",
-            actor_key="industry-v1-ops:research",
-            actor_fingerprint="fp-agent-2",
-            actor_class="industry-dynamic",
-            desired_state="active",
-            runtime_status="idle",
-            industry_instance_id="industry-v1-ops",
-            industry_role_id="research",
-            display_name="Research Agent",
-            role_name="Research",
-        ),
-    )
-
-    mailbox_service = ActorMailboxService(
-        mailbox_repository=mailbox_repository,
-        runtime_repository=runtime_repository,
-        checkpoint_repository=checkpoint_repository,
-        thread_binding_repository=thread_binding_repository,
-    )
-    item = mailbox_service.enqueue_item(
-        agent_id="agent-1",
-        task_id="task-1",
-        source_agent_id="agent-2",
-        title="Prepare operator brief",
-        summary="Collect the latest operator backlog and summarize it.",
-        capability_ref="system:dispatch_query",
-        conversation_thread_id="agent-chat:agent-1",
-        payload={"query": "Summarize the operator backlog."},
-        metadata={"origin": "seed"},
-    )
-    mailbox_service.create_checkpoint(
-        agent_id="agent-1",
-        mailbox_id=item.id,
-        task_id="task-1",
-        checkpoint_kind="worker-step",
-        status="ready",
-        phase="queued",
-        conversation_thread_id="agent-chat:agent-1",
-        summary="Mailbox item seeded for actor runtime API tests.",
-    )
-    lease_repository.upsert_lease(
-        AgentLeaseRecord(
-            agent_id="agent-1",
-            lease_kind="actor-runtime",
-            resource_ref="actor-runtime:agent-1",
-            owner="copaw-actor-worker",
-            lease_token="lease-1",
-        ),
-    )
-    thread_binding_repository.upsert_binding(
-        AgentThreadBindingRecord(
-            thread_id="agent-chat:agent-1",
-            agent_id="agent-1",
-            session_id="agent-chat:agent-1",
-            channel="console",
-            binding_kind="agent-primary",
-            industry_instance_id="industry-v1-ops",
-            industry_role_id="operator",
-            owner_scope="ops",
-            metadata={"agent_name": "Ops Agent", "role_name": "Operations"},
-        ),
-    )
-    thread_binding_repository.upsert_binding(
-        AgentThreadBindingRecord(
-            thread_id="agent-chat:agent-2",
-            agent_id="agent-2",
-            session_id="agent-chat:agent-2",
-            channel="console",
-            binding_kind="agent-primary",
-            industry_instance_id="industry-v1-ops",
-            industry_role_id="research",
-            owner_scope="ops",
-            metadata={"agent_name": "Research Agent", "role_name": "Research"},
-        ),
-    )
+    executor_runtime_service = ExecutorRuntimeService(state_store=state_store)
+    for assignment_id, role_id, agent_id, display_name, role_name in (
+        ("assignment-operator", "operator", "agent-1", "Ops Agent", "Operations"),
+        ("assignment-research", "research", "agent-2", "Research Agent", "Research"),
+    ):
+        runtime = executor_runtime_service.create_or_reuse_runtime(
+            executor_id="codex",
+            protocol_kind="app_server",
+            scope_kind="assignment",
+            assignment_id=assignment_id,
+            role_id=role_id,
+            thread_id=f"industry-chat:industry-v1-ops:{role_id}",
+            metadata={
+                "owner_agent_id": agent_id,
+                "display_name": display_name,
+                "role_name": role_name,
+                "industry_instance_id": "industry-v1-ops",
+                "industry_role_id": role_id,
+                "desired_state": "active",
+                "continuity": {
+                    "control_thread_id": f"industry-chat:industry-v1-ops:{role_id}",
+                    "session_id": f"industry-chat:industry-v1-ops:{role_id}",
+                },
+            },
+        )
+        executor_runtime_service.mark_runtime_ready(
+            runtime.runtime_id,
+            thread_id=f"industry-chat:industry-v1-ops:{role_id}",
+            metadata={
+                "owner_agent_id": agent_id,
+                "display_name": display_name,
+                "role_name": role_name,
+                "industry_instance_id": "industry-v1-ops",
+                "industry_role_id": role_id,
+                "desired_state": "active",
+                "continuity": {
+                    "control_thread_id": f"industry-chat:industry-v1-ops:{role_id}",
+                    "session_id": f"industry-chat:industry-v1-ops:{role_id}",
+                },
+            },
+        )
 
     evidence_ledger = EvidenceLedger()
     capability_service = CapabilityService(evidence_ledger=evidence_ledger)
@@ -167,11 +110,8 @@ def _build_actor_app(tmp_path):
         override_repository=override_repository,
         task_repository=task_repository,
         task_runtime_repository=task_runtime_repository,
-        agent_runtime_repository=runtime_repository,
-        agent_mailbox_repository=mailbox_repository,
         agent_checkpoint_repository=checkpoint_repository,
-        agent_lease_repository=lease_repository,
-        agent_thread_binding_repository=thread_binding_repository,
+        executor_runtime_service=executor_runtime_service,
         decision_request_repository=decision_request_repository,
         capability_service=capability_service,
     )
@@ -191,11 +131,8 @@ def _build_actor_app(tmp_path):
 
     app = FastAPI()
     app.include_router(runtime_center_router)
-    app.state.agent_runtime_repository = runtime_repository
-    app.state.agent_mailbox_repository = mailbox_repository
     app.state.agent_checkpoint_repository = checkpoint_repository
-    app.state.agent_lease_repository = lease_repository
-    app.state.agent_thread_binding_repository = thread_binding_repository
+    app.state.executor_runtime_service = executor_runtime_service
     app.state.agent_profile_override_repository = override_repository
     app.state.task_repository = task_repository
     app.state.task_runtime_repository = task_runtime_repository
@@ -204,7 +141,7 @@ def _build_actor_app(tmp_path):
     app.state.agent_profile_service = agent_profile_service
     app.state.capability_service = capability_service
     app.state.kernel_dispatcher = dispatcher
-    return app, item
+    return app, SimpleNamespace(id="retired-actor-mailbox-item")
 
 
 def _list_lifecycle_kernel_tasks(app: FastAPI) -> list[object]:
@@ -311,7 +248,6 @@ def test_runtime_center_agent_capability_assignment_uses_executor_runtime_when_a
     tmp_path,
 ) -> None:
     app, _item = _build_actor_app(tmp_path)
-    app.state.agent_runtime_repository = None
     executor_runtime_service = ExecutorRuntimeService(
         state_store=SQLiteStateStore(tmp_path / "actor-capability-executor.db"),
     )

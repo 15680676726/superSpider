@@ -39,13 +39,12 @@ class _IndustryTeamRuntimeMixin:
         agent_id: str,
         capability_ids: list[str] | None,
     ) -> None:
-        repository = self._agent_runtime_repository
-        if repository is None or not isinstance(agent_id, str) or not agent_id.strip():
+        if not isinstance(agent_id, str) or not agent_id.strip():
             return
-        runtime = repository.get_runtime(agent_id)
+        runtime = _get_industry_executor_runtime(self, agent_id=agent_id)
         if runtime is None:
             return
-        metadata = dict(getattr(runtime, "metadata", {}) or {})
+        metadata = _industry_executor_metadata(runtime)
         layers = IndustrySeatCapabilityLayers.from_metadata(
             metadata.get("capability_layers"),
         )
@@ -70,13 +69,13 @@ class _IndustryTeamRuntimeMixin:
             cycle_delta_capability_ids=list(layers.cycle_delta_capability_ids),
             session_overlay_capability_ids=list(layers.session_overlay_capability_ids),
             current_capability_trial=current_trial,
-            target_role_id=_string(getattr(runtime, "industry_role_id", None)),
+            target_role_id=_industry_executor_role_id(runtime),
             target_seat_ref=_string(metadata.get("selected_seat_ref")),
             selected_scope=_string(current_trial.get("selected_scope")),
             candidate_id=_string(current_trial.get("candidate_id")),
         )
         metadata["capability_layers"] = snapshot.layers_payload
-        repository.upsert_runtime(
+        self._executor_runtime_service.upsert_runtime(
             runtime.model_copy(
                 update={
                     "metadata": metadata,
@@ -104,10 +103,13 @@ class _IndustryTeamRuntimeMixin:
         reason: str | None = None,
         preflight: dict[str, object] | None = None,
     ) -> dict[str, object]:
-        repository = self._agent_runtime_repository
-        if repository is None or not isinstance(target_agent_id, str) or not target_agent_id.strip():
-            return {"success": False, "error": "Agent runtime repository is not available"}
-        runtime = repository.get_runtime(target_agent_id)
+        if (
+            self._executor_runtime_service is None
+            or not isinstance(target_agent_id, str)
+            or not target_agent_id.strip()
+        ):
+            return {"success": False, "error": "Executor runtime service is not available"}
+        runtime = _get_industry_executor_runtime(self, agent_id=target_agent_id)
         if runtime is None:
             runtime = self._seed_agent_runtime_for_scope_attach(
                 agent_id=target_agent_id,
@@ -116,7 +118,7 @@ class _IndustryTeamRuntimeMixin:
             )
             if runtime is None:
                 return {"success": False, "error": f"Target agent '{target_agent_id}' is not available"}
-        metadata = dict(getattr(runtime, "metadata", {}) or {})
+        metadata = _industry_executor_metadata(runtime)
         if selected_seat_ref:
             metadata["selected_seat_ref"] = selected_seat_ref
         layers = IndustrySeatCapabilityLayers.from_metadata(
@@ -134,7 +136,7 @@ class _IndustryTeamRuntimeMixin:
             else "merge"
         )
         resolved_target_role_id = _string(target_role_id) or _string(
-            getattr(runtime, "industry_role_id", None),
+            _industry_executor_role_id(runtime),
         )
         resolved_seat_ref = _string(selected_seat_ref) or _string(
             metadata.get("selected_seat_ref"),
@@ -226,7 +228,7 @@ class _IndustryTeamRuntimeMixin:
                     snapshot.layers_payload.get("session_overlay_capability_ids") or [],
                 ),
             }
-        repository.upsert_runtime(
+        self._executor_runtime_service.upsert_runtime(
             runtime.model_copy(
                 update={
                     "metadata": metadata,
@@ -257,9 +259,8 @@ class _IndustryTeamRuntimeMixin:
         agent_id: str,
         target_role_id: str | None,
         selected_seat_ref: str | None,
-    ) -> AgentRuntimeRecord | None:
-        repository = self._agent_runtime_repository
-        if repository is None:
+    ) -> ExecutorRuntimeInstanceRecord | None:
+        if self._executor_runtime_service is None:
             return None
         profile_getter = getattr(self._agent_profile_service, "get_agent", None)
         profile = profile_getter(agent_id) if callable(profile_getter) else None
@@ -292,6 +293,13 @@ class _IndustryTeamRuntimeMixin:
         metadata = {
             "selected_seat_ref": _string(selected_seat_ref)
             or _string(runtime_metadata.get("selected_seat_ref")),
+            "owner_agent_id": agent_id,
+            "industry_instance_id": _string(getattr(profile, "industry_instance_id", None)),
+            "industry_role_id": normalized_role_id or _string(runtime_detail.get("industry_role_id")),
+            "display_name": _string(getattr(profile, "name", None)),
+            "role_name": _string(getattr(profile, "role_name", None)),
+            "desired_state": "active",
+            "seat_runtime_status": "idle",
             "capability_layers": (
                 detail_layers.to_metadata_payload()
                 if detail_layers.merged_capability_ids()
@@ -305,21 +313,22 @@ class _IndustryTeamRuntimeMixin:
                 ).to_metadata_payload()
             ),
         }
-        runtime = AgentRuntimeRecord(
-            agent_id=agent_id,
-            actor_key=f"runtime:{agent_id}",
-            actor_fingerprint=f"runtime:{agent_id}",
-            actor_class="industry-dynamic",
-            desired_state="active",
-            runtime_status="idle",
-            industry_instance_id=_string(getattr(profile, "industry_instance_id", None)),
-            industry_role_id=normalized_role_id or _string(runtime_detail.get("industry_role_id")),
-            display_name=_string(getattr(profile, "name", None)),
-            role_name=_string(getattr(profile, "role_name", None)),
+        runtime = self._executor_runtime_service.create_or_reuse_runtime(
+            executor_id=self._industry_executor_id(
+                instance_id=_string(getattr(profile, "industry_instance_id", None)) or "industry",
+                agent_id=agent_id,
+            ),
+            protocol_kind="cli_runtime",
+            scope_kind="role",
+            role_id=normalized_role_id or _string(runtime_detail.get("industry_role_id")) or agent_id,
+            thread_id=f"agent-chat:{agent_id}",
             metadata=metadata,
         )
-        repository.upsert_runtime(runtime)
-        return runtime
+        return self._executor_runtime_service.mark_runtime_ready(
+            runtime.runtime_id,
+            thread_id=f"agent-chat:{agent_id}",
+            metadata=metadata,
+        )
 
     @staticmethod
     def _mutate_scope_capabilities(
@@ -345,6 +354,10 @@ class _IndustryTeamRuntimeMixin:
                 final_capability_ids.append(capability_id)
         return final_capability_ids
 
+    @staticmethod
+    def _industry_executor_id(*, instance_id: str, agent_id: str) -> str:
+        return f"industry-seat:{instance_id}:{agent_id}"
+
     def _build_actor_runtime_capability_layers(
         self,
         *,
@@ -354,6 +367,19 @@ class _IndustryTeamRuntimeMixin:
         existing_layers = IndustrySeatCapabilityLayers.from_metadata(
             existing_metadata.get("capability_layers"),
         )
+        non_role_capability_ids = {
+            capability_id.lower()
+            for capability_id in _unique_strings(
+                existing_layers.seat_instance_capability_ids,
+                existing_layers.cycle_delta_capability_ids,
+                existing_layers.session_overlay_capability_ids,
+            )
+        }
+        role_prototype_capability_ids = [
+            capability_id
+            for capability_id in _normalize_text_list(agent.allowed_capabilities)
+            if capability_id.lower() not in non_role_capability_ids
+        ]
         current_trial = (
             dict(existing_metadata.get("current_capability_trial"))
             if isinstance(existing_metadata.get("current_capability_trial"), dict)
@@ -362,7 +388,7 @@ class _IndustryTeamRuntimeMixin:
         snapshot = resolve_industry_capability_governance_service(
             self,
         ).recompose_runtime_capability_layers(
-            role_prototype_capability_ids=list(agent.allowed_capabilities),
+            role_prototype_capability_ids=role_prototype_capability_ids,
             seat_instance_capability_ids=list(existing_layers.seat_instance_capability_ids),
             cycle_delta_capability_ids=list(existing_layers.cycle_delta_capability_ids),
             session_overlay_capability_ids=list(existing_layers.session_overlay_capability_ids),
@@ -643,14 +669,7 @@ class _IndustryTeamRuntimeMixin:
         assignment_summary: str | None = None,
         assignment_status: str | None = None,
     ) -> None:
-        if is_execution_core_agent_id(agent.agent_id):
-            self._upsert_execution_core_thread_bindings(
-                agent=agent,
-                instance_id=instance_id,
-                owner_scope=owner_scope,
-            )
-            return
-        self._upsert_actor_runtime(
+        runtime = self._upsert_actor_runtime(
             agent=agent,
             instance_id=instance_id,
             owner_scope=owner_scope,
@@ -662,7 +681,18 @@ class _IndustryTeamRuntimeMixin:
             assignment_summary=assignment_summary,
             assignment_status=assignment_status,
         )
+        if runtime is None:
+            return
+        if is_execution_core_agent_id(agent.agent_id):
+            self._upsert_execution_core_thread_bindings(
+                runtime=runtime,
+                agent=agent,
+                instance_id=instance_id,
+                owner_scope=owner_scope,
+            )
+            return
         self._upsert_agent_thread_bindings(
+            runtime=runtime,
             agent=agent,
             instance_id=instance_id,
             owner_scope=owner_scope,
@@ -681,57 +711,58 @@ class _IndustryTeamRuntimeMixin:
         assignment_title: str | None,
         assignment_summary: str | None,
         assignment_status: str | None,
-    ) -> None:
-        repository = self._agent_runtime_repository
-        if repository is None or is_execution_core_agent_id(agent.agent_id):
-            return
-        existing = repository.get_runtime(agent.agent_id)
+    ) -> ExecutorRuntimeInstanceRecord | None:
+        service = self._executor_runtime_service
+        if service is None:
+            return None
+        existing = _get_industry_executor_runtime(
+            self,
+            industry_instance_id=instance_id,
+            agent_id=agent.agent_id,
+            role_id=agent.role_id,
+        )
+        existing_metadata = _industry_executor_metadata(existing)
         now = _utc_now()
         desired_state = "retired" if status == "retired" else "active"
         assignment_active = bool(
             assignment_id and assignment_status not in {"completed", "failed", "cancelled"}
         )
-        if existing is not None and existing.desired_state == "paused":
+        existing_desired_state = _string(existing_metadata.get("desired_state"))
+        if existing is not None and existing_desired_state == "paused":
             desired_state = "paused"
-            runtime_status = "paused"
+            seat_runtime_status = "paused"
         elif status == "retired":
-            runtime_status = "retired"
+            seat_runtime_status = "retired"
         elif status == "blocked":
-            runtime_status = "blocked"
+            seat_runtime_status = "blocked"
         elif status == "running":
-            runtime_status = "executing"
+            seat_runtime_status = "running"
         elif status == "waiting":
-            runtime_status = "assigned" if assignment_active else "idle"
+            seat_runtime_status = "waiting" if assignment_active else "idle"
         else:
-            runtime_status = "idle"
+            seat_runtime_status = "idle"
         if (
             existing is not None
             and status in {"idle", "waiting"}
-            and runtime_status not in {"paused", "retired"}
+            and seat_runtime_status not in {"paused", "retired"}
         ):
-            existing_queue_depth = int(existing.queue_depth or 0)
-            if existing.runtime_status == "blocked" and (
-                existing.current_task_id
-                or existing.current_mailbox_id
+            existing_queue_depth = int(existing_metadata.get("queue_depth") or 0)
+            existing_seat_runtime_status = _string(existing_metadata.get("seat_runtime_status"))
+            if existing_seat_runtime_status == "blocked" and (
+                _string(existing_metadata.get("current_task_id")) is not None
                 or existing_queue_depth > 0
-                or existing.last_error_summary
+                or _string(existing_metadata.get("last_error_summary")) is not None
             ):
-                runtime_status = "blocked"
-            elif existing.current_mailbox_id:
-                runtime_status = (
-                    "claimed"
-                    if existing.runtime_status == "claimed"
-                    else "executing"
-                )
-            elif existing.current_task_id:
-                runtime_status = "executing"
+                seat_runtime_status = "blocked"
+            elif _string(existing_metadata.get("current_task_id")) is not None:
+                seat_runtime_status = "running"
             elif existing_queue_depth > 0:
-                runtime_status = "queued"
+                seat_runtime_status = "running"
             elif assignment_active:
-                runtime_status = "assigned"
-        incoming_actor_key = _string(agent.actor_key) or (existing.actor_key if existing is not None else f"{instance_id}:{agent.role_id}")
-        incoming_actor_fingerprint = _string(agent.actor_fingerprint) or (existing.actor_fingerprint if existing is not None else None)
-        metadata = dict(existing.metadata) if existing is not None else {}
+                seat_runtime_status = "waiting"
+        incoming_actor_key = _string(agent.actor_key) or _string(existing_metadata.get("actor_key")) or f"{instance_id}:{agent.role_id}"
+        incoming_actor_fingerprint = _string(agent.actor_fingerprint) or _string(existing_metadata.get("actor_fingerprint"))
+        metadata = dict(existing_metadata)
         current_focus_kind = _string(metadata.get("current_focus_kind"))
         current_focus_id = _string(metadata.get("current_focus_id"))
         current_focus = _string(metadata.get("current_focus"))
@@ -791,7 +822,11 @@ class _IndustryTeamRuntimeMixin:
                 metadata.pop(key, None)
             else:
                 metadata[key] = value
-        previous_fingerprint = _string(existing.actor_fingerprint) if existing is not None else None
+        previous_fingerprint = (
+            _string(existing_metadata.get("actor_fingerprint"))
+            if existing is not None
+            else None
+        )
         if previous_fingerprint and incoming_actor_fingerprint and previous_fingerprint != incoming_actor_fingerprint:
             metadata["actor_semantic_drift"] = {
                 "previous_fingerprint": previous_fingerprint,
@@ -799,101 +834,165 @@ class _IndustryTeamRuntimeMixin:
                 "detected_at": now.isoformat(),
             }
         update = {
+            "owner_agent_id": agent.agent_id,
+            "industry_instance_id": instance_id,
+            "industry_role_id": agent.role_id,
             "actor_key": incoming_actor_key,
             "actor_fingerprint": incoming_actor_fingerprint,
-            "actor_class": "industry-dynamic",
             "desired_state": desired_state,
-            "runtime_status": runtime_status,
+            "seat_runtime_status": seat_runtime_status,
             "employment_mode": agent.employment_mode,
             "activation_mode": agent.activation_mode,
             "persistent": agent.activation_mode != "on-demand",
-            "industry_instance_id": instance_id,
-            "industry_role_id": agent.role_id,
             "display_name": agent.name,
             "role_name": agent.role_name,
-            "queue_depth": 0 if status == "retired" else (existing.queue_depth if existing is not None else 0),
-            "current_task_id": None if status == "retired" else (existing.current_task_id if existing is not None else None),
-            "current_mailbox_id": None if status == "retired" else (existing.current_mailbox_id if existing is not None else None),
-            "current_environment_id": existing.current_environment_id if existing is not None else None,
-            "last_started_at": existing.last_started_at if existing is not None else (now if runtime_status == "running" else None),
-            "last_heartbeat_at": now,
-            "last_stopped_at": now if status == "retired" else (existing.last_stopped_at if existing is not None else None),
-            "last_result_summary": goal_title or (existing.last_result_summary if existing is not None else None),
-            "last_error_summary": None if status != "retired" else (existing.last_error_summary if existing is not None else None),
-            "last_checkpoint_id": existing.last_checkpoint_id if existing is not None else None,
-            "metadata": metadata,
-            "updated_at": now,
+            "queue_depth": 0 if status == "retired" else int(metadata.get("queue_depth") or 0),
+            "current_task_id": None if status == "retired" else _string(metadata.get("current_task_id")),
+            "current_environment_id": _string(metadata.get("current_environment_id")),
+            "last_started_at": metadata.get("last_started_at") or (now.isoformat() if seat_runtime_status == "running" else None),
+            "last_heartbeat_at": now.isoformat(),
+            "last_stopped_at": now.isoformat() if status == "retired" else _string(metadata.get("last_stopped_at")),
+            "last_result_summary": goal_title or _string(metadata.get("last_result_summary")),
+            "last_error_summary": _string(metadata.get("last_error_summary")) if status == "retired" else None,
+            "last_checkpoint_id": _string(metadata.get("last_checkpoint_id")),
         }
+        metadata.update(update)
+        top_level_status = (
+            "stopped"
+            if seat_runtime_status == "retired"
+            else "degraded"
+            if seat_runtime_status == "blocked"
+            else "ready"
+        )
+        thread_id = (
+            f"industry-chat:{instance_id}:{EXECUTION_CORE_ROLE_ID}"
+            if is_execution_core_agent_id(agent.agent_id)
+            else f"agent-chat:{agent.agent_id}"
+        )
+        executor_id = self._industry_executor_id(
+            instance_id=instance_id,
+            agent_id=agent.agent_id,
+        )
         if existing is None:
-            runtime = AgentRuntimeRecord(agent_id=agent.agent_id, **update)
+            runtime = service.create_or_reuse_runtime(
+                executor_id=executor_id,
+                protocol_kind="cli_runtime",
+                scope_kind="role",
+                role_id=agent.role_id or agent.agent_id,
+                thread_id=thread_id,
+                metadata=metadata,
+            )
         else:
             runtime = existing.model_copy(update=update)
-        repository.upsert_runtime(runtime)
+        runtime_metadata = dict(runtime.metadata or {})
+        for key in (
+            "goal_id",
+            "goal_title",
+            "current_focus_kind",
+            "current_focus_id",
+            "current_focus",
+            "current_assignment_id",
+            "current_assignment_title",
+            "current_assignment_summary",
+            "current_assignment_status",
+        ):
+            if key not in metadata:
+                runtime_metadata.pop(key, None)
+        runtime_metadata.update(metadata)
+        runtime_metadata["executor_runtime_managed"] = True
+        runtime = service.upsert_runtime(
+            runtime.model_copy(
+                update={
+                    "executor_id": executor_id,
+                    "protocol_kind": "cli_runtime",
+                    "scope_kind": "role",
+                    "role_id": agent.role_id or agent.agent_id,
+                    "thread_id": thread_id,
+                    "runtime_status": top_level_status,
+                    "metadata": runtime_metadata,
+                    "updated_at": now,
+                },
+            ),
+        )
+        return runtime
 
     def _upsert_agent_thread_bindings(
         self,
         *,
+        runtime: ExecutorRuntimeInstanceRecord,
         agent: IndustryRoleBlueprint,
         instance_id: str,
         owner_scope: str | None,
     ) -> None:
-        repository = self._agent_thread_binding_repository
-        if repository is None or is_execution_core_agent_id(agent.agent_id):
+        service = self._executor_runtime_service
+        if service is None or is_execution_core_agent_id(agent.agent_id):
             return
         primary_thread_id = f"agent-chat:{agent.agent_id}"
-        for binding in repository.list_bindings(
+        alias_thread_id = f"industry-chat:{instance_id}:{agent.role_id}"
+        desired_thread_ids = {primary_thread_id, alias_thread_id}
+        for binding in _list_industry_executor_thread_bindings(
+            self,
+            industry_instance_id=instance_id,
             agent_id=agent.agent_id,
-            active_only=False,
-            limit=None,
         ):
-            if binding.thread_id.startswith("actor-chat:"):
-                repository.delete_binding(binding.thread_id)
-        repository.upsert_binding(
-            AgentThreadBindingRecord(
-                thread_id=primary_thread_id,
-                agent_id=agent.agent_id,
-                session_id=primary_thread_id,
-                channel="console",
-                binding_kind="agent-primary",
-                industry_instance_id=instance_id,
-                industry_role_id=agent.role_id,
-                owner_scope=owner_scope,
-                active=True,
-                alias_of_thread_id=None,
-                metadata={
-                    "agent_name": agent.name,
-                    "role_name": agent.role_name,
-                },
-            ),
-        )
-        repository.upsert_binding(
-            AgentThreadBindingRecord(
-                thread_id=f"industry-chat:{instance_id}:{agent.role_id}",
-                agent_id=agent.agent_id,
-                session_id=primary_thread_id,
-                channel="console",
-                binding_kind="industry-role-alias",
-                industry_instance_id=instance_id,
-                industry_role_id=agent.role_id,
-                owner_scope=owner_scope,
-                active=True,
-                alias_of_thread_id=primary_thread_id,
-                metadata={
-                    "agent_name": agent.name,
-                    "role_name": agent.role_name,
-                },
-            ),
-        )
+            if _string(getattr(binding, "thread_id", None)) not in desired_thread_ids:
+                service.delete_thread_binding(binding.binding_id)
+        for thread_id, binding_kind, alias_of_thread_id in (
+            (primary_thread_id, "agent-primary", None),
+            (alias_thread_id, "industry-role-alias", primary_thread_id),
+        ):
+            existing = _get_industry_executor_thread_binding(self, thread_id=thread_id)
+            metadata = {
+                "binding_kind": binding_kind,
+                "industry_instance_id": instance_id,
+                "industry_role_id": agent.role_id,
+                "owner_scope": owner_scope,
+                "owner_agent_id": agent.agent_id,
+                "agent_name": agent.name,
+                "role_name": agent.role_name,
+                "alias_of_thread_id": alias_of_thread_id,
+                "canonical_thread_id": primary_thread_id,
+            }
+            if existing is None:
+                record = ExecutorThreadBindingRecord(
+                    runtime_id=runtime.runtime_id,
+                    role_id=agent.role_id,
+                    executor_provider_id=runtime.executor_id,
+                    project_profile_id=runtime.project_profile_id,
+                    assignment_id=runtime.assignment_id,
+                    thread_id=thread_id,
+                    runtime_status=runtime.runtime_status,
+                    last_turn_id=None,
+                    last_seen_at=_utc_now(),
+                    metadata=metadata,
+                )
+            else:
+                record = existing.model_copy(
+                    update={
+                        "runtime_id": runtime.runtime_id,
+                        "role_id": agent.role_id,
+                        "executor_provider_id": runtime.executor_id,
+                        "project_profile_id": runtime.project_profile_id,
+                        "assignment_id": runtime.assignment_id,
+                        "thread_id": thread_id,
+                        "runtime_status": runtime.runtime_status,
+                        "last_seen_at": _utc_now(),
+                        "metadata": {**dict(existing.metadata or {}), **metadata},
+                        "updated_at": _utc_now(),
+                    },
+                )
+            service.upsert_thread_binding(record)
 
     def _upsert_execution_core_thread_bindings(
         self,
         *,
+        runtime: ExecutorRuntimeInstanceRecord,
         agent: IndustryRoleBlueprint,
         instance_id: str,
         owner_scope: str | None,
     ) -> None:
-        repository = self._agent_thread_binding_repository
-        if repository is None or not is_execution_core_agent_id(agent.agent_id):
+        service = self._executor_runtime_service
+        if service is None or not is_execution_core_agent_id(agent.agent_id):
             return
         canonical_thread_id = f"industry-chat:{instance_id}:{EXECUTION_CORE_ROLE_ID}"
         work_context_id = self._ensure_execution_core_work_context(
@@ -901,37 +1000,54 @@ class _IndustryTeamRuntimeMixin:
             instance_id=instance_id,
             owner_scope=owner_scope,
         )
-        for binding in repository.list_bindings(
+        for binding in _list_industry_executor_thread_bindings(
+            self,
             industry_instance_id=instance_id,
-            active_only=False,
-            limit=None,
+            role_id=EXECUTION_CORE_ROLE_ID,
         ):
-            if binding.thread_id == canonical_thread_id:
-                continue
-            if binding.agent_id != agent.agent_id and not is_execution_core_role_id(
-                binding.industry_role_id,
-            ):
-                continue
-            repository.delete_binding(binding.thread_id)
-        repository.upsert_binding(
-            AgentThreadBindingRecord(
+            if _string(getattr(binding, "thread_id", None)) != canonical_thread_id:
+                service.delete_thread_binding(binding.binding_id)
+        existing = _get_industry_executor_thread_binding(self, thread_id=canonical_thread_id)
+        metadata = {
+            "binding_kind": "industry-role-alias",
+            "industry_instance_id": instance_id,
+            "industry_role_id": EXECUTION_CORE_ROLE_ID,
+            "owner_scope": owner_scope,
+            "owner_agent_id": agent.agent_id,
+            "agent_name": agent.name,
+            "role_name": agent.role_name,
+            "work_context_id": work_context_id,
+            "canonical_thread_id": canonical_thread_id,
+        }
+        if existing is None:
+            record = ExecutorThreadBindingRecord(
+                runtime_id=runtime.runtime_id,
+                role_id=EXECUTION_CORE_ROLE_ID,
+                executor_provider_id=runtime.executor_id,
+                project_profile_id=runtime.project_profile_id,
+                assignment_id=runtime.assignment_id,
                 thread_id=canonical_thread_id,
-                agent_id=agent.agent_id,
-                session_id=canonical_thread_id,
-                channel="console",
-                binding_kind="industry-role-alias",
-                industry_instance_id=instance_id,
-                industry_role_id=EXECUTION_CORE_ROLE_ID,
-                work_context_id=work_context_id,
-                owner_scope=owner_scope,
-                active=True,
-                alias_of_thread_id=None,
-                metadata={
-                    "agent_name": agent.name,
-                    "role_name": agent.role_name,
+                runtime_status=runtime.runtime_status,
+                last_turn_id=None,
+                last_seen_at=_utc_now(),
+                metadata=metadata,
+            )
+        else:
+            record = existing.model_copy(
+                update={
+                    "runtime_id": runtime.runtime_id,
+                    "role_id": EXECUTION_CORE_ROLE_ID,
+                    "executor_provider_id": runtime.executor_id,
+                    "project_profile_id": runtime.project_profile_id,
+                    "assignment_id": runtime.assignment_id,
+                    "thread_id": canonical_thread_id,
+                    "runtime_status": runtime.runtime_status,
+                    "last_seen_at": _utc_now(),
+                    "metadata": {**dict(existing.metadata or {}), **metadata},
+                    "updated_at": _utc_now(),
                 },
-            ),
-        )
+            )
+        service.upsert_thread_binding(record)
 
     def _retire_stale_actors(
         self,
@@ -955,14 +1071,21 @@ class _IndustryTeamRuntimeMixin:
             if agent_id is None or is_execution_core_agent_id(agent_id) or agent_id in normalized_agent_ids:
                 continue
             self._agent_profile_override_repository.delete_override(agent_id)
-            if self._agent_runtime_repository is not None:
-                self._agent_runtime_repository.delete_runtime(agent_id)
-            if self._agent_thread_binding_repository is not None:
-                for binding in self._agent_thread_binding_repository.list_bindings(
+            if self._executor_runtime_service is not None:
+                for runtime in _list_industry_executor_runtimes(
+                    self,
+                    industry_instance_id=normalized_instance_id,
                     agent_id=agent_id,
-                    active_only=False,
                 ):
-                    self._agent_thread_binding_repository.delete_binding(binding.thread_id)
+                    self._executor_runtime_service.delete_runtime(runtime.runtime_id)
+                for binding in _list_industry_executor_thread_bindings(
+                    self,
+                    industry_instance_id=normalized_instance_id,
+                    agent_id=agent_id,
+                ):
+                    self._executor_runtime_service.delete_thread_binding(
+                        binding.binding_id,
+                    )
 
     def _build_readiness_checks(
         self,

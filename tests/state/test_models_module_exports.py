@@ -1,6 +1,10 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import importlib
+
+import pytest
+
 
 def test_assignment_record_reexports_from_state_models() -> None:
     from copaw.state.models import (
@@ -17,8 +21,11 @@ def test_assignment_record_reexports_from_state_models() -> None:
 
 
 def test_split_state_modules_export_expected_records() -> None:
-    from copaw.state.models_agents_runtime import AgentRuntimeRecord
     from copaw.state.models_core import RiskLevel
+    from copaw.state.models_execution_continuity import (
+        AgentCheckpointRecord,
+        AutomationLoopRuntimeRecord,
+    )
     from copaw.state.models_goals_tasks import AssignmentRecord, HumanAssistTaskRecord
     from copaw.state.models_governance import GovernanceControlRecord
     from copaw.state.models_industry import IndustryInstanceRecord
@@ -30,7 +37,8 @@ def test_split_state_modules_export_expected_records() -> None:
     from copaw.state.models_reporting import ReportRecord
     from copaw.state.models_workflows import WorkflowTemplateRecord
 
-    assert AgentRuntimeRecord.__name__ == "AgentRuntimeRecord"
+    assert AgentCheckpointRecord.__name__ == "AgentCheckpointRecord"
+    assert AutomationLoopRuntimeRecord.__name__ == "AutomationLoopRuntimeRecord"
     assert AssignmentRecord.__name__ == "AssignmentRecord"
     assert HumanAssistTaskRecord.__name__ == "HumanAssistTaskRecord"
     assert GovernanceControlRecord.__name__ == "GovernanceControlRecord"
@@ -66,3 +74,25 @@ def test_state_package_keeps_compatibility_exports_after_split() -> None:
         SqliteResearchSessionRepository.__name__
         == "SqliteResearchSessionRepository"
     )
+
+
+def test_retired_actor_runtime_models_and_repositories_leave_formal_exports() -> None:
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("copaw.state.models_agents_runtime")
+
+    import copaw.state as state_module
+    import copaw.state.repositories as repositories_module
+
+    assert not hasattr(state_module, "AgentRuntimeRecord")
+    assert not hasattr(state_module, "AgentMailboxRecord")
+    assert not hasattr(state_module, "AgentLeaseRecord")
+    assert not hasattr(state_module, "AgentThreadBindingRecord")
+
+    assert not hasattr(repositories_module, "BaseAgentRuntimeRepository")
+    assert not hasattr(repositories_module, "BaseAgentMailboxRepository")
+    assert not hasattr(repositories_module, "BaseAgentLeaseRepository")
+    assert not hasattr(repositories_module, "BaseAgentThreadBindingRepository")
+    assert not hasattr(repositories_module, "SqliteAgentRuntimeRepository")
+    assert not hasattr(repositories_module, "SqliteAgentMailboxRepository")
+    assert not hasattr(repositories_module, "SqliteAgentLeaseRepository")
+    assert not hasattr(repositories_module, "SqliteAgentThreadBindingRepository")

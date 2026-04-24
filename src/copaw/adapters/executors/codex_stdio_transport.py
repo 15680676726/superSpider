@@ -6,8 +6,10 @@ import json
 import os
 import queue
 import subprocess
+import tempfile
 import threading
 from collections.abc import Iterable, Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 from ...__version__ import __version__
@@ -156,7 +158,7 @@ class CodexStdioTransport:
                 text=True,
                 encoding="utf-8",
                 bufsize=1,
-                env={**os.environ, **self._launch_env},
+                env=self._build_process_env(),
             )
             if process.stdin is None or process.stdout is None:
                 raise RuntimeError("Codex stdio transport failed to open stdio pipes.")
@@ -167,6 +169,28 @@ class CodexStdioTransport:
                 daemon=True,
             )
             self._reader_thread.start()
+
+    def _build_process_env(self) -> dict[str, str]:
+        launch_env = {**os.environ, **self._launch_env}
+        if not str(launch_env.get("CODEX_HOME") or "").strip():
+            launch_env["CODEX_HOME"] = str(self._ensure_default_codex_home())
+        return launch_env
+
+    def _ensure_default_codex_home(self) -> Path:
+        executable_path = Path(str(self._codex_command[0])).expanduser()
+        candidate_roots = []
+        user_codex_home = Path.home() / ".codex"
+        if user_codex_home.exists():
+            candidate_roots.append(user_codex_home)
+        candidate_roots.append(executable_path.parent / ".codex-home")
+        candidate_roots.append(Path(tempfile.gettempdir()) / "copaw" / "codex-home")
+        for candidate_root in candidate_roots:
+            try:
+                candidate_root.mkdir(parents=True, exist_ok=True)
+                return candidate_root
+            except OSError:
+                continue
+        raise RuntimeError("Failed to provision a writable CODEX_HOME for Codex stdio launch.")
 
     def _initialize_session(self) -> None:
         response = self._send_request(

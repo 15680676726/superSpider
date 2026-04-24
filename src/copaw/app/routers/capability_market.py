@@ -4405,20 +4405,7 @@ async def install_market_executor_provider(
         )
     )
     binding_payload: dict[str, Any] | None = None
-    model_policy_payload: dict[str, Any] | None = None
     role_id = str(payload.role_id or "").strip() or None
-    model_policy_id = str(payload.model_policy_id or "").strip() or None
-    if payload.default_model_ref and model_policy_id is None:
-        model_policy_id = f"{provider.provider_id}:default-model-policy"
-    if model_policy_id is not None:
-        model_policy = service.upsert_model_invocation_policy(
-            ModelInvocationPolicyRecord(
-                policy_id=model_policy_id,
-                ownership_mode="copaw_managed",
-                default_model_ref=str(payload.default_model_ref or "").strip() or None,
-            )
-        )
-        model_policy_payload = model_policy.model_dump(mode="json")
     if role_id is not None:
         binding = service.upsert_role_executor_binding(
             RoleExecutorBindingRecord(
@@ -4427,7 +4414,7 @@ async def install_market_executor_provider(
                 selection_mode=payload.selection_mode,
                 project_profile_id=str(payload.project_profile_id or "").strip() or None,
                 execution_policy_id=str(payload.execution_policy_id or "").strip() or None,
-                model_policy_id=model_policy_id,
+                model_policy_id=None,
             )
         )
         binding_payload = binding.model_dump(mode="json")
@@ -4435,5 +4422,5 @@ async def install_market_executor_provider(
         installed=True,
         provider=_serialize_executor_provider_candidate(provider),
         binding=binding_payload,
-        model_policy=model_policy_payload,
+        model_policy=None,
     )

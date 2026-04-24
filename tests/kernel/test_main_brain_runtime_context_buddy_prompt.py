@@ -6,17 +6,10 @@ from types import SimpleNamespace
 
 import copaw.kernel.query_execution as query_execution_module
 import copaw.kernel.query_execution_prompt as query_execution_prompt_module
-from copaw.kernel import ActorMailboxService
 from copaw.kernel.query_execution import KernelQueryExecutionService
-from copaw.state import (
-    AgentRuntimeRecord,
-    SQLiteStateStore,
-)
-from copaw.state.repositories import (
-    SqliteAgentCheckpointRepository,
-    SqliteAgentMailboxRepository,
-    SqliteAgentRuntimeRepository,
-)
+from copaw.state import SQLiteStateStore
+from copaw.state.executor_runtime_service import ExecutorRuntimeService
+from copaw.state.repositories import SqliteAgentCheckpointRepository
 
 from .query_execution_environment_parts.shared import *  # noqa: F401,F403
 
@@ -100,6 +93,39 @@ class _ContractAwareIndustryService(_FakeIndustryService):
         return detail
 
 
+def _seed_executor_runtime(
+    state_store: SQLiteStateStore,
+    *,
+    agent_id: str,
+    thread_id: str,
+) -> ExecutorRuntimeService:
+    service = ExecutorRuntimeService(state_store=state_store)
+    runtime = service.create_or_reuse_runtime(
+        executor_id="codex",
+        protocol_kind="app_server",
+        scope_kind="role",
+        role_id=agent_id,
+        thread_id=thread_id,
+        metadata={
+            "owner_agent_id": agent_id,
+            "display_name": "Ops Agent",
+            "role_name": "Operations lead",
+            "industry_instance_id": "industry-v1-ops",
+            "industry_role_id": "execution-core",
+        },
+        continuity_metadata={
+            "control_thread_id": thread_id,
+            "session_id": thread_id,
+        },
+    )
+    service.mark_runtime_ready(
+        runtime.runtime_id,
+        thread_id=thread_id,
+        metadata={"owner_agent_id": agent_id},
+    )
+    return service
+
+
 def test_query_execution_service_appends_buddy_persona_prompt_when_bound_profile_exists(
     tmp_path,
     monkeypatch,
@@ -122,28 +148,12 @@ def test_query_execution_service_appends_buddy_persona_prompt_when_bound_profile
     )
 
     state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
-    runtime_repository = SqliteAgentRuntimeRepository(state_store)
-    runtime_repository.upsert_runtime(
-        AgentRuntimeRecord(
-            agent_id="ops-agent",
-            actor_key="industry-v1-ops:execution-core",
-            actor_fingerprint="fp-ops",
-            actor_class="industry-dynamic",
-            desired_state="active",
-            runtime_status="idle",
-            industry_instance_id="industry-v1-ops",
-            industry_role_id="execution-core",
-            display_name="Ops Agent",
-            role_name="Operations lead",
-        ),
+    executor_runtime_service = _seed_executor_runtime(
+        state_store,
+        agent_id="ops-agent",
+        thread_id="industry-chat:industry-v1-ops:execution-core",
     )
-    mailbox_repository = SqliteAgentMailboxRepository(state_store)
     checkpoint_repository = SqliteAgentCheckpointRepository(state_store)
-    mailbox_service = ActorMailboxService(
-        mailbox_repository=mailbox_repository,
-        runtime_repository=runtime_repository,
-        checkpoint_repository=checkpoint_repository,
-    )
 
     service = KernelQueryExecutionService(
         session_backend=_FakeSessionBackend(),
@@ -151,7 +161,7 @@ def test_query_execution_service_appends_buddy_persona_prompt_when_bound_profile
         agent_profile_service=_FakeAgentProfileService(),
         industry_service=_ContractAwareIndustryService(),
         agent_checkpoint_repository=checkpoint_repository,
-        agent_runtime_repository=runtime_repository,
+        executor_runtime_service=executor_runtime_service,
         buddy_projection_service=_FakeBuddyProjectionService(),
     )
 
@@ -221,28 +231,12 @@ def test_query_execution_service_appends_current_time_grounding_for_buddy_runtim
     )
 
     state_store = SQLiteStateStore(tmp_path / "state-time.sqlite3")
-    runtime_repository = SqliteAgentRuntimeRepository(state_store)
-    runtime_repository.upsert_runtime(
-        AgentRuntimeRecord(
-            agent_id="ops-agent",
-            actor_key="industry-v1-ops:execution-core",
-            actor_fingerprint="fp-ops",
-            actor_class="industry-dynamic",
-            desired_state="active",
-            runtime_status="idle",
-            industry_instance_id="industry-v1-ops",
-            industry_role_id="execution-core",
-            display_name="Ops Agent",
-            role_name="Operations lead",
-        ),
+    executor_runtime_service = _seed_executor_runtime(
+        state_store,
+        agent_id="ops-agent",
+        thread_id="industry-chat:industry-v1-ops:execution-core",
     )
-    mailbox_repository = SqliteAgentMailboxRepository(state_store)
     checkpoint_repository = SqliteAgentCheckpointRepository(state_store)
-    mailbox_service = ActorMailboxService(
-        mailbox_repository=mailbox_repository,
-        runtime_repository=runtime_repository,
-        checkpoint_repository=checkpoint_repository,
-    )
 
     service = KernelQueryExecutionService(
         session_backend=_FakeSessionBackend(),
@@ -250,7 +244,7 @@ def test_query_execution_service_appends_current_time_grounding_for_buddy_runtim
         agent_profile_service=_FakeAgentProfileService(),
         industry_service=_ContractAwareIndustryService(),
         agent_checkpoint_repository=checkpoint_repository,
-        agent_runtime_repository=runtime_repository,
+        executor_runtime_service=executor_runtime_service,
         buddy_projection_service=_FakeBuddyProjectionService(),
     )
 

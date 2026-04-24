@@ -80,6 +80,7 @@ from copaw.routines import RoutineService
 from copaw.sop_kernel import FixedSopService
 from copaw.state import (
     AgentProfileOverrideRecord,
+    ExecutorRuntimeService,
     GoalOverrideRecord,
     IndustryInstanceRecord,
     SQLiteStateStore,
@@ -90,8 +91,6 @@ from copaw.state.reporting_service import StateReportingService
 from copaw.state.strategy_memory_service import StateStrategyMemoryService
 from copaw.state.repositories import (
     SqliteAgentReportRepository,
-    SqliteAgentRuntimeRepository,
-    SqliteAgentThreadBindingRepository,
     SqliteAgentProfileOverrideRepository,
     SqliteAssignmentRepository,
     SqliteBacklogItemRepository,
@@ -117,6 +116,10 @@ from copaw.state.repositories import (
     SqliteTaskRuntimeRepository,
     SqliteWorkContextRepository,
     SqliteWorkflowRunRepository,
+)
+from tests.shared.executor_runtime_compat import (
+    SqliteAgentRuntimeRepository,
+    SqliteAgentThreadBindingRepository,
 )
 
 
@@ -424,6 +427,7 @@ def _build_industry_app(
     )
     agent_runtime_repository = SqliteAgentRuntimeRepository(state_store)
     agent_thread_binding_repository = SqliteAgentThreadBindingRepository(state_store)
+    executor_runtime_service = agent_runtime_repository.service
     task_repository = SqliteTaskRepository(state_store)
     task_runtime_repository = SqliteTaskRuntimeRepository(state_store)
     runtime_frame_repository = SqliteRuntimeFrameRepository(state_store)
@@ -523,7 +527,6 @@ def _build_industry_app(
     )
     agent_profile_service = AgentProfileService(
         override_repository=agent_profile_override_repository,
-        agent_runtime_repository=agent_runtime_repository,
         task_repository=task_repository,
         task_runtime_repository=task_runtime_repository,
         decision_request_repository=decision_request_repository,
@@ -532,7 +535,7 @@ def _build_industry_app(
         learning_service=learning_service,
         goal_service=goal_service,
         industry_instance_repository=industry_instance_repository,
-        agent_thread_binding_repository=agent_thread_binding_repository,
+        executor_runtime_service=executor_runtime_service,
     )
     reporting_service = StateReportingService(
         task_repository=task_repository,
@@ -590,8 +593,7 @@ def _build_industry_app(
         operating_cycle_repository=operating_cycle_repository,
         assignment_repository=assignment_repository,
         agent_report_repository=agent_report_repository,
-        agent_runtime_repository=agent_runtime_repository,
-        agent_thread_binding_repository=agent_thread_binding_repository,
+        executor_runtime_service=executor_runtime_service,
         schedule_repository=schedule_repository,
         strategy_memory_repository=strategy_memory_repository,
         workflow_run_repository=workflow_run_repository,
@@ -653,6 +655,7 @@ def _build_industry_app(
     app.state.goal_override_repository = goal_override_repository
     app.state.industry_instance_repository = industry_instance_repository
     app.state.agent_profile_override_repository = agent_profile_override_repository
+    app.state.executor_runtime_service = executor_runtime_service
     app.state.agent_runtime_repository = agent_runtime_repository
     app.state.agent_thread_binding_repository = agent_thread_binding_repository
     app.state.task_repository = task_repository

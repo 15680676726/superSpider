@@ -53,21 +53,14 @@ class _QueryExecutionUsageRuntimeMixin:
         model_context: dict[str, Any],
         recorded_at: datetime,
     ) -> None:
-        runtime = None
-        runtime_updater = None
-        if self._agent_runtime_repository is not None and owner_agent_id:
-            runtime = self._agent_runtime_repository.get_runtime(owner_agent_id)
-            if runtime is not None:
-                runtime_updater = self._agent_runtime_repository.upsert_runtime
-        if runtime is None:
-            executor_contract = self._resolve_executor_runtime_contract(
-                owner_agent_id=owner_agent_id,
-                conversation_thread_id=_first_non_empty(getattr(request, "session_id", None)),
-                kernel_task_id=kernel_task_id,
-            )
-            runtime = executor_contract.get("runtime")
-            executor_service = getattr(self, "_executor_runtime_service", None)
-            runtime_updater = getattr(executor_service, "upsert_runtime", None)
+        executor_contract = self._resolve_executor_runtime_contract(
+            owner_agent_id=owner_agent_id,
+            conversation_thread_id=_first_non_empty(getattr(request, "session_id", None)),
+            kernel_task_id=kernel_task_id,
+        )
+        runtime = executor_contract.get("runtime")
+        executor_service = getattr(self, "_executor_runtime_service", None)
+        runtime_updater = getattr(executor_service, "upsert_runtime", None)
         if runtime is None or not callable(runtime_updater):
             return
         metadata = dict(runtime.metadata or {})

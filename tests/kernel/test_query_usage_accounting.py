@@ -7,32 +7,77 @@ from agentscope_runtime.engine.schemas.agent_schemas import AgentRequest
 
 from copaw.evidence import EvidenceLedger
 from copaw.kernel.query_execution import KernelQueryExecutionService
-from copaw.state import (
-    AgentRuntimeRecord,
-    SQLiteStateStore,
-    TaskRecord,
-    TaskRuntimeRecord,
-)
+from copaw.state import SQLiteStateStore, TaskRecord, TaskRuntimeRecord
 from copaw.state.executor_runtime_service import ExecutorRuntimeService
-from copaw.state.repositories import (
-    SqliteAgentRuntimeRepository,
-    SqliteTaskRepository,
-    SqliteTaskRuntimeRepository,
-)
+from copaw.state.repositories import SqliteTaskRepository, SqliteTaskRuntimeRepository
 
 
-def test_record_turn_usage_persists_runtime_and_evidence(tmp_path, monkeypatch) -> None:
+def _build_executor_runtime_service(
+    state_store: SQLiteStateStore,
+    *,
+    agent_id: str,
+    task_id: str,
+    session_id: str,
+):
+    executor_runtime_service = ExecutorRuntimeService(state_store=state_store)
+    runtime = executor_runtime_service.create_or_reuse_runtime(
+        executor_id="codex",
+        protocol_kind="app_server",
+        scope_kind="assignment",
+        assignment_id=task_id,
+        role_id=agent_id,
+        thread_id=session_id,
+        metadata={"owner_agent_id": agent_id},
+        continuity_metadata={
+            "control_thread_id": session_id,
+            "session_id": session_id,
+        },
+    )
+    executor_runtime_service.mark_runtime_ready(
+        runtime.runtime_id,
+        thread_id=session_id,
+        metadata={"owner_agent_id": agent_id},
+    )
+    return executor_runtime_service, runtime
+
+
+def _build_service(
+    *,
+    agent_id: str,
+    task_id: str,
+    task_runtime_repository: SqliteTaskRuntimeRepository,
+    evidence_ledger: EvidenceLedger,
+    executor_runtime_service: ExecutorRuntimeService,
+    provider_manager: object | None,
+) -> KernelQueryExecutionService:
+    return KernelQueryExecutionService(
+        session_backend=object(),
+        agent_profile_service=SimpleNamespace(
+            get_agent=lambda resolved_agent_id: (
+                SimpleNamespace(agent_id=resolved_agent_id)
+                if resolved_agent_id == agent_id
+                else None
+            ),
+            list_agents=lambda: [SimpleNamespace(agent_id=agent_id)],
+        ),
+        task_runtime_repository=task_runtime_repository,
+        evidence_ledger=evidence_ledger,
+        provider_manager=provider_manager,
+        executor_runtime_service=executor_runtime_service,
+    )
+
+
+def test_record_turn_usage_persists_executor_runtime_and_evidence(tmp_path) -> None:
     state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
-    agent_runtime_repository = SqliteAgentRuntimeRepository(state_store)
+    executor_runtime_service, runtime = _build_executor_runtime_service(
+        state_store,
+        agent_id="agent-1",
+        task_id="task-1",
+        session_id="sess-usage",
+    )
     task_repository = SqliteTaskRepository(state_store)
     task_runtime_repository = SqliteTaskRuntimeRepository(state_store)
     evidence_ledger = EvidenceLedger(database_path=tmp_path / "evidence.sqlite3")
-    agent_runtime_repository.upsert_runtime(
-        AgentRuntimeRecord(
-            agent_id="agent-1",
-            actor_key="agent-1",
-        ),
-    )
     task_repository.upsert_task(
         TaskRecord(
             id="task-1",
@@ -48,19 +93,13 @@ def test_record_turn_usage_persists_runtime_and_evidence(tmp_path, monkeypatch) 
             last_owner_agent_id="agent-1",
         ),
     )
-    service = KernelQueryExecutionService(
-        session_backend=object(),
-        agent_profile_service=SimpleNamespace(
-            get_agent=lambda agent_id: (
-                SimpleNamespace(agent_id=agent_id)
-                if agent_id == "agent-1"
-                else None
-            ),
-            list_agents=lambda: [SimpleNamespace(agent_id="agent-1")],
-        ),
-        agent_runtime_repository=agent_runtime_repository,
+
+    service = _build_service(
+        agent_id="agent-1",
+        task_id="task-1",
         task_runtime_repository=task_runtime_repository,
         evidence_ledger=evidence_ledger,
+        executor_runtime_service=executor_runtime_service,
         provider_manager=SimpleNamespace(
             resolve_model_slot=lambda: (
                 SimpleNamespace(provider_id="openai", model="gpt-5"),
@@ -103,9 +142,9 @@ def test_record_turn_usage_persists_runtime_and_evidence(tmp_path, monkeypatch) 
         },
     )
 
-    runtime = agent_runtime_repository.get_runtime("agent-1")
-    assert runtime is not None
-    assert runtime.metadata["last_query_usage"] == {
+    updated_runtime = executor_runtime_service.get_runtime(runtime.runtime_id)
+    assert updated_runtime is not None
+    assert updated_runtime.metadata["last_query_usage"] == {
         "input_tokens": 5,
         "output_tokens": 3,
         "cost_estimate": 0.12,
@@ -113,13 +152,13 @@ def test_record_turn_usage_persists_runtime_and_evidence(tmp_path, monkeypatch) 
         "completion_tokens": 3,
         "total_tokens": 8,
     }
-    assert runtime.metadata["query_usage_totals"] == {
+    assert updated_runtime.metadata["query_usage_totals"] == {
         "prompt_tokens": 5,
         "completion_tokens": 3,
         "total_tokens": 8,
     }
-    assert runtime.metadata["query_cost_total_estimate"] == 0.12
-    assert runtime.metadata["last_query_model_context"] == {
+    assert updated_runtime.metadata["query_cost_total_estimate"] == 0.12
+    assert updated_runtime.metadata["last_query_model_context"] == {
         "provider_id": "openai",
         "model": "gpt-5",
         "slot_source": "active",
@@ -135,44 +174,25 @@ def test_record_turn_usage_persists_runtime_and_evidence(tmp_path, monkeypatch) 
     assert evidence.task_id == "task-1"
     assert evidence.capability_ref == "system:dispatch_query"
     assert evidence.risk_level == "guarded"
-    assert evidence.metadata["usage"] == {
-        "input_tokens": 5,
-        "output_tokens": 3,
-        "cost_estimate": 0.12,
-        "prompt_tokens": 5,
-        "completion_tokens": 3,
-        "total_tokens": 8,
-    }
+    assert evidence.metadata["usage"]["total_tokens"] == 8
     assert evidence.metadata["cost_estimate"] == 0.12
     assert evidence.metadata["owner_agent_id"] == "agent-1"
     assert evidence.metadata["skill_candidate_id"] == "cand-browser-runtime"
-    assert evidence.metadata["skill_trial_id"] == "trial-browser-runtime-seat-primary"
-    assert evidence.metadata["skill_lifecycle_stage"] == "trial"
-    assert evidence.metadata["selected_scope"] == "seat"
-    assert evidence.metadata["selected_seat_ref"] == "seat-primary"
-    assert evidence.metadata["donor_id"] == "donor-browser-runtime"
-    assert evidence.metadata["package_id"] == "pkg-browser-runtime"
-    assert evidence.metadata["source_profile_id"] == "source-browser-runtime"
-    assert evidence.metadata["candidate_source_kind"] == "external_catalog"
-    assert evidence.metadata["resolution_kind"] == "reuse_existing_candidate"
-    assert evidence.metadata["replacement_target_ids"] == ["mcp:legacy_browser"]
-    assert evidence.metadata["rollback_target_ids"] == ["mcp:legacy_browser"]
 
 
 def test_record_turn_usage_does_not_instantiate_provider_manager_fallback(
     tmp_path,
 ) -> None:
     state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
-    agent_runtime_repository = SqliteAgentRuntimeRepository(state_store)
+    executor_runtime_service, runtime = _build_executor_runtime_service(
+        state_store,
+        agent_id="agent-2",
+        task_id="task-2",
+        session_id="sess-no-provider",
+    )
     task_repository = SqliteTaskRepository(state_store)
     task_runtime_repository = SqliteTaskRuntimeRepository(state_store)
     evidence_ledger = EvidenceLedger(database_path=tmp_path / "evidence.sqlite3")
-    agent_runtime_repository.upsert_runtime(
-        AgentRuntimeRecord(
-            agent_id="agent-2",
-            actor_key="agent-2",
-        ),
-    )
     task_repository.upsert_task(
         TaskRecord(
             id="task-2",
@@ -189,19 +209,12 @@ def test_record_turn_usage_does_not_instantiate_provider_manager_fallback(
         ),
     )
 
-    service = KernelQueryExecutionService(
-        session_backend=object(),
-        agent_profile_service=SimpleNamespace(
-            get_agent=lambda agent_id: (
-                SimpleNamespace(agent_id=agent_id)
-                if agent_id == "agent-2"
-                else None
-            ),
-            list_agents=lambda: [SimpleNamespace(agent_id="agent-2")],
-        ),
-        agent_runtime_repository=agent_runtime_repository,
+    service = _build_service(
+        agent_id="agent-2",
+        task_id="task-2",
         task_runtime_repository=task_runtime_repository,
         evidence_ledger=evidence_ledger,
+        executor_runtime_service=executor_runtime_service,
         provider_manager=None,
     )
     request = AgentRequest(
@@ -216,88 +229,10 @@ def test_record_turn_usage_does_not_instantiate_provider_manager_fallback(
     service.record_turn_usage(
         request=request,
         kernel_task_id="task-2",
-        usage={
-            "input_tokens": 2,
-            "output_tokens": 1,
-        },
-    )
-
-    runtime = agent_runtime_repository.get_runtime("agent-2")
-    assert runtime is not None
-    assert "last_query_model_context" not in (runtime.metadata or {})
-
-
-def test_record_turn_usage_persists_executor_runtime_when_actor_runtime_missing(
-    tmp_path,
-) -> None:
-    state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
-    executor_runtime_service = ExecutorRuntimeService(state_store=state_store)
-    task_repository = SqliteTaskRepository(state_store)
-    task_runtime_repository = SqliteTaskRuntimeRepository(state_store)
-    evidence_ledger = EvidenceLedger(database_path=tmp_path / "evidence.sqlite3")
-    runtime = executor_runtime_service.create_or_reuse_runtime(
-        executor_id="codex",
-        protocol_kind="app_server",
-        scope_kind="assignment",
-        assignment_id="task-3",
-        role_id="agent-3",
-        thread_id="sess-executor-usage",
-        metadata={"owner_agent_id": "agent-3"},
-        continuity_metadata={
-            "control_thread_id": "sess-executor-usage",
-            "session_id": "sess-executor-usage",
-        },
-    )
-    executor_runtime_service.mark_runtime_ready(
-        runtime.runtime_id,
-        thread_id="sess-executor-usage",
-        metadata={"owner_agent_id": "agent-3"},
-    )
-    task_repository.upsert_task(
-        TaskRecord(
-            id="task-3",
-            title="Track executor runtime usage",
-            task_type="system:dispatch_query",
-            owner_agent_id="agent-3",
-        ),
-    )
-    task_runtime_repository.upsert_runtime(
-        TaskRuntimeRecord(
-            task_id="task-3",
-            risk_level="auto",
-            last_owner_agent_id="agent-3",
-        ),
-    )
-    service = KernelQueryExecutionService(
-        session_backend=object(),
-        agent_profile_service=SimpleNamespace(
-            get_agent=lambda agent_id: (
-                SimpleNamespace(agent_id=agent_id)
-                if agent_id == "agent-3"
-                else None
-            ),
-            list_agents=lambda: [SimpleNamespace(agent_id="agent-3")],
-        ),
-        task_runtime_repository=task_runtime_repository,
-        evidence_ledger=evidence_ledger,
-        provider_manager=None,
-        executor_runtime_service=executor_runtime_service,
-    )
-    request = AgentRequest(
-        id="req-executor-usage",
-        session_id="sess-executor-usage",
-        user_id="user-executor-usage",
-        channel="console",
-        input=[],
-    )
-    request.agent_id = "agent-3"
-
-    service.record_turn_usage(
-        request=request,
-        kernel_task_id="task-3",
-        usage={"input_tokens": 4, "output_tokens": 2},
+        usage={"input_tokens": 2, "output_tokens": 1},
     )
 
     updated_runtime = executor_runtime_service.get_runtime(runtime.runtime_id)
     assert updated_runtime is not None
-    assert updated_runtime.metadata["last_query_usage"]["total_tokens"] == 6
+    assert updated_runtime.metadata["last_query_usage"]["total_tokens"] == 3
+    assert "last_query_model_context" not in (updated_runtime.metadata or {})

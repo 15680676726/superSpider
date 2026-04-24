@@ -10,19 +10,21 @@ from copaw.industry.models import (
 from copaw.industry.service_runtime_views import _IndustryRuntimeViewsMixin
 from copaw.state import (
     AgentReportRecord,
-    AgentRuntimeRecord,
     AssignmentRecord,
     BacklogItemRecord,
     IndustryInstanceRecord,
     StrategyMemoryRecord,
 )
 from copaw.state import SQLiteStateStore
-from copaw.state.repositories import SqliteAgentRuntimeRepository
 from copaw.state.skill_candidate_service import CapabilityCandidateService
 from copaw.state.skill_lifecycle_decision_service import (
     SkillLifecycleDecisionService,
 )
 from copaw.state.skill_trial_service import SkillTrialService
+from tests.shared.executor_runtime_compat import (
+    AgentRuntimeRecord,
+    SqliteAgentRuntimeRepository,
+)
 
 
 class _StrategyServiceStub:
@@ -145,7 +147,7 @@ class _RuntimeViewsHarness(_IndustryRuntimeViewsMixin):
 class _CapabilityGovernanceRuntimeViewsHarness(_RuntimeViewsHarness):
     def __init__(self, strategy: StrategyMemoryRecord, runtime_repository) -> None:
         super().__init__(strategy)
-        self._agent_runtime_repository = runtime_repository
+        self._executor_runtime_service = runtime_repository.service
         self._goal_service = SimpleNamespace(get_goal=lambda goal_id: None)
         self._goal_override_repository = SimpleNamespace(
             get_override=lambda goal_id: None,
@@ -455,63 +457,6 @@ def test_capability_governance_projection_exposes_formal_governance_result(
     candidate_service = CapabilityCandidateService(state_store=state_store)
     trial_service = SkillTrialService(state_store=state_store)
     decision_service = SkillLifecycleDecisionService(state_store=state_store)
-    runtime_repository.upsert_runtime(
-        AgentRuntimeRecord(
-            agent_id="agent-seat",
-            actor_key="runtime:agent-seat",
-            actor_fingerprint="fp-agent-seat",
-            actor_class="industry-dynamic",
-            desired_state="active",
-            runtime_status="running",
-            metadata={
-                "selected_seat_ref": "seat-primary",
-                "capability_layers": {
-                    "role_prototype_capability_ids": [
-                        "skill:role-a",
-                        "skill:role-b",
-                        "skill:role-c",
-                        "skill:role-d",
-                        "skill:role-e",
-                    ],
-                    "seat_instance_capability_ids": [
-                        "skill:seat-a",
-                        "skill:seat-b",
-                        "skill:seat-c",
-                        "skill:seat-d",
-                    ],
-                    "cycle_delta_capability_ids": [
-                        "mcp:campaign-dashboard",
-                        "mcp:legacy_browser",
-                    ],
-                    "session_overlay_capability_ids": [
-                        "mcp:browser_runtime_next",
-                    ],
-                    "effective_capability_ids": [
-                        "skill:role-a",
-                        "skill:role-b",
-                        "skill:role-c",
-                        "skill:role-d",
-                        "skill:role-e",
-                        "skill:seat-a",
-                        "skill:seat-b",
-                        "skill:seat-c",
-                        "skill:seat-d",
-                        "mcp:campaign-dashboard",
-                        "mcp:legacy_browser",
-                        "mcp:browser_runtime_next",
-                    ],
-                },
-                "current_capability_trial": {
-                    "candidate_id": "cand-browser-runtime-next",
-                    "skill_trial_id": "trial-browser-runtime-seat-primary",
-                    "selected_scope": "session",
-                    "selected_seat_ref": "seat-primary",
-                    "capability_ids": ["mcp:browser_runtime_next"],
-                    "replacement_target_ids": ["mcp:legacy_browser"],
-                },
-            },
-        ),
-    )
     baseline = candidate_service.normalize_candidate_source(
         candidate_kind="mcp-bundle",
         target_scope="seat",
@@ -553,6 +498,64 @@ def test_capability_governance_projection_exposes_formal_governance_result(
         equivalence_class="browser-runtime",
         capability_overlap_score=0.93,
         metadata={"mount_id": "mcp:browser_runtime_next"},
+    )
+    runtime_repository.upsert_runtime(
+        AgentRuntimeRecord(
+            agent_id="agent-seat",
+            actor_key="runtime:agent-seat",
+            actor_fingerprint="fp-agent-seat",
+            actor_class="industry-dynamic",
+            desired_state="active",
+            runtime_status="running",
+            industry_role_id="support-seat",
+            metadata={
+                "selected_seat_ref": "seat-primary",
+                "capability_layers": {
+                    "role_prototype_capability_ids": [
+                        "skill:role-a",
+                        "skill:role-b",
+                        "skill:role-c",
+                        "skill:role-d",
+                        "skill:role-e",
+                    ],
+                    "seat_instance_capability_ids": [
+                        "skill:seat-a",
+                        "skill:seat-b",
+                        "skill:seat-c",
+                        "skill:seat-d",
+                    ],
+                    "cycle_delta_capability_ids": [
+                        "mcp:campaign-dashboard",
+                        "mcp:legacy_browser",
+                    ],
+                    "session_overlay_capability_ids": [
+                        "mcp:browser_runtime_next",
+                    ],
+                    "effective_capability_ids": [
+                        "skill:role-a",
+                        "skill:role-b",
+                        "skill:role-c",
+                        "skill:role-d",
+                        "skill:role-e",
+                        "skill:seat-a",
+                        "skill:seat-b",
+                        "skill:seat-c",
+                        "skill:seat-d",
+                        "mcp:campaign-dashboard",
+                        "mcp:legacy_browser",
+                        "mcp:browser_runtime_next",
+                    ],
+                },
+                "current_capability_trial": {
+                    "candidate_id": candidate.candidate_id,
+                    "skill_trial_id": "trial-browser-runtime-seat-primary",
+                    "selected_scope": "session",
+                    "selected_seat_ref": "seat-primary",
+                    "capability_ids": ["mcp:browser_runtime_next"],
+                    "replacement_target_ids": ["mcp:legacy_browser"],
+                },
+            },
+        ),
     )
     trial_service.create_or_update_trial(
         candidate_id=candidate.candidate_id,
@@ -1080,6 +1083,7 @@ def test_runtime_views_instance_detail_projects_multi_seat_capability_governance
                     "capability_ids": ["mcp:browser-temp"],
                     "status": "active",
                 },
+                "seat_runtime_status": "blocked",
             },
         ),
     )

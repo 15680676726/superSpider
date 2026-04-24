@@ -57,7 +57,6 @@ from copaw.kernel import KernelTask
 from .industry_api_parts.shared import _build_industry_app
 from copaw.kernel import KernelDispatcher, KernelTaskStore
 from copaw.state import (
-    AgentRuntimeRecord,
     CapabilityDonorService,
     SQLiteStateStore,
     SkillLifecycleDecisionService,
@@ -81,6 +80,7 @@ from copaw.state.repositories import (
     SqliteTaskRepository,
     SqliteTaskRuntimeRepository,
 )
+from tests.shared.executor_runtime_compat import AgentRuntimeRecord
 
 
 class FakeCapabilityService(CapabilityService):
@@ -1926,18 +1926,16 @@ def test_capability_market_executor_provider_install_persists_formal_provider_in
     assert payload["provider"]["formal_surface"] is True
     assert payload["binding"]["role_id"] == "execution-core"
     assert payload["binding"]["executor_provider_id"] == "codex-app-server"
-    assert payload["model_policy"]["policy_id"] == "codex-default"
-    assert payload["model_policy"]["default_model_ref"] == "gpt-5-codex"
+    assert payload["model_policy"] is None
     stored_provider = executor_runtime_service.resolve_executor_provider("codex-app-server")
     assert stored_provider is not None
     assert stored_provider.control_surface_kind == "app_server"
     stored_binding = executor_runtime_service.resolve_role_executor_binding("execution-core")
     assert stored_binding is not None
     assert stored_binding.executor_provider_id == "codex-app-server"
+    assert stored_binding.model_policy_id is None
     stored_policy = executor_runtime_service.resolve_model_invocation_policy("codex-default")
-    assert stored_policy is not None
-    assert stored_policy.ownership_mode == "copaw_managed"
-    assert stored_policy.default_model_ref == "gpt-5-codex"
+    assert stored_policy is None
 
 
 def test_capability_market_project_install_unwraps_kernel_output_payload(

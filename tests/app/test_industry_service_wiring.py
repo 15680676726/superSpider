@@ -18,7 +18,6 @@ from copaw.industry.service_context import (
     build_industry_service_runtime_bindings,
 )
 from copaw.state import (
-    AgentRuntimeRecord,
     GoalRecord,
     IndustryInstanceRecord,
     SQLiteStateStore,
@@ -28,7 +27,6 @@ from copaw.state import (
 from copaw.state.repositories import (
     SqliteAgentProfileOverrideRepository,
     SqliteAgentReportRepository,
-    SqliteAgentRuntimeRepository,
     SqliteGoalOverrideRepository,
     SqliteIndustryInstanceRepository,
     SqliteTaskRepository,
@@ -39,6 +37,10 @@ from copaw.state.skill_lifecycle_decision_service import (
     SkillLifecycleDecisionService,
 )
 from copaw.state.skill_trial_service import SkillTrialService
+from tests.shared.executor_runtime_compat import (
+    AgentRuntimeRecord,
+    SqliteAgentRuntimeRepository,
+)
 
 
 class _DummyGoalService:
@@ -466,7 +468,6 @@ def test_runtime_domain_builder_passes_memory_activation_service_to_industry_ser
         capability_service=_CapabilityService(),
         kernel_dispatcher=object(),
         kernel_tool_bridge=object(),
-        actor_mailbox_service=object(),
     )
 
     assert (
@@ -519,12 +520,9 @@ def test_runtime_bindings_builder_does_not_fabricate_from_state_store(
     assert runtime_bindings.operating_cycle_repository is None
     assert runtime_bindings.assignment_repository is None
     assert runtime_bindings.agent_report_repository is None
-    assert runtime_bindings.agent_runtime_repository is None
-    assert runtime_bindings.agent_thread_binding_repository is None
+    assert runtime_bindings.executor_runtime_service is None
     assert runtime_bindings.schedule_repository is None
-    assert runtime_bindings.agent_mailbox_repository is None
     assert runtime_bindings.agent_checkpoint_repository is None
-    assert runtime_bindings.agent_lease_repository is None
     assert runtime_bindings.strategy_memory_repository is None
     assert runtime_bindings.workflow_run_repository is None
     assert runtime_bindings.prediction_case_repository is None
@@ -613,20 +611,16 @@ def test_industry_view_service_owns_read_model_logic_without_lifecycle_mixin(
     assert view_service.get_instance_detail("industry-1") is detail
 
 
-def test_industry_service_cleanup_uses_injected_mailbox_repository_without_state_store(
+def test_industry_service_cleanup_mailbox_stage_is_formally_retired(
     tmp_path,
 ) -> None:
     state_store = SQLiteStateStore(tmp_path / "state.db")
-    mailbox_repository = _MailboxRepositorySpy()
     industry_service = IndustryService(
         goal_service=_DummyGoalService(),
         industry_instance_repository=SqliteIndustryInstanceRepository(state_store),
         goal_override_repository=SqliteGoalOverrideRepository(state_store),
         agent_profile_override_repository=SqliteAgentProfileOverrideRepository(
             state_store,
-        ),
-        runtime_bindings=IndustryServiceRuntimeBindings(
-            agent_mailbox_repository=mailbox_repository,
         ),
     )
 
@@ -635,8 +629,7 @@ def test_industry_service_cleanup_uses_injected_mailbox_repository_without_state
         thread_ids=["thread-1"],
     )
 
-    assert deleted == 2
-    assert sorted(mailbox_repository.deleted) == ["mailbox-agent", "mailbox-thread"]
+    assert deleted == 0
 
 
 def test_reconcile_instance_status_for_goal_uses_targeted_goal_lookup(
@@ -996,7 +989,7 @@ def test_industry_service_syncs_formal_capability_layers_into_actor_runtime(
         ),
     )
     runtime_bindings = build_industry_service_runtime_bindings(
-        agent_runtime_repository=runtime_repository,
+        executor_runtime_service=runtime_repository.service,
     )
     industry_service = IndustryService(
         goal_service=_DummyGoalService(),
@@ -1086,7 +1079,7 @@ def test_attach_candidate_to_scope_blocks_protected_baseline_replacement_and_rec
         ),
     )
     runtime_bindings = build_industry_service_runtime_bindings(
-        agent_runtime_repository=runtime_repository,
+        executor_runtime_service=runtime_repository.service,
     )
     industry_service = IndustryService(
         goal_service=_DummyGoalService(),
@@ -1226,7 +1219,7 @@ def test_sync_actor_runtime_surface_recomputes_effective_capabilities_after_tria
         ),
     )
     runtime_bindings = build_industry_service_runtime_bindings(
-        agent_runtime_repository=runtime_repository,
+        executor_runtime_service=runtime_repository.service,
     )
     industry_service = IndustryService(
         goal_service=_DummyGoalService(),
@@ -1382,7 +1375,6 @@ def test_runtime_domain_builder_injects_research_session_service_into_main_brain
         capability_service=_CapabilityService(),
         kernel_dispatcher=object(),
         kernel_tool_bridge=object(),
-        actor_mailbox_service=object(),
     )
 
     injected_service = captured.get("main_brain_research_session_service")
@@ -1497,16 +1489,11 @@ def test_runtime_domain_builder_does_not_thread_actor_runtime_truth_into_formal_
         capability_service=_CapabilityService(),
         kernel_dispatcher=object(),
         kernel_tool_bridge=object(),
-        actor_mailbox_service=object(),
     )
 
     runtime_binding_kwargs = captured["runtime_binding_kwargs"]
-    assert runtime_binding_kwargs["agent_runtime_repository"] is None
-    assert runtime_binding_kwargs["agent_thread_binding_repository"] is None
-    assert runtime_binding_kwargs["agent_mailbox_repository"] is None
+    assert runtime_binding_kwargs["executor_runtime_service"] is None
     assert runtime_binding_kwargs["agent_checkpoint_repository"] is None
-    assert runtime_binding_kwargs["agent_lease_repository"] is None
-    assert captured["industry_service_kwargs"]["actor_mailbox_service"] is None
 
 
 def test_runtime_domain_builder_wires_executor_runtime_service_into_query_execution_service(
@@ -1589,7 +1576,6 @@ def test_runtime_domain_builder_wires_executor_runtime_service_into_query_execut
         ),
         kernel_dispatcher=object(),
         kernel_tool_bridge=object(),
-        actor_mailbox_service=None,
         executor_runtime_service=executor_runtime_service,
     )
 

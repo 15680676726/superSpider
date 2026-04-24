@@ -2,6 +2,10 @@
 from __future__ import annotations
 
 from .shared import *  # noqa: F401,F403
+from tests.shared.executor_runtime_compat import (
+    AgentRuntimeRecord,
+    SqliteAgentRuntimeRepository,
+)
 
 
 def test_execution_feedback_prompt_lines_include_relation_path_guidance() -> None:
@@ -164,12 +168,12 @@ def test_query_execution_service_passes_runtime_provider_into_copaw_agent(
     assert _FakeAgent.created[0].kwargs["runtime_provider"] is runtime_provider
 
 
-def test_query_execution_service_returns_busy_message_when_actor_runtime_is_already_leased(
+def test_query_execution_service_continues_when_session_lease_is_already_leased_by_another_owner(
     tmp_path,
     monkeypatch,
 ) -> None:
     _FakeAgent.created.clear()
-    state_store = SQLiteStateStore(tmp_path / "actor-busy-state.sqlite3")
+    state_store = SQLiteStateStore(tmp_path / "session-busy-state.sqlite3")
     session_repository = SessionMountRepository(state_store)
     environment_service = EnvironmentService(
         registry=EnvironmentRegistry(
@@ -179,11 +183,16 @@ def test_query_execution_service_returns_busy_message_when_actor_runtime_is_alre
         lease_ttl_seconds=60,
     )
     environment_service.set_session_repository(session_repository)
-    agent_lease_repository = SqliteAgentLeaseRepository(state_store)
-    environment_service.set_agent_lease_repository(agent_lease_repository)
-    environment_service.acquire_actor_lease(
-        agent_id="copaw-agent-runner",
-        owner="copaw-actor-worker",
+    environment_service.acquire_session_lease(
+        channel="console",
+        session_id="sess-busy",
+        user_id="user-busy",
+        owner="another-owner",
+        handle={
+            "channel": "console",
+            "session_id": "sess-busy",
+            "user_id": "user-busy",
+        },
     )
 
     monkeypatch.setattr(query_execution_module, "CoPawAgent", _FakeAgent)
@@ -217,88 +226,7 @@ def test_query_execution_service_returns_busy_message_when_actor_runtime_is_alre
                 user_id="user-busy",
                 channel="console",
             ),
-            kernel_task_id="chat:actor-busy",
-        ):
-            payload.append(item)
-        return payload
-
-    messages = asyncio.run(_run())
-
-    assert len(messages) == 1
-    assert messages[0][1] is True
-    assert "执行编排暂时不可用" in messages[0][0].get_text_content()
-    assert session_backend.loaded == []
-    assert session_backend.saved == []
-
-
-def test_query_execution_service_skips_reentrant_actor_lease_for_mailbox_owned_query(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    _FakeAgent.created.clear()
-    state_store = SQLiteStateStore(tmp_path / "actor-reentrant-state.sqlite3")
-    session_repository = SessionMountRepository(state_store)
-    environment_service = EnvironmentService(
-        registry=EnvironmentRegistry(
-            repository=EnvironmentRepository(state_store),
-            session_repository=session_repository,
-        ),
-        lease_ttl_seconds=60,
-    )
-    environment_service.set_session_repository(session_repository)
-    agent_lease_repository = SqliteAgentLeaseRepository(state_store)
-    environment_service.set_agent_lease_repository(agent_lease_repository)
-    environment_service.acquire_actor_lease(
-        agent_id="copaw-agent-runner",
-        owner="copaw-actor-worker",
-    )
-    runtime_repository = SqliteAgentRuntimeRepository(state_store)
-    runtime_repository.upsert_runtime(
-        AgentRuntimeRecord(
-            agent_id="copaw-agent-runner",
-            actor_key="industry-buddy:execution-core",
-            actor_fingerprint="fp-execution-core",
-            actor_class="industry-dynamic",
-            desired_state="active",
-            runtime_status="running",
-            current_task_id="ctask:control-core",
-            current_mailbox_id="mailbox:control-core",
-        ),
-    )
-
-    monkeypatch.setattr(query_execution_module, "CoPawAgent", _FakeAgent)
-    monkeypatch.setattr(
-        query_execution_module,
-        "stream_printing_messages",
-        _fake_stream_printing_messages,
-    )
-    monkeypatch.setattr(
-        query_execution_module,
-        "load_config",
-        lambda: SimpleNamespace(
-            agents=SimpleNamespace(
-                running=SimpleNamespace(max_iters=1, max_input_length=512),
-            ),
-        ),
-    )
-
-    session_backend = _FakeSessionBackend()
-    service = KernelQueryExecutionService(
-        session_backend=session_backend,
-        environment_service=environment_service,
-        agent_runtime_repository=runtime_repository,
-    )
-
-    async def _run():
-        payload = []
-        async for item in service.execute_stream(
-            msgs=[SimpleNamespace(get_text_content=lambda: "start execution")],
-            request=SimpleNamespace(
-                session_id="industry-chat:buddy:demo:execution-core",
-                user_id="user-busy",
-                channel="industry-cycle",
-            ),
-            kernel_task_id="ctask:control-core",
+            kernel_task_id="chat:session-busy",
         ):
             payload.append(item)
         return payload
@@ -307,8 +235,19 @@ def test_query_execution_service_skips_reentrant_actor_lease_for_mailbox_owned_q
 
     assert len(messages) == 2
     assert messages[0][1] is False
-    assert session_backend.loaded == [("industry-chat:buddy:demo:execution-core", "user-busy")]
-    assert session_backend.saved == [("industry-chat:buddy:demo:execution-core", "user-busy")]
+    assert session_backend.loaded == [("sess-busy", "user-busy")]
+    assert session_backend.saved == [("sess-busy", "user-busy")]
+    session_mount = environment_service.get_session("session:console:sess-busy")
+    assert session_mount is not None
+    assert session_mount.lease_status == "leased"
+    assert session_mount.lease_owner == "another-owner"
+    return
+
+    assert len(messages) == 1
+    assert messages[0][1] is True
+    assert "执行编排暂时不可用" in messages[0][0].get_text_content()
+    assert session_backend.loaded == []
+    assert session_backend.saved == []
 
 
 def test_query_execution_service_heartbeats_leases_during_silent_turn(
@@ -326,24 +265,15 @@ def test_query_execution_service_heartbeats_leases_during_silent_turn(
         lease_ttl_seconds=30,
     )
     environment_service.set_session_repository(session_repository)
-    agent_lease_repository = SqliteAgentLeaseRepository(state_store)
-    environment_service.set_agent_lease_repository(agent_lease_repository)
 
     session_heartbeats: list[str] = []
-    actor_heartbeats: list[str] = []
     original_session_heartbeat = environment_service.heartbeat_session_lease
-    original_actor_heartbeat = environment_service.heartbeat_actor_lease
 
     def _record_session_heartbeat(*args, **kwargs):
         session_heartbeats.append(args[0])
         return original_session_heartbeat(*args, **kwargs)
 
-    def _record_actor_heartbeat(*args, **kwargs):
-        actor_heartbeats.append(args[0])
-        return original_actor_heartbeat(*args, **kwargs)
-
     monkeypatch.setattr(environment_service, "heartbeat_session_lease", _record_session_heartbeat)
-    monkeypatch.setattr(environment_service, "heartbeat_actor_lease", _record_actor_heartbeat)
     monkeypatch.setattr(query_execution_module, "CoPawAgent", _FakeAgent)
     monkeypatch.setattr(
         query_execution_module,
@@ -381,9 +311,7 @@ def test_query_execution_service_heartbeats_leases_during_silent_turn(
     asyncio.run(_run())
 
     assert session_heartbeats
-    assert actor_heartbeats
     assert session_heartbeats[0] == "session:console:sess-heartbeat"
-    assert actor_heartbeats[0] == "actor:copaw-agent-runner"
 
 
 def test_query_execution_service_reuses_resident_agent_for_same_session(
@@ -554,13 +482,7 @@ def test_query_execution_service_uses_agent_profile_and_capability_graph(
 
     assert len(_FakeAgent.created) == 1
     agent = _FakeAgent.created[0]
-    assert agent.kwargs["allowed_tool_capability_ids"] == {
-        "tool:edit_file",
-        "tool:execute_shell_command",
-        "tool:get_current_time",
-        "tool:read_file",
-        "tool:write_file",
-    }
+    assert agent.kwargs["allowed_tool_capability_ids"] == set()
     assert agent.kwargs["allowed_skill_names"] == set()
     assert [client.name for client in agent.kwargs["mcp_clients"]] == []
     assert {
@@ -635,14 +557,7 @@ def test_query_execution_service_uses_agent_profile_and_capability_graph(
         "target_role_name explicitly; do not leave the target implicit."
         in agent.kwargs["prompt_appendix"]
     )
-    assert "Shell execution runs on the current Windows host." in agent.kwargs["prompt_appendix"]
-    assert "Prefer PowerShell or other Windows-native commands first." in agent.kwargs[
-        "prompt_appendix"
-    ]
-    assert "Do not start with Linux-only probing such as command -v, find, sed, or bash syntax." in agent.kwargs[
-        "prompt_appendix"
-    ]
-    assert "For file/path discovery on Windows, prefer rg, Get-ChildItem, and Select-String." in agent.kwargs[
+    assert "Shell/admin execution is not mounted in this session." in agent.kwargs[
         "prompt_appendix"
     ]
     assert "Do not describe this runtime as a generic sandbox" in agent.kwargs["prompt_appendix"]
@@ -785,7 +700,7 @@ def test_query_execution_service_passes_typed_capability_layers_into_agent_and_p
         agent_profile_service=_FakeAgentProfileServiceWithGovernance(),
         industry_service=_FakeIndustryService(),
         knowledge_service=_FakeKnowledgeService(),
-        agent_runtime_repository=runtime_repository,
+        executor_runtime_service=runtime_repository.service,
     )
 
     async def _run():

@@ -11,13 +11,9 @@ from pydantic import BaseModel
 
 from ..models import (
     AgentCheckpointRecord,
-    AgentLeaseRecord,
-    AgentMailboxRecord,
     AgentProfileOverrideRecord,
     AgentReportRecord,
     AssignmentRecord,
-    AgentRuntimeRecord,
-    AgentThreadBindingRecord,
     AutomationLoopRuntimeRecord,
     BacklogItemRecord,
     CapabilityOverrideRecord,
@@ -52,12 +48,8 @@ from ..models_work_context import WorkContextRecord
 from ..store import SQLiteStateStore
 from .base import (
     BaseAgentCheckpointRepository,
-    BaseAgentLeaseRepository,
-    BaseAgentMailboxRepository,
     BaseAgentReportRepository,
-    BaseAgentRuntimeRepository,
     BaseAssignmentRepository,
-    BaseAgentThreadBindingRepository,
     BaseAutomationLoopRuntimeRepository,
     BaseBacklogItemRepository,
     BaseDecisionRequestRepository,
@@ -748,12 +740,6 @@ def _decode_json_list(value: str | None) -> list[str] | None:
 
 def _operating_lane_from_row(row: Any) -> OperatingLaneRecord | None:
     from .sqlite_industry import _operating_lane_from_row as impl
-
-    return impl(row)
-
-
-def _agent_runtime_from_row(row: Any) -> AgentRuntimeRecord | None:
-    from .sqlite_governance_agents import _agent_runtime_from_row as impl
 
     return impl(row)
 

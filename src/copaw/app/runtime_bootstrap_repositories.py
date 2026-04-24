@@ -5,12 +5,8 @@ from ..environments import SessionMountRepository
 from ..state import SQLiteStateStore
 from ..state.repositories import (
     SqliteAgentCheckpointRepository,
-    SqliteAgentLeaseRepository,
-    SqliteAgentMailboxRepository,
     SqliteAgentProfileOverrideRepository,
     SqliteAgentReportRepository,
-    SqliteAgentRuntimeRepository,
-    SqliteAgentThreadBindingRepository,
     SqliteAutomationLoopRuntimeRepository,
     SqliteAssignmentRepository,
     SqliteBacklogItemRepository,
@@ -73,13 +69,7 @@ def build_runtime_repositories(state_store: SQLiteStateStore) -> RuntimeReposito
         agent_profile_override_repository=SqliteAgentProfileOverrideRepository(
             state_store,
         ),
-        agent_runtime_repository=SqliteAgentRuntimeRepository(state_store),
-        agent_mailbox_repository=SqliteAgentMailboxRepository(state_store),
         agent_checkpoint_repository=SqliteAgentCheckpointRepository(state_store),
-        agent_lease_repository=SqliteAgentLeaseRepository(state_store),
-        agent_thread_binding_repository=SqliteAgentThreadBindingRepository(
-            state_store,
-        ),
         industry_instance_repository=SqliteIndustryInstanceRepository(state_store),
         media_analysis_repository=SqliteMediaAnalysisRepository(state_store),
         operating_lane_repository=SqliteOperatingLaneRepository(state_store),

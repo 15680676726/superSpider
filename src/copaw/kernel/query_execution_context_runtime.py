@@ -51,8 +51,6 @@ class _QueryExecutionContextRuntimeMixin:
         conversation_thread_id: str | None,
     ) -> dict[str, Any]:
         context: dict[str, Any] = {}
-        runtime_repository = self._agent_runtime_repository
-
         def _merge_capability_trial_attribution(value: Any) -> None:
             payload = _mapping_value(value)
             if not payload:
@@ -158,7 +156,11 @@ class _QueryExecutionContextRuntimeMixin:
                     _merge_capability_trial_attribution(
                         task_request.get("capability_trial_attribution"),
                     )
-        runtime = runtime_repository.get_runtime(agent_id) if runtime_repository is not None else None
+        runtime = self._resolve_executor_runtime_contract(
+            owner_agent_id=agent_id,
+            conversation_thread_id=conversation_thread_id,
+            kernel_task_id=kernel_task_id,
+        ).get("runtime")
         if runtime is not None:
             runtime_metadata = _mapping_value(getattr(runtime, "metadata", None))
             if runtime_metadata:

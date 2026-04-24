@@ -8,6 +8,8 @@
 
 **Tech Stack:** Python, FastAPI, Pydantic, SQLite repositories, pytest
 
+**2026-04-24 correction:** Formal external-executor launches must resolve `model_ref` from the system runtime-provider facade. Executor-provider intake may still accept `model_policy_id / default_model_ref` as compatibility input, but those fields no longer drive live sidecar model selection or formal binding truth.
+
 ---
 
 ## Scope-Checked File Map

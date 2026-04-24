@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 from weakref import WeakSet
 
-from ..state import AgentLeaseRecord
 from .cooperative.browser_attach_runtime import build_browser_attach_clear_patch
 from .models import SessionMount
 
@@ -19,7 +18,7 @@ _ACTIVE_LEASE_SERVICES: WeakSet = WeakSet()
 
 
 class EnvironmentLeaseService:
-    """Focused collaborator for session/resource/actor leases."""
+    """Focused collaborator for session/resource leases."""
 
     def __init__(self, service: EnvironmentService) -> None:
         self._service = service
@@ -980,183 +979,6 @@ class EnvironmentLeaseService:
         session_repository.upsert_session(updated_session)
         self._service._registry.upsert(updated_mount)
         return updated_session
-
-    def acquire_actor_lease(
-        self,
-        *,
-        agent_id: str,
-        owner: str,
-        ttl_seconds: int | None = None,
-        metadata: dict[str, object] | None = None,
-    ) -> AgentLeaseRecord:
-        actor_repository = self._service._agent_lease_repository
-        if actor_repository is None:
-            raise RuntimeError("Actor lease repository is not available")
-        now = _utc_now()
-        expires_at = now + timedelta(
-            seconds=ttl_seconds or self._service._lease_ttl_seconds,
-        )
-        lease_id = f"actor:{agent_id}"
-        existing = actor_repository.get_lease(lease_id)
-        if (
-            existing is not None
-            and existing.lease_status == "leased"
-            and not _lease_expired(existing.expires_at, now=now)
-            and existing.owner
-            and existing.owner != owner
-        ):
-            raise RuntimeError(
-                f"Actor '{agent_id}' is already leased by '{existing.owner}'",
-            )
-        payload = {
-            "agent_id": agent_id,
-            "lease_kind": "actor-runtime",
-            "resource_ref": f"actor:{agent_id}",
-            "lease_status": "leased",
-            "lease_token": existing.lease_token if existing is not None else uuid4().hex,
-            "owner": owner,
-            "acquired_at": existing.acquired_at if existing is not None else now,
-            "expires_at": expires_at,
-            "heartbeat_at": now,
-            "released_at": None,
-            "metadata": {
-                **(existing.metadata if existing is not None else {}),
-                **(metadata or {}),
-            },
-            "updated_at": now,
-        }
-        lease = (
-            existing.model_copy(update=payload)
-            if existing is not None
-            else AgentLeaseRecord(id=lease_id, **payload)
-        )
-        return actor_repository.upsert_lease(lease)
-
-    def heartbeat_actor_lease(
-        self,
-        lease_id: str,
-        *,
-        lease_token: str | None,
-        ttl_seconds: int | None = None,
-        metadata: dict[str, object] | None = None,
-    ) -> AgentLeaseRecord:
-        actor_repository = self._service._agent_lease_repository
-        if actor_repository is None:
-            raise RuntimeError("Actor lease repository is not available")
-        existing = actor_repository.get_lease(lease_id)
-        if existing is None:
-            raise KeyError(f"Actor lease '{lease_id}' not found")
-        if existing.lease_token and lease_token and existing.lease_token != lease_token:
-            raise ValueError(f"Lease token mismatch for actor lease '{lease_id}'")
-        now = _utc_now()
-        updated = existing.model_copy(
-            update={
-                "lease_status": "leased",
-                "expires_at": now
-                + timedelta(seconds=ttl_seconds or self._service._lease_ttl_seconds),
-                "heartbeat_at": now,
-                "metadata": {**existing.metadata, **(metadata or {})},
-                "updated_at": now,
-            },
-        )
-        return actor_repository.upsert_lease(updated)
-
-    def release_actor_lease(
-        self,
-        lease_id: str,
-        *,
-        lease_token: str | None = None,
-        reason: str | None = None,
-    ) -> AgentLeaseRecord | None:
-        actor_repository = self._service._agent_lease_repository
-        if actor_repository is None:
-            return None
-        existing = actor_repository.get_lease(lease_id)
-        if existing is None:
-            return None
-        if existing.lease_token and lease_token and existing.lease_token != lease_token:
-            raise ValueError(f"Lease token mismatch for actor lease '{lease_id}'")
-        now = _utc_now()
-        metadata = dict(existing.metadata)
-        if reason:
-            metadata["release_reason"] = reason
-        updated = existing.model_copy(
-            update={
-                "lease_status": "released",
-                "released_at": now,
-                "heartbeat_at": now,
-                "expires_at": now,
-                "metadata": metadata,
-                "updated_at": now,
-            },
-        )
-        return actor_repository.upsert_lease(updated)
-
-    def reap_expired_actor_leases(
-        self,
-        *,
-        now: datetime | None = None,
-    ) -> int:
-        actor_repository = self._service._agent_lease_repository
-        if actor_repository is None:
-            return 0
-        current = now or _utc_now()
-        leases = actor_repository.list_leases(limit=None)
-        expired = [
-            lease
-            for lease in leases
-            if lease.lease_status == "leased"
-            and _lease_expired(lease.expires_at, now=current)
-        ]
-        for lease in expired:
-            metadata = dict(lease.metadata)
-            metadata["release_reason"] = "actor lease expired"
-            actor_repository.upsert_lease(
-                lease.model_copy(
-                    update={
-                        "lease_status": "expired",
-                        "released_at": current,
-                        "heartbeat_at": current,
-                        "expires_at": current,
-                        "metadata": metadata,
-                        "updated_at": current,
-                    },
-                ),
-            )
-        return len(expired)
-
-    def recover_orphaned_actor_leases(
-        self,
-        *,
-        now: datetime | None = None,
-    ) -> int:
-        actor_repository = self._service._agent_lease_repository
-        if actor_repository is None:
-            return 0
-        current = now or _utc_now()
-        leases = actor_repository.list_leases(limit=None)
-        orphaned = [
-            lease
-            for lease in leases
-            if lease.lease_status == "leased"
-            and not _lease_expired(lease.expires_at, now=current)
-        ]
-        for lease in orphaned:
-            metadata = dict(lease.metadata)
-            metadata["release_reason"] = "actor lease orphaned during runtime recovery"
-            actor_repository.upsert_lease(
-                lease.model_copy(
-                    update={
-                        "lease_status": "expired",
-                        "released_at": current,
-                        "heartbeat_at": current,
-                        "expires_at": current,
-                        "metadata": metadata,
-                        "updated_at": current,
-                    },
-                ),
-            )
-        return len(orphaned)
 
     def session_should_be_recovered_locally(
         self,

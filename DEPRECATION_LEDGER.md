@@ -414,6 +414,10 @@
   - `2026-04-22` 验收补充：
     - `/capability-market/executor-providers/search` 与 `/executor-providers/install` 现已通过真实 external-provider smoke，formal provider intake 已不再依赖 donor/project 产品壳做真实性证明
     - 因此 donor/project compatibility/acquisition-only surface 已不再阻塞 external-executor hard-cut 终态完成；但 donor-first taxonomy、旧产品壳与路由删除仍是单独 follow-up
+  - `2026-04-24` 模型治理补充：
+    - formal external executor launch 现已统一改为读取 system runtime-provider contract 的 active model
+    - `/capability-market/executor-providers/install` 上的 `model_policy_id / default_model_ref` 不再进入 formal binding truth，只保留 compatibility 输入意义
+    - executor-scoped default model truth 因此已从 formal live path 退场，不得再把这组字段当成 customer-delivery 主链的模型真相
 
 ### 3.1.6 本地 browser 执行层：`src/copaw/agents/tools/browser_control.py`、`src/copaw/capabilities/browser_runtime.py`、`src/copaw/environments/surface_execution/browser/service.py`
 

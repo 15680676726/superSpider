@@ -31,12 +31,8 @@ from copaw.kernel import KernelTask
 from copaw.kernel.main_brain_intake import MainBrainIntakeContract
 from copaw.kernel.query_execution import KernelQueryExecutionService
 from copaw.constant import MEMORY_COMPACT_KEEP_RECENT
-from copaw.state import AgentRuntimeRecord, SQLiteStateStore
+from copaw.state import SQLiteStateStore
 from copaw.state.executor_runtime_service import ExecutorRuntimeService
-from copaw.state.repositories import (
-    SqliteAgentLeaseRepository,
-    SqliteAgentRuntimeRepository,
-)
 
 
 async def _yield_once_with_runtime_bindings() -> None:
@@ -94,9 +90,7 @@ def test_resident_runtime_helpers_are_sourced_from_resident_module() -> None:
         "_get_or_create_resident_agent",
         "_resident_agent_cache_key",
         "_resident_agent_signature",
-        "_acquire_actor_runtime_lease",
-        "_heartbeat_actor_runtime_lease",
-        "_release_actor_runtime_lease",
+        "_missing_session_lease_error",
         "_build_query_lease_heartbeat",
         "_heartbeat_query_leases",
     )
@@ -251,22 +245,29 @@ def test_query_execution_runtime_resolves_execution_context_from_task_runtime_an
     tmp_path,
 ) -> None:
     state_store = SQLiteStateStore(tmp_path / "query-runtime-state.db")
-    runtime_repository = SqliteAgentRuntimeRepository(state_store)
-    runtime_repository.upsert_runtime(
-        AgentRuntimeRecord(
-            agent_id="ops-agent",
-            actor_key="industry-v1-ops:execution-core",
-            actor_fingerprint="fp-ops",
-            actor_class="industry-dynamic",
-            desired_state="active",
-            runtime_status="idle",
-            metadata={
-                "main_brain_runtime": {
-                    "environment": {"ref": "desktop:runtime"},
-                    "recovery": {"mode": "runtime-metadata"},
-                },
+    executor_runtime_service = ExecutorRuntimeService(state_store=state_store)
+    runtime = executor_runtime_service.create_or_reuse_runtime(
+        executor_id="codex",
+        protocol_kind="app_server",
+        scope_kind="role",
+        role_id="ops-agent",
+        thread_id="industry-chat:industry-v1-ops:execution-core",
+        metadata={
+            "owner_agent_id": "ops-agent",
+            "main_brain_runtime": {
+                "environment": {"ref": "desktop:runtime"},
+                "recovery": {"mode": "runtime-metadata"},
             },
-        ),
+        },
+        continuity_metadata={
+            "control_thread_id": "industry-chat:industry-v1-ops:execution-core",
+            "session_id": "industry-chat:industry-v1-ops:execution-core",
+        },
+    )
+    executor_runtime_service.mark_runtime_ready(
+        runtime.runtime_id,
+        thread_id="industry-chat:industry-v1-ops:execution-core",
+        metadata={"owner_agent_id": "ops-agent"},
     )
     kernel_task = KernelTask(
         id="ktask:query-runtime",
@@ -288,7 +289,7 @@ def test_query_execution_runtime_resolves_execution_context_from_task_runtime_an
     service = KernelQueryExecutionService(
         session_backend=object(),
         kernel_dispatcher=dispatcher,
-        agent_runtime_repository=runtime_repository,
+        executor_runtime_service=executor_runtime_service,
     )
 
     resolved = service._resolve_execution_task_context(  # pylint: disable=protected-access
@@ -358,32 +359,8 @@ def test_query_execution_runtime_resolves_execution_context_from_executor_runtim
     assert resolved["main_brain_runtime"]["recovery"]["mode"] == "resume-sidecar-stream"
 
 
-def test_query_execution_runtime_bypasses_actor_lease_when_same_task_is_already_current(
-    tmp_path,
-) -> None:
-    state_store = SQLiteStateStore(tmp_path / "query-runtime-lease-bypass.db")
-    runtime_repository = SqliteAgentRuntimeRepository(state_store)
-    runtime_repository.upsert_runtime(
-        AgentRuntimeRecord(
-            agent_id="ops-agent",
-            actor_key="industry-v1-ops:execution-core",
-            actor_fingerprint="fp-ops",
-            actor_class="industry-dynamic",
-            desired_state="active",
-            runtime_status="running",
-            current_task_id="ktask:same-task",
-            current_mailbox_id=None,
-        ),
-    )
-    service = KernelQueryExecutionService(
-        session_backend=object(),
-        agent_runtime_repository=runtime_repository,
-    )
-
-    assert service._should_bypass_actor_runtime_lease(  # pylint: disable=protected-access
-        agent_id="ops-agent",
-        task_id="ktask:same-task",
-    )
+def test_query_execution_runtime_drops_actor_lease_bypass_helper() -> None:
+    assert not hasattr(KernelQueryExecutionService, "_should_bypass_actor_runtime_lease")
 
 
 def test_query_execution_runtime_marks_sidecar_memory_boundary_as_degraded_when_missing() -> None:
@@ -512,8 +489,6 @@ def test_query_execution_runtime_disables_missing_session_heartbeat_after_first_
         lease_ttl_seconds=30,
     )
     environment_service.set_session_repository(session_repository)
-    agent_lease_repository = SqliteAgentLeaseRepository(state_store)
-    environment_service.set_agent_lease_repository(agent_lease_repository)
 
     session_lease = environment_service.acquire_session_lease(
         channel="console",
@@ -521,33 +496,17 @@ def test_query_execution_runtime_disables_missing_session_heartbeat_after_first_
         user_id="user-1",
         owner="copaw-agent-runner",
     )
-    actor_lease = environment_service.acquire_actor_lease(
-        agent_id="copaw-agent-runner",
-        owner="sess-heartbeat-missing",
-    )
-    assert actor_lease is not None
 
     session_heartbeat_calls: list[str] = []
-    actor_heartbeat_calls: list[str] = []
-    original_actor_heartbeat = environment_service.heartbeat_actor_lease
 
     def _missing_session_heartbeat(*args, **kwargs):
         session_heartbeat_calls.append(args[0])
         raise KeyError(f"Session '{args[0]}' not found")
 
-    def _record_actor_heartbeat(*args, **kwargs):
-        actor_heartbeat_calls.append(args[0])
-        return original_actor_heartbeat(*args, **kwargs)
-
     monkeypatch.setattr(
         environment_service,
         "heartbeat_session_lease",
         _missing_session_heartbeat,
-    )
-    monkeypatch.setattr(
-        environment_service,
-        "heartbeat_actor_lease",
-        _record_actor_heartbeat,
     )
 
     service = KernelQueryExecutionService(
@@ -557,7 +516,6 @@ def test_query_execution_runtime_disables_missing_session_heartbeat_after_first_
     )
     heartbeat = service._build_query_lease_heartbeat(  # pylint: disable=protected-access
         session_lease=session_lease,
-        actor_lease=actor_lease,
     )
     assert heartbeat is not None
 
@@ -568,7 +526,6 @@ def test_query_execution_runtime_disables_missing_session_heartbeat_after_first_
     asyncio.run(_pulse_twice())
 
     assert session_heartbeat_calls == [session_lease.id]
-    assert actor_heartbeat_calls == [actor_lease.id, actor_lease.id]
 
 
 def test_query_execution_runtime_projects_compaction_visibility_into_entropy_contract() -> None:
@@ -1668,31 +1625,32 @@ def test_query_execution_runtime_filters_capabilities_by_effective_seat_layers(
     tmp_path,
 ) -> None:
     state_store = SQLiteStateStore(tmp_path / "query-runtime-seat-capability-layers.db")
-    runtime_repository = SqliteAgentRuntimeRepository(state_store)
-    runtime_repository.upsert_runtime(
-        AgentRuntimeRecord(
-            agent_id="agent-support",
-            actor_key="industry-1:support-specialist",
-            actor_fingerprint="fingerprint-support",
-            actor_class="industry-dynamic",
-            desired_state="active",
-            runtime_status="idle",
-            metadata={
-                "capability_layers": {
-                    "schema_version": "industry-seat-capability-layers-v1",
-                    "role_prototype_capability_ids": ["tool:read_file"],
-                    "seat_instance_capability_ids": ["skill:crm-seat-playbook"],
-                    "cycle_delta_capability_ids": ["mcp:campaign-dashboard"],
-                    "session_overlay_capability_ids": ["mcp:browser-temp"],
-                    "effective_capability_ids": [
-                        "tool:read_file",
-                        "skill:crm-seat-playbook",
-                        "mcp:campaign-dashboard",
-                        "mcp:browser-temp",
-                    ],
-                },
+    executor_runtime_service = ExecutorRuntimeService(state_store=state_store)
+    runtime = executor_runtime_service.create_or_reuse_runtime(
+        executor_id="codex",
+        protocol_kind="app_server",
+        scope_kind="role",
+        role_id="agent-support",
+        metadata={
+            "owner_agent_id": "agent-support",
+            "capability_layers": {
+                "schema_version": "industry-seat-capability-layers-v1",
+                "role_prototype_capability_ids": ["tool:read_file"],
+                "seat_instance_capability_ids": ["skill:crm-seat-playbook"],
+                "cycle_delta_capability_ids": ["mcp:campaign-dashboard"],
+                "session_overlay_capability_ids": ["mcp:browser-temp"],
+                "effective_capability_ids": [
+                    "tool:read_file",
+                    "skill:crm-seat-playbook",
+                    "mcp:campaign-dashboard",
+                    "mcp:browser-temp",
+                ],
             },
-        ),
+        },
+    )
+    executor_runtime_service.mark_runtime_ready(
+        runtime.runtime_id,
+        metadata={"owner_agent_id": "agent-support"},
     )
 
     def _mount(capability_id: str, source_kind: str) -> SimpleNamespace:
@@ -1712,7 +1670,7 @@ def test_query_execution_runtime_filters_capabilities_by_effective_seat_layers(
     service = KernelQueryExecutionService(
         session_backend=object(),
         capability_service=capability_service,
-        agent_runtime_repository=runtime_repository,
+        executor_runtime_service=executor_runtime_service,
     )
 
     (
