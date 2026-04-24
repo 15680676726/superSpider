@@ -40,18 +40,6 @@ def test_runtime_execution_stack_wires_workflow_repositories_into_patch_executor
         def __init__(self, **kwargs) -> None:
             self.kwargs = kwargs
 
-    class _ActorMailboxService:
-        def __init__(self, **kwargs) -> None:
-            self.kwargs = kwargs
-
-    class _ActorWorker:
-        def __init__(self, **kwargs) -> None:
-            self.kwargs = kwargs
-
-    class _ActorSupervisor:
-        def __init__(self, **kwargs) -> None:
-            self.kwargs = kwargs
-
     repositories = SimpleNamespace(
         capability_override_repository=object(),
         agent_profile_override_repository=object(),
@@ -65,7 +53,6 @@ def test_runtime_execution_stack_wires_workflow_repositories_into_patch_executor
         runtime_frame_repository=object(),
         agent_mailbox_repository=object(),
         agent_runtime_repository=object(),
-        agent_checkpoint_repository=object(),
         agent_thread_binding_repository=object(),
         evidence_ledger_repository=object(),
     )
@@ -89,9 +76,6 @@ def test_runtime_execution_stack_wires_workflow_repositories_into_patch_executor
         kernel_tool_bridge_cls=_KernelToolBridge,
         capability_service_cls=_CapabilityService,
         kernel_dispatcher_cls=_KernelDispatcher,
-        actor_mailbox_service_cls=_ActorMailboxService,
-        actor_worker_cls=_ActorWorker,
-        actor_supervisor_cls=_ActorSupervisor,
     )
 
     assert (

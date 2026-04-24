@@ -98,7 +98,6 @@ def _build_bootstrap() -> RuntimeBootstrap:
         governance_control_repository=object(),
         capability_override_repository=object(),
         agent_profile_override_repository=object(),
-        agent_checkpoint_repository=object(),
         industry_instance_repository=object(),
         media_analysis_repository=object(),
         goal_override_repository=object(),
@@ -839,6 +838,17 @@ def test_build_runtime_state_bindings_do_not_publish_retired_actor_runtime_truth
     assert "agent_thread_binding_repository" not in bindings
 
 
+def test_build_runtime_state_bindings_do_not_publish_checkpoint_compatibility_truth() -> None:
+    bindings = build_runtime_state_bindings(
+        runtime_host=object(),
+        bootstrap=_build_bootstrap(),
+        manager_stack=RuntimeManagerStack(),
+        startup_recovery_summary={"reason": "startup"},
+    )
+
+    assert "agent_checkpoint_repository" not in bindings
+
+
 def test_build_runtime_state_bindings_preserves_executor_runtime_sidecar_truth(
     tmp_path,
 ) -> None:
@@ -1050,7 +1060,6 @@ def test_build_kernel_runtime_threads_state_store_into_capability_service(
         governance_control_repository=object(),
         task_runtime_repository=object(),
         runtime_frame_repository=object(),
-        agent_checkpoint_repository=object(),
     )
     state_query_service = SimpleNamespace()
 
@@ -1108,7 +1117,6 @@ def test_build_kernel_runtime_demotes_actor_runtime_from_default_bootstrap(
         governance_control_repository=object(),
         task_runtime_repository=object(),
         runtime_frame_repository=object(),
-        agent_checkpoint_repository=object(),
     )
 
     runtime_stack = _build_kernel_runtime(
@@ -1166,7 +1174,6 @@ def test_build_kernel_runtime_threads_external_runtime_service_into_capability_s
         governance_control_repository=object(),
         task_runtime_repository=object(),
         runtime_frame_repository=object(),
-        agent_checkpoint_repository=object(),
     )
 
     _build_kernel_runtime(

@@ -96,7 +96,6 @@ from ..state.skill_trial_service import SkillTrialService
 from ..state.external_runtime_service import ExternalCapabilityRuntimeService
 from ..state.work_context_service import WorkContextService
 from ..state.repositories import (
-    SqliteAgentCheckpointRepository,
     SqliteAgentProfileOverrideRepository,
     SqliteAgentReportRepository,
     SqliteAssignmentRepository,

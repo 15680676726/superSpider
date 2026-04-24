@@ -8,7 +8,6 @@ carrier upgrade.
 from __future__ import annotations
 
 from .models import (
-    AgentCheckpointRecord,
     AgentProfileOverrideRecord,
     AgentReportRecord,
     AutomationLoopRuntimeRecord,
@@ -135,7 +134,6 @@ from .store import SQLiteStateStore, STATE_SCHEMA_VERSION
 
 __all__ = [
     "AgentReportService",
-    "AgentCheckpointRecord",
     "AgentProfileOverrideRecord",
     "AssignmentService",
     "AgentReportRecord",

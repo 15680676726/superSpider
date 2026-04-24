@@ -8,7 +8,6 @@ from copaw.kernel.query_execution_confirmation import (
     query_confirmation_request_context,
 )
 from copaw.state.executor_runtime_service import ExecutorRuntimeService
-
 from .query_execution_environment_parts.shared import *  # noqa: F401,F403
 
 
@@ -219,3 +218,90 @@ def test_query_execution_service_formally_consumes_main_brain_runtime_context_in
     assert runtime.metadata["main_brain_runtime"]["knowledge_graph"]["top_relations"] == [
         "Outbound approval depends on finance sign-off",
     ]
+
+
+def test_query_execution_service_restores_main_brain_runtime_context_from_executor_checkpoint_projection_without_checkpoint_repo(
+    tmp_path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    executor_runtime_service = _seed_executor_runtime(
+        state_store,
+        agent_id="ops-agent",
+        thread_id="industry-chat:industry-v1-ops:execution-core",
+    )
+    runtime = next(
+        iter(executor_runtime_service.list_runtimes(role_id="ops-agent")),
+        None,
+    )
+    assert runtime is not None
+    executor_runtime_service.upsert_runtime(
+        runtime.model_copy(
+            update={
+                "metadata": {
+                    **dict(runtime.metadata or {}),
+                    "main_brain_runtime": {
+                        "environment": {
+                            "ref": "desktop:session-1",
+                            "session_id": "session:console:desktop-session-1",
+                        },
+                        "recovery": {
+                            "mode": "resume-environment",
+                            "reason": "session-lease",
+                        },
+                        "knowledge_graph": {
+                            "scope_id": "ctx-approval",
+                        },
+                    },
+                    "last_query_checkpoint_id": "checkpoint-runtime-projection",
+                    "last_query_checkpoint": {
+                        "id": "checkpoint-runtime-projection",
+                        "task_id": "kernel-main-brain-1",
+                        "conversation_thread_id": "industry-chat:industry-v1-ops:execution-core",
+                        "checkpoint_kind": "task-result",
+                        "status": "applied",
+                        "phase": "query-complete",
+                        "summary": "Projection restored",
+                        "resume_payload": {
+                            "main_brain_runtime": {
+                                "environment": {
+                                    "ref": "desktop:session-1",
+                                    "session_id": "session:console:desktop-session-1",
+                                },
+                                "recovery": {
+                                    "mode": "resume-environment",
+                                    "reason": "session-lease",
+                                },
+                                "knowledge_graph": {
+                                    "scope_id": "ctx-approval",
+                                },
+                            },
+                        },
+                        "snapshot_payload": {
+                            "restored": True,
+                        },
+                    },
+                },
+            },
+        )
+    )
+
+    service = KernelQueryExecutionService(
+        session_backend=_FakeSessionBackend(),
+        capability_service=_FakeCapabilityService(),
+        agent_profile_service=_FakeAgentProfileService(),
+        industry_service=_FakeIndustryService(),
+        executor_runtime_service=executor_runtime_service,
+    )
+
+    restored_context = service._resolve_execution_task_context(  # pylint: disable=protected-access
+        agent_id="ops-agent",
+        kernel_task_id="kernel-main-brain-1",
+        conversation_thread_id="industry-chat:industry-v1-ops:execution-core",
+    )
+
+    assert restored_context["resume_checkpoint"]["id"] == "checkpoint-runtime-projection"
+    assert restored_context["resume_payload"]["main_brain_runtime"]["environment"]["ref"] == (
+        "desktop:session-1"
+    )
+    assert restored_context["resume_snapshot"]["restored"] is True
+    assert restored_context["main_brain_runtime"]["recovery"]["reason"] == "session-lease"

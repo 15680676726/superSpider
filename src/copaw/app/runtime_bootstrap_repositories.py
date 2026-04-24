@@ -4,7 +4,6 @@ from __future__ import annotations
 from ..environments import SessionMountRepository
 from ..state import SQLiteStateStore
 from ..state.repositories import (
-    SqliteAgentCheckpointRepository,
     SqliteAgentProfileOverrideRepository,
     SqliteAgentReportRepository,
     SqliteAutomationLoopRuntimeRepository,
@@ -69,7 +68,6 @@ def build_runtime_repositories(state_store: SQLiteStateStore) -> RuntimeReposito
         agent_profile_override_repository=SqliteAgentProfileOverrideRepository(
             state_store,
         ),
-        agent_checkpoint_repository=SqliteAgentCheckpointRepository(state_store),
         industry_instance_repository=SqliteIndustryInstanceRepository(state_store),
         media_analysis_repository=SqliteMediaAnalysisRepository(state_store),
         operating_lane_repository=SqliteOperatingLaneRepository(state_store),

@@ -2,10 +2,7 @@
 """Compatibility re-export surface for Phase 1 state records."""
 from __future__ import annotations
 
-from .models_execution_continuity import (
-    AgentCheckpointRecord,
-    AutomationLoopRuntimeRecord,
-)
+from .models_execution_continuity import AutomationLoopRuntimeRecord
 from .models_buddy import (
     BuddyDomainCapabilityRecord,
     BuddyGrowthProjection,
@@ -164,7 +161,6 @@ from .models_workflows import (
 
 __all__ = [
     "ActorDesiredState",
-    "AgentCheckpointRecord",
     "AgentCheckpointStatus",
     "AgentLeaseStatus",
     "AgentMailboxStatus",

@@ -57,7 +57,6 @@ if TYPE_CHECKING:
     from ..state.strategy_memory_service import StateStrategyMemoryService
     from ..state.work_context_service import WorkContextService
     from ..state.repositories import (
-        SqliteAgentCheckpointRepository,
         SqliteAgentProfileOverrideRepository,
         SqliteAgentReportRepository,
         SqliteAssignmentRepository,
@@ -130,7 +129,6 @@ class RuntimeRepositories:
     governance_control_repository: SqliteGovernanceControlRepository
     capability_override_repository: SqliteCapabilityOverrideRepository
     agent_profile_override_repository: SqliteAgentProfileOverrideRepository
-    agent_checkpoint_repository: SqliteAgentCheckpointRepository
     industry_instance_repository: SqliteIndustryInstanceRepository
     media_analysis_repository: SqliteMediaAnalysisRepository
     operating_lane_repository: SqliteOperatingLaneRepository

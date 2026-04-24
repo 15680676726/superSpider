@@ -11,8 +11,6 @@ from fastapi.testclient import TestClient
 from copaw.evidence import EvidenceRecord
 from copaw.industry.chat_writeback import build_chat_writeback_plan
 from copaw.kernel import (
-    ActorMailboxService,
-    ActorWorker,
     KernelTask,
     KernelTurnExecutor,
     TaskDelegationService,
@@ -23,11 +21,7 @@ from copaw.kernel.main_brain_intake import MainBrainIntakeContract
 from copaw.kernel.main_brain_orchestrator import MainBrainOrchestrator
 from copaw.kernel.persistence import decode_kernel_task_metadata
 from copaw.sop_kernel import FixedSopBindingCreateRequest
-from copaw.state import AgentReportRecord, AgentRuntimeRecord
-from copaw.state.repositories import (
-    SqliteAgentCheckpointRepository,
-    SqliteAgentMailboxRepository,
-)
+from copaw.state import AgentReportRecord
 
 from .industry_api_parts.shared import _build_industry_app
 
@@ -1517,54 +1511,24 @@ def test_runtime_canonical_flow_harness_delegated_child_report_supports_manual_p
         if getattr(profile, "industry_instance_id", None) == instance_id
         and getattr(profile, "industry_role_id", None) == "researcher"
     )
-    app.state.agent_runtime_repository.upsert_runtime(
-        AgentRuntimeRecord(
-            agent_id=teammate.agent_id,
-            actor_key=f"{instance_id}:{teammate.industry_role_id}",
-            actor_fingerprint=f"fp-{teammate.agent_id}",
-            actor_class="industry-dynamic",
-            desired_state="active",
-            runtime_status="idle",
-            industry_instance_id=instance_id,
-            industry_role_id=teammate.industry_role_id,
-            display_name=teammate.name,
-            role_name=teammate.role_name,
-        ),
-    )
-    mailbox_repository = SqliteAgentMailboxRepository(app.state.state_store)
-    checkpoint_repository = SqliteAgentCheckpointRepository(app.state.state_store)
-    mailbox_service = ActorMailboxService(
-        mailbox_repository=mailbox_repository,
-        runtime_repository=app.state.agent_runtime_repository,
-        checkpoint_repository=checkpoint_repository,
-    )
-    worker = ActorWorker(
-        worker_id="test-canonical-flow-worker",
-        mailbox_service=mailbox_service,
-        kernel_dispatcher=app.state.kernel_dispatcher,
-        agent_runtime_repository=app.state.agent_runtime_repository,
-        industry_service=app.state.industry_service,
-    )
-
-    class _DirectSupervisor:
-        async def run_agent_once(self, agent_id: str) -> bool:
-            return await worker.run_once(agent_id)
 
     delegation_service = TaskDelegationService(
         task_repository=app.state.task_repository,
         task_runtime_repository=app.state.task_runtime_repository,
         kernel_dispatcher=app.state.kernel_dispatcher,
         evidence_ledger=app.state.evidence_ledger,
+        agent_profile_service=app.state.agent_profile_service,
         industry_service=app.state.industry_service,
-        actor_mailbox_service=mailbox_service,
-        actor_supervisor=_DirectSupervisor(),
+        environment_service=app.state.environment_service,
+        mcp_manager=getattr(app.state, "mcp_manager", None),
+        runtime_event_bus=getattr(app.state, "runtime_event_bus", None),
     )
     delegation_result = asyncio.run(
         delegation_service.delegate_task(
             parent_task_id,
             title="Research same-thread next move",
             owner_agent_id="copaw-agent-runner",
-            target_agent_id="researcher",
+            target_agent_id=teammate.agent_id,
             prompt_text="Review the same-thread request and return the next governed move.",
             execute=True,
             channel="console",

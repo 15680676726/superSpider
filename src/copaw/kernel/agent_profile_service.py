@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 from .agent_profile import AgentProfile, DEFAULT_AGENTS
+from .executor_runtime_projection import list_runtime_query_checkpoint_projections
 from .persistence import decode_kernel_task_metadata
 from ..evidence import EvidenceLedger, serialize_evidence_record
 from ..industry.models import (
@@ -16,7 +17,6 @@ from ..industry.models import (
 from ..industry.identity import EXECUTION_CORE_AGENT_ID, EXECUTION_CORE_ROLE_ID
 from ..utils.runtime_action_links import build_decision_actions
 from ..state.repositories import (
-    SqliteAgentCheckpointRepository,
     SqliteAgentProfileOverrideRepository,
     SqliteDecisionRequestRepository,
     SqliteIndustryInstanceRepository,
@@ -101,7 +101,6 @@ class AgentProfileService:
         override_repository: SqliteAgentProfileOverrideRepository | None = None,
         task_repository: SqliteTaskRepository | None = None,
         task_runtime_repository: SqliteTaskRuntimeRepository | None = None,
-        agent_checkpoint_repository: SqliteAgentCheckpointRepository | None = None,
         executor_runtime_service: object | None = None,
         decision_request_repository: SqliteDecisionRequestRepository | None = None,
         evidence_ledger: EvidenceLedger | None = None,
@@ -114,7 +113,6 @@ class AgentProfileService:
         self._override_repository = override_repository
         self._task_repository = task_repository
         self._task_runtime_repository = task_runtime_repository
-        self._agent_checkpoint_repository = agent_checkpoint_repository
         self._executor_runtime_service = executor_runtime_service
         self._decision_request_repository = decision_request_repository
         self._evidence_ledger = evidence_ledger
@@ -390,15 +388,14 @@ class AgentProfileService:
             environment_refs=environment_refs,
             current_environment_id=current_environment_id,
         )
-        checkpoints = (
-            self._agent_checkpoint_repository.list_checkpoints(agent_id=agent_id, limit=20)
-            if self._agent_checkpoint_repository is not None
-            else []
-        )
         thread_bindings = []
         runtime_id = _coerce_non_empty_str(getattr(runtime, "runtime_id", None))
         if runtime_id is not None:
             thread_bindings = list(self._list_executor_thread_bindings(runtime_id=runtime_id))
+        checkpoints = list_runtime_query_checkpoint_projections(
+            *[_mapping(getattr(item, "metadata", None)) for item in thread_bindings],
+            _mapping(getattr(runtime, "metadata", None)),
+        )[:20]
         teammates = self._list_teammates(profile)
         latest_collaboration: list[dict[str, object]] = []
         capability_surface = self.get_capability_surface(agent_id)
@@ -408,7 +405,7 @@ class AgentProfileService:
             "runtime": runtime.model_dump(mode="json") if runtime is not None else None,
             "goals": goals,
             "tasks": task_payload,
-            "checkpoints": [item.model_dump(mode="json") for item in checkpoints],
+            "checkpoints": [dict(item) for item in checkpoints],
             "thread_bindings": [_model_dump_or_dict(item) for item in thread_bindings],
             "teammates": teammates,
             "latest_collaboration": latest_collaboration,
@@ -1090,31 +1087,29 @@ class AgentProfileService:
 
     def _apply_runtime_projection(self, profile: AgentProfile) -> AgentProfile:
         executor_runtime = self._get_executor_runtime_for_agent(profile.agent_id)
-        checkpoints = (
-            self._agent_checkpoint_repository.list_checkpoints(
-                agent_id=profile.agent_id,
-                limit=50,
-            )
-            if self._agent_checkpoint_repository is not None
+        runtime_metadata = _mapping(getattr(executor_runtime, "metadata", None))
+        runtime_id = _coerce_non_empty_str(getattr(executor_runtime, "runtime_id", None))
+        thread_bindings = (
+            list(self._list_executor_thread_bindings(runtime_id=runtime_id))
+            if runtime_id is not None
             else []
         )
-        checkpoints.sort(key=lambda item: item.updated_at, reverse=True)
+        checkpoints = list_runtime_query_checkpoint_projections(
+            *[_mapping(getattr(item, "metadata", None)) for item in thread_bindings],
+            runtime_metadata,
+        )
         current_checkpoint = next(
             (
                 item
                 for item in checkpoints
-                if item.id == _coerce_non_empty_str(
-                    _mapping(getattr(executor_runtime, "metadata", None)).get(
-                        "last_query_checkpoint_id",
-                    ),
-                )
+                if _coerce_non_empty_str(item.get("id"))
+                == _coerce_non_empty_str(runtime_metadata.get("last_query_checkpoint_id"))
             ),
             None,
         )
         if current_checkpoint is None and checkpoints:
             current_checkpoint = checkpoints[0]
 
-        runtime_metadata = _mapping(getattr(executor_runtime, "metadata", None))
         continuity = _mapping(runtime_metadata.get("continuity"))
         current_query = _mapping(runtime_metadata.get("current_query"))
         latest_query_summary = _coerce_non_empty_str(
@@ -1125,7 +1120,7 @@ class AgentProfileService:
         )
         active_task_id = (
             _coerce_non_empty_str(current_query.get("task_id"))
-            or _coerce_non_empty_str(getattr(current_checkpoint, "task_id", None))
+            or _coerce_non_empty_str(_mapping(current_checkpoint).get("task_id"))
             or profile.current_task_id
         )
         tasks = (
@@ -1152,16 +1147,8 @@ class AgentProfileService:
             else None
         )
 
-        checkpoint_resume = (
-            dict(current_checkpoint.resume_payload)
-            if current_checkpoint is not None
-            else {}
-        )
-        checkpoint_snapshot = (
-            dict(current_checkpoint.snapshot_payload)
-            if current_checkpoint is not None
-            else {}
-        )
+        checkpoint_resume = _mapping(_mapping(current_checkpoint).get("resume_payload"))
+        checkpoint_snapshot = _mapping(_mapping(current_checkpoint).get("snapshot_payload"))
         explicit_focus_kind = (
             _coerce_non_empty_str(runtime_metadata.get("current_focus_kind"))
             or _coerce_non_empty_str(checkpoint_resume.get("current_focus_kind"))
@@ -1183,7 +1170,7 @@ class AgentProfileService:
 
         current_environment_id = (
             _coerce_non_empty_str(continuity.get("environment_ref"))
-            or _coerce_non_empty_str(getattr(current_checkpoint, "environment_ref", None))
+            or _coerce_non_empty_str(_mapping(current_checkpoint).get("environment_ref"))
             or (
                 task_runtime.active_environment_id
                 if task_runtime is not None and task_runtime.active_environment_id
@@ -1193,11 +1180,14 @@ class AgentProfileService:
         )
         latest_checkpoint_id = (
             _coerce_non_empty_str(runtime_metadata.get("last_query_checkpoint_id"))
-            or (current_checkpoint.id if current_checkpoint is not None else None)
+            or _coerce_non_empty_str(_mapping(current_checkpoint).get("id"))
         )
         result_summary = latest_query_summary
-        if result_summary is None and current_checkpoint is not None and current_checkpoint.status == "applied":
-            result_summary = _coerce_non_empty_str(getattr(current_checkpoint, "summary", None))
+        if (
+            result_summary is None
+            and _coerce_non_empty_str(_mapping(current_checkpoint).get("status")) == "applied"
+        ):
+            result_summary = _coerce_non_empty_str(_mapping(current_checkpoint).get("summary"))
         if result_summary is None:
             result_summary = (
                 (
@@ -1208,16 +1198,20 @@ class AgentProfileService:
                 or profile.today_output_summary
             )
         error_summary = latest_query_error
-        if error_summary is None and current_checkpoint is not None and current_checkpoint.status == "failed":
-            error_summary = _coerce_non_empty_str(getattr(current_checkpoint, "summary", None))
+        if (
+            error_summary is None
+            and _coerce_non_empty_str(_mapping(current_checkpoint).get("status")) == "failed"
+        ):
+            error_summary = _coerce_non_empty_str(_mapping(current_checkpoint).get("summary"))
         if error_summary is None and task_runtime is not None and task_runtime.last_error_summary:
             error_summary = task_runtime.last_error_summary
 
         updated_candidates = [profile.updated_at]
         if executor_runtime is not None:
             updated_candidates.append(executor_runtime.updated_at)
-        if current_checkpoint is not None:
-            updated_candidates.append(current_checkpoint.updated_at)
+        checkpoint_updated_at = _coerce_datetime(_mapping(current_checkpoint).get("updated_at"))
+        if checkpoint_updated_at is not None:
+            updated_candidates.append(checkpoint_updated_at)
         if task_runtime is not None:
             updated_candidates.append(task_runtime.updated_at)
         if task is not None:
@@ -1697,6 +1691,18 @@ def _json_datetime(value: object) -> str | None:
     if isinstance(value, datetime):
         return value.isoformat()
     return None
+
+
+def _coerce_datetime(value: object) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    text = _coerce_non_empty_str(value)
+    if text is None:
+        return None
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
 
 
 def normalize_role(value: object) -> str | None:

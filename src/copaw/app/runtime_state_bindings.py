@@ -56,7 +56,6 @@ def build_runtime_state_bindings(
         "governance_control_repository": repositories.governance_control_repository,
         "capability_override_repository": repositories.capability_override_repository,
         "agent_profile_override_repository": repositories.agent_profile_override_repository,
-        "agent_checkpoint_repository": repositories.agent_checkpoint_repository,
         "industry_instance_repository": repositories.industry_instance_repository,
         "media_analysis_repository": repositories.media_analysis_repository,
         "operating_lane_repository": repositories.operating_lane_repository,

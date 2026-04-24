@@ -9,7 +9,9 @@ import copaw.kernel.query_execution_prompt as query_execution_prompt_module
 from copaw.kernel.query_execution import KernelQueryExecutionService
 from copaw.state import SQLiteStateStore
 from copaw.state.executor_runtime_service import ExecutorRuntimeService
-from copaw.state.repositories import SqliteAgentCheckpointRepository
+from copaw.state.repositories.sqlite_governance_agents import (
+    SqliteAgentCheckpointRepository,
+)
 
 from .query_execution_environment_parts.shared import *  # noqa: F401,F403
 

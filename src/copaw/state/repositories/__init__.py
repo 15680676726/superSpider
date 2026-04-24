@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from .base import (
-    BaseAgentCheckpointRepository,
     BaseAgentReportRepository,
     BaseAssignmentRepository,
     BaseAutomationLoopRuntimeRepository,
@@ -48,7 +47,6 @@ from .base import (
     BaseWorkflowTemplateRepository,
 )
 from .sqlite import (
-    SqliteAgentCheckpointRepository,
     SqliteAgentProfileOverrideRepository,
     SqliteAgentReportRepository,
     SqliteAssignmentRepository,
@@ -97,7 +95,6 @@ from .sqlite import (
 )
 
 __all__ = [
-    "BaseAgentCheckpointRepository",
     "BaseAgentReportRepository",
     "BaseAssignmentRepository",
     "BaseAutomationLoopRuntimeRepository",
@@ -140,7 +137,6 @@ __all__ = [
     "BaseWorkflowPresetRepository",
     "BaseWorkflowRunRepository",
     "BaseWorkflowTemplateRepository",
-    "SqliteAgentCheckpointRepository",
     "SqliteAgentProfileOverrideRepository",
     "SqliteAgentReportRepository",
     "SqliteAssignmentRepository",

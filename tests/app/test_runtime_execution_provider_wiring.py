@@ -31,7 +31,6 @@ def _repositories() -> SimpleNamespace:
         runtime_frame_repository=object(),
         agent_mailbox_repository=object(),
         agent_runtime_repository=object(),
-        agent_checkpoint_repository=object(),
         agent_thread_binding_repository=object(),
     )
 

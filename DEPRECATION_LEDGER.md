@@ -198,7 +198,7 @@
 
 ### 3.1.3 本地多 agent 执行脑：`actor_worker / actor_supervisor / actor_mailbox / models_agents_runtime`
 
-- 当前状态：`frozen`
+- 当前状态：`deleted`
 - 问题：
   - 这套对象和服务正在承载本地多执行位正式真相
   - 与新方向“外部执行体替代本地多 agent 执行层”直接冲突
@@ -302,6 +302,11 @@
   - `2026-04-23` default lifecycle kwargs 补充：
     - `src/copaw/app/_app.py` 与 `src/copaw/app/runtime_lifecycle.py` 已停止在 `run_startup_recovery(...)` 中传递 `actor_mailbox_service=None` 与 `exception_absorption_service=None`
     - default startup / restart path 不再保留这两个 dead kwargs；但 actor mailbox / supervisor compatibility path 与 kernel 文件本体仍在，本条目继续保持 `frozen`
+  - `2026-04-24` 最终退役补充：
+    - `src/copaw/kernel/actor_mailbox.py` / `src/copaw/kernel/actor_worker.py` / `src/copaw/kernel/actor_supervisor.py` / `src/copaw/state/models_agents_runtime.py` 已物理删除
+    - formal query/context/profile read surface 现已统一改读 executor runtime projection；`agent_checkpoint_repository` 也已退出 formal app-state / DI / state export 面
+    - `src/copaw` 下已无 `ActorMailboxService / ActorWorker / ActorSupervisor / AgentRuntimeRecord / AgentThreadBindingRecord / AgentMailboxRecord / AgentLeaseRecord` 生产引用
+    - 因此本地 actor runtime 已完成物理退役；browser / desktop / document local replacement 属于其他条目，不再作为本条目的阻塞项
 
 ### 3.1.4 `src/copaw/kernel/delegation_service.py`
 
@@ -366,6 +371,10 @@
     - default startup / restart 也已停止把 `agent_runtime_repository` 注入 `run_startup_recovery(...)`
     - default `IndustryService` runtime bindings 也已停止注入 `agent_runtime_repository / agent_thread_binding_repository / agent_mailbox_repository / agent_checkpoint_repository / agent_lease_repository`
     - 因此 delegation compatibility 已进一步退出 actor mailbox/runtime truth 的默认正式写链；但 `delegation_service.py` 文件、startup recovery compatibility path、以及 actor kernel 文件本体仍在，本条目状态继续保持 `frozen`
+  - `2026-04-24` cutover completion note：
+    - `tests/app/test_runtime_canonical_flow_e2e.py` 的 delegated-child e2e 现已改走 formal `TaskDelegationService + direct child-run` 路径，不再依赖 actor mailbox / worker
+    - `TaskDelegationService` 当前保留为 executor-first child-run facade，而不是本地 actor/delegation runtime
+    - 因此 external-executor multi-agent cutover 不再以删除 `delegation_service.py` 文件为完成前提；该文件后续是否继续收敛，属于单独简化任务
 
 ### 3.1.5 donor-first 外接项目产品面：`/capability-market/projects/install*`、`project donor` taxonomy、Runtime Center donor 读面
 

@@ -964,6 +964,60 @@
     - 结果：先 RED，再 GREEN
     - 验收层级：`L1`
 
+## 1.0.30 `2026-04-24` external executor multi-agent cutover completion
+
+- 本轮完成的是 `docs/superpowers/plans/2026-04-23-external-executor-multi-agent-cutover-plan.md` 剩余的 `Task 3 / Task 5`，不是重开新范围：
+  - `src/copaw/kernel/executor_runtime_projection.py`
+    - 新增 formal executor-runtime projection helper；query checkpoint / child reportback 现在统一投影到 `ExecutorRuntimeInstance.metadata + ExecutorThreadBinding.metadata`
+  - `src/copaw/kernel/query_execution_runtime.py`
+    - formal delegation-first guard、query checkpoint continuity 与 child reportback 读写已统一改走 executor runtime projection
+    - checkpoint repository 仅保留 compatibility persistence，不再充当 formal read truth
+  - `src/copaw/kernel/query_execution_context_runtime.py`
+    - resume checkpoint / resume payload / resume snapshot 已从 executor runtime projection 回读
+  - `src/copaw/kernel/agent_profile_service.py`
+    - formal agent profile projection 已停止读取 checkpoint repository；current focus / environment / last checkpoint / result summary 统一从 executor runtime truth 投影
+  - `src/copaw/app/runtime_state_bindings.py` / `src/copaw/app/routers/runtime_center_dependencies.py`
+    - 已删除 `agent_checkpoint_repository` formal app-state / DI 暴露
+  - `src/copaw/state/__init__.py` / `src/copaw/state/models.py` / `src/copaw/state/repositories/__init__.py`
+    - 已删除 `AgentCheckpointRecord / BaseAgentCheckpointRepository / SqliteAgentCheckpointRepository` formal export
+  - `src/copaw/app/runtime_bootstrap_models.py` / `src/copaw/app/runtime_bootstrap_repositories.py`
+    - 已删除 dead `agent_checkpoint_repository` bootstrap export
+  - `src/copaw/adapters/executors/codex_stdio_transport.py`
+    - `CODEX_HOME` 默认选择现在会验证 `sessions/` 子目录可写；若用户 `~/.codex` 不可写，会自动回退到 managed/tmp sidecar home
+  - `tests/app/test_runtime_canonical_flow_e2e.py`
+    - delegated child e2e 已改成 formal `TaskDelegationService + direct child-run` 路径，不再依赖已删除的 actor mailbox/worker
+- 当前能诚实写出的结论：
+  - external executor 现在是 formal multi-agent execution semantics 的唯一正式执行后端
+  - 本地 actor runtime 已在 `src/copaw` 物理删除；formal read surface 也已不再读取 actor mailbox/checkpoint runtime truth
+  - `TaskDelegationService` 文件仍在，但它现在是 executor-first child-run facade，不再是本地 actor mailbox/supervisor runtime
+  - browser / desktop / document/file local replacement 仍是后续 follow-up；不属于这份 multi-agent cutover plan 的未完成项
+- fresh 验收证据：
+  - Task 3 focused regression：
+    - 命令：`python -m pytest tests/app/test_runtime_bootstrap_helpers.py tests/app/test_runtime_center_actor_api.py tests/app/test_runtime_chat_thread_binding.py tests/app/test_runtime_conversations_api.py tests/app/test_runtime_execution_provider_wiring.py tests/app/test_runtime_workflow_patch_bootstrap_wiring.py tests/kernel/test_agent_profile_service.py tests/kernel/test_main_brain_runtime_context_consumption.py tests/kernel/test_main_brain_runtime_context_buddy_prompt.py tests/kernel/query_execution_environment_parts/dispatch.py tests/kernel/test_query_execution_runtime.py tests/state/test_models_module_exports.py -q`
+    - 结果：`163 passed in 93.60s`
+    - 验收层级：`L1 + L2`
+  - Task 5 focused regression：
+    - 命令：见 plan `Task 5 / Step 1`
+    - 结果：`412 passed, 1 skipped in 871.01s`
+    - 验收层级：`L1 + L2`
+  - default gate：
+    - 命令：`python scripts/run_p0_runtime_terminal_gate.py`
+    - 结果：后端主链 `363 passed`；长跑/删旧 `84 passed`；前台 `21 passed`；build 通过
+    - 验收层级：`L2`
+  - explicit live smoke：
+    - 命令：`COPAW_RUN_EXTERNAL_EXECUTOR_LIVE_SMOKE=1 python -m pytest tests/app/test_external_executor_live_smoke.py -q -k provider_intake_and_runtime_writeback`
+    - 结果：`1 passed, 4 deselected in 23.84s`
+    - 说明：该条需要网络放通，因为 Codex sidecar 需要访问 OpenAI API
+    - 验收层级：`L3`
+  - explicit e2e：
+    - 命令：`python -m pytest tests/app/test_runtime_canonical_flow_e2e.py tests/app/test_operator_runtime_e2e.py -q`
+    - 结果：`16 passed in 132.10s`
+    - 验收层级：`L3`
+  - selected soak：
+    - 命令：`python -m pytest tests/app/test_phase_next_autonomy_smoke.py tests/app/test_runtime_canonical_flow_e2e.py tests/app/test_operator_runtime_e2e.py -q` 连续 `3` 轮
+    - 结果：`27 passed in 214.75s`、`27 passed in 224.29s`、`27 passed in 223.83s`
+    - 验收层级：`selected L4`
+
 ## 1.1.1 `2026-04-07` Buddy 领域能力阶段收口补充
 
 - Buddy 当前成长阶段的正式真相已从关系经验切到 active `BuddyDomainCapabilityRecord`

@@ -9,8 +9,8 @@ from typing import Any, Sequence, TypeVar
 
 from pydantic import BaseModel
 
+from ..models_execution_continuity import AgentCheckpointRecord
 from ..models import (
-    AgentCheckpointRecord,
     AgentProfileOverrideRecord,
     AgentReportRecord,
     AssignmentRecord,

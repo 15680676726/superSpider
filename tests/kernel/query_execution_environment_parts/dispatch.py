@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-from copaw.state import AgentCheckpointRecord
+from copaw.state.models_execution_continuity import AgentCheckpointRecord
 
 from .shared import *  # noqa: F401,F403
 from tests.shared.executor_runtime_compat import (
@@ -684,7 +684,7 @@ def test_query_execution_service_delegation_first_guard_prefers_agent_payload_ca
     assert capability_service.calls == []
 
 
-def test_query_execution_service_delegation_first_guard_unlocks_after_child_terminal_report(
+def test_query_execution_service_delegation_first_guard_keeps_lock_when_only_checkpoint_repository_reports_child_terminal(
     tmp_path,
 ) -> None:
     state_store = SQLiteStateStore(tmp_path / "delegation-guard.sqlite3")
@@ -748,14 +748,10 @@ def test_query_execution_service_delegation_first_guard_unlocks_after_child_term
     )
 
     assert delegation_guard is not None
-    assert delegation_guard.locked is False
-
-    assert service._build_delegation_policy_lines(
-        delegation_guard=delegation_guard,
-    ) == []
+    assert delegation_guard.locked is True
 
 
-def test_query_execution_service_delegation_first_guard_unlocks_after_waiting_confirm_child_report(
+def test_query_execution_service_delegation_first_guard_keeps_lock_when_only_checkpoint_repository_reports_waiting_confirm(
     tmp_path,
 ) -> None:
     state_store = SQLiteStateStore(tmp_path / "delegation-guard-worker.sqlite3")
@@ -819,10 +815,73 @@ def test_query_execution_service_delegation_first_guard_unlocks_after_waiting_co
     )
 
     assert delegation_guard is not None
+    assert delegation_guard.locked is True
+
+
+def test_query_execution_service_delegation_first_guard_unlocks_from_executor_runtime_projection(
+    tmp_path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "delegation-guard-executor.sqlite3")
+    runtime_repository = SqliteAgentRuntimeRepository(state_store)
+    capability_service = _FakeCapabilityService()
+    agent_profile_service = _FakeAgentProfileService()
+    service = KernelQueryExecutionService(
+        session_backend=_FakeSessionBackend(),
+        capability_service=capability_service,
+        kernel_dispatcher=_FakeKernelDispatcher(),
+        agent_profile_service=agent_profile_service,
+        industry_service=_FakeIndustryService(),
+        executor_runtime_service=runtime_repository.service,
+    )
+    runtime_repository.upsert_runtime(
+        AgentRuntimeRecord(
+            agent_id="ops-agent",
+            actor_key="industry-v1-ops:execution-core",
+            actor_fingerprint="fp-ops-agent",
+            actor_class="industry-dynamic",
+            desired_state="active",
+            runtime_status="ready",
+            industry_instance_id="industry-v1-ops",
+            industry_role_id="execution-core",
+            display_name="Ops Agent",
+            role_name="Operations lead",
+            metadata={
+                "owner_agent_id": "ops-agent",
+                "query_child_reportbacks": [
+                    {
+                        "task_id": "task-child-runtime",
+                        "parent_task_id": "task-parent-runtime",
+                        "phase": "completed",
+                        "report_back_mode": "summary",
+                        "control_thread_id": "industry-chat-1",
+                    }
+                ],
+            },
+        ),
+    )
+    agent_profile = agent_profile_service.get_agent("ops-agent")
+    request = SimpleNamespace(
+        session_id="industry-chat-1",
+        user_id="ops-agent",
+        channel="industry",
+        owner_scope="industry-v1-ops-scope",
+        industry_instance_id="industry-v1-ops",
+        industry_role_id="execution-core",
+        session_kind="industry-agent-chat",
+        entry_source="agent-workbench",
+    )
+
+    delegation_guard = service._resolve_delegation_first_guard(
+        request=request,
+        owner_agent_id="ops-agent",
+        agent_profile=agent_profile,
+        system_capability_ids={"system:dispatch_query"},
+        kernel_task_id="task-parent-runtime",
+        conversation_thread_id=request.session_id,
+    )
+
+    assert delegation_guard is not None
     assert delegation_guard.locked is False
-    assert service._build_delegation_policy_lines(
-        delegation_guard=delegation_guard,
-    ) == []
 
 
 def test_query_execution_service_rejects_unbound_frontdoor_chat(monkeypatch) -> None:

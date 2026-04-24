@@ -43,14 +43,6 @@ def _get_agent_profile_service(request: Request):
         raise HTTPException(503, detail="Agent profile service is not available")
     return service
 
-
-def _get_agent_checkpoint_repository(request: Request):
-    repository = getattr(request.app.state, "agent_checkpoint_repository", None)
-    if repository is None:
-        raise HTTPException(503, detail="Agent checkpoint repository is not available")
-    return repository
-
-
 def _get_knowledge_service(request: Request):
     service = getattr(request.app.state, "knowledge_service", None)
     if service is None or not all(

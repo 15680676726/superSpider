@@ -1024,6 +1024,11 @@
 - `AgentCheckpointRecord.work_context_id`
 - `AgentReportRecord.work_context_id`
 
+- `2026-04-24` supplement:
+  - formal runtime chat / query / profile read surfaces no longer use `AgentCheckpointRecord` as canonical continuity truth
+  - resume/checkpoint continuity now reads from `ExecutorRuntimeInstance.metadata + ExecutorThreadBinding.metadata`
+  - `AgentCheckpointRecord` remains compatibility/private continuity persistence only
+
 ### 迁移原则
 
 - `task-thread` 是当前第一批默认 `WorkContext` 锚点

@@ -15,7 +15,13 @@ from ..industry.models import (
 from ..memory.conversation_compaction_service import ConversationCompactionService
 from ..memory.surface_service import MemorySurfaceService
 from ..memory.knowledge_writeback_service import KnowledgeWritebackService
-from ..state import AgentCheckpointRecord
+from ..state.models_execution_continuity import AgentCheckpointRecord
+from .executor_runtime_projection import (
+    list_runtime_child_reportback_projections,
+    merge_runtime_metadata_with_child_reportback,
+    merge_runtime_metadata_with_query_checkpoint,
+    normalize_query_checkpoint_projection,
+)
 from .main_brain_intake import (
     build_industry_chat_action_kwargs,
     read_attached_main_brain_intake_contract,
@@ -2374,9 +2380,18 @@ class _QueryExecutionRuntimeMixin(
             summary="已开始交互查询轮次",
             execution_context=execution_context,
         )
-        checkpoint_id = getattr(checkpoint, "id", None) if checkpoint is not None else None
+        checkpoint_id = (
+            checkpoint.get("id")
+            if isinstance(checkpoint, dict)
+            else getattr(checkpoint, "id", None)
+            if checkpoint is not None
+            else None
+        )
         if runtime is None or not callable(runtime_updater):
             return
+        refreshed_runtime = self._get_executor_runtime_record(getattr(runtime, "runtime_id", None))
+        if refreshed_runtime is not None:
+            runtime = refreshed_runtime
         degradation = _mapping_value((execution_context or {}).get("degradation"))
         main_brain_runtime = self._merge_main_brain_runtime_contexts(
             dict(runtime.metadata or {}).get("main_brain_runtime"),
@@ -2473,9 +2488,18 @@ class _QueryExecutionRuntimeMixin(
                 "final_summary": final_summary,
             },
         )
-        checkpoint_id = getattr(checkpoint, "id", None) if checkpoint is not None else None
+        checkpoint_id = (
+            checkpoint.get("id")
+            if isinstance(checkpoint, dict)
+            else getattr(checkpoint, "id", None)
+            if checkpoint is not None
+            else None
+        )
         if runtime is None or not callable(runtime_updater):
             return
+        refreshed_runtime = self._get_executor_runtime_record(getattr(runtime, "runtime_id", None))
+        if refreshed_runtime is not None:
+            runtime = refreshed_runtime
         blocking_error = resolved_error if should_block_runtime_error(resolved_error) else None
         degradation = _mapping_value((execution_context or {}).get("degradation"))
         main_brain_runtime_payload = _mapping_value(
@@ -2592,9 +2616,9 @@ class _QueryExecutionRuntimeMixin(
         stream_step_count: int = 0,
         snapshot_payload: dict[str, object] | None = None,
     ) -> Any | None:
+        checkpoint_id = f"executor-checkpoint:{uuid4().hex}"
+        checkpoint_updated_at = _utc_now().isoformat()
         checkpoint_repository = self._agent_checkpoint_repository
-        if checkpoint_repository is None:
-            return None
         mailbox_id = None
         work_context_id = _first_non_empty((execution_context or {}).get("work_context_id"))
         task_segment = _mapping_value((execution_context or {}).get("task_segment"))
@@ -2629,53 +2653,189 @@ class _QueryExecutionRuntimeMixin(
             "conversation_thread_id": conversation_thread_id,
             **dict(snapshot_payload or {}),
         }
-        candidate_checkpoints = checkpoint_repository.list_checkpoints(
-            agent_id=agent_id,
-            mailbox_id=mailbox_id,
-            task_id=task_id,
-            work_context_id=work_context_id,
-            limit=None,
+        stored_checkpoint = None
+        if checkpoint_repository is not None:
+            candidate_checkpoints = checkpoint_repository.list_checkpoints(
+                agent_id=agent_id,
+                mailbox_id=mailbox_id,
+                task_id=task_id,
+                work_context_id=work_context_id,
+                limit=None,
+            )
+            for checkpoint in candidate_checkpoints:
+                if checkpoint.checkpoint_kind != checkpoint_kind:
+                    continue
+                if checkpoint.status != status or checkpoint.phase != phase:
+                    continue
+                if checkpoint.conversation_thread_id != conversation_thread_id:
+                    continue
+                if checkpoint.environment_ref != channel:
+                    continue
+                if dict(checkpoint.snapshot_payload or {}) != normalized_snapshot_payload:
+                    continue
+                if dict(checkpoint.resume_payload or {}) != checkpoint_payload:
+                    continue
+                if checkpoint.summary != summary:
+                    continue
+                stored_checkpoint = checkpoint
+                break
+            if stored_checkpoint is None:
+                stored_checkpoint = checkpoint_repository.upsert_checkpoint(
+                    AgentCheckpointRecord(
+                        agent_id=agent_id,
+                        mailbox_id=mailbox_id,
+                        task_id=task_id,
+                        work_context_id=work_context_id,
+                        checkpoint_kind=(
+                            checkpoint_kind
+                            if checkpoint_kind in {"worker-step", "resume", "handoff", "task-result"}
+                            else "worker-step"
+                        ),
+                        status=(
+                            status if status in {"ready", "applied", "abandoned", "failed"} else "ready"
+                        ),
+                        phase=phase,
+                        cursor=_first_non_empty(
+                            resume_point.get("cursor"),
+                            task_segment.get("segment_id"),
+                            conversation_thread_id,
+                        ),
+                        conversation_thread_id=conversation_thread_id,
+                        environment_ref=channel,
+                        snapshot_payload=normalized_snapshot_payload,
+                        resume_payload=checkpoint_payload,
+                        summary=summary,
+                    )
+                )
+            checkpoint_id = getattr(stored_checkpoint, "id", None) or checkpoint_id
+
+        checkpoint_projection = normalize_query_checkpoint_projection(
+            {
+                "id": checkpoint_id,
+                "agent_id": agent_id,
+                "task_id": task_id,
+                "work_context_id": work_context_id,
+                "checkpoint_kind": checkpoint_kind,
+                "status": status,
+                "phase": phase,
+                "cursor": _first_non_empty(
+                    resume_point.get("cursor"),
+                    task_segment.get("segment_id"),
+                    conversation_thread_id,
+                ),
+                "conversation_thread_id": conversation_thread_id,
+                "environment_ref": channel,
+                "resume_payload": checkpoint_payload,
+                "snapshot_payload": normalized_snapshot_payload,
+                "summary": summary,
+                "updated_at": checkpoint_updated_at,
+            }
         )
-        for checkpoint in candidate_checkpoints:
-            if checkpoint.checkpoint_kind != checkpoint_kind:
-                continue
-            if checkpoint.status != status or checkpoint.phase != phase:
-                continue
-            if checkpoint.conversation_thread_id != conversation_thread_id:
-                continue
-            if checkpoint.environment_ref != channel:
-                continue
-            if dict(checkpoint.snapshot_payload or {}) != normalized_snapshot_payload:
-                continue
-            if dict(checkpoint.resume_payload or {}) != checkpoint_payload:
-                continue
-            if checkpoint.summary != summary:
-                continue
-            return checkpoint
-        checkpoint = AgentCheckpointRecord(
+        self._project_query_checkpoint_to_executor_runtime(
             agent_id=agent_id,
-            mailbox_id=mailbox_id,
             task_id=task_id,
-            work_context_id=work_context_id,
-            checkpoint_kind=(
-                checkpoint_kind
-                if checkpoint_kind in {"worker-step", "resume", "handoff", "task-result"}
-                else "worker-step"
-            ),
-            status=(status if status in {"ready", "applied", "abandoned", "failed"} else "ready"),
-            phase=phase,
-            cursor=_first_non_empty(
-                resume_point.get("cursor"),
-                task_segment.get("segment_id"),
-                conversation_thread_id,
-            ),
             conversation_thread_id=conversation_thread_id,
-            environment_ref=channel,
-            snapshot_payload=normalized_snapshot_payload,
-            resume_payload=checkpoint_payload,
-            summary=summary,
+            checkpoint_projection=checkpoint_projection,
         )
-        return checkpoint_repository.upsert_checkpoint(checkpoint)
+        return stored_checkpoint or checkpoint_projection
+
+    def _project_query_checkpoint_to_executor_runtime(
+        self,
+        *,
+        agent_id: str,
+        task_id: str | None,
+        conversation_thread_id: str | None,
+        checkpoint_projection: dict[str, Any] | None,
+    ) -> None:
+        normalized_projection = normalize_query_checkpoint_projection(checkpoint_projection)
+        if not normalized_projection:
+            return
+        service = self._executor_runtime_service
+        runtime_contract = self._resolve_executor_runtime_contract(
+            owner_agent_id=agent_id,
+            conversation_thread_id=conversation_thread_id,
+            kernel_task_id=task_id,
+        )
+        runtime = runtime_contract.get("runtime")
+        if runtime is None or service is None:
+            return
+        upsert_runtime = getattr(service, "upsert_runtime", None)
+        if not callable(upsert_runtime):
+            return
+        child_reportback = None
+        resume_payload = _mapping_value(normalized_projection.get("resume_payload"))
+        if (
+            _first_non_empty(normalized_projection.get("checkpoint_kind")) == "task-result"
+            and _first_non_empty(resume_payload.get("parent_task_id")) is not None
+            and _first_non_empty(resume_payload.get("report_back_mode")) is not None
+        ):
+            child_reportback = {
+                "task_id": _first_non_empty(
+                    resume_payload.get("task_id"),
+                    normalized_projection.get("task_id"),
+                ),
+                "parent_task_id": _first_non_empty(resume_payload.get("parent_task_id")),
+                "phase": _first_non_empty(
+                    resume_payload.get("phase"),
+                    normalized_projection.get("phase"),
+                ),
+                "report_back_mode": _first_non_empty(
+                    resume_payload.get("report_back_mode"),
+                ),
+                "control_thread_id": _first_non_empty(
+                    resume_payload.get("control_thread_id"),
+                    resume_payload.get("session_id"),
+                    normalized_projection.get("conversation_thread_id"),
+                ),
+                "session_id": _first_non_empty(resume_payload.get("session_id")),
+                "work_context_id": _first_non_empty(
+                    resume_payload.get("work_context_id"),
+                    normalized_projection.get("work_context_id"),
+                ),
+                "status": _first_non_empty(normalized_projection.get("status")),
+                "summary": _first_non_empty(normalized_projection.get("summary")),
+                "updated_at": _first_non_empty(normalized_projection.get("updated_at")),
+            }
+        updated_at = _utc_now()
+        runtime_metadata = merge_runtime_metadata_with_query_checkpoint(
+            getattr(runtime, "metadata", None),
+            normalized_projection,
+        )
+        if child_reportback is not None:
+            runtime_metadata = merge_runtime_metadata_with_child_reportback(
+                runtime_metadata,
+                child_reportback,
+            )
+        refreshed_runtime = upsert_runtime(
+            runtime.model_copy(
+                update={
+                    "metadata": runtime_metadata,
+                    "updated_at": updated_at,
+                },
+            )
+        )
+        binding = runtime_contract.get("binding")
+        upsert_thread_binding = getattr(service, "upsert_thread_binding", None)
+        if binding is None or not callable(upsert_thread_binding):
+            return
+        binding_metadata = merge_runtime_metadata_with_query_checkpoint(
+            getattr(binding, "metadata", None),
+            normalized_projection,
+        )
+        if child_reportback is not None:
+            binding_metadata = merge_runtime_metadata_with_child_reportback(
+                binding_metadata,
+                child_reportback,
+            )
+        upsert_thread_binding(
+            binding.model_copy(
+                update={
+                    "runtime_id": getattr(refreshed_runtime, "runtime_id", binding.runtime_id),
+                    "metadata": binding_metadata,
+                    "updated_at": updated_at,
+                },
+            )
+        )
 
     def _resolve_query_agent_profile(
         self,
@@ -3030,6 +3190,7 @@ class _QueryExecutionRuntimeMixin(
             teammates=teammates,
         )
         if self._has_terminal_child_reportback_checkpoint(
+            owner_agent_id=owner_agent_id,
             parent_task_id=kernel_task_id,
             conversation_thread_id=conversation_thread_id,
         ):
@@ -3039,36 +3200,39 @@ class _QueryExecutionRuntimeMixin(
     def _has_terminal_child_reportback_checkpoint(
         self,
         *,
+        owner_agent_id: str | None,
         parent_task_id: str | None,
         conversation_thread_id: str | None,
     ) -> bool:
-        checkpoint_repository = self._agent_checkpoint_repository
-        if checkpoint_repository is None:
-            return False
         resolved_parent_task_id = _first_non_empty(parent_task_id)
         if resolved_parent_task_id is None:
             return False
-        checkpoints = checkpoint_repository.list_checkpoints(limit=50)
+        executor_contract = self._resolve_executor_runtime_contract(
+            owner_agent_id=owner_agent_id,
+            conversation_thread_id=conversation_thread_id,
+            kernel_task_id=resolved_parent_task_id,
+        )
+        checkpoints = list_runtime_child_reportback_projections(
+            getattr(executor_contract.get("binding"), "metadata", None),
+            getattr(executor_contract.get("runtime"), "metadata", None),
+        )
         for checkpoint in checkpoints:
-            if _first_non_empty(getattr(checkpoint, "checkpoint_kind", None)) != "task-result":
-                continue
-            if _first_non_empty(getattr(checkpoint, "phase", None)) not in {
+            if _first_non_empty(checkpoint.get("phase")) not in {
                 "completed",
                 "failed",
                 "cancelled",
                 "waiting-confirm",
             }:
                 continue
-            resume_payload = _mapping_value(getattr(checkpoint, "resume_payload", None))
-            if _first_non_empty(resume_payload.get("parent_task_id")) != resolved_parent_task_id:
+            if _first_non_empty(checkpoint.get("parent_task_id")) != resolved_parent_task_id:
                 continue
             if conversation_thread_id is not None:
                 if _first_non_empty(
-                    resume_payload.get("control_thread_id"),
-                    resume_payload.get("session_id"),
+                    checkpoint.get("control_thread_id"),
+                    checkpoint.get("session_id"),
                 ) != _first_non_empty(conversation_thread_id):
                     continue
-            if _first_non_empty(resume_payload.get("report_back_mode")) is None:
+            if _first_non_empty(checkpoint.get("report_back_mode")) is None:
                 continue
             return True
         return False

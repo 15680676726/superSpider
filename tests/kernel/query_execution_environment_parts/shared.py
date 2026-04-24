@@ -24,12 +24,14 @@ from copaw.kernel.persistence import KernelTaskStore, decode_kernel_task_metadat
 from copaw.kernel.query_execution import KernelQueryExecutionService
 from copaw.state import SQLiteStateStore
 from copaw.state.repositories import (
-    SqliteAgentCheckpointRepository,
     SqliteDecisionRequestRepository,
     SqliteGovernanceControlRepository,
     SqliteRuntimeFrameRepository,
     SqliteTaskRepository,
     SqliteTaskRuntimeRepository,
+)
+from copaw.state.repositories.sqlite_governance_agents import (
+    SqliteAgentCheckpointRepository,
 )
 
 

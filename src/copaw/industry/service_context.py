@@ -67,7 +67,6 @@ from ..state.main_brain_service import (
 )
 from ..state.strategy_memory_service import compact_strategy_payload
 from ..state.repositories import (
-    SqliteAgentCheckpointRepository,
     SqliteAgentProfileOverrideRepository,
     SqliteAgentReportRepository,
     SqliteAssignmentRepository,
@@ -85,6 +84,7 @@ from ..state.repositories import (
     SqliteStrategyMemoryRepository,
     SqliteWorkflowRunRepository,
 )
+from ..state.repositories.sqlite_governance_agents import SqliteAgentCheckpointRepository
 from .compiler import (
     canonicalize_industry_draft,
     build_goal_dispatch_context,

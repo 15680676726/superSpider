@@ -30,6 +30,9 @@
 - formal external-executor launches now resolve `model_ref` from the system runtime-provider contract
 - executor-provider intake may still receive `model_policy_id / default_model_ref` as compatibility input, but those fields no longer drive live sidecar model selection
 - `RoleExecutorBinding.model_policy_id` remains compatibility state only unless a future formal system-owned policy bridge explicitly reintroduces it
+- formal multi-agent query continuity now reads and writes through `ExecutorRuntimeInstance.metadata + ExecutorThreadBinding.metadata`
+- `AgentCheckpointRecord` remains a compatibility/private continuity projection, not a formal read-surface truth for runtime chat/query/profile
+- managed `Codex` stdio launch must verify `CODEX_HOME/sessions` is writable and fall back to managed/tmp sidecar home when the user home is not writable
 
 `2026-03-26` supplement:
 - `docs/superpowers/specs/2026-03-26-agent-body-grid-computer-runtime.md` is an execution-side supplement only
@@ -38,6 +41,7 @@
 - `BodySession` maps to `SessionMount`
 - `BodyLease` maps to `SessionMount` lease metadata and resource-slot lease records
 - `BodyCheckpoint` maps to `AgentCheckpointRecord + RuntimeFrame`
+- formal executor-driven resume/checkpoint continuity now projects through `ExecutorRuntimeInstance / ExecutorThreadBinding`; `BodyCheckpoint` should be treated as compatibility/private working state only
 - external `n8n / Workflow Hub` is retired from the target architecture
 - future fixed SOP orchestration must stay inside CoPaw as a minimal internal kernel
 - `FixedSopTemplate / FixedSopBinding / FixedSopRun` should remain workflow-layer objects inside unified `state`, not become an external second truth source

@@ -11,6 +11,7 @@ import threading
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from ...__version__ import __version__
 from .codex_app_server_transport import (
@@ -185,12 +186,22 @@ class CodexStdioTransport:
         candidate_roots.append(executable_path.parent / ".codex-home")
         candidate_roots.append(Path(tempfile.gettempdir()) / "copaw" / "codex-home")
         for candidate_root in candidate_roots:
-            try:
-                candidate_root.mkdir(parents=True, exist_ok=True)
+            if self._codex_home_is_writable(candidate_root):
                 return candidate_root
-            except OSError:
-                continue
         raise RuntimeError("Failed to provision a writable CODEX_HOME for Codex stdio launch.")
+
+    @staticmethod
+    def _codex_home_is_writable(candidate_root: Path) -> bool:
+        try:
+            candidate_root.mkdir(parents=True, exist_ok=True)
+            sessions_root = candidate_root / "sessions"
+            sessions_root.mkdir(parents=True, exist_ok=True)
+            probe_path = sessions_root / f".copaw-write-probe-{uuid4().hex}"
+            probe_path.write_text("", encoding="utf-8")
+            probe_path.unlink(missing_ok=True)
+            return True
+        except OSError:
+            return False
 
     def _initialize_session(self) -> None:
         response = self._send_request(

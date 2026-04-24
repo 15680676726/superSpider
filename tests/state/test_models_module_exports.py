@@ -96,3 +96,14 @@ def test_retired_actor_runtime_models_and_repositories_leave_formal_exports() ->
     assert not hasattr(repositories_module, "SqliteAgentMailboxRepository")
     assert not hasattr(repositories_module, "SqliteAgentLeaseRepository")
     assert not hasattr(repositories_module, "SqliteAgentThreadBindingRepository")
+
+
+def test_checkpoint_compatibility_records_and_repositories_leave_formal_exports() -> None:
+    import copaw.state as state_module
+    import copaw.state.models as models_module
+    import copaw.state.repositories as repositories_module
+
+    assert not hasattr(state_module, "AgentCheckpointRecord")
+    assert not hasattr(models_module, "AgentCheckpointRecord")
+    assert not hasattr(repositories_module, "BaseAgentCheckpointRepository")
+    assert not hasattr(repositories_module, "SqliteAgentCheckpointRepository")

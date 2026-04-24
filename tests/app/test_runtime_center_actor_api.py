@@ -20,7 +20,6 @@ from copaw.state import (
     SQLiteStateStore,
 )
 from copaw.state.repositories import (
-    SqliteAgentCheckpointRepository,
     SqliteDecisionRequestRepository,
     SqliteAgentProfileOverrideRepository,
     SqliteRuntimeFrameRepository,
@@ -32,6 +31,7 @@ from copaw.state.repositories import (
 def test_runtime_center_dependencies_drop_legacy_actor_service_getters() -> None:
     assert not hasattr(runtime_center_dependencies_module, "_get_actor_mailbox_service")
     assert not hasattr(runtime_center_dependencies_module, "_get_actor_supervisor")
+    assert not hasattr(runtime_center_dependencies_module, "_get_agent_checkpoint_repository")
 
 
 def test_runtime_center_agent_capability_helpers_drop_require_actor_flag() -> None:
@@ -56,7 +56,6 @@ def test_runtime_center_actor_fixture_drops_legacy_actor_state(tmp_path) -> None
 
 def _build_actor_app(tmp_path):
     state_store = SQLiteStateStore(tmp_path / "actor-state.db")
-    checkpoint_repository = SqliteAgentCheckpointRepository(state_store)
     override_repository = SqliteAgentProfileOverrideRepository(state_store)
     task_repository = SqliteTaskRepository(state_store)
     task_runtime_repository = SqliteTaskRuntimeRepository(state_store)
@@ -110,7 +109,6 @@ def _build_actor_app(tmp_path):
         override_repository=override_repository,
         task_repository=task_repository,
         task_runtime_repository=task_runtime_repository,
-        agent_checkpoint_repository=checkpoint_repository,
         executor_runtime_service=executor_runtime_service,
         decision_request_repository=decision_request_repository,
         capability_service=capability_service,
@@ -131,7 +129,6 @@ def _build_actor_app(tmp_path):
 
     app = FastAPI()
     app.include_router(runtime_center_router)
-    app.state.agent_checkpoint_repository = checkpoint_repository
     app.state.executor_runtime_service = executor_runtime_service
     app.state.agent_profile_override_repository = override_repository
     app.state.task_repository = task_repository

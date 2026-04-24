@@ -4,6 +4,10 @@
 
 **Goal:** Make external executor runtime the only formal execution backend for multi-agent work, then physically retire the local actor/delegation runtime.
 
+`2026-04-24` final status:
+- Task 1-5 are now complete.
+- Historical checkbox steps below are retained as execution log; the authoritative completion evidence is the `2026-04-24` completion note at the end of this plan plus `TASK_STATUS.md` `1.0.30`.
+
 **Architecture:** First extend the formal `ExecutorRuntime` seam so it can carry the multi-agent semantics that still live in the local actor stack: child-run dispatch, continuity, checkpoint/resume, and recovery. Then cut production writers off the actor mailbox/supervisor path, including the industry-owned runtime truth that still persists `AgentRuntimeRecord` and `AgentThreadBindingRecord`. After that, migrate formal read surfaces and bootstrap exports away from actor runtime truth, and only then delete actor kernel/state files plus the remaining state/repository/env glue that still imports those records.
 
 **Tech Stack:** Python, FastAPI, Pydantic, SQLite repositories, pytest
@@ -588,3 +592,34 @@ git rev-list --left-right --count origin/main...main
 Expected:
 - clean worktree
 - `0 0`
+
+`2026-04-24` completion note:
+- Task 3 is complete:
+  - `runtime_state_bindings.py` no longer publishes `agent_checkpoint_repository`
+  - `runtime_center_dependencies.py` no longer exposes `_get_agent_checkpoint_repository(...)`
+  - `agent_profile_service.py`, `query_execution_context_runtime.py`, and `query_execution_runtime.py` now use executor runtime/thread metadata projections as the formal continuity/read surface
+  - `state/__init__.py` / `state/models.py` / `state/repositories/__init__.py` no longer export checkpoint compatibility truth as formal surface
+  - `runtime_bootstrap_models.py` / `runtime_bootstrap_repositories.py` also dropped the dead `agent_checkpoint_repository` bootstrap export
+  - focused regression:
+    - `python -m pytest tests/app/test_runtime_bootstrap_helpers.py tests/app/test_runtime_center_actor_api.py tests/app/test_runtime_chat_thread_binding.py tests/app/test_runtime_conversations_api.py tests/app/test_runtime_execution_provider_wiring.py tests/app/test_runtime_workflow_patch_bootstrap_wiring.py tests/kernel/test_agent_profile_service.py tests/kernel/test_main_brain_runtime_context_consumption.py tests/kernel/test_main_brain_runtime_context_buddy_prompt.py tests/kernel/query_execution_environment_parts/dispatch.py tests/kernel/test_query_execution_runtime.py tests/state/test_models_module_exports.py -q`
+    - `163 passed in 93.60s`
+- Task 5 is complete:
+  - focused executor + retirement regression:
+    - `python -m pytest tests/kernel/test_main_brain_executor_runtime_integration.py tests/app/test_external_executor_live_smoke.py tests/app/test_runtime_center_task_delegation_api.py tests/app/test_startup_recovery.py tests/app/test_runtime_lifecycle.py tests/app/test_industry_service_wiring.py tests/app/industry_api_parts/bootstrap_lifecycle.py tests/app/industry_api_parts/runtime_updates.py tests/app/test_runtime_center_actor_api.py tests/app/test_runtime_chat_thread_binding.py tests/app/test_runtime_conversations_api.py tests/app/test_runtime_bootstrap_helpers.py tests/app/test_runtime_bootstrap_split.py tests/app/test_runtime_execution_provider_wiring.py tests/app/test_runtime_workflow_patch_bootstrap_wiring.py tests/industry/test_runtime_views_split.py tests/kernel/test_agent_profile_service.py tests/kernel/test_main_brain_runtime_context_consumption.py tests/kernel/test_main_brain_runtime_context_buddy_prompt.py tests/kernel/test_query_execution_runtime.py tests/kernel/query_execution_environment_parts/lifecycle.py tests/kernel/query_execution_environment_parts/dispatch.py tests/kernel/test_query_usage_accounting.py tests/state/test_models_module_exports.py tests/state/test_sqlite_repositories.py -q`
+    - `412 passed, 1 skipped in 871.01s`
+  - default gate:
+    - `python scripts/run_p0_runtime_terminal_gate.py`
+    - backend mainline `363 passed`
+    - long-run / deletion `84 passed`
+    - frontend targeted regression `21 passed`
+    - frontend build PASS
+  - explicit live smoke:
+    - `COPAW_RUN_EXTERNAL_EXECUTOR_LIVE_SMOKE=1 python -m pytest tests/app/test_external_executor_live_smoke.py -q -k provider_intake_and_runtime_writeback`
+    - `1 passed, 4 deselected in 23.84s`
+    - note: this run required network-enabled execution because Codex must reach the OpenAI API
+  - explicit e2e:
+    - `python -m pytest tests/app/test_runtime_canonical_flow_e2e.py tests/app/test_operator_runtime_e2e.py -q`
+    - `16 passed in 132.10s`
+  - selected soak:
+    - `python -m pytest tests/app/test_phase_next_autonomy_smoke.py tests/app/test_runtime_canonical_flow_e2e.py tests/app/test_operator_runtime_e2e.py -q`
+    - consecutive results: `27 passed in 214.75s`, `27 passed in 224.29s`, `27 passed in 223.83s`

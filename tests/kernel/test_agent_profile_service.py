@@ -6,18 +6,20 @@ from copaw.evidence import ArtifactRecord, EvidenceLedger, EvidenceRecord, Repla
 from copaw.kernel.agent_profile_service import AgentProfileService
 from copaw.kernel import KernelTask, KernelTaskStore
 from copaw.state import (
-    AgentCheckpointRecord,
     DecisionRequestRecord,
     AgentProfileOverrideRecord,
     TaskRecord,
     SQLiteStateStore,
 )
 from copaw.state.repositories import (
-    SqliteAgentCheckpointRepository,
     SqliteAgentProfileOverrideRepository,
     SqliteDecisionRequestRepository,
     SqliteTaskRepository,
     SqliteTaskRuntimeRepository,
+)
+from copaw.state.models_execution_continuity import AgentCheckpointRecord
+from copaw.state.repositories.sqlite_governance_agents import (
+    SqliteAgentCheckpointRepository,
 )
 from tests.shared.executor_runtime_compat import (
     AgentRuntimeRecord,
@@ -618,7 +620,6 @@ def test_agent_profile_service_prefers_runtime_and_checkpoint_projection(tmp_pat
         task_repository=task_repo,
         task_runtime_repository=task_runtime_repo,
         executor_runtime_service=runtime_repo.service,
-        agent_checkpoint_repository=checkpoint_repo,
     )
     profile = service.get_agent("agent-1")
 
@@ -678,7 +679,6 @@ def test_agent_profile_service_ignores_runtime_legacy_goal_focus_and_keeps_check
 
     service = AgentProfileService(
         executor_runtime_service=runtime_repo.service,
-        agent_checkpoint_repository=checkpoint_repo,
     )
     profile = service.get_agent("agent-1")
 
@@ -722,7 +722,6 @@ def test_agent_profile_service_does_not_overlay_current_focus_with_legacy_goal_m
 
     service = AgentProfileService(
         override_repository=override_repo,
-        agent_checkpoint_repository=checkpoint_repo,
     )
     profile = service.get_agent("agent-1")
 
@@ -732,7 +731,7 @@ def test_agent_profile_service_does_not_overlay_current_focus_with_legacy_goal_m
     assert profile.current_focus == "Stale assignment"
 
 
-def test_agent_profile_service_uses_checkpoint_current_focus_when_runtime_focus_missing(
+def test_agent_profile_service_ignores_checkpoint_compat_when_runtime_focus_missing(
     tmp_path,
 ) -> None:
     store = SQLiteStateStore(tmp_path / "state.db")
@@ -772,17 +771,16 @@ def test_agent_profile_service_uses_checkpoint_current_focus_when_runtime_focus_
 
     service = AgentProfileService(
         executor_runtime_service=runtime_repo.service,
-        agent_checkpoint_repository=checkpoint_repo,
     )
     profile = service.get_agent("agent-1")
 
     assert profile is not None
-    assert profile.current_focus_kind == "assignment"
-    assert profile.current_focus_id == "assignment-checkpoint"
-    assert profile.current_focus == "Checkpoint projected assignment"
+    assert profile.current_focus_kind is None
+    assert profile.current_focus_id is None
+    assert profile.current_focus == ""
 
 
-def test_agent_profile_service_uses_checkpoint_current_focus_when_runtime_missing(
+def test_agent_profile_service_ignores_checkpoint_compat_when_runtime_missing(
     tmp_path,
 ) -> None:
     store = SQLiteStateStore(tmp_path / "state.db")
@@ -813,14 +811,69 @@ def test_agent_profile_service_uses_checkpoint_current_focus_when_runtime_missin
 
     service = AgentProfileService(
         override_repository=override_repo,
-        agent_checkpoint_repository=checkpoint_repo,
+    )
+    profile = service.get_agent("agent-1")
+
+    assert profile is not None
+    assert profile.current_focus_kind is None
+    assert profile.current_focus_id is None
+    assert profile.current_focus == ""
+
+
+def test_agent_profile_service_prefers_executor_runtime_checkpoint_projection_without_checkpoint_repo(
+    tmp_path,
+) -> None:
+    store = SQLiteStateStore(tmp_path / "state.db")
+    runtime_repo = SqliteAgentRuntimeRepository(store)
+
+    runtime_repo.upsert_runtime(
+        AgentRuntimeRecord(
+            agent_id="agent-1",
+            actor_key="industry-v1-ops:operator",
+            actor_fingerprint="fp-agent-1",
+            actor_class="industry-dynamic",
+            desired_state="active",
+            runtime_status="running",
+            industry_instance_id="industry-v1-ops",
+            industry_role_id="operator",
+            display_name="Ops Agent",
+            role_name="Operations",
+            metadata={
+                "current_query": {"task_id": "task-runtime"},
+                "continuity": {"environment_ref": "session:industry:ops"},
+                "last_query_summary": "Runtime result",
+                "last_query_checkpoint_id": "checkpoint-runtime-projection",
+                "last_query_checkpoint": {
+                    "id": "checkpoint-runtime-projection",
+                    "task_id": "task-runtime",
+                    "checkpoint_kind": "worker-step",
+                    "status": "ready",
+                    "phase": "query-streaming",
+                    "environment_ref": "session:industry:ops",
+                    "summary": "Checkpoint summary",
+                    "resume_payload": {
+                        "current_focus_kind": "assignment",
+                        "current_focus_id": "assignment-runtime-projection",
+                        "current_focus": "Runtime projected assignment",
+                    },
+                },
+            },
+        ),
+    )
+
+    service = AgentProfileService(
+        executor_runtime_service=runtime_repo.service,
     )
     profile = service.get_agent("agent-1")
 
     assert profile is not None
     assert profile.current_focus_kind == "assignment"
-    assert profile.current_focus_id == "assignment-checkpoint"
-    assert profile.current_focus == "Checkpoint projected assignment"
+    assert profile.current_focus_id == "assignment-runtime-projection"
+    assert profile.current_focus == "Runtime projected assignment"
+    assert profile.current_task_id == "task-runtime"
+    assert profile.current_environment_id == "session:industry:ops"
+    assert profile.today_output_summary == "Runtime result"
+    assert profile.last_checkpoint_id == "checkpoint-runtime-projection"
 
 
 def test_agent_profile_service_ignores_legacy_focus_alias_fields_without_current_focus_contract(
