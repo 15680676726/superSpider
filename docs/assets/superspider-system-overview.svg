@@ -1,0 +1,118 @@
+<svg width="1280" height="820" viewBox="0 0 1280 820" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="120" y1="40" x2="1120" y2="780" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF8EC"/>
+      <stop offset="1" stop-color="#EEF6FF"/>
+    </linearGradient>
+    <linearGradient id="main" x1="420" y1="180" x2="860" y2="420" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1E6F5C"/>
+      <stop offset="1" stop-color="#0F4C5C"/>
+    </linearGradient>
+    <linearGradient id="memory" x1="110" y1="210" x2="380" y2="390" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F7D08A"/>
+      <stop offset="1" stop-color="#E8A87C"/>
+    </linearGradient>
+    <linearGradient id="knowledge" x1="110" y1="430" x2="380" y2="610" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#B8E1DD"/>
+      <stop offset="1" stop-color="#6DB1BF"/>
+    </linearGradient>
+    <linearGradient id="executor" x1="900" y1="220" x2="1170" y2="430" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7A5CFA"/>
+      <stop offset="1" stop-color="#355CFF"/>
+    </linearGradient>
+    <linearGradient id="runtime" x1="900" y1="470" x2="1170" y2="690" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFD166"/>
+      <stop offset="1" stop-color="#F4A261"/>
+    </linearGradient>
+    <linearGradient id="evidence" x1="420" y1="500" x2="860" y2="720" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#EF476F"/>
+      <stop offset="1" stop-color="#BC2C58"/>
+    </linearGradient>
+    <filter id="shadow" x="0" y="0" width="1280" height="820" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="12" stdDeviation="18" flood-opacity="0.12"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 12 12" refX="9" refY="6" markerWidth="12" markerHeight="12" orient="auto-start-reverse">
+      <path d="M1 1L10 6L1 11V1Z" fill="#23404A"/>
+    </marker>
+  </defs>
+
+  <rect x="20" y="20" width="1240" height="780" rx="32" fill="url(#bg)"/>
+
+  <g filter="url(#shadow)">
+    <rect x="80" y="56" width="230" height="96" rx="24" fill="#FFFFFF"/>
+    <text x="112" y="96" fill="#23404A" font-family="Segoe UI, Arial, sans-serif" font-size="20" font-weight="700">Operator Goals</text>
+    <text x="112" y="124" fill="#45606A" font-family="Segoe UI, Arial, sans-serif" font-size="16">intent</text>
+    <text x="182" y="124" fill="#45606A" font-family="Segoe UI, Arial, sans-serif" font-size="16">-&gt;</text>
+    <text x="202" y="124" fill="#45606A" font-family="Segoe UI, Arial, sans-serif" font-size="16">strategy</text>
+    <text x="112" y="146" fill="#45606A" font-family="Segoe UI, Arial, sans-serif" font-size="16">lane</text>
+    <text x="158" y="146" fill="#45606A" font-family="Segoe UI, Arial, sans-serif" font-size="16">-&gt;</text>
+    <text x="178" y="146" fill="#45606A" font-family="Segoe UI, Arial, sans-serif" font-size="16">backlog</text>
+    <text x="248" y="146" fill="#45606A" font-family="Segoe UI, Arial, sans-serif" font-size="16">-&gt;</text>
+    <text x="268" y="146" fill="#45606A" font-family="Segoe UI, Arial, sans-serif" font-size="16">assignment</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="400" y="160" width="480" height="270" rx="36" fill="url(#main)"/>
+    <text x="460" y="218" fill="#FFFFFF" font-family="Segoe UI, Arial, sans-serif" font-size="36" font-weight="800">Main Brain</text>
+    <text x="460" y="256" fill="#D8F2F0" font-family="Segoe UI, Arial, sans-serif" font-size="18">formal orchestration and control plane</text>
+    <text x="460" y="308" fill="#FFFFFF" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700">What it owns</text>
+    <text x="460" y="344" fill="#EAF8F7" font-family="Segoe UI, Arial, sans-serif" font-size="18">- goal judgment, planning, delegation, supervision</text>
+    <text x="460" y="374" fill="#EAF8F7" font-family="Segoe UI, Arial, sans-serif" font-size="18">- runtime coordination, recovery, governance</text>
+    <text x="460" y="404" fill="#EAF8F7" font-family="Segoe UI, Arial, sans-serif" font-size="18">- one truth chain across execution, evidence, and operator state</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="90" y="200" width="260" height="170" rx="28" fill="url(#memory)"/>
+    <text x="122" y="246" fill="#2B2B2B" font-family="Segoe UI, Arial, sans-serif" font-size="28" font-weight="800">Memory System</text>
+    <text x="122" y="286" fill="#3E4147" font-family="Segoe UI, Arial, sans-serif" font-size="18">StrategyMemory</text>
+    <text x="122" y="314" fill="#3E4147" font-family="Segoe UI, Arial, sans-serif" font-size="18">continuity metadata</text>
+    <text x="122" y="342" fill="#3E4147" font-family="Segoe UI, Arial, sans-serif" font-size="18">long-running local recall</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="90" y="420" width="260" height="190" rx="28" fill="url(#knowledge)"/>
+    <text x="122" y="466" fill="#103642" font-family="Segoe UI, Arial, sans-serif" font-size="28" font-weight="800">Knowledge System</text>
+    <text x="122" y="506" fill="#1C4E5A" font-family="Segoe UI, Arial, sans-serif" font-size="18">KnowledgeChunk</text>
+    <text x="122" y="534" fill="#1C4E5A" font-family="Segoe UI, Arial, sans-serif" font-size="18">KnowledgeGraph</text>
+    <text x="122" y="562" fill="#1C4E5A" font-family="Segoe UI, Arial, sans-serif" font-size="18">TaskSubgraph</text>
+    <text x="122" y="590" fill="#1C4E5A" font-family="Segoe UI, Arial, sans-serif" font-size="18">constraints, blockers, recovery paths</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="930" y="210" width="260" height="200" rx="28" fill="url(#executor)"/>
+    <text x="962" y="256" fill="#FFFFFF" font-family="Segoe UI, Arial, sans-serif" font-size="28" font-weight="800">External Executors</text>
+    <text x="962" y="298" fill="#EEF0FF" font-family="Segoe UI, Arial, sans-serif" font-size="18">Codex today</text>
+    <text x="962" y="326" fill="#EEF0FF" font-family="Segoe UI, Arial, sans-serif" font-size="18">Hermes-class next</text>
+    <text x="962" y="354" fill="#EEF0FF" font-family="Segoe UI, Arial, sans-serif" font-size="18">managed execution turns</text>
+    <text x="962" y="382" fill="#EEF0FF" font-family="Segoe UI, Arial, sans-serif" font-size="18">not a second brain</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="930" y="460" width="260" height="200" rx="28" fill="url(#runtime)"/>
+    <text x="962" y="506" fill="#4B2B16" font-family="Segoe UI, Arial, sans-serif" font-size="28" font-weight="800">Runtime Center</text>
+    <text x="962" y="548" fill="#5E3A1D" font-family="Segoe UI, Arial, sans-serif" font-size="18">visible runtime truth</text>
+    <text x="962" y="576" fill="#5E3A1D" font-family="Segoe UI, Arial, sans-serif" font-size="18">operator control</text>
+    <text x="962" y="604" fill="#5E3A1D" font-family="Segoe UI, Arial, sans-serif" font-size="18">governance and recovery</text>
+    <text x="962" y="632" fill="#5E3A1D" font-family="Segoe UI, Arial, sans-serif" font-size="18">memory and knowledge surfaces</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="400" y="500" width="480" height="210" rx="32" fill="url(#evidence)"/>
+    <text x="460" y="550" fill="#FFFFFF" font-family="Segoe UI, Arial, sans-serif" font-size="30" font-weight="800">Evidence and Replay</text>
+    <text x="460" y="590" fill="#FFE8EE" font-family="Segoe UI, Arial, sans-serif" font-size="18">runtime events -&gt; evidence -&gt; artifacts -&gt; replay pointers</text>
+    <text x="460" y="620" fill="#FFE8EE" font-family="Segoe UI, Arial, sans-serif" font-size="18">structured writeback into the same local truth chain</text>
+    <text x="460" y="650" fill="#FFE8EE" font-family="Segoe UI, Arial, sans-serif" font-size="18">traceable execution, visible failure, recoverable state</text>
+  </g>
+
+  <path d="M311 104H392" stroke="#23404A" stroke-width="4" stroke-linecap="round" marker-end="url(#arrow)"/>
+  <path d="M350 285H388" stroke="#23404A" stroke-width="4" stroke-linecap="round" marker-end="url(#arrow)"/>
+  <path d="M350 515H388" stroke="#23404A" stroke-width="4" stroke-linecap="round" marker-end="url(#arrow)"/>
+  <path d="M882 295H922" stroke="#23404A" stroke-width="4" stroke-linecap="round" marker-end="url(#arrow)"/>
+  <path d="M1060 414V448" stroke="#23404A" stroke-width="4" stroke-linecap="round" marker-end="url(#arrow)"/>
+  <path d="M880 605H922" stroke="#23404A" stroke-width="4" stroke-linecap="round" marker-end="url(#arrow)"/>
+  <path d="M640 432V488" stroke="#23404A" stroke-width="4" stroke-linecap="round" marker-end="url(#arrow)"/>
+
+  <text x="433" y="114" fill="#49646C" font-family="Segoe UI, Arial, sans-serif" font-size="16" font-weight="700">one control plane</text>
+  <text x="1000" y="440" fill="#49646C" font-family="Segoe UI, Arial, sans-serif" font-size="16" font-weight="700">visible operating surface</text>
+  <text x="544" y="475" fill="#49646C" font-family="Segoe UI, Arial, sans-serif" font-size="16" font-weight="700">evidence-first writeback</text>
+</svg>

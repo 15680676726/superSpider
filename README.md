@@ -10,6 +10,14 @@ superSpider is not another chat wrapper. It is a local execution main brain buil
 
 Today, the formal external executor path is `Codex`. The architecture is being shaped so the same main brain can govern more external executors over time, including `Hermes`-class runtimes, without turning those executors into a second brain or a second truth source.
 
+## System overview
+
+<p align="center">
+  <img src="docs/assets/superspider-system-overview.svg" alt="superSpider system overview showing the main brain, memory system, knowledge system, external executors, evidence chain, and Runtime Center" width="100%" />
+</p>
+
+At a high level, the system keeps one control plane, one truth chain, and one visible operator surface. The main brain governs long-running work, memory and knowledge stabilize context over time, external executors do the execution, and evidence plus replay keep the whole chain inspectable.
+
 ## Why this project exists
 
 Most AI projects stop at chat, prompts, and tool calls. That layer is useful, but it breaks down when work needs to continue, recover, prove what happened, remember why it matters, and stay operable after the model has already answered once.
