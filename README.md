@@ -3,35 +3,88 @@
 
   # superSpider
 
-  <p><b>A local autonomous execution system for goals, environments, evidence, and long-running multi-agent work.</b></p>
+  <p><b>The main brain for local autonomous execution.</b></p>
 </div>
 
-superSpider is a local-first runtime for long-running autonomous work. It brings goals, agents, tasks, environments, evidence, and patches into one Runtime Center so planning, execution, observation, and recovery happen on the same visible surface.
+superSpider is not another chat wrapper. It is a local execution main brain built to drive long-running work through managed external executors, visible runtime state, persistent environments, and evidence-first writeback.
 
-It is built around four operational ideas:
+Today, the formal external executor path is `Codex`. The architecture is being shaped so the same main brain can govern more external executors over time, including `Hermes`-class runtimes, without turning those executors into a second brain or a second truth source.
 
-- main-brain execution over formal `assignment / backlog` truth
-- managed external executors instead of hidden local worker state
-- persistent environments and evidence-first runtime behavior
-- one local operating surface instead of scattered control panels
+## Why this project exists
 
-## What superSpider does today
+Most AI projects stop at chat, prompts, and tool calls. That is useful, but it breaks down when work needs to continue, recover, prove what happened, or stay visible after the model has already answered once.
 
-- Runs a main-brain driven execution chain over goals, backlog, assignments, runtime state, and evidence.
-- Uses a managed local external executor path for real task execution and writeback.
-- Keeps runtime continuity, evidence, and operator-visible state in one Runtime Center.
-- Exposes a local control surface for execution, observation, governance, and recovery.
+superSpider is built for that harder operating problem:
 
-## Who it is for
+- one main brain that decides what should happen next
+- external executors that actually do the work
+- one Runtime Center where runtime state, evidence, recovery, and operator control stay visible
+- one local operating surface instead of scattered scripts, panels, and hidden worker state
 
-superSpider is for operators and developers who want a local autonomous execution system instead of a chat-only assistant. It is intended for people who need long-running work, governed execution, visible runtime state, and evidence they can inspect after the fact.
+## What superSpider is
 
-## What this repository contains
+superSpider is a local-first autonomous execution system with a clear split:
+
+- `superSpider` is the main brain
+- external executors are the execution layer
+- the Runtime Center is the visible operating surface
+- evidence and runtime state are written back into the same local truth chain
+
+That split matters. The executor should execute. The main brain should plan, delegate, supervise, recover, and keep the system coherent over time.
+
+## What works today
+
+The current repository already supports these core behaviors:
+
+- a formal main-brain execution chain over goals, backlog, assignments, runtime state, and evidence
+- a managed local external executor path using `Codex`
+- runtime continuity, event ingestion, evidence writeback, and recovery
+- a Runtime Center for execution, observation, governance, and operator control
+- a local-first workflow where the operator can inspect what ran, what failed, and what the system believes is true
+
+## External executor model
+
+superSpider does not treat external executors as plugins hidden behind a chat prompt.
+
+It treats them as managed execution surfaces.
+
+- `superSpider` owns the main-brain logic, task truth, recovery logic, and operator-visible state
+- the external executor owns the execution turn
+- execution results come back as runtime events, evidence, and structured writeback
+
+Current formal path:
+
+- `Codex` as the active external executor path
+
+Planned path:
+
+- `Hermes`-class runtimes and other formal executor providers that can fit the same execution contract
+
+## Why developers care
+
+superSpider is aimed at developers who want more than a chat assistant:
+
+- AI agent and automation developers who want a visible runtime instead of a black box
+- independent developers who want local autonomous execution instead of a hosted orchestration layer
+- people building long-running work where evidence, recovery, and state continuity matter as much as model output
+
+## What this repository is not
+
+superSpider is not:
+
+- a generic chat UI
+- a prompt wrapper around tools
+- a random workflow marketplace
+- a system where any imported project automatically becomes a formal executor
+
+This repository is trying to build a disciplined execution architecture, not a loose collection of demos.
+
+## Repository shape
 
 - `src/copaw/`: runtime kernel, state, capability, execution, evidence, and compatibility layers
 - `console/`: main frontend and Runtime Center
 - `website/`: repository-hosted docs and product pages
-- root planning/status docs: live architecture, migration, and acceptance records
+- root planning and status docs: architecture, migration, and acceptance records
 
 ## Naming
 
@@ -41,15 +94,19 @@ superSpider is for operators and developers who want a local autonomous executio
 
 The runtime package and CLI have not been renamed yet, so installation and commands still use `copaw`.
 
-## Current status
+## Current project status
 
-The repository is public and open for issues, discussions, and pull requests. The current governance model is maintainer-led, and external contributors should start with an issue or discussion for larger changes.
+- public repository
+- issues, discussions, and pull requests are open
+- governance is currently maintainer-led
+- larger changes should start with an issue or discussion
 
-## Current entry points
+Architecture and live progress are tracked in:
 
-- `console/` is the main frontend and Runtime Center.
-- `website/` contains the repository-hosted docs and product pages.
-- Architecture and live progress are tracked in [System Architecture](COPAW_CARRIER_UPGRADE_MASTERPLAN.md) and [Task Status](TASK_STATUS.md).
+- [System Architecture](COPAW_CARRIER_UPGRADE_MASTERPLAN.md)
+- [Task Status](TASK_STATUS.md)
+- [Data Model Draft](DATA_MODEL_DRAFT.md)
+- [API Transition Map](API_TRANSITION_MAP.md)
 
 ## Quick start
 
