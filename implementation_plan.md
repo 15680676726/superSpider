@@ -68,7 +68,7 @@
   - operator 可在 `/industry` 直接编辑团队/目标/计划
   - bootstrap 只激活最终 draft，不再重走固定模板编译
 - 当前系统已经能生成行业实例、初始 goal、默认 schedule、evidence-driven daily/weekly snapshot
-- `2026-03-12` 补充：`V3` 已真实完成，Capability Market、Runtime Center governance/recovery/automation、Settings/System 产品化入口，以及 `AgentRunner`/runtime-center `bridge` 删尾均已收口；正式验收见 `V3_RELEASE_ACCEPTANCE.md`
+- `2026-03-12` 补充：`V3` 已真实完成，Capability Market、Runtime Center governance/recovery/automation、Settings/System 产品化入口，以及 `AgentRunner`/runtime-center `bridge` 删尾均已收口；正式验收见 `docs/archive/root-legacy/V3_RELEASE_ACCEPTANCE.md`
 
 这意味着后续开发不能再回退为：
 
@@ -189,13 +189,13 @@
 
 ---
 
-## 4.1 `implementation_plan1.md` 功能映射
+## 4.1 `docs/archive/root-legacy/implementation_plan1.md` 功能映射
 
-旧 `implementation_plan1.md` 里的功能主题，并没有被整体丢掉，但已经按“当前现实基线 + 可上线边界”重排到新三版本里。
+旧 `docs/archive/root-legacy/implementation_plan1.md` 里的功能主题，并没有被整体丢掉，但已经按“当前现实基线 + 可上线边界”重排到新三版本里。
 
 映射关系如下：
 
-| `implementation_plan1.md` 主题 | 新计划落点 | 说明 |
+| `docs/archive/root-legacy/implementation_plan1.md` 主题 | 新计划落点 | 说明 |
 |---|---|---|
 | 行业初始化引导 / 行业激活 | `V1-B3` | 升级为正式启动控制面和系统自检入口 |
 | `Manager` 固定核心岗 + `Researcher` 默认研究支援岗 | `V1-B2` 基线继承 | `execution-core` 是固定团队总控核；当前运行主链会默认补齐 `researcher`，由它负责研究回流与证据补充 |
@@ -431,7 +431,7 @@
 
 把 `V1` 的正式行业团队，升级为能长期运行的自治运营系统。
 
-当前完成记录：`2026-03-12` 已完成 `V2-B1 ~ V2-B5`，正式验收见 `V2_RELEASE_ACCEPTANCE.md`。
+当前完成记录：`2026-03-12` 已完成 `V2-B1 ~ V2-B5`，正式验收见 `docs/archive/root-legacy/V2_RELEASE_ACCEPTANCE.md`。
 
 用户在 `V2` 结束后，应能得到：
 
@@ -630,7 +630,7 @@
 
 把 `V2` 的长期自治系统，升级为可交付、可治理、可恢复、可扩展的正式产品。
 
-当前完成记录：`2026-03-12` 已完成 `V3-B1 ~ V3-B4`，正式验收见 `V3_RELEASE_ACCEPTANCE.md`。
+当前完成记录：`2026-03-12` 已完成 `V3-B1 ~ V3-B4`，正式验收见 `docs/archive/root-legacy/V3_RELEASE_ACCEPTANCE.md`。
 
 用户在 `V3` 结束后，应能得到：
 

@@ -9,8 +9,8 @@
 **Tech Stack:** Python 3, FastAPI, Pydantic, SQLite state repositories, pytest, React, TypeScript, Runtime Center
 
 **Companion Docs:**
-- Audit baseline: `REVIEW_C3PO_FULL_AUDIT.md`
-- Acceptance gate: `REVIEW_C3PO_ACCEPTANCE_CHECKLIST.md`
+- Audit baseline: `docs/archive/root-legacy/REVIEW_C3PO_FULL_AUDIT.md`
+- Acceptance gate: `docs/archive/root-legacy/REVIEW_C3PO_ACCEPTANCE_CHECKLIST.md`
 
 ---
 
@@ -21,7 +21,7 @@
 - Treat `tool / MCP / skill / browser / desktop` as capability surfaces only. Do not let them absorb main-brain synthesis responsibility.
 - Keep all new truth in existing `state` objects or explicit extensions of those objects.
 - Prefer extracting focused helper modules over growing `service_lifecycle.py` and `query_execution_runtime.py` even further.
-- Treat `REVIEW_C3PO_ACCEPTANCE_CHECKLIST.md` as the release gate. A task is not complete if it only improves wording, routing heuristics, or status summaries without moving the acceptance items.
+- Treat `docs/archive/root-legacy/REVIEW_C3PO_ACCEPTANCE_CHECKLIST.md` as the release gate. A task is not complete if it only improves wording, routing heuristics, or status summaries without moving the acceptance items.
 
 ## Exit Gates
 

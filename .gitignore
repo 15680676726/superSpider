@@ -34,6 +34,7 @@ providers.json
 envs.json
 !.env.example
 !.env.template
+.pytest_cache/
 __pycache__/
 *.db
 *.rdb
@@ -94,6 +95,10 @@ codex_desktop_smoke_*.txt
 .cache/  # Includes conda_unpack_wheels/ for Windows packaging workaround
 .worktrees/
 tmp/
+tmp-memory-probe*/
+.tmp-research-check/
+.tmp_git_hook_final_smoke/
+workflow_*/
 tmp_real_self_evolution_smoke.py
 tmp_real_self_evolution_smoke_*/
 .githooks/pre-commit

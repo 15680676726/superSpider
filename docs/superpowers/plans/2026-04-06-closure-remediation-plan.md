@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Close the highest-confidence truth gaps confirmed in `46问题文档.md` without adding new parallel truth sources.
+**Goal:** Close the highest-confidence truth gaps confirmed in `docs/archive/root-legacy/46问题文档.md` without adding new parallel truth sources.
 
 **Architecture:** Fix the closure gaps from the write path inward: first harden `HumanAssistTask` verification semantics, then remove active legacy `goal/schedule` writebacks from industry runtime, then eliminate read-side truth fabrication and governance bypasses, and finally align API/frontend/doc surfaces to the corrected contracts. Each task owns a disjoint write set.
 
@@ -21,7 +21,7 @@
 - `Task 5`: partial
   - backend query boundary 已收成只接受 canonical `assignment/backlog` focus；前端本轮补齐了 Runtime Center surface-only contract 的陈旧测试；另外 `/runtime-center/external-runtimes/actions` 已切回 `kernel dispatcher submit -> execute_task` 并继承 mount risk，但更大范围的本地 truth derivation 与 capability front-door 绕路清理尚未完成。
 - `Task 6`: complete for this remediation round
-  - `46问题文档.md`、`TASK_STATUS.md`、本计划文档已按本轮真实验证结果纠偏；更大范围的历史文档真实性治理仍需后续持续处理。
+  - `docs/archive/root-legacy/46问题文档.md`、`TASK_STATUS.md`、本计划文档已按本轮真实验证结果纠偏；更大范围的历史文档真实性治理仍需后续持续处理。
 - `Final Verification`: complete for the current remediation scope
   - backend 回归矩阵已重新执行，`bootstrap_lifecycle.py` 本轮全量 `38 passed`，industry kickoff focused slice `7 passed`，external runtime route focused regression `4 passed`；前端 targeted Vitest `19 passed`，`console build` 通过。
 
@@ -114,7 +114,7 @@
 ### Task 6: Reconcile Docs And Verification Claims
 
 **Files:**
-- Modify: `46问题文档.md`
+- Modify: `docs/archive/root-legacy/46问题文档.md`
 - Modify: `TASK_STATUS.md`
 - Modify: `API_TRANSITION_MAP.md`
 - Modify: `COPAW_CARRIER_UPGRADE_MASTERPLAN.md`
@@ -144,7 +144,7 @@
 - [ ] Run all focused backend tests touched by Tasks 1-5.
 - [ ] Run focused frontend tests touched by Task 5.
 - [ ] Run `npm --prefix console run build`.
-- [ ] Update `46问题文档.md` with final resolved/unresolved status.
+- [ ] Update `docs/archive/root-legacy/46问题文档.md` with final resolved/unresolved status.
 
 ### 2026-04-06 Follow-up Closure Update
 

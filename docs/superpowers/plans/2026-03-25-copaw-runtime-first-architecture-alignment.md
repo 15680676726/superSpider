@@ -110,7 +110,7 @@
 - Modify: `DATA_MODEL_DRAFT.md`
 - Modify: `API_TRANSITION_MAP.md`
 - Modify: `COPAW_CARRIER_UPGRADE_MASTERPLAN.md`
-- Modify: `SPIDER_MAIN_CHAIN_MAP.md`
+- Modify: `docs/archive/root-legacy/SPIDER_MAIN_CHAIN_MAP.md`
 
 ### Task 1: Modularize Runtime Bootstrap Without Changing Public Entry Contracts
 
@@ -402,7 +402,7 @@ Expected: PASS.
 - Modify: `DATA_MODEL_DRAFT.md`
 - Modify: `API_TRANSITION_MAP.md`
 - Modify: `COPAW_CARRIER_UPGRADE_MASTERPLAN.md`
-- Modify: `SPIDER_MAIN_CHAIN_MAP.md`
+- Modify: `docs/archive/root-legacy/SPIDER_MAIN_CHAIN_MAP.md`
 
 - [ ] **Step 1: Update docs to reference the runtime-first supplement as a secondary lens**
 

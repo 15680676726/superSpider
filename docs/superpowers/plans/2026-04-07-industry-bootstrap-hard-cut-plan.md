@@ -114,7 +114,7 @@ git commit -m "test: move bootstrap assertions to canonical runtime truth"
 ### Task 4: Documentation and Focused Verification
 
 **Files:**
-- Modify: `46问题文档.md`
+- Modify: `docs/archive/root-legacy/46问题文档.md`
 - Modify: `TASK_STATUS.md`
 - Modify: `DATA_MODEL_DRAFT.md`
 
@@ -135,6 +135,6 @@ Expected: PASS.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add 46问题文档.md TASK_STATUS.md DATA_MODEL_DRAFT.md
+git add docs/archive/root-legacy/46问题文档.md TASK_STATUS.md DATA_MODEL_DRAFT.md
 git commit -m "docs: record bootstrap hard-cut closure"
 ```

@@ -1,7 +1,7 @@
 # C3PO 主脑闭环整改验收清单
 
 > 配套文档：
-> - 审计基线：[REVIEW_C3PO_FULL_AUDIT.md](/D:/word/copaw/REVIEW_C3PO_FULL_AUDIT.md)
+> - 审计基线：[docs/archive/root-legacy/REVIEW_C3PO_FULL_AUDIT.md](/D:/word/copaw/docs/archive/root-legacy/REVIEW_C3PO_FULL_AUDIT.md)
 > - 执行计划：[2026-03-24-main-brain-cognitive-closure.md](/D:/word/copaw/docs/superpowers/plans/2026-03-24-main-brain-cognitive-closure.md)
 
 **目的：** 本清单只回答一件事：本轮整改是否真的补上了主脑闭环，而不是做了看起来很忙、实际上没有改变根问题的伪修复。

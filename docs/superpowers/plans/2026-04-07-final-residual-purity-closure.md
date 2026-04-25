@@ -54,7 +54,7 @@
 ### Task 4: Docs And Verification
 
 **Files:**
-- Modify: `46问题文档.md`
+- Modify: `docs/archive/root-legacy/46问题文档.md`
 - Modify: `TASK_STATUS.md`
 
 - [ ] Update the docs so only the current residuals remain documented.

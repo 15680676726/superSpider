@@ -451,7 +451,7 @@ task thread 只能来自真实 `Task / TaskRuntime / dispatch_query / assignment
 
 必要时同步：
 
-- `REAL_ISSUES.md`
+- `docs/archive/root-legacy/REAL_ISSUES.md`
 - `ARCHITECTURE_DECISIONS.md`
 
 ---

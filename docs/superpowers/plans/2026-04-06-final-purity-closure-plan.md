@@ -136,7 +136,7 @@ git commit -m "runtime: remove reporting prediction goal truth residue"
 **Files:**
 - Modify: `README.md`
 - Modify: `TASK_STATUS.md`
-- Modify: `46问题文档.md`
+- Modify: `docs/archive/root-legacy/46问题文档.md`
 - Modify: `docs/superpowers/plans/2026-04-06-closure-remediation-plan.md`
 - Modify: `console/src/pages/RuntimeCenter/MainBrainCockpitPanel.tsx`
 - Modify: `console/src/pages/RuntimeCenter/useRuntimeCenter.test.ts`
@@ -165,6 +165,6 @@ Run the same doc/product focused matrix plus any touched frontend tests.
 - [x] **Step 5: Commit**
 
 ```bash
-git add README.md TASK_STATUS.md 46问题文档.md docs/superpowers/plans/2026-04-06-closure-remediation-plan.md console/src/pages/RuntimeCenter/MainBrainCockpitPanel.tsx console/src/pages/RuntimeCenter/useRuntimeCenter.test.ts
+git add README.md TASK_STATUS.md docs/archive/root-legacy/46问题文档.md docs/superpowers/plans/2026-04-06-closure-remediation-plan.md console/src/pages/RuntimeCenter/MainBrainCockpitPanel.tsx console/src/pages/RuntimeCenter/useRuntimeCenter.test.ts
 git commit -m "docs: align runtime vocabulary with canonical main brain chain"
 ```
