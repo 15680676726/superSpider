@@ -9,6 +9,9 @@
 - GitHub：`https://github.com/15680676726/superSpider`
 - Issues：`https://github.com/15680676726/superSpider/issues`
 - Discussions：`https://github.com/15680676726/superSpider/discussions`
+- 支持与反馈：[SUPPORT.md](SUPPORT.md)
+- 治理方式：[GOVERNANCE.md](GOVERNANCE.md)
+- 社区行为规范：[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 
 当前运行时包名 / CLI 名称仍然是 `copaw`，所以代码、安装命令和测试里暂时还会继续使用这个名字。
 

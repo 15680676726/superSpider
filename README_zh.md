@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="console/public/baize-symbol.svg" alt="superSpider logo" width="120" />
+  <img src="console/public/spider-mesh-symbol.svg" alt="superSpider logo" width="120" />
 
   # superSpider
 
@@ -64,6 +64,9 @@ npm run dev
 ## 参与方式
 
 - [贡献指南](CONTRIBUTING_zh.md)
+- [社区行为规范](CODE_OF_CONDUCT.md)
+- [支持与反馈](SUPPORT.md)
+- [治理方式](GOVERNANCE.md)
 - [安全策略](SECURITY.md)
 - [Issues](https://github.com/15680676726/superSpider/issues)
 - [Discussions](https://github.com/15680676726/superSpider/discussions)

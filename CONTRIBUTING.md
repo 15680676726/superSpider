@@ -8,6 +8,9 @@ Repository:
 - GitHub: `https://github.com/15680676726/superSpider`
 - Issues: `https://github.com/15680676726/superSpider/issues`
 - Discussions: `https://github.com/15680676726/superSpider/discussions`
+- Support: [SUPPORT.md](SUPPORT.md)
+- Governance: [GOVERNANCE.md](GOVERNANCE.md)
+- Code of conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 
 Current runtime package / CLI name remains `copaw`, so code, install commands, and tests still use that name.
 

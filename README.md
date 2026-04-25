@@ -64,6 +64,9 @@ npm run dev
 ## Contributing
 
 - [Contributing guide](CONTRIBUTING.md)
+- [Code of conduct](CODE_OF_CONDUCT.md)
+- [Support](SUPPORT.md)
+- [Governance](GOVERNANCE.md)
 - [Security policy](SECURITY.md)
 - [Issues](https://github.com/15680676726/superSpider/issues)
 - [Discussions](https://github.com/15680676726/superSpider/discussions)
