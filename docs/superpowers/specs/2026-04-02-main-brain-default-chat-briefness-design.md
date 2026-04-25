@@ -27,7 +27,7 @@ Out of scope:
 - Keep `/api/runtime-center/chat/run` as the only chat front door.
 - Do not add a second planning center or another intent-routing layer.
 - Avoid editing the large Chinese system prompt body unless necessary; prefer tightening the existing default shell tail in `main_brain_chat_service.py`.
-- Borrow `cc` front-door discipline only. Do not transplant `cc`-specific labels, slash-command semantics, donor wording, or any donor-only shell names into CoPaw `CHAT` replies.
+- Reuse only the front-door single-path discipline. Do not transplant external labels, slash-command semantics, or external-only shell names into CoPaw `CHAT` replies.
 - Keep this change to prompt-tail text only. Do not widen scope into token-limit tuning, response post-processing, or any other behavioral layer.
 
 ## Approaches Considered
@@ -36,7 +36,7 @@ Out of scope:
 
 Rejected.
 
-This would push CoPaw away from "borrow CC discipline, not CC product complexity" and add one more front-door mechanism to maintain.
+This would push CoPaw away from the desired "single-path discipline without extra product complexity" direction and add one more front-door mechanism to maintain.
 
 ### 2. Lower `max_tokens` globally
 
@@ -48,13 +48,13 @@ It is too blunt. It can shorten good replies, but it does not reliably improve r
 
 Selected.
 
-This is the closest donor-boundary move:
+This is the closest boundary-safe move:
 
 - no extra mechanism
 - no new truth
 - no new mode
 - direct impact on ordinary chat tone and length
-- no donor-language transplant into CoPaw reply text
+- no external-language transplant into CoPaw reply text
 
 ## Design
 

@@ -6,7 +6,7 @@
 
 **Architecture:** The main brain remains responsible for chat intake, understanding, planning, delegation, governance, and result synthesis. Real execution must still flow through `strategy / lane / backlog / assignment / specialist / task / report / evidence`, and every acceptance item below checks whether that formal chain is actually visible and durable.
 
-**Tech Stack:** Python, FastAPI, pytest, console frontend, Runtime Center, Industry Workbench, Buddy flow, capability market, donor/runtime subsystem.
+**Tech Stack:** Python, FastAPI, pytest, console frontend, Runtime Center, Industry Workbench, Buddy flow, capability market, external capability/runtime subsystem.
 
 ---
 
@@ -198,7 +198,7 @@ This proves the system is not just a package inventory manager.
 - [ ] Install a capability from the real front door:
   - skill
   - MCP
-  - project/runtime donor
+  - project package / runtime provider
 - [ ] Confirm install truth is durable.
 - [ ] Confirm the capability is actually attached or adopted by the target execution seat when intended.
 - [ ] Confirm the next execution turn can really select and use it.

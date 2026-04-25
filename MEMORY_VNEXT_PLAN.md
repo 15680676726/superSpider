@@ -2,12 +2,7 @@
 
 本文件用于把 `CoPaw` 下一阶段的记忆升级方向收口成正式方案。
 
-这次升级的参考对象不是“照搬 OpenClaw 当前默认稳定版 memory”，而是借鉴其正在研究的 `Workspace Memory v2` 方向中真正有价值的部分：
-
-- `derived index`
-- `Retain / Recall / Reflect`
-- `entity / opinion / confidence`
-- hybrid recall 与可替换检索后端
+这次升级的目标，是把 `derived index`、`Retain / Recall / Reflect`、`entity / opinion / confidence` 与 hybrid recall 这几类能力，收口到 `CoPaw` 现有正式真相链上。
 
 同时，本方案明确拒绝把 `CoPaw` 拉回到 `MEMORY.md / memory/YYYY-MM-DD.md` 这类文件型真相源。
 
@@ -25,31 +20,16 @@
 
 ---
 
-## 2. 为什么不是直接照搬 OpenClaw
+## 2. 为什么不采用文件型 memory 主链
 
-`OpenClaw` 当前公开的正式 memory 主链，仍偏向：
+当前仓库已经把战略、知识、证据、执行与报告收口到统一 `state / evidence / kernel` 主链。
 
-- workspace Markdown canonical source
-- `MEMORY.md` + `memory/YYYY-MM-DD.md`
-- `memory_search / memory_get`
-- SQLite / QMD / vector sidecar 作为检索层
+如果再引入 Markdown-first memory 主链，会出现两个问题：
 
-这套设计适合“单助手 + 工作区记忆”场景，但 `CoPaw` 当前已经进入：
+1. 重新引入第二真相源。
+2. 把战略、执行、证据、报告之间已经建立的正式关系打散成额外旁路。
 
-- `StrategyMemoryRecord`
-- `KnowledgeChunkRecord`
-- `EvidenceRecord`
-- `ExecutionRoutineRecord / RoutineRunRecord`
-- `AssignmentRecord / AgentReportRecord`
-
-这些对象都已经属于统一 `state / evidence / kernel` 主链。
-
-如果直接照搬 OpenClaw 的 Markdown-first memory，会出现两个明显问题：
-
-1. 会重新引入第二真相源。
-2. 会把战略、执行、证据、报告之间已经建立好的正式关系重新打散。
-
-因此这里真正要借的是它的“记忆能力层设计”，不是它的“文件型真相源落点”。
+因此本方案只保留能力层目标：`derived index`、`Retain / Recall / Reflect`、`entity / opinion / confidence`，不引入文件型 canonical memory。
 
 ---
 
@@ -309,9 +289,9 @@ working memory 不默认升级为共享长期真相。
 
 ---
 
-## 7. 对 OpenClaw 的借鉴点与拒绝点
+## 7. 能力边界与排除项
 
-### 7.1 明确借鉴
+### 7.1 本轮保留的能力目标
 
 - `Retain / Recall / Reflect`
 - `entity / opinion / confidence`
@@ -319,7 +299,7 @@ working memory 不默认升级为共享长期真相。
 - hybrid retrieval
 - optional sidecar backend
 
-### 7.2 明确不借
+### 7.2 本轮明确排除的实现
 
 - `MEMORY.md` 成为系统正式真相源
 - `memory/YYYY-MM-DD.md` 成为 durable memory 主存储
@@ -411,15 +391,7 @@ src/copaw/kernel/
 
 ---
 
-## 11. 参考来源
-
-本方案借鉴的外部材料主要来自 `OpenClaw` 公开文档中的研究方向，而不是其默认稳定落点：
-
-- Memory concepts: `https://docs.openclaw.ai/concepts/memory`
-- Workspace memory research: `https://docs.openclaw.ai/experiments/research/memory`
-- AGENTS / SOUL templates: `https://docs.openclaw.ai/reference/templates/AGENTS`
-
-### M4+ QMD Sidecar
+## 11. M4+ QMD Sidecar
 
 - `2026-03-19` 状态更新：`QMD` 已从 `Memory VNext M4` 的 placeholder slot 升级为真实可运行 sidecar backend。
 - 新增 `src/copaw/memory/qmd_backend.py`，把 `derived memory index` 物化为本地 markdown corpus，并由 `DerivedMemoryIndexService` 通过 `replace_entries / upsert_entry / delete_entries` 保持 sidecar corpus 与 canonical fact index 同步。
@@ -441,4 +413,4 @@ src/copaw/kernel/
 
 ## 12. 最后一条边界
 
-> `CoPaw` 可以借鉴 OpenClaw 的记忆能力设计，但不能为此退回文件型真相源或第二套 memory 主链。
+> `CoPaw` 应持续保持单一真相源，不为记忆增强新增文件型主链或第二套 memory 主链。

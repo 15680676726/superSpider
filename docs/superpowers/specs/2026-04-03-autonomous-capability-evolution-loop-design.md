@@ -13,7 +13,7 @@ The full second-tier target is broader:
 - unified optimization case truth
 - baseline vs challenger trial discipline
 - evidence-backed evaluator
-- lifecycle decisions across skill / MCP / donor / package
+- lifecycle decisions across skill / MCP / external source / package
 - Runtime Center visibility for the whole loop
 
 This file should therefore be read as:
@@ -24,13 +24,13 @@ not as:
 
 - `the entire autonomous self-optimization architecture`
 
-When the two differ, the broader second-tier design takes precedence and this file remains the donor/package/lifecycle slice inside that larger loop.
+When the two differ, the broader second-tier design takes precedence and this file remains the external-source/package/lifecycle slice inside that larger loop.
 
 ## Landed Boundary (`2026-04-07`)
 
 What is now live in code for this slice:
 
-- donor / candidate / package truth stays formal and shared
+- external-source / candidate / package truth stays formal and shared
 - trial records and lifecycle decisions stay on the same truth chain
 - evaluator verdicts now write back into lifecycle decisions instead of floating as side metadata only
 - MCP challengers can now enter the same governed trial vocabulary as skill challengers
@@ -48,8 +48,8 @@ This design is intentionally broader than "auto-generate a skill". The formal ta
 
 - discover repeatable capability gaps
 - decide the correct capability form
-- prefer an external donor or reusable package when one already fits
-- synthesize a governed artifact only when donor-first reuse still leaves a real gap
+- prefer an external source or reusable package when one already fits
+- synthesize a governed artifact only when external-source-first reuse still leaves a real gap
 - trial it on the right scope
 - evaluate it with runtime evidence
 - promote / replace / rollback / retire it
@@ -69,7 +69,7 @@ The loop must obey repository architecture rules:
 - no prompt-only hidden capability state
 - all important mutations must stay governed and evidence-backed
 
-The loop must also obey the donor-first platform rule:
+The loop must also obey the external-source-first platform rule:
 
 - CoPaw is the governance/runtime base, not a built-in skill factory
 - mature external projects, MCPs, adapters, and helper runtimes are the default growth path
@@ -90,15 +90,15 @@ It must not create a shadow "skill manager" that bypasses capability governance.
 
 ---
 
-## 3. Donor Boundary From `cc`
+## 3. Artifact Discipline Boundary
 
-`cc` is worth borrowing from in three narrow areas:
+Three external artifact-discipline patterns remain useful here:
 
 1. `SKILL.md` as the final artifact shape for prompt-oriented reusable process knowledge.
 2. Skill discovery / surfacing / loading discipline.
 3. Small-step improvement of an already-existing skill artifact.
 
-`cc` is not the donor for lifecycle governance. Its codebase centers on loading, injecting, discovering, and lightly improving skill files. It does not provide CoPaw's required formal loop of:
+Those external artifact patterns are not the lifecycle-governance source of truth. They center on loading, injecting, discovering, and lightly improving skill files. They do not provide CoPaw's required formal loop of:
 
 - candidate truth
 - seat/session trial governance
@@ -107,7 +107,7 @@ It must not create a shadow "skill manager" that bypasses capability governance.
 - rollback truth
 - runtime-center-visible lifecycle history
 
-CoPaw should therefore borrow artifact discipline from `cc`, but keep lifecycle governance on its own formal truth chain.
+CoPaw should therefore keep artifact discipline on the artifact side, while keeping lifecycle governance on its own formal truth chain.
 
 ---
 
@@ -121,14 +121,14 @@ CoPaw should optimize for:
 
 The first preference order is:
 
-1. adopt an existing external donor
+1. adopt an existing external source
 2. reuse an already-known healthy artifact/version
 3. revise an existing governed local artifact when that is cheaper than replacement
 4. author a new local artifact only when the previous three paths still fail to close the gap
 
 In some cases the right result is:
 
-- adoption of an existing donor package
+- adoption of an existing external-source package
 - reuse of an already-proven package version
 - a revision of an existing skill
 - an MCP bundle decision
@@ -144,14 +144,14 @@ The design therefore centers on capability evolution, not skill generation alone
 
 CoPaw already has two real-world ways to obtain a capability artifact:
 
-1. external donor / open-source project / MCP / adapter / remote auto-install path
+1. external source / open-source project / MCP / adapter / remote auto-install path
 2. local self-authored / main-brain-requested / writer-authored fallback path
 
 These must not become two promotion systems.
 
 The formal rule is:
 
-- external donor intake is the default candidate source
+- external-source intake is the default candidate source
 - local self-authored synthesis is fallback-only candidate supply
 - both must normalize into the same `CapabilityCandidateRecord`
 - both must pass the same overlap detection, budget governance, scoped trial, lineage, promotion, replacement, and rollback flow
@@ -161,7 +161,7 @@ This means:
 - an externally fetched skill must not become role-active only because install succeeded
 - a locally generated skill must not become role-active only because a file was written
 - both paths must be visible in Runtime Center as the same lifecycle object model
-- the existence of local writing ability does not justify bypassing donor search or donor reuse
+- the existence of local writing ability does not justify bypassing external-source search or external-source reuse
 
 The difference between the two paths is source provenance, not lifecycle semantics.
 
@@ -238,8 +238,8 @@ Does not own:
 
 Owns:
 
-- donor artifact normalization and packaging
-- thin local glue artifact synthesis when donor-first paths still leave a gap
+- external-source artifact normalization and packaging
+- thin local glue artifact synthesis when external-source-first paths still leave a gap
 - companion `SKILL.md` / `scripts/` / `references/` only when they are actually needed
 - verification contract authoring
 
@@ -317,7 +317,7 @@ This is a major architectural difference from a skill-only system.
 
 Before any new local artifact is authored, the system must explicitly try:
 
-- governed donor adoption
+- governed external-source adoption
 - healthy-version reuse
 - existing local artifact revision
 
@@ -325,7 +325,7 @@ Only if those paths still fail should the loop proceed to local artifact draftin
 
 ### 6.5 Draft Fallback Artifact
 
-If the chosen form still needs a new or revised local artifact after donor-first resolution, the main brain dispatches an `artifact-writer` owner to synthesize:
+If the chosen form still needs a new or revised local artifact after external-source-first resolution, the main brain dispatches an `artifact-writer` owner to synthesize:
 
 - `SKILL.md`
 - `scripts/`
@@ -808,7 +808,7 @@ The following are architectural failures:
 - directly writing a new skill file and treating that as completion
 - allowing the main brain to become the default artifact author
 - treating local self-authored artifacts as the default growth path
-- skipping donor adoption/reuse evaluation because local synthesis is available
+- skipping external-source adoption/reuse evaluation because local synthesis is available
 - promoting directly to role prototype with no seat/session trial
 - silently mutating active role skills from ad-hoc user corrections
 - letting session overlay state become a hidden second lifecycle truth
@@ -826,11 +826,11 @@ The following are architectural failures:
 Implementation should proceed in four macro phases:
 
 1. candidate truth and discovery
-2. donor adoption / reuse / fallback artifact materialization
+2. external-source adoption / reuse / fallback artifact materialization
 3. scoped trialing and lifecycle decision
 4. continuous drift detection and active artifact improvement
 
-The system should first ship a full governed loop for donor-first candidates, then extend the same lifecycle model to local revisions and broader capability recomposition. Local new-artifact authoring is not the first milestone; it is the bounded fallback path inside the same governed loop.
+The system should first ship a full governed loop for external-source-first candidates, then extend the same lifecycle model to local revisions and broader capability recomposition. Local new-artifact authoring is not the first milestone; it is the bounded fallback path inside the same governed loop.
 
 ---
 
@@ -843,10 +843,10 @@ The recommended strategy for CoPaw is:
 That means:
 
 - main brain decides
-- donor/reuse path is evaluated first
+- external-source/reuse path is evaluated first
 - writer only fills the remaining bounded gap
 - executor trials them
 - governor applies lifecycle mutations
 - observer keeps the loop alive after activation
 
-This preserves CoPaw's formal autonomy boundaries while still borrowing the useful artifact discipline from `cc`.
+This preserves CoPaw's formal autonomy boundaries while still retaining useful artifact-discipline patterns without importing an external product center.

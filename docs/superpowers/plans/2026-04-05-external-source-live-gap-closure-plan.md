@@ -1,8 +1,8 @@
 # Donor-First Live Gap Closure Plan
 
-**Goal:** Close only the donor-first items that are still missing in real runtime behavior, and stop treating object/read-model/test coverage as equivalent to live external capability closure.
+**Goal:** Close only the external-source-first items that are still missing in real runtime behavior, and stop treating object/read-model/test coverage as equivalent to live external capability closure.
 
-**Scope boundary:** This plan does not reopen donor-first architecture, lifecycle truth, or Runtime Center read-model design. It only covers the remaining live gaps that block a truthful `discover -> install -> use` completion claim.
+**Scope boundary:** This plan does not reopen external-source-first architecture, lifecycle truth, or Runtime Center read-model design. It only covers the remaining live gaps that block a truthful `discover -> install -> use` completion claim.
 
 ## Completion Note (`2026-04-05`)
 
@@ -12,13 +12,13 @@ Closed items:
 
 - runtime bootstrap discovery executor is no longer a no-op
 - source-chain now distinguishes `success / empty / failed / snapshot`
-- GitHub/open-source donor discovery is now a real runtime path via scout/provider search
+- GitHub/open-source project source discovery is now a real runtime path via scout/provider search
 - SkillHub/curated search now suppresses dead bundles before install
 
 Fresh verification recorded in `TASK_STATUS.md`:
 
 - focused regression: `73 passed`
-- donor read-model adjacent regression: `107 passed`
+- external-source read-model adjacent regression: `107 passed`
 - live network validation:
   - hub search/install
   - curated search/install
@@ -33,7 +33,7 @@ They are not current blocker claims after the live validation recorded above and
 
 1. runtime bootstrap still wires an empty discovery executor, so autonomous scout defaults to `0 imported candidates`
 2. source-chain records `success` on `0 hit`, which inflates source health and misleads Runtime Center
-3. generic GitHub / open-source donor discovery is not yet a real runtime search path
+3. generic GitHub / open-source external-source discovery is not yet a real runtime search path
 4. SkillHub / curated search returns dead bundles, so result sets are not install-trustworthy by default
 
 ## Closure Rule Used By This Plan
@@ -66,10 +66,10 @@ This plan is complete only when all 4 are true:
   - GitHub/open-source repo search
 - keep one active source per action, but allow empty/failure fallback to the next source
 
-### Task 3: GitHub/open-source donor path
+### Task 3: GitHub/open-source project source path
 
 - add a bounded GitHub repository discovery adapter
-- return normalized donor hits with package/source lineage
+- return normalized external-source hits with package/source lineage
 - support directional queries such as:
   - `browser automation github`
   - `filesystem mcp`
@@ -90,7 +90,7 @@ The implementation is not complete until all of the following are executed fresh
   - skill
   - curated
   - MCP registry
-  - GitHub/open-source donor
+  - GitHub/open-source project source
 - real live install:
   - one SkillHub package
   - one MCP registry package

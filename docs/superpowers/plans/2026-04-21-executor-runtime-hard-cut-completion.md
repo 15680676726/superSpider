@@ -4,7 +4,7 @@
 
 **Goal:** Finish executor-runtime hard-cut `Task 2/3/6/7` so the remaining bridge, contract, Runtime Center, and verification gaps are closed with current evidence.
 
-**Architecture:** Reuse the existing `ExecutorRuntimeService` and Codex adapter path, but finish the compatibility bridge on top of `ExternalCapabilityRuntimeService`, tighten executor-provider contract boundaries so donor/project install paths cannot masquerade as formal executor runtimes, and cut Runtime Center read surfaces over to executor-runtime-first while leaving actor-runtime endpoints in explicit compatibility mode only. Verification follows `UNIFIED_ACCEPTANCE_STANDARD.md`: focused regression first, then default regression, then selected `L3` smoke and `L4` soak.
+**Architecture:** Reuse the existing `ExecutorRuntimeService` and Codex adapter path, but finish the compatibility bridge on top of `ExternalCapabilityRuntimeService`, tighten executor-provider contract boundaries so external-project compatibility install paths cannot masquerade as formal executor runtimes, and cut Runtime Center read surfaces over to executor-runtime-first while leaving actor-runtime endpoints in explicit compatibility mode only. Verification follows `UNIFIED_ACCEPTANCE_STANDARD.md`: focused regression first, then default regression, then selected `L3` smoke and `L4` soak.
 
 **Tech Stack:** Python 3.12, FastAPI, SQLite state store, pytest, Runtime Center frontend, Codex App Server protocol shim
 
@@ -28,7 +28,7 @@
 ## Guardrails
 
 - No new parallel truth source for executor state.
-- No new active path that routes arbitrary donor/project installs into formal executor-provider truth.
+- No new active path that routes arbitrary external-project compatibility installs into formal executor-provider truth.
 - Actor runtime compatibility routes may remain only if clearly no longer primary execution truth.
 - Completion claims must state exact acceptance layer and remaining boundaries if any command cannot be run.
 
@@ -46,12 +46,12 @@
   - RuntimeExecutionStrip / AgentWorkbench no longer expose actor pause/resume/cancel/retry controls
   - capability governance now uses the agent formal surface only
 - `Task 6`: improved. Runtime Center / Agent Workbench actor surfaces now read as compatibility-only instead of looking canonical.
-- donor/provider surface: additional partial closure now landed in the current worktree:
-  - project donor contract metadata and projected package metadata now carry `compatibility/acquisition-only + formal_surface=false`
-  - `/capability-market/projects/search` and `/projects/install*` responses now advertise the donor/project surface as compatibility-only instead of leaving it visually canonical
-  - Runtime Center donor/package projection now carries the same compatibility marker and tolerates dict-backed service payloads
+- external-source/provider surface: additional partial closure now landed in the current worktree:
+  - project package intake metadata and projected package metadata now carry `compatibility/acquisition-only + formal_surface=false`
+  - `/capability-market/projects/search` and `/projects/install*` responses now advertise the external-source/project surface as compatibility-only instead of leaving it visually canonical
+  - Runtime Center external-source/package projection now carries the same compatibility marker and tolerates dict-backed service payloads
 - `Task 7`: widened verification now exists for the current closure slices:
-  - focused `L1 + L2` evidence still covers actor compatibility, delegation default-surface demotion, donor/provider surface demotion, and `console` build
+  - focused `L1 + L2` evidence still covers actor compatibility, delegation default-surface demotion, external-source/provider surface demotion, and `console` build
   - `default regression` now passes through `python scripts/run_p0_runtime_terminal_gate.py`
   - selected `L3` smoke now passes for runtime front-door / Runtime Center readback
   - selected `L4` soak now passes for `3` repeated long-chain cycles across `phase_next_autonomy_smoke + runtime_canonical_flow_e2e + operator_runtime_e2e`
@@ -117,7 +117,7 @@
 
 - `delegation_service.py` is no longer the formal assignment execution backend, but it still exists as an explicit compatibility capability/backend and has not been physically deleted.
 - `delegate_task` is no longer a default execution-core surface, but it still exists as an explicit compatibility capability.
-- formal `ExecutorProvider` intake is now landed, but donor/project compatibility surfaces and donor taxonomy retirement are still not physically deleted.
+- formal `ExecutorProvider` intake is now landed, but external-project compatibility surfaces and old taxonomy retirement are still not physically deleted.
 - selected `default regression`, `L3`, and `L4` evidence now exist for the `2026-04-21` closure slices, but this still does not prove full external-executor hard-cut completion.
 - `live external-provider smoke` and full-repo soak remain unrun.
 - This plan must not be cited as proof that the entire external-executor hard-cut is fully complete; use the newer status/deprecation docs for the latest boundary statement.

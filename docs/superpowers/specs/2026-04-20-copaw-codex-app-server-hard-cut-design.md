@@ -19,7 +19,7 @@
 - `CoPaw` 保留主脑、记忆、战略、派工、审批、证据与回流真相
 - 现有本地多执行位 runtime 退役
 - 多个受控外部执行体替代现有多 agent 执行层
-- 对外接入面从“任意开源项目 donor”收口成“受控执行体 runtime provider”
+- 对外接入面从“任意开源项目接入”收口成“受控执行体 runtime provider”
 - 第一适配器是 `Codex App Server`
 - 后续允许接入 `Hermes` 与其他具备正式控制面的开源智能体 runtime
 
@@ -42,7 +42,7 @@
 - `纯 MCP` 作为主控总线
 - `Desktop App` 作为长期底层
 - 继续演化本地 `actor_worker / actor_supervisor / delegation execution`
-- 继续把 GitHub / donor intake 当成“任意项目接入面”
+- 继续把 GitHub / 外部项目 intake 当成“任意项目接入面”
 
 正式口径：
 
@@ -353,7 +353,7 @@ V1 最小字段建议：
 边界：
 
 - 它代表“可治理的执行体 runtime”
-- 不再代表“任意 GitHub donor 项目”
+- 不再代表“任意 GitHub 外部项目”
 
 ### 4.5 RoleExecutorBinding
 
@@ -781,13 +781,13 @@ V1 第一版统一采用 `open_default`。
 
 ### 11.2 架构级纠偏要求
 
-- 必须把旧 GitHub donor/open-source intake 收口成“只接执行体 runtime provider”的正式入口
+- 必须把旧 GitHub/open-source intake 收口成“只接执行体 runtime provider”的正式入口
 - 必须支持“全局统一执行体”和“按职业路由不同执行体”两种模式
 - 必须把模型调用治理纳入主脑正式对象，不允许每个执行体各自变成黑箱
 - 必须先完成 generic executor seam，再退役本地 actor runtime
 - 必须显式保护现有 `MCP/skill` capability-market 与 evolution 主链；执行体 provider intake 不能吞并现有 capability acquisition taxonomy
 
-### 11.2.1 旧 donor / 外接项目体系必须显式收口的内容
+### 11.2.1 旧外部项目 / acquisition 体系必须显式收口的内容
 
 这部分不能只靠“以后别这么想”处理，必须在实现和删旧台账里显式收口。
 
@@ -797,17 +797,17 @@ V1 第一版统一采用 `open_default`。
 2. `taxonony` 收口
    - `project-package / adapter / runtime-component` 不应继续作为执行层一级产品语义
    - 执行层正式语义应收口成 `ExecutorProvider / control_surface_kind / protocol_surface_kind / workspace_contract_kind`
-3. `donor state/service` 收口
-   - `CapabilityDonorService / DonorPackageService / CapabilityPortfolioService / donor trust/trial/retirement`
+3. `external-source state/service` 收口
+   - `CapabilityDonorService / DonorPackageService / CapabilityPortfolioService / provenance/trust/trial/retirement`
    - 不能继续直接代表执行层主链；要么降为 acquisition/governance 子系统，要么缩窄成 executor provider governance
-4. `Runtime Center donor 读面` 收口
+4. `Runtime Center external-source 读面` 收口
    - `/runtime-center/capabilities/donors` 与 `/runtime-center/external-runtimes*`
    - 必须区分“候选供给面”和“当前活动执行体”，不能继续混在同一条执行主链里
-5. `旧 donor contract/spec` 收口
-   - `project_donor_contracts.py` 及 `2026-04-04/04-06` donor-first 设计
+5. `旧 external-source contract/spec` 收口
+   - `project_donor_contracts.py` 及 `2026-04-04/04-06` external-source-first 设计
    - 必须补 supersede 或 compatibility 边界，避免继续被理解成 active executor mainline
 6. `命名与测试口径` 收口
-   - donor-first 测试、task status 和记述文档必须显式标注“这是 compatibility/acquisition 方向，不再是执行层正式方向”
+   - external-source-first 测试、task status 和记述文档必须显式标注“这是 compatibility/acquisition 方向，不再是执行层正式方向”
 
 ### 11.3 Phase 2 方向
 
@@ -828,10 +828,10 @@ V1 第一版统一采用 `open_default`。
 
 本次设计的正式结论如下：
 
-1. `CoPaw` 的长期定位是“主脑框架 + 可插拔外部执行层”，不是 `Codex-only` 产品
+1. `CoPaw` 的长期定位是“主脑框架 + 可插拔外部执行层”，不是单一执行器产品
 2. 被替换的是本地多 agent 执行层，不是 CoPaw 主脑
 3. `Codex App Server` 是第一条正式控制面，但不是唯一控制面
-4. 外部项目 / donor intake 必须收口成“执行体 runtime provider intake”，不再继续以“任意项目接入”为目标
+4. 外部项目 intake 必须收口成“执行体 runtime provider intake”，不再继续以“任意项目接入”为目标
 5. 系统必须支持“全部执行位统一一种执行体”与“不同职业绑定不同执行体”两种模式
 6. 模型调用必须进入主脑统一治理，而不是完全散落在各执行体私有配置中
 7. 第一版采用 `open_default`，优先跑通“主脑派工 -> 执行体执行 -> 事件回流 -> 主脑收尾”的真实闭环

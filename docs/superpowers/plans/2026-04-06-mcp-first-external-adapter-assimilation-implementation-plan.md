@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add one common `MCP -> API/SDK -> adapter` assimilation seam on top of the existing donor/runtime base so external donors can become formally callable CoPaw `adapter` capabilities, while `CLI/runtime`-only donors remain lower-tier `project-package / runtime-component` landings.
+**Goal:** Add one common `MCP -> API/SDK -> adapter` assimilation seam on top of the existing external-source/runtime base so external donors can become formally callable CoPaw `adapter` capabilities, while `CLI/runtime`-only donors remain lower-tier `project-package / runtime-component` landings.
 
-**Architecture:** Reuse the current donor/package/candidate/trial/lifecycle/runtime-center spine and add a bounded adapter layer: protocol classification -> compiled adapter contract -> typed adapter execution -> scoped trial/evidence/lifecycle attribution. External protocols remain intake and transport facts only; the main brain and execution agents consume only CoPaw formal `adapter / runtime / project` capability truth.
+**Architecture:** Reuse the current external-source/package/candidate/trial/lifecycle/runtime-center spine and add a bounded adapter layer: protocol classification -> compiled adapter contract -> typed adapter execution -> scoped trial/evidence/lifecycle attribution. External protocols remain intake and transport facts only; the main brain and execution agents consume only CoPaw formal `adapter / runtime / project` capability truth.
 
 **Tech Stack:** Python, FastAPI, Pydantic, SQLite state store, existing `src/copaw/capabilities`, `src/copaw/state`, `src/copaw/app/runtime_center`, pytest
 
@@ -12,17 +12,17 @@
 
 ## Scope Guard
 
-This plan does **not** redo the already-landed donor/source/runtime work:
+This plan does **not** redo the already-landed external-source/source/runtime work:
 
-- donor/source normalization
+- external-source/source normalization
 - source-chain execution
 - open-source project install/materialization
 - scoped runtime instance lifecycle
-- Runtime Center donor/package/trust/scout read surfaces
+- Runtime Center external-source/package/trust/scout read surfaces
 
 This plan adds only the missing adapter-assimilation seam:
 
-1. classify donor callable surfaces
+1. classify external-source callable surfaces
 2. compile eligible donors into formal CoPaw `adapter` contracts
 3. execute typed adapter actions through governed transport bridges
 4. carry adapter attribution through trial/lifecycle/evidence/read models
@@ -44,7 +44,7 @@ Success criteria for this plan:
 - `src/copaw/discovery/models.py`
   - Add protocol-surface metadata to `DiscoveryHit` and `NormalizedDiscoveryHit`.
 - `src/copaw/capabilities/project_donor_contracts.py`
-  - Extract generic callable-surface hints from installed donor packages without adding donor-specific branches.
+  - Extract generic callable-surface hints from installed external-source packages without adding external-source-specific branches.
 - `src/copaw/app/routers/capability_market.py`
   - Persist protocol classification and compiled adapter contracts during project install/materialization.
 - `src/copaw/state/skill_candidate_service.py`
@@ -60,7 +60,7 @@ Success criteria for this plan:
 - `src/copaw/capabilities/service.py`
   - Wire the new adapter executor into the existing `CapabilityExecutionFacade`.
 - `src/copaw/app/runtime_center/state_query.py`
-  - Extend existing donor/candidate/portfolio read surfaces with protocol/adapter status.
+  - Extend existing external-source/candidate/portfolio read surfaces with protocol/adapter status.
 - `src/copaw/app/routers/runtime_center_routes_core.py`
   - Expose the new adapter status fields through existing Runtime Center capability routes.
 - `src/copaw/kernel/query_execution_runtime.py`
@@ -71,7 +71,7 @@ Success criteria for this plan:
 ### New files to create
 
 - `src/copaw/capabilities/external_adapter_contracts.py`
-  - Typed protocol-surface models, generic donor hints contract, compiled adapter contract, and metadata serialization helpers.
+  - Typed protocol-surface models, generic external-source hints contract, compiled adapter contract, and metadata serialization helpers.
 - `src/copaw/capabilities/external_adapter_compiler.py`
   - Generic compiler that turns `native_mcp` / `api` / `sdk` surfaces into CoPaw-owned adapter contracts and blocks unsupported shapes.
 - `src/copaw/capabilities/external_adapter_execution.py`
@@ -115,7 +115,6 @@ def test_native_mcp_surface_is_adapter_eligible():
     assert surface.protocol_surface_kind == "native_mcp"
     assert surface.transport_kind == "mcp"
     assert surface.formal_adapter_eligible is True
-
 
 def test_cli_runtime_surface_is_not_adapter_eligible():
     surface = classify_external_protocol_surface(
@@ -200,7 +199,7 @@ Expected: PASS
 
 ```bash
 git add src/copaw/capabilities/external_adapter_contracts.py src/copaw/discovery/models.py src/copaw/state/skill_candidate_service.py tests/capabilities/test_external_adapter_contracts.py tests/predictions/test_skill_candidate_service.py
-git commit -m "feat: add donor protocol surface contracts"
+git commit -m "feat: add external-source protocol surface contracts"
 ```
 
 ### Task 2: Compile Eligible Donors Into Formal Adapter Contracts During Materialization
@@ -230,7 +229,6 @@ def test_native_mcp_surface_compiles_into_formal_adapter_contract():
     assert contract.transport_kind == "mcp"
     assert contract.actions[0].action_id == "execute_task"
 
-
 def test_cli_runtime_only_surface_is_blocked_from_adapter_compilation():
     blocked = compile_external_adapter_contract(
         capability_id="adapter:demo",
@@ -258,7 +256,6 @@ class CompiledAdapterAction(BaseModel):
     input_schema: dict[str, Any] = Field(default_factory=dict)
     output_schema: dict[str, Any] = Field(default_factory=dict)
     transport_action_ref: str
-
 
 class CompiledAdapterContract(BaseModel):
     compiled_adapter_id: str
@@ -315,7 +312,7 @@ Expected: PASS
 
 ```bash
 git add src/copaw/capabilities/external_adapter_compiler.py src/copaw/config/config.py src/copaw/capabilities/project_donor_contracts.py src/copaw/app/routers/capability_market.py tests/capabilities/test_external_adapter_compiler.py tests/app/test_capability_market_api.py
-git commit -m "feat: compile donor protocol surfaces into adapter contracts"
+git commit -m "feat: compile external-source protocol surfaces into adapter contracts"
 ```
 
 ### Task 3: Project Compiled Adapters Into The Capability Graph Without Leaking Raw Protocols
@@ -409,7 +406,6 @@ async def test_compiled_mcp_adapter_action_calls_bound_transport(monkeypatch):
     assert result["success"] is True
     assert result["adapter_action"] == "execute_task"
 
-
 async def test_runtime_only_capability_rejects_business_adapter_action():
     result = await facade.execute_task(build_runtime_task("runtime:demo", action="execute_task"))
     assert result["success"] is False
@@ -441,7 +437,7 @@ class ExternalAdapterExecution:
         return {"success": False, "summary": "Unsupported adapter transport."}
 ```
 
-- [ ] **Step 4: Route `adapter:*` through the new executor and keep runtime-only donors blocked**
+- [ ] **Step 4: Route `adapter:*` through the new executor and keep runtime-only external sources blocked**
 
 ```python
 if mount.kind == "adapter" and metadata.get("adapter_contract"):
@@ -512,12 +508,11 @@ def test_trial_summary_keeps_protocol_and_compiled_adapter_ids():
     )
     assert trial.metadata["compiled_adapter_id"] == "adapter:demo"
 
-
 def test_runtime_evidence_carries_adapter_action_attribution():
     metadata = normalize_execution_attribution(
         {
             "skill_trial_id": "trial-1",
-            "donor_id": "donor-1",
+            "external_source_id": "source-1",
             "package_id": "pkg-1",
             "protocol_surface_kind": "api",
             "transport_kind": "http",
@@ -608,7 +603,7 @@ $env:PYTHONPATH='src'; .\.venv\Scripts\python.exe -m pytest tests/app/test_runti
 
 Expected: FAIL because Runtime Center does not yet expose the adapter-assimilation fields.
 
-- [ ] **Step 3: Extend existing candidate/donor/portfolio projections**
+- [ ] **Step 3: Extend existing candidate/external-source/portfolio projections**
 
 ```python
 payload["protocol_surface_kind"] = metadata.get("protocol_surface_kind")
@@ -648,7 +643,7 @@ git commit -m "feat: expose adapter assimilation status in runtime center"
 ### Task 7: Run Focused Regression And Common-Base Proof Samples
 
 **Files:**
-- Modify: `docs/superpowers/specs/2026-04-06-mcp-first-donor-adapter-assimilation-design.md`
+- Modify: `docs/superpowers/specs/2026-04-06-mcp-first-external-adapter-assimilation-design.md`
 - Modify: `TASK_STATUS.md`
 
 - [ ] **Step 1: Run the focused regression slices**
@@ -663,7 +658,7 @@ Expected: PASS
 
 - [ ] **Step 2: Run one real `native_mcp` proof sample through the common base**
 
-Run the existing install/search path against a real MCP-native donor and verify:
+Run the existing install/search path against a real MCP-native external-source and verify:
 
 - install succeeds
 - compiled adapter contract exists
@@ -675,7 +670,7 @@ Run the existing install/search path against a real MCP-native donor and verify:
 Verify:
 
 - no project-specific branch was added
-- donor compiles into the same `adapter_contract` shape
+- external-source compiles into the same `adapter_contract` shape
 - at least one typed adapter action executes
 - trial/lifecycle/evidence attribution contains `compiled_adapter_id`
 
@@ -685,19 +680,19 @@ Document:
 
 - what protocol shapes are truly live-verified
 - what remains blocked by design
-- that `MCP-first but not MCP-only` is now implemented as the common donor adapter base
+- that `MCP-first but not MCP-only` is now implemented as the common external-source adapter base
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add docs/superpowers/specs/2026-04-06-mcp-first-donor-adapter-assimilation-design.md TASK_STATUS.md
-git commit -m "docs: record verified donor adapter assimilation coverage"
+git add docs/superpowers/specs/2026-04-06-mcp-first-external-adapter-assimilation-design.md TASK_STATUS.md
+git commit -m "docs: record verified external-source adapter assimilation coverage"
 ```
 
 ## Notes For Implementers
 
-- Do not add `if donor == "OpenSpace"` or any other donor-specific branch anywhere in the common base.
+- Do not add `if provider == "OpenSpace"` or any other external-source-specific branch anywhere in the common base.
 - Do not let `project-package` or `runtime-component` masquerade as formal business adapters.
 - Prefer first-class typed contracts over ad-hoc metadata parsing; when metadata is used, keep the keys centralized in `external_adapter_contracts.py`.
-- If a donor lacks a stable typed callable surface, keep it installable as `project-package / runtime-component` and stop there.
+- If a external-source lacks a stable typed callable surface, keep it installable as `project-package / runtime-component` and stop there.
 - `sdk` transport may use a bounded bridge runner internally, but the main brain must still only see formal adapter actions.

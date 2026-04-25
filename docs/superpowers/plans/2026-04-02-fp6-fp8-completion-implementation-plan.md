@@ -4,7 +4,7 @@
 
 **Goal:** Fully deliver the remaining formal-planning backlog by landing a typed strategic uncertainty register, a typed strategy-change trigger engine, and a multi-cycle lane budget compiler on the existing `StrategyMemory -> OperatingLane -> BacklogItem -> OperatingCycle -> Assignment -> AgentReport -> synthesis/replan` truth chain.
 
-**Architecture:** Keep strategy truth on `StrategyMemoryRecord`, compile it through the dedicated `compiler/planning` slice, and push the resulting typed uncertainty, budget, and trigger outputs through cycle materialization, report/replan, prediction overlap, goal compiler context, and runtime read models. Borrow only CC shell discipline and bounded planning artifacts; do not introduce a second planner truth source, prompt-only planner state, or duplicate shallow follow-up branches.
+**Architecture:** Keep strategy truth on `StrategyMemoryRecord`, compile it through the dedicated `compiler/planning` slice, and push the resulting typed uncertainty, budget, and trigger outputs through cycle materialization, report/replan, prediction overlap, goal compiler context, and runtime read models. Keep only compact shell discipline and bounded planning artifacts; do not introduce a second planner truth source, prompt-only planner state, or duplicate shallow follow-up branches.
 
 **Tech Stack:** Python 3.11, Pydantic, SQLite, pytest, existing CoPaw `state / compiler / industry / goals / predictions / runtime-center` services.
 
@@ -21,7 +21,7 @@ This plan completes exactly three bounded backlog items:
 This plan does not:
 
 - reopen runtime-tail stages that are already closed
-- replace CoPaw's planning truth chain with Claude-style session planning
+- replace CoPaw's planning truth chain with prompt-only session planning
 - hide new work inside `metadata`-only prompt scratch when the object should be typed
 - keep the old shallow "always create follow-up backlog" path once a richer trigger decision replaces it
 

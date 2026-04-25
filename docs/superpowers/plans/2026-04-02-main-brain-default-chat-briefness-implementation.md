@@ -25,7 +25,7 @@ Add or tighten assertions so the default `CHAT` shell tail explicitly requires:
 - no request restatement unless needed
 - no bullets/sections for simple asks
 - one decisive clarification question at most
-- no donor-specific `cc` wording, labels, or shell names being introduced as part of this change
+- no external-project-specific wording, labels, or shell names being introduced as part of this change
 
 - [ ] **Step 2: Run the focused test to verify failure**
 
@@ -45,7 +45,7 @@ Do not:
 
 - change the shell-mode set
 - add a local reply-classification layer
-- import donor-specific `cc` wording or labels into CoPaw replies
+- import external-project-specific wording or labels into CoPaw replies
 - modify `plan / review / resume / verify`
 - change token limits or add response post-processing
 - change formal truth or orchestration behavior

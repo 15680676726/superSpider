@@ -46,7 +46,7 @@ In that framing:
 - browser, document, and Windows app execution are required carrier skills
 - Windows is the strongest current local execution host, not the only future environment
 - `Symbiotic Host Runtime` is the execution-side system that lets CoPaw live inside a real Windows
-  user workspace instead of merely borrowing UI tools
+  user workspace instead of merely relying on raw UI tools
 
 ## 3. Execution-Side Design Stance
 

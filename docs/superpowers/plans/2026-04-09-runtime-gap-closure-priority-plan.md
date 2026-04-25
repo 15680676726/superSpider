@@ -268,7 +268,7 @@ Run:
 
 Commit: `git commit -m "fix: tighten runtime read-model truth semantics"`
 
-### Task 6: Make capability install truth explicit: inventory vs seat attachment vs donor job result
+### Task 6: Make capability install truth explicit: inventory vs seat attachment vs external-job result
 
 **Files:**
 - Modify: `console/src/api/modules/capabilityMarket.ts`
@@ -283,7 +283,7 @@ Commit: `git commit -m "fix: tighten runtime read-model truth semantics"`
 Cover:
 - inventory-only install
 - install with target attachment
-- project donor async accepted vs completed
+- project-package async accepted vs completed
 
 - [ ] **Step 2: Run targeted tests**
 
@@ -296,9 +296,9 @@ Run:
 Required distinctions:
 - 已加入库存
 - 已挂到执行位
-- donor 安装中
-- donor 安装失败
-- donor 已完成并通过正式 probe/trial
+- 项目包安装中
+- 项目包安装失败
+- 项目包已完成并通过正式 probe/trial
 
 - [ ] **Step 4: Re-run tests and build**
 
@@ -309,7 +309,7 @@ Run:
 
 - [ ] **Step 5: Commit**
 
-Commit: `git commit -m "fix: distinguish inventory, attachment, and donor job results"`
+Commit: `git commit -m "fix: distinguish inventory, attachment, and external job results"`
 
 ### Task 7: Harden learning truth: real trials, patch evidence attachment, scoped workbench feeds
 

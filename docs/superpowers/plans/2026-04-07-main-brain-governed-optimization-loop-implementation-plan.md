@@ -4,7 +4,7 @@
 
 **Goal:** Turn the current review/prediction/candidate/trial/lifecycle pieces into one complete second-tier optimization loop without creating a parallel truth source or apply path.
 
-**Architecture:** Reuse the existing main-brain cadence, prediction discovery, donor/package/candidate truth, skill trial/lifecycle truth, MCP runtime contract, and Runtime Center governance surfaces. The work is to unify semantics and contracts so they behave like one loop instead of several adjacent subsystems.
+**Architecture:** Reuse the existing main-brain cadence, prediction discovery, external-source/package/candidate truth, skill trial/lifecycle truth, MCP runtime contract, and Runtime Center governance surfaces. The work is to unify semantics and contracts so they behave like one loop instead of several adjacent subsystems.
 
 **Tech Stack:** Python, Pydantic, existing CoPaw `predictions / capabilities / app.mcp / state / industry / runtime_center`, pytest.
 
@@ -21,7 +21,7 @@ This implementation plan is primarily for:
 - main-brain review cadence
 - prediction discovery intake
 - reporting/performance metrics
-- skill / donor / candidate / trial / lifecycle truth
+- skill / external-source / candidate / trial / lifecycle truth
 - MCP runtime as trialable governed capability supply
 - Runtime Center optimization read-model
 
@@ -30,7 +30,7 @@ This implementation plan is primarily for:
 These should be connected next once the Batch 1 loop is stable:
 
 - workflow preview / assignment-gap pressure
-- donor trust / capability portfolio pressure
+- provenance trust / capability portfolio pressure
 - knowledge-graph activation context
 - strategy / planning constraints
 
@@ -167,7 +167,7 @@ PYTHONPATH=src python -m pytest tests/predictions/test_skill_trial_service.py -q
 
 - [ ] Add failing tests for a unified Runtime Center optimization surface.
 - [ ] Verify the tests fail first.
-- [ ] Show discovery queue, active cases, running trials, promotion/rollback/retirement pressure, donor provenance, and MCP health in one read-model.
+- [ ] Show discovery queue, active cases, running trials, promotion/rollback/retirement pressure, source provenance, and MCP health in one read-model.
 - [ ] Expose the minimum operator-visible fields per optimization case:
   - issue source
   - discovery case id
@@ -177,7 +177,7 @@ PYTHONPATH=src python -m pytest tests/predictions/test_skill_trial_service.py -q
   - owner
   - evaluator verdict
   - lifecycle decision
-  - donor trust impact
+  - provenance trust impact
   - planning impact
   - rollback/recovery route
 - [ ] Remove duplicate or misleading labels that imply separate prediction/optimization systems.
@@ -200,14 +200,14 @@ PYTHONPATH=src python -m pytest tests/app/runtime_center_api_parts/overview_gove
 - [ ] Add a failing end-to-end test covering: review cadence -> discovery case -> main-brain handoff -> challenger trial -> evaluator verdict -> lifecycle decision -> Runtime Center readback.
 - [ ] Verify the new e2e test fails first.
 - [ ] Fill any missing glue in the existing chain until the loop passes end to end.
-- [ ] Ensure review results also write back into the next main-brain planning turn through donor trust / portfolio pressure / future discovery pressure.
+- [ ] Ensure review results also write back into the next main-brain planning turn through provenance trust / portfolio pressure / future discovery pressure.
 - [ ] Ensure the e2e path proves the intended boundary:
   - apply locally first
   - write truth back globally
   - only broaden rollout through explicit lifecycle decision
 - [ ] Make the writeback targets explicit and testable:
   - main-brain planning constraints
-  - donor trust truth
+  - provenance trust truth
   - capability portfolio pressure
   - future discovery/review pressure
   - strategy or operating-lane reopen signals
@@ -247,7 +247,7 @@ Landed in code:
 - Runtime Center optimization actionable/history surface
 - end-to-end loop verification from discovery to Runtime Center readback
 - real `desktop-windows` MCP template acceptance through manager connect + safe tool call
-- optimization review results written back into the next formal planning turn through planning constraints / donor trust / portfolio pressure / future discovery pressure
+- optimization review results written back into the next formal planning turn through planning constraints / provenance trust / portfolio pressure / future discovery pressure
 
 Focused verification used for closure:
 

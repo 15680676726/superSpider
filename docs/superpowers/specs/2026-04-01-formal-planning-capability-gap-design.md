@@ -5,24 +5,24 @@
 Define the remaining gap between:
 
 - CoPaw's current formal planning chain
-- Claude Code's borrowable planning/runtime discipline
+- the reusable single-path planning/runtime discipline patterns already absorbed into the repo
 - the complete short/mid/long-horizon planner CoPaw still needs
 
 This document exists to answer one precise question:
 
-> after borrowing Claude Code's execution shell and planning shell ideas, what formal planning capability still needs to be built inside CoPaw itself?
+> after absorbing the execution-shell and planning-shell discipline already proven useful here, what formal planning capability still needs to be built inside CoPaw itself?
 
 It does not replace:
 
 - `COPAW_CARRIER_UPGRADE_MASTERPLAN.md`
 - `V7_MAIN_BRAIN_AUTONOMY_PLAN.md`
-- `docs/superpowers/specs/2026-04-01-claude-runtime-contract-hardening-design.md`
+- the historical runtime-contract hardening record for this program
 
 It narrows the planning question to:
 
 - what CoPaw already has
-- what Claude Code can really donate
-- what Claude Code cannot donate
+- what reusable external planning-shell patterns can really provide
+- what they cannot provide
 - what must be built as CoPaw's own formal planner
 
 ---
@@ -35,7 +35,7 @@ That chain is:
 
 `StrategyMemory -> OperatingLane -> BacklogItem -> OperatingCycle -> Assignment -> AgentReport -> synthesis/replan`
 
-This is closer to CoPaw's target than Claude Code's session/task/todo/plan-file mental model.
+This is closer to CoPaw's target than a session/task/todo/plan-file-first mental model.
 
 But CoPaw still does not yet have a complete formal planner.
 
@@ -49,7 +49,7 @@ The current situation is:
 So the real upgrade target is:
 
 - keep CoPaw's formal planning truth
-- borrow Claude Code's planning shell and execution discipline
+- reuse external planning-shell discipline and execution closure patterns
 - build the remaining formal short/mid/long-horizon planner inside CoPaw
 
 ---
@@ -93,7 +93,7 @@ See:
 - `src/copaw/state/models_goals_tasks.py`
 - `V7_MAIN_BRAIN_AUTONOMY_PLAN.md`
 
-So CoPaw does not need Claude Code's task/todo/session model as a new planning truth.
+So CoPaw does not need an external task/todo/session model as a new planning truth.
 
 ### 2.3 Strategy and memory already enter lower planning/compile paths
 
@@ -214,17 +214,17 @@ But the system still lacks a strong assignment-local planning shell that formall
 - dependency ordering
 - bounded scratch planning
 
-This is exactly where Claude Code's planning shell is useful.
+This is exactly where an assignment-local planning shell is useful.
 
 ---
 
-## 4. What Claude Code Can Really Donate
+## 4. What External Planning-Shell Patterns Can Provide
 
-Claude Code should be treated here as a donor of planning shell discipline, not planning truth.
+External planning-shell patterns should be treated here as a source of shell discipline, not planning truth.
 
-### 4.1 Directly borrowable
+### 4.1 Directly reusable
 
-These ideas can be borrowed almost directly in adapted form:
+These ideas can be reused almost directly in adapted form:
 
 1. plan-mode discipline
    - read-only planning pass before mutation when needed
@@ -239,7 +239,7 @@ These ideas can be borrowed almost directly in adapted form:
 6. worker/subagent run shell
    - startup, additive tooling, finish-time cleanup
 
-### 4.2 Borrowable only after adaptation
+### 4.2 Reusable only after adaptation
 
 These are useful, but only after remapping into CoPaw's formal model:
 
@@ -256,14 +256,14 @@ These are useful, but only after remapping into CoPaw's formal model:
    - should become assignment/cycle review aides
    - not the formal report object itself
 
-### 4.3 Not borrowable as system center
+### 4.3 Not reusable as system center
 
 These should not be adopted as CoPaw's primary planning model:
 
 1. session-first planning truth
 2. todo/task/app-state as formal planner center
 3. plan file as canonical strategic memory
-4. Claude's top-level planner replacing `StrategyMemory/Lane/Backlog/Cycle`
+4. an external top-level planner replacing `StrategyMemory/Lane/Backlog/Cycle`
 
 ---
 
@@ -298,7 +298,7 @@ Still missing or too weak:
 5. local plan revision after evidence
    - when new evidence changes the current assignment path
 
-Claude Code helps strongly here through:
+External planning-shell discipline helps strongly here through:
 
 - planning shell
 - todo shell
@@ -338,7 +338,7 @@ Still missing or too weak:
 5. report-to-replan compiler
    - structured interpretation of repeated failures, blocked work, partial progress, and contradictions
 
-Claude Code helps only indirectly here.
+External planning-shell discipline helps only indirectly here.
 
 Its main contribution is:
 
@@ -379,7 +379,7 @@ Still missing or too weak:
 5. horizon coupling
    - how long-term mission constrains mid-cycle lane allocation and short-horizon assignment decomposition
 
-Claude Code does not provide this planner.
+External planning-shell discipline does not provide this planner.
 
 This must be built natively in CoPaw.
 
@@ -387,7 +387,7 @@ This must be built natively in CoPaw.
 
 ## 6. Final Classification
 
-### 6.1 Claude Code can directly help with
+### 6.1 External planning-shell discipline can directly help with
 
 - assignment-local planning shell
 - checklist/todo discipline
@@ -396,14 +396,14 @@ This must be built natively in CoPaw.
 - review input cleanup
 - subagent run shell
 
-### 6.2 Claude Code can help only after adaptation
+### 6.2 External planning-shell discipline can help only after adaptation
 
 - sidecar planning artifact
 - plan assistant
 - review summary shell
 - bounded assignment planner workspace
 
-### 6.3 Claude Code cannot replace
+### 6.3 External planning-shell discipline cannot replace
 
 - strategy compiler
 - lane allocator
@@ -423,13 +423,13 @@ To finish the complete planning capability gap cleanly, the order should be:
 Important naming note:
 
 - `Phase P-1` here is a planning-program phase label used only inside this planning-gap build order.
-- It is not the same thing as the historical `2026-04-01 P0 / P1 / P2` landed wave recorded in `2026-04-01-claude-runtime-contract-hardening-design.md`.
-- The historical `P0 / P1 / P2` record tracks Claude-derived runtime-contract hardening closure.
+- It is not the same thing as the historical `2026-04-01 P0 / P1 / P2` landed wave recorded in the earlier runtime-contract hardening record.
+- The historical `P0 / P1 / P2` record tracks the earlier runtime-contract hardening closure.
 - The `P-1 -> P-5` sequence below tracks the staged completion order for CoPaw's remaining formal planning capability.
 
-### Phase P-1: Finish Claude-derived runtime/planning shell hardening
+### Phase P-1: Finish current runtime/planning shell hardening
 
-Use Claude Code ideas for:
+Use the already-adopted single-path planning/runtime ideas for:
 
 - execution front-door
 - planning shell
@@ -486,7 +486,7 @@ This planning gap is considered closed only when:
 2. cycle generation is no longer just "backlog exists -> pick top items -> daily cycle"
 3. strategy fields such as `lane_weights`, `planning_policy`, and `review_rules` are compiled into real planning behavior
 4. report synthesis can trigger more than local follow-up; it can formally reshape cycle and strategy decisions
-5. Claude-derived planning shell remains sidecar and does not become a second strategic truth source
+5. assignment-local planning shell remains sidecar and does not become a second strategic truth source
 
 ---
 
@@ -511,7 +511,7 @@ This means the current gap closure should be read as:
 
 - short-horizon planning is now explicit and typed
 - mid-horizon cycle/replan shaping is no longer only thin local rule glue
-- Claude-derived planning shell remains bounded sidecar discipline
+- assignment-local planning shell remains bounded sidecar discipline
 
 What is now explicitly closed by the `2026-04-02` implementation round:
 
@@ -535,10 +535,9 @@ If future work wants richer horizon logic beyond this closure, it must start a n
 
 ## 10. Donor Boundary Summary
 
-For `FP-6 -> FP-8`, Claude Code is a donor of shell and discipline, not of
-planner truth.
+For `FP-6 -> FP-8`, external planning-shell discipline is a source of shell and execution discipline, not of planner truth.
 
-Allowed borrow classes:
+Allowed reuse classes:
 
 - plan file lifecycle
 - assignment-local planning scratch
@@ -547,7 +546,7 @@ Allowed borrow classes:
 - context entropy control
 - additive agent-specific MCP shell
 
-Forbidden borrow classes:
+Forbidden reuse classes:
 
 - strategic truth objects
 - lane/cycle/assignment/report planner truth
@@ -580,6 +579,6 @@ one.
 
 ## 12. One-Sentence Summary
 
-Claude Code can help CoPaw plan better inside a run, an assignment, and a review loop.
+External planning-shell discipline can help CoPaw plan better inside a run, an assignment, and a review loop.
 
 It cannot replace the formal short/mid/long-horizon planner that CoPaw still needs to build on top of its own `StrategyMemory -> Lane -> Backlog -> Cycle -> Assignment -> Report` truth chain.

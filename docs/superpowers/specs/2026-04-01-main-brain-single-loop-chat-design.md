@@ -66,11 +66,11 @@
 - 主脑文本不允许直接改状态
 - 正式写回、治理、恢复、任务物化仍由 kernel 二阶段提交
 
-## Reference Model From `cc`
+## Runtime Mainline Principles
 
-`cc` 在“聊天主链怎么跑”这件事上是更好的参考，但不能整套照搬。
+这条聊天主链应采用单环主查询，但不能整套复制外部产品前门。
 
-可直接借鉴的原则包括：
+直接保留的原则包括：
 
 - 默认直接进入主查询循环，而不是先跑一轮业务前门分类
 - 是否回复、追问、调能力、继续执行，默认由主模型自己决定
@@ -79,15 +79,15 @@
 - user/system context 使用会话级缓存
 - tool summary 等次要工作后移，不阻塞下一次主调用
 
-不能直接照搬的部分包括：
+明确不保留的部分包括：
 
 - Anthropic 专有 API 形态
 - `cache_control`、provider beta header、`CLAUDE.md` 专属机制
 - `cc` 的产品线程组织与 CoPaw 单窗口产品约束不一致的交互
 
-因此，CoPaw 的正确落地方式不是“复制 `cc`”，而是：
+因此，CoPaw 的正确落地方式是：
 
-`用 cc 的单环主脑原则重写 CoPaw 的聊天主链，再把正式提交链保留在 CoPaw kernel 内。`
+`用单环主脑原则重写 CoPaw 的聊天主链，再把正式提交链保留在 CoPaw kernel 内。`
 
 ## Proposed Architecture
 

@@ -4,7 +4,7 @@
 
 **Goal:** Make CoPaw main-brain shell selection prefer stronger explicit hints over weaker natural-language aliases, without expanding the keyword surface.
 
-**Architecture:** Keep all changes inside the existing request-scoped `intent_shell` path. Detect all triggerable matches, rank them by strength and position, and preserve the existing `request.mode_hint` override in `turn_executor` with explicit tests so shell priority stays deterministic and donor-boundary-safe.
+**Architecture:** Keep all changes inside the existing request-scoped `intent_shell` path. Detect all triggerable matches, rank them by strength and position, and preserve the existing `request.mode_hint` override in `turn_executor` with explicit tests so shell priority stays deterministic and boundary-safe.
 
 **Tech Stack:** Python, pytest, existing kernel chat/orchestrator routing
 

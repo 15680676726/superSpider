@@ -322,7 +322,7 @@ Required docs:
 - `TASK_STATUS.md`
 - `API_TRANSITION_MAP.md`
 - `docs/superpowers/specs/2026-04-01-formal-planning-capability-gap-design.md`
-- `docs/superpowers/specs/2026-04-01-claude-runtime-contract-hardening-design.md`
+- the historical runtime-contract hardening record for this program
 - `docs/superpowers/plans/2026-04-01-formal-planning-capability-gap-implementation-plan.md`
 - `docs/superpowers/specs/2026-04-02-runtime-complete-tail-closure-design.md`
 - `docs/superpowers/plans/2026-04-02-runtime-complete-tail-closure-implementation-plan.md`

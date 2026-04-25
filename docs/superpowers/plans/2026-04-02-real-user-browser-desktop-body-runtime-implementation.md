@@ -4,9 +4,9 @@
 
 **Goal:** Make CoPaw feel like a product-grade child-agent runtime that can continue real user browser and Windows desktop work, while staying on CoPaw's formal `EnvironmentMount / SessionMount / EvidenceRecord` truth.
 
-**Architecture:** Do not copy `cowork` as a parallel subsystem. Borrow donor runtime discipline from `cc/cowork` and land it on CoPaw's existing chat durability chain, `work_context_id` continuity chain, `lease_service`, and environment/session metadata. Any new helper must be a thin adapter over the current environment stack, not a second lifecycle center.
+**Architecture:** Keep this work on CoPaw's existing chat durability chain, `work_context_id` continuity chain, `lease_service`, and environment/session metadata. Any new helper must be a thin adapter over the current environment stack, not a second lifecycle center.
 
-**Tech Stack:** Python, FastAPI, SQLite state store, Playwright, Windows desktop MCP adapter, Runtime Event Bus, SSE chat runtime, CoPaw environment/runtime services, `cc` donor bridge and computer-use runtime patterns.
+**Tech Stack:** Python, FastAPI, SQLite state store, Playwright, Windows desktop MCP adapter, Runtime Event Bus, SSE chat runtime, CoPaw environment/runtime services.
 
 ---
 
@@ -41,22 +41,10 @@
 - `src/copaw/environments/cooperative/browser_attach_runtime.py`
 - `tests/environments/test_cooperative_browser_attach_runtime.py`
 
-**Grounded donor references**
-
-- `cc/src/bridge/bridgeApi.ts`
-- `cc/src/bridge/replBridge.ts`
-- `cc/src/bridge/bridgeMain.ts`
-- `cc/src/bridge/types.ts`
-- `cc/src/QueryEngine.ts`
-- `cc/src/hooks/useRemoteSession.ts`
-- `cc/src/utils/computerUse/executor.ts`
-- `cc/src/utils/computerUse/escHotkey.ts`
-- `cc/src/utils/computerUse/appNames.ts`
-
 **Explicit non-goals**
 
-- do not introduce `cowork_settings.json`
-- do not introduce `cowork_plugins`
+- do not introduce new file-backed host settings
+- do not introduce a separate plugin-managed runtime directory
 - do not introduce `memdir` or file-backed continuity truth
 - do not introduce a second chat or planner runtime
 
@@ -97,7 +85,7 @@ it('keeps accepted reply_done and commit_failed as separate phases', () => {
 - [x] **Step 4: Run the targeted frontend tests and verify failure**
 
 Run: `npm --prefix console test -- runtimeTransport.test.ts ChatRuntimeSidebar.test.tsx`
-Expected: FAIL because frontend lifecycle handling does not yet fully match the stricter donor-grade durability contract.
+Expected: FAIL because frontend lifecycle handling does not yet fully match the stricter durability contract.
 
 - [x] **Step 5: Implement minimal backend durability fixes**
 
@@ -328,7 +316,7 @@ git commit -m "feat: add end to end operator abort plumbing"
 
 **Files:**
 - Modify: `TASK_STATUS.md`
-- Modify: `docs/superpowers/specs/2026-04-02-cc-cowork-donor-mapping-and-copaw-alignment.md`
+- Modify: browser/body runtime design notes for the same closure wave
 
 - [x] **Step 1: Add explicit acceptance checklist**
 
@@ -359,16 +347,16 @@ Prove on a real machine:
 - a Windows app action respects exclusive ownership and abort
 - Runtime Center shows the same lifecycle truth
 
-- [x] **Step 4: Update status and donor spec**
+- [x] **Step 4: Update status and runtime spec**
 
 Document:
 - what is landed
 - what remains
-- what is intentionally still not copied from `cc/cowork`
+- what is intentionally still out of scope
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add TASK_STATUS.md docs/superpowers/specs/2026-04-02-cc-cowork-donor-mapping-and-copaw-alignment.md
+git add TASK_STATUS.md
 git commit -m "docs: update real-user runtime acceptance status"
 ```

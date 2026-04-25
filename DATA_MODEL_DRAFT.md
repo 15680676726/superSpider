@@ -3,7 +3,7 @@
 `2026-04-20` supplement:
 - CoPaw 后续要把本地多 agent 执行层硬切成统一 `External Executor Runtime` 接缝
 - 外部执行体只负责执行，不得成为第二主脑、第二记忆中心或第二长期战略中心
-- GitHub/open-source donor intake 后续只允许把“具备正式控制面的执行体 runtime provider”纳入正式模型；不再把任意仓库本身当成第一类执行对象
+- GitHub/open-source project source intake 后续只允许把“具备正式控制面的执行体 runtime provider”纳入正式模型；不再把任意仓库本身当成第一类执行对象
 - 新增的正式对象应至少包括：
   - `ExecutorProvider`
   - `RoleExecutorBinding`

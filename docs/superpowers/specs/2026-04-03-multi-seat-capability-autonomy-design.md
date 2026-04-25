@@ -55,7 +55,7 @@
   - `src/copaw/industry/service_activation.py`
 - capability discovery / recommendation：
   - `src/copaw/capabilities/capability_discovery.py`
-- 远程 skill trial / rollout donor 基线：
+- 远程 skill trial / rollout external-source 基线：
   - `src/copaw/capabilities/remote_skill_contract.py`
   - `src/copaw/capabilities/system_skill_handlers.py`
   - `src/copaw/predictions/service_recommendations.py`
@@ -143,7 +143,7 @@
 
 ---
 
-## 4. `cc` 借鉴边界
+## 4. 能力边界
 
 本设计明确借 `cc` 的纪律，但不复制 `cc` 的产品壳。
 

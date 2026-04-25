@@ -4,7 +4,7 @@
 
 **Goal:** 把 CoPaw 收口成“上层主脑框架 + 可插拔外部执行 runtime”架构，先接通 `Codex App Server`，再把本地多 agent 执行脑退役为历史层，同时为 `Hermes` 和其他开源执行体保留同一条正式接缝。
 
-**Architecture:** 保留 `MainBrain / Memory / Knowledge / Assignment / Evidence / Report / Runtime Center` 这条正式真相链，不再让 CoPaw 自己维护浏览器/桌面/文档执行脑。复用现有 `external_runtime / external_adapter / donor` 资产，统一改造成 `ExecutorRuntime` 接入层；把旧 GitHub/open-source donor intake 收口成“只接受控执行体 runtime provider”的正式入口。第一适配器是 `Codex App Server`，后续可扩展到 `Hermes` 与其他开源智能体 runtime；执行体既可全局统一，也可按职业绑定，同时模型调用必须进入统一治理。
+**Architecture:** 保留 `MainBrain / Memory / Knowledge / Assignment / Evidence / Report / Runtime Center` 这条正式真相链，不再让 CoPaw 自己维护浏览器/桌面/文档执行脑。复用现有 `external_runtime / external_adapter / external-source` 资产，统一改造成 `ExecutorRuntime` 接入层；把旧 GitHub/open-source intake 收口成“只接受控执行体 runtime provider”的正式入口。第一适配器是 `Codex App Server`，后续可扩展到 `Hermes` 与其他开源智能体 runtime；执行体既可全局统一，也可按职业绑定，同时模型调用必须进入统一治理。
 
 **Tech Stack:** Python 3.12, FastAPI, SQLite state store, pytest, Codex App Server protocol, Runtime Center frontend
 
@@ -24,7 +24,7 @@
   - `src/copaw/kernel/actor_mailbox.py`
   - `src/copaw/kernel/delegation_service.py`
   - `src/copaw/state/models_agents_runtime.py`
-- 当前仓库已经有一套可复用的外部 runtime / adapter / donor 契约，不应重写：
+- 当前仓库已经有一套可复用的外部 runtime / adapter / external-source 契约，不应重写：
   - `src/copaw/state/models_external_runtime.py`
   - `src/copaw/state/external_runtime_service.py`
   - `src/copaw/capabilities/external_adapter_contracts.py`
@@ -38,7 +38,7 @@
   - `ExecutorRuntime = 可插拔外部执行层`
   - `Codex = 第一适配器，不是唯一适配器`
   - `Hermes/others = 后续适配器，不单独再造第二套执行主链`
-  - 旧 GitHub/open-source donor intake 要收口成 `executor runtime provider intake`
+  - 旧 GitHub/open-source intake 要收口成 `executor runtime provider intake`
   - 系统必须支持 `single-runtime` 和 `role-routed` 两种执行体绑定模式
   - 模型调用必须有统一治理对象，而不是完全散落在外部执行体内部
 - 当前 `MCP/skill` canonical 主链仍然成立，且不应被本轮 executor-runtime 改造打乱：
@@ -177,11 +177,11 @@ Status notes in this section supersede the unchecked historical checklist items 
 
 - [ ] **Step 1: Write a failing architecture contract guard note in the plan**
 
-Add a checklist note to the modified spec stating that future edits must not regress back to `Codex-only` wording or to “arbitrary donor project intake” wording.
+Add a checklist note to the modified spec stating that future edits must not regress back to `single-adapter-only` wording or to “arbitrary project intake” wording.
 
 - [ ] **Step 2: Review the current spec and mark the exact sections to revise**
 
-Run: `rg -n "Codex-only|Codex App Server|browser|desktop|document|actor_worker|delegation" docs/superpowers/specs/2026-04-20-copaw-codex-app-server-hard-cut-design.md TASK_STATUS.md DATA_MODEL_DRAFT.md API_TRANSITION_MAP.md DEPRECATION_LEDGER.md`
+Run: `rg -n "single-adapter-only|Codex App Server|browser|desktop|document|actor_worker|delegation" docs/superpowers/specs/2026-04-20-copaw-codex-app-server-hard-cut-design.md TASK_STATUS.md DATA_MODEL_DRAFT.md API_TRANSITION_MAP.md DEPRECATION_LEDGER.md`
 
 Expected: existing `Codex-first` and old executor/runtime wording is located for replacement.
 
@@ -195,7 +195,7 @@ ExecutorRuntime = pluggable external executor runtime seam
 Codex = first adapter
 Hermes/others = future adapters
 Old local actor runtime = retirement target
-GitHub/donor intake = executor runtime provider intake only
+GitHub/project intake = executor runtime provider intake only
 single-runtime + role-routed modes both supported
 model invocation = unified governance object
 ExecutorRuntime != MCP != skill
@@ -207,16 +207,16 @@ Required content:
 
 - old local actor runtime marked as retired target
 - old browser/desktop/document execution surfaces marked as deferred retirement
-- `external_runtime / external_adapter / donor` assets marked as rename-and-reuse assets
+- `external_runtime / external_adapter / external-source` assets marked as rename-and-reuse assets
 - 7 个当前代码级缺口写入 spec/plan 风险段
 - 统一执行体选择模式和模型治理口径写入文档
-- 旧 donor/project 体系的 6 类显式收口项写入 spec/ledger：
+- 旧 external-source/project 体系的 6 类显式收口项写入 spec/ledger：
   - `/capability-market/projects/install*`
   - `project-package / adapter / runtime-component`
-  - donor state/service/trust/trial/retirement
-  - Runtime Center donor 读面
-  - donor-first 旧 specs/contracts
-  - donor-first 测试与 TASK_STATUS 口径
+  - external-source state/service/trust/trial/retirement
+  - Runtime Center external-source 读面
+  - external-source-first 旧 specs/contracts
+  - external-source-first 测试与 TASK_STATUS 口径
 - 显式写清 `ExecutorRuntime / MCP / skill` 三者边界，避免后续继续混层
 - 显式写清“现有 MCP/skill 安装、搜索、演进主链不属于本轮收口目标”
 
@@ -318,7 +318,7 @@ Implementation note:
 
 - keep `ExternalCapabilityRuntimeInstanceRecord` readable during transition
 - add translation helpers or aliases so new executor runtime logic can reuse the same repository patterns
-- keep provider/runtime intake reusable, but no longer model it as arbitrary project donor install
+- keep provider/runtime intake reusable, but no longer model it as arbitrary project-package install
 
 - [ ] **Step 7: Commit the formal executor runtime layer**
 
@@ -379,11 +379,11 @@ Required rule:
 - a runtime is only formal if it exposes controllable lifecycle plus event return path
 - GitHub/open-source intake only enters this layer if it resolves to a formal executor runtime provider contract
 
-- [ ] **Step 4: Rename donor-oriented helpers in code and docstrings**
+- [ ] **Step 4: Rename provider-oriented helpers in code and docstrings**
 
 Examples:
 
-- “donor” -> “executor runtime provider” where the code is now about runtime intake
+- “legacy intake” -> “executor runtime provider” where the code is now about runtime intake
 - keep migration aliases only if tests require them
 
 - [ ] **Step 5: Keep MCP/API/SDK/CLI-runtime support**
@@ -694,8 +694,8 @@ git commit -m "docs: record executor runtime cutover verification"
 - Do not build Hermes integration in the same phase.
 - Do not invent a second memory or runtime truth chain inside external executors.
 - Do not keep local actor runtime and executor runtime as long-lived peers after cutover.
-- Do not let “arbitrary project donor install” continue masquerading as executor-runtime intake after the new seam lands.
-- Do not leave the old donor-first product surfaces undocumented; every retained donor/project surface must be labeled `compatibility` or explicitly narrowed to executor providers.
+- Do not let “arbitrary project-package install” continue masquerading as executor-runtime intake after the new seam lands.
+- Do not leave the old external-source-first product surfaces undocumented; every retained external-source/project surface must be labeled `compatibility` or explicitly narrowed to executor providers.
 - Do not rewrite or merge away the current MCP/skill install-search-evolution chain in the same phase; that remains the capability-market/capability-evolution domain.
 
 ---

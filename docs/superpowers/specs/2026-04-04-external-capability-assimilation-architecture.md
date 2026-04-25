@@ -82,13 +82,13 @@ Three rules must remain absolute:
 - `CoPaw owns lifecycle`
 - `CoPaw owns replacement power`
 
-No donor may bypass those three.
+No external source may bypass those three.
 
 ---
 
 ## 3. Main Brain Core Competence Boundary
 
-The main brain is not a chat persona, not a skill writer, and not a donor router.
+The main brain is not a chat persona, not a skill writer, and not an external-source router.
 
 Its core competence is:
 
@@ -105,22 +105,22 @@ The main brain may use external donors, but external donors do not replace the m
 
 Therefore:
 
-- donor selection is a governed optimization act
-- donor usage is an execution act
-- donor promotion is a lifecycle act
+- external-source selection is a governed optimization act
+- external-source usage is an execution act
+- external-source promotion is a lifecycle act
 - none of the above redefine what the main brain is
 
 ---
 
 ## 4. Unified Donor Universe
 
-All donor types must normalize into one formal capability-evolution chain.
+All external-source types must normalize into one formal capability-evolution chain.
 
 The source may differ, but lifecycle semantics may not.
 
 ### 4.1 Donor Categories
 
-Recommended normalized donor categories:
+Recommended normalized external-source categories:
 
 - `skill`
 - `mcp-bundle`
@@ -152,7 +152,7 @@ The following must always be false:
 - file written == promoted skill
 - package available == role-wide capability
 
-Every donor must pass through the same lifecycle chain before formal adoption.
+Every external source must pass through the same lifecycle chain before formal adoption.
 
 ---
 
@@ -168,13 +168,13 @@ Discovery only identifies possible leverage. It must not mutate formal runtime c
 
 ### 5.2 Evaluate
 
-Evaluation scores a donor for fit, safety, environment compatibility, role relevance, and likely leverage.
+Evaluation scores an external source for fit, safety, environment compatibility, role relevance, and likely leverage.
 
 ### 5.3 Candidate
 
-`CapabilityCandidateRecord` is the first point where a donor becomes formal system state.
+`CapabilityCandidateRecord` is the first point where an external source becomes formal system state.
 
-Before candidate state, a donor is only an external possibility.
+Before candidate state, an external source is only an external possibility.
 
 ### 5.4 Scoped Trial
 
@@ -221,7 +221,7 @@ Constant GitHub/registry polling would create:
 - uncontrolled cost
 - noise inflation
 - low-signal candidate floods
-- donor pollution
+- source sprawl
 - portfolio entropy
 
 Recommended discovery model is:
@@ -236,13 +236,13 @@ Recommended discovery model is:
 Trigger when the system encounters a real capability hole:
 
 - repeated failure on the same task family
-- no suitable donor in the current portfolio
+- no suitable external source in the current portfolio
 - role/environment mismatch
 - persistent inability to execute a required class of work
 
 ### 6.2 Performance-Driven Discovery
 
-Trigger when an existing donor underperforms:
+Trigger when an existing external source underperforms:
 
 - too many failures
 - too much latency
@@ -269,7 +269,7 @@ Typical triggers:
 
 - trusted ecosystem release feeds
 - trusted author/org updates
-- explicit donor watchlists
+- explicit external-source watchlists
 - high-value market signals from already relevant ecosystems
 
 This should behave as a low-frequency radar, not as broad continuous scraping.
@@ -357,7 +357,7 @@ Source outage or source misconfiguration must only degrade:
 It must never break:
 
 - main-brain operation
-- existing donor execution
+- existing external-source execution
 - current runtime tasks
 - already adopted capabilities
 
@@ -369,7 +369,7 @@ Hard rule:
 
 The platform should retain last-known-good snapshots for:
 
-- donor catalogs
+- external-source catalogs
 - source metadata
 - trust memory
 - allowlists/watchlists
@@ -447,7 +447,7 @@ In short:
 
 Multiple sources improve resilience, but they also create duplication noise.
 
-Without formal deduplication, the same donor would appear as many fake choices, which would:
+Without formal deduplication, the same external source would appear as many fake choices, which would:
 
 - inflate candidate count
 - split evidence
@@ -465,8 +465,8 @@ Recommended dedup layers:
    - remove duplicates inside the active source result set
 2. `package identity dedup`
    - merge artifacts with the same canonical package identity
-3. `donor lineage dedup`
-   - merge different source aliases pointing at the same donor family
+3. `source lineage dedup`
+   - merge different source aliases pointing at the same source family
 4. `candidate overlap detection`
    - detect functionally overlapping donors even when package identity differs
 5. `portfolio compaction`
@@ -488,7 +488,7 @@ Recommended fields include:
 Three rules should remain explicit:
 
 - `multi-source discovery must merge before candidate expansion`
-- `same donor from multiple sources should strengthen confidence, not multiply candidates`
+- `the same external source from multiple sources should strengthen confidence, not multiply candidates`
 - `portfolio count is based on normalized donors, not raw source hits`
 
 ---
@@ -501,7 +501,7 @@ Admission does not equal trial.
 
 Trial does not equal promotion.
 
-Recommended donor admission classes:
+Recommended external-source admission classes:
 
 ### 10.1 `allowlisted`
 
@@ -565,10 +565,10 @@ CoPaw should not treat self-authored skills or self-authored capabilities as the
 
 The default growth rule should be:
 
-1. reuse an existing donor
+1. reuse an existing external source
 2. compose existing donors
 3. compare multiple donors
-4. adopt the best-performing donor
+4. adopt the best-performing external source
 5. only then allow local fallback authoring
 
 This is the platform-first interpretation of long-term evolution.
@@ -651,7 +651,7 @@ Default policy must be:
 - `human-out-of-the-loop by default`
 - `human-at-the-boundary only`
 
-Most users do not understand skill ecosystems, MCP internals, provider contracts, or donor quality signals.
+Most users do not understand skill ecosystems, MCP internals, provider contracts, or external-source quality signals.
 
 Therefore routine trial-and-error should be handled by the system itself.
 
@@ -659,12 +659,12 @@ Therefore routine trial-and-error should be handled by the system itself.
 
 By default the system should autonomously handle:
 
-- donor discovery
-- donor evaluation
+- external-source discovery
+- external-source evaluation
 - candidate creation
 - scoped trial
 - trial evidence collection
-- donor comparison
+- external-source comparison
 - automatic rollback
 - portfolio refresh
 
@@ -675,7 +675,7 @@ Human involvement should be reserved for:
 - irreversible external actions
 - money/account/legal/privacy high-risk boundaries
 - mutations near kernel/truth/governance core
-- cases where multiple high-impact donor choices remain unresolved with insufficient evidence
+- cases where multiple high-impact external-source choices remain unresolved with insufficient evidence
 
 The platform should not routinely require the human to choose technical building blocks.
 
@@ -689,10 +689,10 @@ The old intuition of "system discovers gap -> main brain writes new skill" shoul
 
 Recommended priority order:
 
-1. reuse an existing donor
+1. reuse an existing external source
 2. compose existing donors
 3. compare multiple donors through scoped trial
-4. adopt the best-performing donor
+4. adopt the best-performing external source
 5. only if the ecosystem cannot cover the gap, allow `local_authored`
 
 So `local_authored` should become:
@@ -719,13 +719,13 @@ Long-term autonomy is not only about adding donors.
 It is also about:
 
 - portfolio shape
-- donor replacement
-- donor forgetting
-- donor retirement
+- external-source replacement
+- external-source forgetting
+- external-source retirement
 
 ### 15.1 Portfolio Limits
 
-Every role, seat, and environment should have bounded donor density.
+Every role, seat, and environment should have bounded external-source density.
 
 Too many active donors produce:
 
@@ -734,24 +734,24 @@ Too many active donors produce:
 - lower trial quality
 - worse execution predictability
 
-So the platform should maintain bounded active donor counts per:
+So the platform should maintain bounded active external-source counts per:
 
 - role baseline
 - seat runtime
 - environment/session scope
-- donor category
+- external-source category
 
 ### 15.2 Trust Memory
 
-CoPaw should accumulate donor trust memory over time:
+CoPaw should accumulate source trust memory over time:
 
 - reliable sources
 - unstable sources
 - high-value authors/orgs
-- donors with frequent rollback history
-- donors with repeated mismatch by role or environment
+- sources with frequent rollback history
+- sources with repeated mismatch by role or environment
 
-This is not a separate truth system. It is governance memory that improves future donor selection.
+This is not a separate truth system. It is governance memory that improves future external-source selection.
 
 ### 15.3 Retirement And Forgetting
 
@@ -760,7 +760,7 @@ CoPaw must know how to remove donors, not only add them.
 Retirement signals include:
 
 - better replacement exists
-- donor quality degrades
+- external-source quality degrades
 - maintenance stops
 - compatibility cost grows
 - no longer matches current strategic portfolio
@@ -773,7 +773,7 @@ This is required for sustained autonomy. Otherwise the system only accumulates b
 
 The platform should not optimize only single donors.
 
-It should optimize donor combinations:
+It should optimize external-source combinations:
 
 - best role capability mix
 - best environment capability mix
@@ -794,13 +794,13 @@ That portfolio must stay subordinate to formal runtime truth, not the other way 
 
 ## 17. Anti-Capture Rules
 
-No donor, no matter how good, may capture the platform.
+No external source, no matter how good, may capture the platform.
 
 Three anti-capture rules should remain explicit:
 
-1. a donor may be integrated into CoPaw
-2. CoPaw must not be redefined around a donor's native internal model
-3. if a donor conflicts with CoPaw's formal truth/lifecycle/evidence chain, the donor must adapt or remain external
+1. an external source may be integrated into CoPaw
+2. CoPaw must not be redefined around an external source's native internal model
+3. if an external source conflicts with CoPaw's formal truth/lifecycle/evidence chain, the external source must adapt or remain external
 
 This rule protects the carrier from turning into a pile of loosely glued third-party subsystems.
 
@@ -816,7 +816,7 @@ Minimum formal runtime expectations:
 
 State should be able to represent:
 
-- donor provenance
+- source provenance
 - package provenance
 - candidate state
 - scoped trial state
@@ -833,15 +833,15 @@ Runtime Center and governance read surfaces should be able to show:
 - candidate donors
 - trial outcomes
 - adoption and rollback history
-- degraded donor components
-- donor portfolio deltas
+- degraded external-source components
+- external-source portfolio deltas
 - source provenance and current trust posture
 
 ### 18.3 Execution Attribution
 
 Runtime/evidence should be able to attribute execution to:
 
-- donor id
+- external-source id
 - package id
 - candidate id
 - trial id
@@ -855,7 +855,7 @@ Formal write surfaces should remain explicit:
 - discover candidate
 - start scoped trial
 - apply lifecycle decision
-- retire donor
+- retire external source
 - rebuild capability portfolio
 
 No hidden adoption path should exist outside that chain.
@@ -867,13 +867,13 @@ No hidden adoption path should exist outside that chain.
 The next implementation direction should be:
 
 1. keep the current governed capability lifecycle chain as the formal base
-2. extend it from remote-skill emphasis to full donor assimilation
-3. add donor/source/package truth
+2. extend it from remote-skill emphasis to full external-source assimilation
+3. add source/package provenance truth
 4. add discovery budgeting and watchlist policy
 5. add portfolio limits and trust/retirement rules
 6. keep local authoring only as exception path
 
-This avoids building a second capability manager while still enabling long-term donor-driven evolution.
+This avoids building a second capability manager while still enabling long-term external-source-driven evolution.
 
 ---
 
@@ -885,6 +885,6 @@ CoPaw should be judged successful here only if:
 - it does so without surrendering truth, lifecycle, or replacement power
 - most trial-and-error happens autonomously
 - human involvement stays at real boundary cases
-- the active donor portfolio stays compact, auditable, and strategically aligned
+- the active external-source portfolio stays compact, auditable, and strategically aligned
 
 That is the standard for long-term autonomy under a platform-first architecture.

@@ -617,21 +617,21 @@ Current hard boundary after phase 4:
 1. 不把 activation layer 做成新的 canonical truth
 2. 不把它做成“关键词命中 = 直接召回 chunk”的简单搜索壳
 3. 不引入第二套 memory DB 做双写
-4. 不用 Claude 的 session memory 替代 CoPaw 的 truth-first memory
+4. 不用外部 session memory 替代 CoPaw 的 truth-first memory
 5. 不把 graph activation 直接变成主脑最终决策，必须仍然挂回 evidence/state/strategy
 
-## Relationship To Claude Code
+## Relationship To External Session-Memory Patterns
 
-Claude Code 仍然值得借鉴，但位置很清楚：
+外部会话记忆产品里有一些模式仍然值得参考，但位置很清楚：
 
-Claude 适合借：
+适合吸收的模式：
 
 - working memory
 - session compaction
 - consolidation
 - interrupt / timeout / cleanup discipline
 
-Claude 不适合作为最终知识架构：
+纯会话式知识组织不适合作为最终知识架构：
 
 - 它更像记忆文件系统
 - 不像正式行业知识图谱
@@ -639,7 +639,7 @@ Claude 不适合作为最终知识架构：
 因此：
 
 - 知识最终组织：按 CoPaw 的 activation layer 做
-- 知识提炼工程纪律：继续借 Claude
+- 知识提炼工程纪律：继续保持严格工程纪律
 
 ## Final Position
 

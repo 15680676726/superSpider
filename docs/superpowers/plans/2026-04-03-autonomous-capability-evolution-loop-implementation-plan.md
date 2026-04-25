@@ -18,21 +18,21 @@ Current reality:
   - `CapabilityCandidateRecord`
   - `SkillTrialRecord`
   - `SkillLifecycleDecisionRecord`
-  - donor-first candidate normalization
-  - donor/reuse/fallback resolution through `skill_evolution_service`
+  - external-source-first candidate normalization
+  - external-source/reuse/fallback resolution through `skill_evolution_service`
   - runtime attribution on query execution
   - Runtime Center candidate/trial/lifecycle read-model projection
 - the practical execution priority for this area was later corrected by:
-  - `docs/superpowers/plans/2026-04-04-donor-first-capability-evolution-priority-plan.md`
+  - `docs/superpowers/plans/2026-04-04-external-source-capability-evolution-priority-plan.md`
   - `docs/superpowers/plans/2026-04-04-external-capability-assimilation-implementation-plan.md`
   - `TASK_STATUS.md`
 - the unchecked step boxes below are retained as the original execution template; they must not be read as today's completion truth by themselves
-- live discovery/install/use closure must be judged from the newer donor-first documents and `TASK_STATUS.md`, not from this file alone
+- live discovery/install/use closure must be judged from the newer external-source-first documents and `TASK_STATUS.md`, not from this file alone
 
 Practical rule:
 
 - use this file to understand the original loop structure
-- use the newer donor-first plans plus `TASK_STATUS.md` to judge landed state, superseded ordering, and live-verified runtime scope
+- use the newer external-source-first plans plus `TASK_STATUS.md` to judge landed state, superseded ordering, and live-verified runtime scope
 
 ## Completion Note (`2026-04-06`)
 
@@ -75,7 +75,7 @@ PYTHONPATH=src python -m pytest tests/app/industry_api_parts/bootstrap_lifecycle
 Honest boundary:
 
 - this closes the governed capability-evolution loop in CoPaw's own truth/runtime/risk/evidence chain
-- it does not by itself expand donor discovery/use claims beyond the newer donor-first documents and `TASK_STATUS.md`
+- it does not by itself expand external-source discovery/use claims beyond the newer external-source documents and `TASK_STATUS.md`
 
 ---
 
@@ -95,7 +95,7 @@ Honest boundary:
 - [ ] Keep `SkillCandidateRecord` as the skill-specific subtype instead of the only candidate truth.
 - [ ] Leave room for `McpBundleCandidateRecord` so MCP-native candidates do not get forced into a skill-only schema.
 - [ ] Add candidate-source normalization so both:
-  - external donor / remote auto-install / MCP / adapter ingest
+  - external source / remote auto-install / MCP / adapter ingest
   - local self-authored / generated fallback artifacts
   enter the same `CapabilityCandidateRecord` truth before any activation work.
 - [ ] Persist source provenance on every candidate:
@@ -112,8 +112,8 @@ Honest boundary:
 - [ ] Ensure predictions can emit governed candidate proposals without directly installing anything.
 - [ ] Add duplicate/overlap detection between external candidates and local candidates so equivalent artifacts do not create parallel trial tracks.
 - [ ] Import already-active installed/enabled skill/MCP artifacts as baseline lifecycle records instead of re-installing them as if they were brand new candidates.
-- [ ] Enforce donor-first selection discipline so candidate creation prefers:
-  - existing mature donor
+- [ ] Enforce external-source-first selection discipline so candidate creation prefers:
+  - existing mature external source
   - healthy artifact reuse
   - governed local revision
   - only then new local artifact authoring
@@ -127,9 +127,9 @@ PYTHONPATH=src python -m pytest tests/predictions/test_skill_candidate_service.p
 
 ---
 
-## Phase 2: Donor Adoption, Reuse, And Fallback Artifact Materialization
+## Phase 2: External-Source Adoption, Reuse, And Fallback Artifact Materialization
 
-**Outcome:** a candidate can first resolve to donor adoption or healthy-version reuse, and only then produce a governed fallback artifact package when donor-first paths still leave a real gap.
+**Outcome:** a candidate can first resolve to external-source adoption or healthy-version reuse, and only then produce a governed fallback artifact package when external-source-first paths still leave a real gap.
 
 **Files:**
 - Modify: `src/copaw/capabilities/skill_service.py`
@@ -139,7 +139,7 @@ PYTHONPATH=src python -m pytest tests/predictions/test_skill_candidate_service.p
 - Test: `tests/test_skill_service.py`
 
 - [ ] Define governed package materialization contract for:
-  - external donor package/adapters
+  - external-source package/adapters
   - MCP/runtime bundle metadata
   - `SKILL.md`
   - optional `scripts/`
@@ -150,7 +150,7 @@ PYTHONPATH=src python -m pytest tests/predictions/test_skill_candidate_service.p
 - [ ] Keep subtype-specific materialization boundaries explicit:
   - skill candidates materialize skill artifacts
   - MCP candidates materialize MCP/runtime bundle metadata
-- [ ] Require donor adoption or healthy-version reuse to be evaluated before new local artifact authoring starts.
+- [ ] Require external-source adoption or healthy-version reuse to be evaluated before new local artifact authoring starts.
 - [ ] Persist `candidate_id`, lifecycle stage, and lineage metadata into the artifact path and capability projection.
 - [ ] Keep artifact materialization separate from lifecycle promotion.
 - [ ] Ensure missing local artifact targets fail safely and do not corrupt lifecycle truth.
@@ -242,7 +242,7 @@ PYTHONPATH=src python -m pytest tests/kernel/test_query_execution_runtime.py tes
   - latency summary
 - [ ] Feed verdict-ready trial summaries back into prediction / learning.
 - [ ] Distinguish trial success from mere time-in-use.
-- [ ] Verify donor adoption/reuse paths and local fallback artifacts feed the same trial verdict model.
+- [ ] Verify external-source adoption/reuse paths and local fallback artifacts feed the same trial verdict model.
 
 **Verification:**
 ```powershell
@@ -334,7 +334,7 @@ PYTHONPATH=src python -m pytest tests/industry/test_runtime_views_split.py tests
 - Test: `tests/industry/test_runtime_views_split.py`
 
 - [ ] Project candidate status into Runtime Center.
-- [ ] Project candidate source provenance and source normalization result into Runtime Center so operators can see whether a candidate came from external donor ingest or local authoring without implying different governance.
+- [ ] Project candidate source provenance and source normalization result into Runtime Center so operators can see whether a candidate came from external-source ingest or local authoring without implying different governance.
 - [ ] Project baseline-imported active artifacts and their protection state so operators can tell which active capabilities are inherited baseline versus newly trialed candidates.
 - [ ] Project per-seat / per-session trial state.
 - [ ] Project lifecycle decision history.
@@ -380,8 +380,8 @@ PYTHONPATH=src python -m pytest tests/predictions/test_skill_candidate_service.p
 - [ ] External auto-installed artifacts and local self-authored/generated fallback artifacts normalize into the same candidate lifecycle.
 - [ ] The top-level lifecycle truth can represent both skill candidates and MCP-native candidates without forcing MCP into a skill-only schema.
 - [ ] Existing active installed/enabled artifacts can be imported into the lifecycle ledger without forced reinstall.
-- [ ] Donor adoption and healthy-version reuse are evaluated before new local artifact authoring.
-- [ ] A candidate can synthesize a governed fallback artifact package when donor-first paths do not close the gap.
+- [ ] External-source adoption and healthy-version reuse are evaluated before new local artifact authoring.
+- [ ] A candidate can synthesize a governed fallback artifact package when external-source-first paths do not close the gap.
 - [ ] A new artifact defaults to seat/session trial, not direct role promotion.
 - [ ] The same healthy artifact version is reused across tasks when scope and environment contract still match.
 - [ ] Multi-seat trial evidence stays isolated per seat/session while still aggregating to candidate-level verdicts.

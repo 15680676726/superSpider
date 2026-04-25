@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Finish the external-executor hard-cut against the `2026-04-20` design baseline so CoPaw no longer treats the local actor runtime and arbitrary project-donor intake as the formal execution mainline.
+**Goal:** Finish the external-executor hard-cut against the `2026-04-20` design baseline so CoPaw no longer treats the local actor runtime and arbitrary external project intake as the formal execution mainline.
 
 **Architecture:** Keep `CoPaw` as the only long-lived truth source for main-brain planning, assignment, evidence, and report closure. Move execution truth onto a formal `ExecutorRuntime` object chain and make local actor surfaces explicit read-only compatibility views while executor runtime, event writeback, and provider intake become the canonical execution path.
 
@@ -97,17 +97,17 @@
 - Test: `tests/app/test_runtime_center_external_runtime_api.py`
 - Test: `tests/app/test_capability_market_api.py`
 
-- [ ] **Step 1: Write failing tests that prove arbitrary project-donor install/search still presents itself as a canonical executor surface**
+- [ ] **Step 1: Write failing tests that prove arbitrary external-project compatibility install/search still presents itself as a canonical executor surface**
 
-- [ ] **Step 2: Run the donor/provider cutover tests and verify the failures are on the intended compatibility boundary**
+- [ ] **Step 2: Run the provider/compatibility cutover tests and verify the failures are on the intended compatibility boundary**
 
 - [ ] **Step 3: Mark `/capability-market/projects/install*` and related taxonomy as compatibility/acquisition-only, and prevent them from being interpreted as formal executor-provider truth**
 
 - [ ] **Step 4: Keep `ExecutorProvider / control_surface_kind / protocol_surface_kind` as the only formal execution-layer vocabulary in active read/write paths**
 
-- [ ] **Step 5: Re-run donor/provider tests and make them pass**
+- [ ] **Step 5: Re-run provider/compatibility tests and make them pass**
 
-- [ ] **Step 6: Commit the donor/provider supersede slice**
+- [ ] **Step 6: Commit the provider/compatibility supersede slice**
 
 ### Task 5: Update Status And Deprecation Contracts
 
@@ -120,7 +120,7 @@
 
 - [ ] **Step 2: Update `TASK_STATUS.md` so Task 2/3/6/7 reflect the actual post-cutover state and exact remaining boundaries**
 
-- [ ] **Step 3: Update `DEPRECATION_LEDGER.md` so actor runtime, delegation, and donor/project intake entries reflect their new compatibility or retirement status**
+- [ ] **Step 3: Update `DEPRECATION_LEDGER.md` so actor runtime, delegation, and external-project intake entries reflect their new compatibility or retirement status**
 
 - [ ] **Step 4: Update the older completion plan so it no longer overstates or misstates the final closure scope**
 
@@ -146,7 +146,7 @@
 - Test: `console/src/pages/AgentWorkbench/runtimePanels.test.tsx`
 - Test: `console/src/pages/AgentWorkbench/useAgentWorkbench.test.tsx`
 
-- [ ] **Step 1: Run fresh focused regression for executor state, kernel writeback, Runtime Center, actor compatibility, donor/provider boundaries, and touched frontend slices**
+- [ ] **Step 1: Run fresh focused regression for executor state, kernel writeback, Runtime Center, actor compatibility, provider/compatibility boundaries, and touched frontend slices**
 
 - [ ] **Step 2: Run default regression for the canonical runtime gate that covers the widened hard-cut surface**
 

@@ -87,7 +87,7 @@ Introduce a canonical action payload that includes:
 - `action`
 - `priority`
 - scope identifiers
-- donor/candidate references
+- source/candidate references
 - reason/summary
 - route or review surface hint
 

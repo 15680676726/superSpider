@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Close the remaining seven hard-cut gaps so `ExecutorRuntime` becomes the only formal execution mainline and all leftover local actor, delegation, donor/project, and local-tool surfaces are either explicit compatibility paths or retired.
+**Goal:** Close the remaining seven hard-cut gaps so `ExecutorRuntime` becomes the only formal execution mainline and all leftover local actor, delegation, external-project compatibility, and local-tool surfaces are either explicit compatibility paths or retired.
 
-**Architecture:** First fix the formal contract mismatch around model governance so subsequent cutovers do not build on a broken binding. Then move `ExecutorRuntime` truth off the legacy external-runtime bridge, demote actor/delegation/bootstrap remnants out of the formal startup and assignment path, retire donor/project execution shells, and finally prove the new provider intake with fresh live verification and doc sync.
+**Architecture:** First fix the formal contract mismatch around model governance so subsequent cutovers do not build on a broken binding. Then move `ExecutorRuntime` truth off the legacy external-runtime bridge, demote actor/delegation/bootstrap remnants out of the formal startup and assignment path, retire external-project compatibility execution shells, and finally prove the new provider intake with fresh live verification and doc sync.
 
 **Tech Stack:** Python 3.12, FastAPI, SQLite state store, pytest, Vitest, Runtime Center frontend, Codex App Server adapter
 
@@ -54,9 +54,9 @@
 - `src/copaw/app/runtime_service_graph.py`
   - App assembly path that still injects actor runtime classes.
 - `src/copaw/app/routers/capability_market.py`
-  - Formal executor provider intake plus legacy donor/project compatibility routes.
+  - Formal executor provider intake plus legacy external-project compatibility routes.
 - `src/copaw/app/runtime_center/state_query.py`
-  - Runtime Center read model for executor providers and donor compatibility projections.
+  - Runtime Center read model for executor providers and external-project compatibility projections.
 - `src/copaw/capabilities/project_donor_contracts.py`
   - Donor/project compatibility metadata.
 - `TASK_STATUS.md`
@@ -70,7 +70,7 @@
 2. Move executor truth off the legacy external-runtime bridge.
 3. Remove actor runtime from the formal startup graph.
 4. Continue retiring `delegation_service.py` to a non-formal compatibility edge.
-5. Retire donor/project execution shells from active execution vocabulary.
+5. Retire external-project compatibility execution shells from active execution vocabulary.
 6. Cut the formal execution front-door away from local browser/file/shell tooling.
 7. Run fresh verification, sync docs, commit on `main`, push `origin/main`, and confirm a clean worktree.
 
@@ -291,7 +291,7 @@ git commit -m "refactor: isolate delegation service as compatibility path"
 - Test: `tests/app/test_capability_market_api.py`
 - Test: `tests/app/test_runtime_center_external_runtime_api.py`
 
-- [ ] **Step 1: Write a failing test that proves donor/project compatibility surfaces still appear alongside formal executor intake without explicit segregation**
+- [ ] **Step 1: Write a failing test that proves external-project compatibility surfaces still appear alongside formal executor intake without explicit segregation**
 
 ```python
 assert payload["formal_surface"] is False
@@ -299,23 +299,23 @@ assert payload["compatibility_mode"] == "compatibility/acquisition-only"
 assert "executor_provider_search" in payload["routes"]
 ```
 
-- [ ] **Step 2: Run the donor/provider tests and confirm the failure is on mixed formal/acquisition vocabulary**
+- [ ] **Step 2: Run the provider/compatibility tests and confirm the failure is on mixed formal/acquisition vocabulary**
 
 Run: `python -m pytest tests/capabilities/test_project_donor_contracts.py tests/app/test_capability_market_api.py tests/app/test_runtime_center_external_runtime_api.py -q`
-Expected: FAIL because an active read/write path still exposes donor/project shells too close to canonical executor-provider surfaces.
+Expected: FAIL because an active read/write path still exposes external-project compatibility shells too close to canonical executor-provider surfaces.
 
-- [ ] **Step 3: Separate formal executor-provider intake from donor/project acquisition surfaces**
+- [ ] **Step 3: Separate formal executor-provider intake from external-project acquisition surfaces**
 
 Implementation notes:
 - Formal execution vocabulary must stay `ExecutorProvider / control_surface_kind / default_protocol_kind`.
-- Donor/project routes must remain explicitly acquisition-only and never the default execution product shell.
+- External-project routes must remain explicitly acquisition-only and never the default execution product shell.
 
-- [ ] **Step 4: Remove donor/project execution wording from Runtime Center active runtime projections**
+- [ ] **Step 4: Remove external-project execution wording from Runtime Center active runtime projections**
 
 Implementation notes:
-- Runtime Center should show donor/project records only as compatibility/acquisition inventory, not as active executor-runtime truth.
+- Runtime Center should show external-project records only as compatibility/acquisition inventory, not as active executor-runtime truth.
 
-- [ ] **Step 5: Re-run the focused donor/provider tests**
+- [ ] **Step 5: Re-run the focused provider/compatibility tests**
 
 Run: `python -m pytest tests/capabilities/test_project_donor_contracts.py tests/app/test_capability_market_api.py tests/app/test_runtime_center_external_runtime_api.py -q`
 Expected: PASS
@@ -324,7 +324,7 @@ Expected: PASS
 
 ```bash
 git add src/copaw/app/routers/capability_market.py src/copaw/app/runtime_center/state_query.py src/copaw/capabilities/project_donor_contracts.py src/copaw/app/runtime_bootstrap_models.py tests/capabilities/test_project_donor_contracts.py tests/app/test_capability_market_api.py tests/app/test_runtime_center_external_runtime_api.py
-git commit -m "refactor: quarantine donor project surfaces from executor runtime"
+git commit -m "refactor: quarantine external project surfaces from executor runtime"
 ```
 
 ### Task 6: Cut The Formal Execution Front-Door Away From Local Browser/File/Shell Tooling

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Rebuild CoPaw chat into a cc-like single-loop main-brain experience with one chat window, one primary model turn for ordinary chat, cached prompt/snapshot context, and kernel-owned two-phase commit for formal side effects.
+**Goal:** Rebuild CoPaw chat into a single-loop main-brain experience with one chat window, one primary model turn for ordinary chat, cached prompt/snapshot context, and kernel-owned two-phase commit for formal side effects.
 
 **Architecture:** Keep `POST /api/runtime-center/chat/run` as the only front door, shrink `turn_executor` to lightweight routing, move ordinary chat directly into `MainBrainChatService`, and express formal work as `reply + action_envelope` followed by kernel/governance two-phase commit. Frontend and backend must both adopt the same stream contract: reply tokens first, sidecar commit events second, all inside the same control thread with no second chat product.
 

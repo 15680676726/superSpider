@@ -6,7 +6,7 @@ Turn supported GitHub/Python open-source donors into formally installable and op
 
 ## Why This Exists
 
-The current donor-first external project path solved only the first half of the problem:
+The current external-source-first external project path solved only the first half of the problem:
 
 - discover
 - install
@@ -15,7 +15,7 @@ The current donor-first external project path solved only the first half of the 
 
 That is enough to prove materialization, but it is not enough to prove that an open-source project has become a real runtime capability inside CoPaw.
 
-Right now a Python donor such as `OpenSpace` can land as an installed capability and pass `--help`, but it still behaves like a governed shell wrapper rather than a formal runtime component with:
+Right now a Python external-source such as `OpenSpace` can land as an installed capability and pass `--help`, but it still behaves like a governed shell wrapper rather than a formal runtime component with:
 
 - runtime state
 - readiness truth
@@ -33,7 +33,7 @@ This design covers only:
 - repositories installable through the current governed `pip`-based isolated-venv contract
 - two runtime shapes:
   - short-lived CLI/tool donors
-  - long-running service donors
+  - long-running service runtime sources
 
 This design does not cover:
 
@@ -50,11 +50,11 @@ It is not allowed to create:
 
 - a second capability manager
 - a parallel runtime state store
-- a donor-only environment system
+- a external-source-only environment system
 
 The formal mapping is:
 
-- capability/package identity remains on the existing donor/package/source/candidate/trial/lifecycle spine
+- capability/package identity remains on the existing external-source/package/source/candidate/trial/lifecycle spine
 - runtime lifecycle truth is added as a scoped runtime-instance record attached to existing `CapabilityMount / WorkContext / EnvironmentMount / SessionMount / EvidenceRecord` semantics
 - Runtime Center consumes projections of that same truth
 
@@ -71,7 +71,7 @@ In terms of the repository's architecture questions:
 
 ### Supported Python CLI/Tool Donors
 
-A donor is supported as a CLI/tool donor when all of the following are true:
+A external-source is supported as a CLI/tool external-source when all of the following are true:
 
 - it can be installed through the current isolated-venv `pip` contract
 - it exposes a stable `console_script` or `python -m package` entrypoint
@@ -80,7 +80,7 @@ A donor is supported as a CLI/tool donor when all of the following are true:
 
 ### Supported Python Service Donors
 
-A donor is supported as a service donor when all of the following are true:
+A external-source is supported as a service runtime source when all of the following are true:
 
 - it can be installed through the current isolated-venv `pip` contract
 - it exposes a stable `console_script` or `python -m package` entrypoint
@@ -132,7 +132,7 @@ This design must keep a hard split between:
 
 Declarative runtime contract truth answers:
 
-- what kind of donor runtime this installed capability claims to be
+- what kind of external runtime this installed capability claims to be
 - which actions it supports
 - which environment/evidence contract it requires
 - which ready probe and stop strategy it prefers
@@ -168,7 +168,7 @@ Everything else is projection only:
 - install/search responses carry a response projection of that same contract
 - runtime-instance records may copy immutable audit snapshots such as `runtime_kind`, but they do not become the owner of declarative contract truth
 
-The `CapabilityMount` for an external donor must surface this contract so that the capability graph itself knows whether the donor is `cli` or `service`, what it can do, and what evidence/environment contract it carries.
+The `CapabilityMount` for an external external-source must surface this contract so that the capability graph itself knows whether the external-source is `cli` or `service`, what it can do, and what evidence/environment contract it carries.
 
 ### New Scoped Runtime Record
 
@@ -176,13 +176,13 @@ Add a formal runtime record for installed external Python donors:
 
 - `ExternalCapabilityRuntimeInstanceRecord`
 
-This record represents the current scoped runtime truth of an installed donor capability instance. It is not a replacement for package truth. It is the missing runtime half of the donor model.
+This record represents the current scoped runtime truth of an installed external-source capability instance. It is not a replacement for package truth. It is the missing runtime half of the external-source model.
 
 The core cardinality is:
 
 - `1 installed capability -> N scoped runtime instances`
 
-This is required so donor runtimes can stay on CoPaw's seat/session/work-context truth chain instead of degenerating into a single global daemon record.
+This is required so external runtimes can stay on CoPaw's seat/session/work-context truth chain instead of degenerating into a single global daemon record.
 
 Canonical v1 scope kinds are:
 
@@ -262,7 +262,7 @@ Installed-but-never-started is contract truth, not runtime-instance truth. Runti
 After install, the system must:
 
 1. resolve package entrypoint metadata
-2. predict the donor runtime contract as `cli` or `service`
+2. predict the external runtime contract as `cli` or `service`
 3. materialize the installed capability config
 4. project the runtime contract onto the installed capability mount
 5. return the runtime contract summary in the install response
@@ -273,13 +273,13 @@ If active validation is needed, it must happen as an explicit scoped trial/runti
 
 ### CLI Lifecycle
 
-CLI donors support:
+CLI runtime sources support:
 
 - `describe`
 - `run`
 - `healthcheck`
 
-CLI donors do not create a long-lived resident process. They still create explicit scoped execution-instance records on each admitted `run`.
+CLI runtime sources do not create a long-lived resident process. They still create explicit scoped execution-instance records on each admitted `run`.
 
 CLI execution transitions:
 
@@ -334,7 +334,7 @@ Legal orphan-resolution actions:
 - `archive`
 - `start_new`
 
-These actions must map back onto the existing `EnvironmentMount / SessionMount` recovery chain rather than creating donor-local recovery semantics.
+These actions must map back onto the existing `EnvironmentMount / SessionMount` recovery chain rather than creating external-source-local recovery semantics.
 
 The first version does not need a complex supervisor. It does need truthful lifecycle state and governed actions.
 
@@ -351,7 +351,7 @@ The runtime contract resolver should work in this order:
    - entry module
 2. inspect lightweight help output:
    - service-shaped flags such as `--host`, `--port`, `serve`, `server`, `api`, `daemon`, `worker`
-3. inspect configured donor hints when present
+3. inspect configured external-source hints when present
 
 This detection phase is predictive only. It must not collapse install into runtime execution.
 
@@ -392,23 +392,23 @@ The current model collapses installation and execution into the same shell abstr
 
 After this design lands:
 
-- install truth lives in external package config + donor/package/source truth
+- install truth lives in external package config + external-source/package/source truth
 - runtime contract truth lives on the installed capability/package projection
 - runtime truth lives in `ExternalCapabilityRuntimeInstanceRecord`
 - execution actions mutate runtime truth and emit evidence
 
 ### Capability Execution
 
-The capability execution layer must stop treating every external donor as "pick one shell command and run it".
+The capability execution layer must stop treating every external external-source as "pick one shell command and run it".
 
 Instead:
 
 - `cli` actions call the bounded run path
 - `service` actions call lifecycle verbs
 - raw arbitrary `command` execution must no longer be the primary runtime contract for supported donors
-- capability execution resolves supported actions from the capability's formal runtime contract, not from a donor-only side record
+- capability execution resolves supported actions from the capability's formal runtime contract, not from a external-source-only side record
 
-The capability execution layer may retain an escape hatch only for unsupported/manual donors. Once a donor is classified as supported under this contract, its formal execution path is exclusive to typed lifecycle verbs and must not silently fall back to generic governed shell execution.
+The capability execution layer may retain an escape hatch only for unsupported/manual donors. Once a external-source is classified as supported under this contract, its formal execution path is exclusive to typed lifecycle verbs and must not silently fall back to generic governed shell execution.
 
 ## API Surface
 
@@ -428,7 +428,7 @@ Extend install/search payloads to expose runtime contract summaries:
 - `predicted_health_path`
 - `scope_policy`
 
-Search/install must expose predicted/default contract fields only. Live instance facts such as bound `port` and effective `health_url` belong only to runtime-instance truth after a scoped action has actually started the donor.
+Search/install must expose predicted/default contract fields only. Live instance facts such as bound `port` and effective `health_url` belong only to runtime-instance truth after a scoped action has actually started the external-source.
 
 ### Runtime Action Front-Door
 
@@ -519,14 +519,14 @@ Forbidden as formal runtime action payloads:
 
 - raw shell command strings
 - arbitrary environment variable dictionaries
-- arbitrary cwd mutation outside the donor's governed workspace root
+- arbitrary cwd mutation outside the external-source's governed workspace root
 - free-form stop/start command replacement
 
-If a donor needs that level of freedom, it is outside the supported contract and must not be presented as a formal runtime capability.
+If a external-source needs that level of freedom, it is outside the supported contract and must not be presented as a formal runtime capability.
 
 ## Runtime Center Visibility
 
-Runtime Center must show external donor runtime truth as first-class operator data.
+Runtime Center must show external external runtime truth as first-class operator data.
 
 Minimum read-model fields:
 
@@ -596,7 +596,7 @@ Evidence metadata must preserve:
 - actor identity
 - `decision_request_id` when governance applies
 
-When runtime validation is executed as part of donor adoption/trial flow, the evidence may be linked to the existing donor candidate/trial chain. It must not invent a second trial system.
+When runtime validation is executed as part of external-source adoption/trial flow, the evidence may be linked to the existing external-source candidate/trial chain. It must not invent a second trial system.
 
 ## Verification Standard
 
@@ -623,7 +623,7 @@ Must preserve:
 - capability market
 - capability catalog
 - capability execution
-- donor/source/package truth
+- external-source/source/package truth
 - evidence sinks
 - Runtime Center capability read surfaces
 
@@ -631,8 +631,8 @@ Must preserve:
 
 At least two real Python donors must be validated:
 
-- one CLI/tool donor
-- one service donor
+- one CLI/tool external-source
+- one service runtime source
 
 The live smoke bar is:
 
@@ -641,9 +641,9 @@ The live smoke bar is:
 - classify
 - run or start
 - ready or successful one-shot execution
-- stop for service donors
+- stop for service runtime sources
 
-For service donors, live smoke must also prove:
+For service runtime sources, live smoke must also prove:
 
 - scoped runtime instance creation
 - Runtime Center visibility of that instance
@@ -660,7 +660,7 @@ Implement in this order:
 3. governed lifecycle executor for `start / healthcheck / stop / restart / run`
 4. runtime bootstrap reconciliation/orphan detection
 5. Runtime Center read-model and endpoints
-6. live smoke against one CLI and one service donor
+6. live smoke against one CLI and one service runtime source
 
 ## Non-Goals
 

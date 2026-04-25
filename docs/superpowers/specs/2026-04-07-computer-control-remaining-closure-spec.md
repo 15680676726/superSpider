@@ -369,7 +369,7 @@ Reason:
 - watcher/semantic readiness/writer stability are the biggest remaining closure blockers
 - live verification should come after the target runtime paths exist
 - app-family depth should build on a stable truthful base instead of replacing it
-- browser donor maturity can safely lag as long as the browser channel policy
+- browser external-runtime maturity can safely lag as long as the browser channel policy
   stays honest
 - browser planning still needs to be explicit, but it should advance as a
   maturity track after the current blocker-closure work is honest and green

@@ -4,11 +4,11 @@
 
 - Date: `2026-04-06`
 - Scope: design only
-- Goal: turn donor runtime fragility into one common platform contract, not per-project repair
+- Goal: turn external runtime fragility into one common platform contract, not per-project repair
 
 ## 1. Goal
 
-`CoPaw` already has the first half of donor assimilation:
+`CoPaw` already has the first half of external-source assimilation:
 
 - discover
 - materialize
@@ -17,21 +17,21 @@
 
 What is still missing is the second half:
 
-- donor receives a formal provider contract
-- donor executes inside a bounded fail-fast envelope
-- donor/host mismatches are normalized or blocked by one common compatibility contract
+- external-source receives a formal provider contract
+- external-source executes inside a bounded fail-fast envelope
+- external-source/host mismatches are normalized or blocked by one common compatibility contract
 
 The target is not "fix OpenSpace."
 
 The target is:
 
-- any donor with `MCP / API / SDK / CLI-runtime` intake
+- any external-source with `MCP / API / SDK / CLI-runtime` intake
 - must pass through the same provider/execution/compatibility contracts
-- before CoPaw can honestly claim that the donor is formally usable
+- before CoPaw can honestly claim that the external-source is formally usable
 
 ## 2. Why This Spec Exists
 
-The current donor-first base proved that CoPaw can:
+The current external-source-first base proved that CoPaw can:
 
 - find real open-source donors
 - install them
@@ -42,9 +42,9 @@ The current donor-first base proved that CoPaw can:
 But real live probing exposed a harder truth:
 
 - install success does not imply callable business execution
-- a donor may still depend on hidden host assumptions
-- a donor may hang instead of failing fast
-- a donor may guess provider configuration incorrectly
+- a external-source may still depend on hidden host assumptions
+- a external-source may hang instead of failing fast
+- a external-source may guess provider configuration incorrectly
 
 Those are not one-project bugs.
 
@@ -56,12 +56,12 @@ OpenSpace is only the motivating sample that exposed the platform gap.
 
 `One path, many donors` here means:
 
-- donor-specific transports may differ
-- donor-specific packaging may differ
-- donor-specific startup commands may differ
+- external-source-specific transports may differ
+- external-source-specific packaging may differ
+- external-source-specific startup commands may differ
 - but the execution contracts must not differ
 
-The universal donor execution base therefore needs exactly three common contracts:
+The universal external-source execution base therefore needs exactly three common contracts:
 
 1. `Donor Provider Injection Contract`
 2. `Donor Execution Envelope Contract`
@@ -83,44 +83,44 @@ This design must stay on the existing formal spine:
 
 This design must not create:
 
-- a donor-local provider manager
-- a donor-local lifecycle ledger
+- a external-source-local provider manager
+- a external-source-local lifecycle ledger
 - a second runtime truth chain
 - project-specific special-case branches in the core execution path
 
 In the repository's architecture questions:
 
 1. This belongs primarily to `capabilities / state / kernel / evidence`.
-2. It attaches to the existing donor/package/candidate/trial/lifecycle/capability truth chain.
+2. It attaches to the existing external-source/package/candidate/trial/lifecycle/capability truth chain.
 3. It must not bypass governed execution.
 4. It must not introduce a fourth capability vocabulary.
 5. It must emit provider resolution, probe, timeout, compatibility, and action evidence.
-6. It replaces the current "installed donor may still secretly rely on host guesses" limitation.
+6. It replaces the current "installed external-source may still secretly rely on host guesses" limitation.
 
 ## 5. Contract 1: Donor Provider Injection
 
 ### 5.1 Problem
 
-Today a donor may do one of the following:
+Today a external-source may do one of the following:
 
 - read raw process env vars
 - guess provider model names
 - read host config files directly
 - silently fall back to defaults
 
-That makes donor execution nondeterministic and host-dependent.
+That makes external-source execution nondeterministic and host-dependent.
 
 ### 5.2 Rule
 
-CoPaw must resolve provider truth first, then inject it into the donor.
+CoPaw must resolve provider truth first, then inject it into the external-source.
 
-The donor must not treat "guess host config by itself" as the primary execution path.
+The external-source must not treat "guess host config by itself" as the primary execution path.
 
 ### 5.3 Formal Meaning
 
 Provider truth remains owned by CoPaw's formal provider/runtime layer.
 
-The donor only receives a resolved execution contract, for example:
+The external-source only receives a resolved execution contract, for example:
 
 - resolved provider kind
 - resolved model
@@ -143,11 +143,11 @@ Allowed injection modes:
 - config-file patch injection
 - startup wrapper injection
 
-Every donor runtime must declare which one it consumes.
+Every external runtime must declare which one it consumes.
 
 ### 5.5 Hard Rules
 
-- donor direct host-config scraping may exist only as a last-resort compatibility bridge
+- external-source direct host-config scraping may exist only as a last-resort compatibility bridge
 - it must never remain the primary formal path
 - provider resolution must be observable in evidence
 - raw secrets must not be copied into operator-visible evidence payloads
@@ -156,7 +156,7 @@ Every donor runtime must declare which one it consumes.
 
 ### 6.1 Problem
 
-A donor action may currently:
+A external-source action may currently:
 
 - block for too long
 - never emit a heartbeat
@@ -167,7 +167,7 @@ That turns real failures into "looks hung" experiences.
 
 ### 6.2 Rule
 
-Every donor action must execute inside one common governed envelope.
+Every external-source action must execute inside one common governed envelope.
 
 The envelope owns bounded time, cancellation, liveness, and failure reporting.
 
@@ -189,7 +189,7 @@ At minimum:
 
 ### 6.4 Required Runtime Outcomes
 
-Every donor action must end in one of these formal outcomes:
+Every external-source action must end in one of these formal outcomes:
 
 - `succeeded`
 - `failed`
@@ -218,7 +218,7 @@ Errors should at minimum normalize into:
 
 ### 6.6 Hard Rules
 
-- external donor actions must not default to unbounded wait
+- external external-source actions must not default to unbounded wait
 - long-running actions still need bounded heartbeat and cancellability
 - timeout policy must be explicit and visible in evidence
 - timeout failure must not be mistaken for success or silent incompletion
@@ -227,7 +227,7 @@ Errors should at minimum normalize into:
 
 ### 7.1 Problem
 
-A donor may assume host facts that CoPaw never formally declared, such as:
+A external-source may assume host facts that CoPaw never formally declared, such as:
 
 - config file field names
 - provider naming conventions
@@ -238,11 +238,11 @@ A donor may assume host facts that CoPaw never formally declared, such as:
 - OS support
 - browser/desktop availability
 
-Without a compatibility contract, every donor turns into bespoke glue logic.
+Without a compatibility contract, every external-source turns into bespoke glue logic.
 
 ### 7.2 Rule
 
-Every donor must be checked against one common host compatibility contract before promotion.
+Every external-source must be checked against one common host compatibility contract before promotion.
 
 ### 7.3 Compatibility Inputs
 
@@ -281,7 +281,7 @@ Bridges are allowed only when they are generic and reusable, for example:
 
 Bridges are not allowed to become:
 
-- `if donor == X`
+- `if provider == X`
 - `if repo == Y`
 - `if package == Z`
 
@@ -302,7 +302,7 @@ The platform should distinguish these truths:
 - `adapter_probe_passed`
   - can execute at least one formal business action through CoPaw
 - `primary_action_verified`
-  - the donor's main business action has passed real verification
+  - the external-source's main business action has passed real verification
 
 ### 8.2 Hard Rule
 
@@ -312,7 +312,7 @@ Only `adapter_probe_passed` and above may be described as "formally usable busin
 
 ## 9. Updated Assimilation Pipeline
 
-The universal donor pipeline should become:
+The universal external-source pipeline should become:
 
 `discover -> normalize -> classify -> materialize -> resolve provider contract -> resolve compatibility -> run minimal probe -> compile/promote`
 
@@ -339,35 +339,35 @@ OpenSpace revealed three universal gaps:
 
 - provider truth was not formally injected
 - execution waited too long without bounded fail-fast semantics
-- donor/host compatibility relied on host-guessing instead of one normalized contract
+- external-source/host compatibility relied on host-guessing instead of one normalized contract
 
 This spec does not treat those as OpenSpace-only bugs.
 
-It treats them as platform gaps that any serious donor can expose.
+It treats them as platform gaps that any serious external-source can expose.
 
 ## 11. Non-Goals
 
 This spec does not promise:
 
 - that every open-source repository will auto-work
-- that donor metadata is no longer needed
+- that external-source metadata is no longer needed
 - that all languages/build systems are already covered
 - that donors may bypass CoPaw governance if they provide their own runtime logic
 
 This spec also does not allow:
 
-- exposing raw donor protocol surfaces directly to the main brain
-- treating donor-local config discovery as formal truth
-- writing project-specific special cases into the core donor execution path
+- exposing raw external-source protocol surfaces directly to the main brain
+- treating external-source-local config discovery as formal truth
+- writing project-specific special cases into the core external-source execution path
 
 ## 12. Acceptance Criteria
 
 This design is considered implemented only when all of the following are true:
 
-1. A donor with a valid provider dependency receives provider truth from CoPaw through a formal injection contract.
-2. A donor missing valid provider truth fails fast with typed error output instead of appearing hung.
-3. A donor with host/runtime incompatibility is normalized or blocked through one formal compatibility result.
-4. Adapter donor actions no longer wait indefinitely by default.
+1. A external-source with a valid provider dependency receives provider truth from CoPaw through a formal injection contract.
+2. A external-source missing valid provider truth fails fast with typed error output instead of appearing hung.
+3. A external-source with host/runtime incompatibility is normalized or blocked through one formal compatibility result.
+4. Adapter external-source actions no longer wait indefinitely by default.
 5. Runtime Center / evidence surfaces can show:
    - provider resolution result
    - compatibility result

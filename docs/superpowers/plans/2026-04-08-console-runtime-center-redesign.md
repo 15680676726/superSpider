@@ -4,7 +4,7 @@
 
 **Goal:** 把当前控制台从“蓝金设置台”重构成更像运行中心的深色 command center，并让聊天、运行中心、行业工作台、能力市场等主场页面共享统一视觉与交互壳。
 
-**Architecture:** 先重做全局设计 token、主布局和导航头部，再用统一页面 header/surface 组件把一级页面接到同一套运行中心语言上。风格参考 `awesome-design-md` 的 `linear.app` donor，但保留 CoPaw 自己的“Buddy 主场 + Runtime Center + Industry”产品边界，不做品牌照抄。
+**Architecture:** 先重做全局设计 token、主布局和导航头部，再用统一页面 header/surface 组件把一级页面接到同一套运行中心语言上。风格采用 `awesome-design-md` 的 `linear.app` 方向，但保留 CoPaw 自己的“Buddy 主场 + Runtime Center + Industry”产品边界，不做品牌复刻。
 
 **Tech Stack:** React, TypeScript, Ant Design, Less/CSS, Vitest
 

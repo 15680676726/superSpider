@@ -20,7 +20,7 @@ However, the current live chain is still not one universal foundation:
 - ordinary profession agents do not yet share one formal external-information collection contract
 - GitHub / generic web page / artifact collection are not yet first-class adapters on one formal chain
 
-The system therefore feels weaker than donor systems that already unify search, fetch, browser deepening, tasking, and evidence into one front-door.
+The system therefore still lacks a unified front-door that brings search, fetch, browser deepening, tasking, and evidence onto one formal chain.
 
 The real gap is not "CoPaw has zero research ability". The real gap is:
 

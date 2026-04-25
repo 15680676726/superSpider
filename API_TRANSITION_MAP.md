@@ -25,8 +25,8 @@
 - `2026-04-20` 外部执行体补充：
   - 本地 `actor_worker / actor_supervisor / actor_mailbox / delegation` 已明确成为退役目标；后续要由统一 `ExecutorRuntime` 接缝替代，而不是继续演化本地多 agent runtime
   - `Codex App Server` 是第一条正式控制面，但不是唯一控制面；后续 `Hermes` 与其他执行体也必须映射回同一套 `ExecutorRuntime` 对象和同一套 operator 读面
-  - 旧 GitHub/open-source donor 安装前门后续不再以“任意项目导入”为正式目标，而要收口成“executor runtime provider intake”
-  - `capability-market` 里现存的 `project donor / project-package / adapter / runtime-component` 心智必须补 supersede：这些只允许作为 compatibility/acquisition taxonomy 继续存在，不得继续代表 active executor runtime taxonomy
+  - 旧 GitHub/open-source project source 安装前门后续不再以“任意项目导入”为正式目标，而要收口成“executor runtime provider intake”
+  - `capability-market` 里现存的 `project source / project-package / adapter / runtime-component` 心智必须补 supersede：这些只允许作为 compatibility/acquisition taxonomy 继续存在，不得继续代表 active executor runtime taxonomy
   - `Runtime Center /capabilities/donors` 与 `/external-runtimes*` 也必须拆清“候选供给面”和“当前活动执行体”两条读链
   - operator/runtime API 后续必须支持：
     - 全局默认执行体
@@ -478,8 +478,8 @@
 - `2026-03-19` 起 `/chat` 已新增显式 media panel，先经 `/api/media/*` 产出 `MediaAnalysisRecord`，再把 `media_analysis_ids` 顶层透传到 `chat/intake|run`；聊天主链消费的是分析结果而不是页面本地附件真相
 - `2026-03-29` 补充：prompt recall 现已优先消费 `work_context_id`。当线程/任务已绑定共享工作上下文时，媒体分析与长期记忆的 recall 不再只按 `task_id` 兜底，而会优先命中同一 `work_context` scope，避免共享工作区里的素材/记忆在 follow-up turn 中漏召回
 - `2026-03-29` 补充：runtime chat media 正式写回链也已补成 `work_context` 闭环。media analyze / adopt / retain / recall 现在都会显式透传 `work_context_id`；聊天附件 writeback 会进入 `memory:work_context:*` scope，recall hit 也会优先回显原始 `source_ref`
-- `2026-04-01` 补充：Claude-derived runtime hardening `P0` 已明确保持该路由不变。`/runtime-center/chat/run` 继续只承担 unified SSE ingress / request relay / normalization boundary；真正的执行上下文 merge 仍在 `query_execution_runtime._resolve_execution_task_context(...)`，本轮没有引入第二个 `turn_loop` 或平行 chat frontdoor
-- `2026-04-01` 补充：Claude-derived runtime hardening `P1/P2` 也已收口在现有主链内部。delegated child-run 现统一使用 `dispatch_request + request + request_context` contract，`execute=True` 的 worker ownership 已集中到 `ActorSupervisor -> ActorWorker`，capability mount 也已正式收口到 `package_ref / package_kind / package_version`；本轮没有引入第二套 `task_state_machine`、第二个 `turn_loop`，也没有新增 donor-style task/session frontdoor
+- `2026-04-01` 补充：baseline-aligned runtime hardening `P0` 已明确保持该路由不变。`/runtime-center/chat/run` 继续只承担 unified SSE ingress / request relay / normalization boundary；真正的执行上下文 merge 仍在 `query_execution_runtime._resolve_execution_task_context(...)`，本轮没有引入第二个 `turn_loop` 或平行 chat frontdoor
+- `2026-04-01` 补充：baseline-aligned runtime hardening `P1/P2` 也已收口在现有主链内部。delegated child-run 现统一使用 `dispatch_request + request + request_context` contract，`execute=True` 的 worker ownership 已集中到 `ActorSupervisor -> ActorWorker`，capability mount 也已正式收口到 `package_ref / package_kind / package_version`；本轮没有引入第二套 `task_state_machine`、第二个 `turn_loop`，也没有新增 legacy-source-style task/session frontdoor
 - `2026-04-01` 补充：runtime-side 旧 `memory_manager` compat 入口也已从正式主链删除。`RuntimeHost / KernelTurnExecutor / runtime bootstrap/state binding` 现统一只承载 `conversation_compaction_service`，不再保留 P0 兼容别名
 - `2026-04-02` 补充：`/runtime-center/chat/run` 的正式 contract 已进一步锁成“单窗口单前门”。普通聊天不再经过 frontend provider precheck，也不再为普通文本额外触发 intake 模型判定；只有显式 `requested_actions`、attached intake contract、确认/恢复连续性信号才会把同一路由裁到 orchestrate。
 - `2026-04-02` 补充：该路由的 SSE 输出现在固定为“reply tokens first, sidecar commit events second”，并且 sidecar 仍附着在同一条正式控制线程上；这不是第二聊天对象，也不是 `task-chat:*`、轮询子路由或额外 transport 的回潮。
@@ -976,7 +976,6 @@
 ## 9. 一句话总结
 
 本映射表的目标不是立刻废掉所有旧 API，而是明确：哪些旧路径要保留、哪些只桥接、哪些必须替换，以及它们最终应该接到哪个新服务上。
-
 
 ---
 

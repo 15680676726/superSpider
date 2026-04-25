@@ -4,7 +4,7 @@
 
 **Goal:** 在隔离 worktree 中把执行纪律与主链收口推进到接近硬结束态，不再留下“主链已成型但执行纪律仍然松散、旧入口和旧命名仍然残留”的尾巴。
 
-**Architecture:** 继续把所有改动压在 CoPaw 的唯一正式真相链上：`StrategyMemory -> OperatingLane -> BacklogItem -> OperatingCycle -> Assignment -> AgentReport -> Replan`。借鉴 `cc` 的只是执行纪律壳：熵控制、plan shell、读并发写串行、agent-scoped additive MCP cleanup；不复制 `cc` 的产品前门、planner truth、session truth 或文件型记忆真相。这里的“前门收口”按 canonical ingress / contract 理解，不按物理 URL 数量理解。
+**Architecture:** 继续把所有改动压在 CoPaw 的唯一正式真相链上：`StrategyMemory -> OperatingLane -> BacklogItem -> OperatingCycle -> Assignment -> AgentReport -> Replan`。这里保留的只是执行纪律壳：熵控制、plan shell、读并发写串行、agent-scoped additive MCP cleanup；不复制外部产品前门、planner truth、session truth 或文件型记忆真相。这里的“前门收口”按 canonical ingress / contract 理解，不按物理 URL 数量理解。
 
 **Tech Stack:** Python 3.11, FastAPI, Pydantic, pytest, existing CoPaw kernel/capabilities/environments/runtime-center services, console React frontend for focused visibility updates.
 

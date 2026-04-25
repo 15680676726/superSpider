@@ -33,18 +33,18 @@ Why this is better than keeping the current hybrid path:
 - The current vector-related surfaces mostly add operational noise without being the canonical execution truth path.
 - Removing vector assumptions simplifies local setup, startup health, and operator understanding.
 
-## Supermemory Inspiration Boundary
-This design does borrow from `supermemory`, but only at the memory-organization level.
+## External Memory Pattern Boundary
+This design only reuses memory-organization patterns that are common in external memory systems.
 
-Borrow:
+Reuse:
 - `profile` as a compact first read
 - explicit memory evolution (`updates / supersedes / derives`)
 - `latest` versus `history`
 - forgetting / expiry for temporary memory
 
-Do not borrow:
-- `supermemory` as an external product dependency
-- `supermemory` as a runtime truth source
+Do not reuse:
+- an external memory product as a runtime dependency
+- an external memory product as a runtime truth source
 - cloud-first or API-first memory ownership
 - generic container/tag memory scope in place of CoPaw's canonical runtime scopes
 

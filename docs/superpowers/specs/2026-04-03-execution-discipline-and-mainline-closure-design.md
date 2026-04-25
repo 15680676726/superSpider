@@ -6,7 +6,7 @@
 
 本设计只关注两个结果：
 
-1. 把 `cc` 里真正值得借鉴的执行纪律壳，落到 CoPaw 自己的正式真相链上。
+1. 把现有执行纪律壳中需要保留的部分，落到 CoPaw 自己的正式真相链上。
 2. 把 CoPaw 当前已经成型但仍显杂乱的主链实现层继续收口，直到可以用“只有一条正式主链、每类正式写动作都只有一条 canonical ingress、只有一套正式命名”来描述。
 
 ## 2. 非目标
@@ -29,11 +29,11 @@
 
 换句话说，CoPaw 现在已经不是“没主链”，而是“主链已有，但执行纪律和实现层收口还没打到硬结束态”。
 
-## 4. donor 边界
+## 4. external-source 边界
 
-本轮只借 `cc` 的执行纪律壳，不借其规划真相。
+本轮只保留执行纪律壳，不复制外部规划真相。
 
-允许借鉴的 donor 面：
+允许保留的 external-source 面：
 
 - `tool-result budget`
 - `microcompact`
@@ -45,7 +45,7 @@
 - 读并发、写串行的 planner 纪律
 - agent-scoped additive MCP + cleanup 壳
 
-明确不借的 donor 面：
+明确不借的 external-source 面：
 
 - `cc` 的产品前门
 - `cc` 的 planner truth

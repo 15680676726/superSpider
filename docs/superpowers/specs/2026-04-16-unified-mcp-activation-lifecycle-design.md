@@ -592,7 +592,7 @@ This design does not try to:
 
 - replace `MCPClientManager`
 - replace `EnvironmentService`
-- rebuild the donor lifecycle model
+- rebuild the external-source lifecycle model
 - add a new activation database
 - make every external dependency magically self-solvable
 

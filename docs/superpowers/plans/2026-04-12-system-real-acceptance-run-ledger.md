@@ -113,13 +113,13 @@
 
 ### A. Preconditions
 
-- capability market and donor tests available
+- capability market and external-source tests available
 - capability execution front-door tests available
 
 ### B. Trigger Path
 
 - Real front door: automated regression
-- User/operator action: run donor/install/use and capability execution suites
+- User/operator action: run external-source install/use and capability execution suites
 - Expected formal chain: install -> durable truth -> usable capability -> real execution outcome -> correct failure classification
 
 ### C. Formal Truth IDs
@@ -346,13 +346,13 @@
 
 ### A. Preconditions
 
-- capability market and donor tests available
+- capability market and external-source tests available
 - capability execution front-door tests available
 
 ### B. Trigger Path
 
 - Real front door: automated regression re-run after Track D repair
-- User/operator action: rerun donor/install/use and capability execution suites
+- User/operator action: rerun external-source install/use and capability execution suites
 - Expected formal chain: install -> durable truth -> usable capability -> real execution outcome -> honest blocked/failed classification
 
 ### C. Formal Truth IDs

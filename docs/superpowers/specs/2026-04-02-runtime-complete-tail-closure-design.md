@@ -37,7 +37,7 @@ This closure program does not:
 - replace CoPaw's upper truth chain
 - replace `MainBrainOrchestrator`
 - replace Runtime Center with a new surface
-- turn Claude-style session planning into CoPaw's planner truth
+- turn prompt-only session planning into CoPaw's planner truth
 - reopen already deleted compat paths unless required for diagnosis
 
 The governing truth remains:
@@ -194,6 +194,6 @@ This full-tail closure program is complete only when all of the following are tr
 3. targeted regressions for each stage pass
 4. the repo's formal runtime gate plus wide runtime regression and smoke suites pass together
 5. the full formal-planning regression suite and affected Runtime Center / Industry UI tests pass
-6. `TASK_STATUS.md`, `API_TRANSITION_MAP.md`, `docs/superpowers/specs/2026-04-01-formal-planning-capability-gap-design.md`, `docs/superpowers/specs/2026-04-01-claude-runtime-contract-hardening-design.md`, and the affected plan docs are updated to remove these items as active tails for this program
+6. `TASK_STATUS.md`, `API_TRANSITION_MAP.md`, `docs/superpowers/specs/2026-04-01-formal-planning-capability-gap-design.md`, the historical runtime-contract hardening record, and the affected plan docs are updated to remove these items as active tails for this program
 
 If any one of those conditions is false, the program is not complete.

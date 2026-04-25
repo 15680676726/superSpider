@@ -6,7 +6,7 @@
 
 **Architecture:** This script does not invent a second acceptance standard. It translates the existing system real acceptance checklist into explicit scenario steps, pass conditions, failure categories, and evidence requirements so each track can be honestly signed off.
 
-**Tech Stack:** FastAPI backend, pytest regression suites, console frontend, Runtime Center, Industry, Buddy flow, capability market, donor/runtime subsystem.
+**Tech Stack:** FastAPI backend, pytest regression suites, console frontend, Runtime Center, Industry, Buddy flow, capability market, external capability/runtime subsystem.
 
 ---
 
@@ -86,8 +86,8 @@ This track only passes when:
 This acceptance script only signs off the currently supported contract scope:
 
 - skill-style capability path already supported by the formal market/read-model chain
-- project donor under the current `Python + GitHub + isolated-venv` contract
-- runtime/service donor under the current formal runtime contract
+- project package under the current `Python + GitHub + isolated-venv` contract
+- runtime/service provider under the current formal runtime contract
 
 Current examples already proven in code history include:
 
@@ -98,11 +98,11 @@ Current examples already proven in code history include:
 
 Do **not** treat any of the following as implied acceptance:
 
-- arbitrary donor from any language
+- arbitrary external source from any language
 - arbitrary build systems
 - arbitrary repository layouts
 - arbitrary external protocol
-- automatic typed action discovery from any random donor
+- automatic typed action discovery from any random external source
 
 If those need sign-off, they require a new supported-scope document first.
 
@@ -117,16 +117,16 @@ If those need sign-off, they require a new supported-scope document first.
 
 Run at least these three:
 
-1. Install and use one supported project donor
+1. Install and use one supported project package
    - example: `project:black`
    - path: discover -> install -> attach/adopt if required -> execute
 
-2. Install and use one supported runtime/service donor
+2. Install and use one supported runtime/service provider
    - example: `runtime:openspace`
    - path: discover -> install -> start -> ready -> stop
 
 3. Negative case
-   - choose one unsupported or intentionally malformed donor/input
+   - choose one unsupported or intentionally malformed external-source input
    - confirm the system does not pretend install/use succeeded
 
 ### 3.6 Pass Conditions

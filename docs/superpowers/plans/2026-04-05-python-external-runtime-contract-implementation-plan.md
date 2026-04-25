@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Turn supported GitHub/Python donor projects into formally installable and operable `project-package / adapter / runtime-component` capabilities with typed runtime contracts, scoped runtime instances, governed lifecycle actions, and Runtime Center visibility.
+**Goal:** Turn supported GitHub/Python external-source projects into formally installable and operable `project-package / adapter / runtime-component` capabilities with typed runtime contracts, scoped runtime instances, governed lifecycle actions, and Runtime Center visibility.
 
 **Architecture:** Keep declarative runtime contract truth on installed external capability package truth, project that contract into `CapabilityMount`, and add a separate scoped runtime-instance state chain for actual `run/start/stop/restart/healthcheck` operations. Runtime actions must go through governed service facades and Runtime Center read surfaces instead of falling back to raw shell-wrapper behavior.
 
@@ -17,13 +17,13 @@
 - `src/copaw/config/config.py`
   - Extend `ExternalCapabilityPackageConfig` with canonical runtime-contract fields owned by package truth.
 - `src/copaw/capabilities/project_donor_contracts.py`
-  - Resolve install-time predicted runtime contract without starting service donors.
+  - Resolve install-time predicted runtime contract without starting service runtime sources.
 - `src/copaw/app/routers/capability_market.py`
   - Stop install-time active verification, persist canonical runtime-contract truth, and return predicted contract projections.
 - `src/copaw/capabilities/sources/external_packages.py`
   - Project runtime contract into `CapabilityMount` metadata/environment/evidence/action fields.
 - `src/copaw/capabilities/execution.py`
-  - Remove supported-donor raw-shell fallback and route external donor actions through a typed runtime-operation service.
+  - Remove supported-external-source raw-shell fallback and route external external-source actions through a typed runtime-operation service.
 - `src/copaw/app/runtime_service_graph.py`
   - Wire runtime repositories/services into bootstrap and query layers.
 - `src/copaw/app/runtime_center/state_query.py`
@@ -169,7 +169,7 @@ Expected: PASS
 
 ```bash
 git add src/copaw/config/config.py src/copaw/capabilities/project_donor_contracts.py src/copaw/app/routers/capability_market.py src/copaw/capabilities/sources/external_packages.py tests/capabilities/test_project_donor_contracts.py tests/capabilities/test_external_packages.py tests/app/test_capability_market_api.py
-git commit -m "feat: add canonical python donor runtime contracts"
+git commit -m "feat: add canonical python external-runtime contracts"
 ```
 
 ### Task 2: Add Scoped External Runtime Instance State
@@ -339,7 +339,7 @@ Expected: PASS
 
 ```bash
 git add src/copaw/capabilities/external_runtime_actions.py src/copaw/capabilities/external_runtime_execution.py src/copaw/capabilities/execution.py src/copaw/capabilities/service.py src/copaw/app/runtime_service_graph.py tests/app/test_capabilities_execution.py
-git commit -m "feat: govern external donor runtime actions"
+git commit -m "feat: govern external runtime-provider actions"
 ```
 
 ### Task 4: Add Runtime Center External Runtime APIs And Read Models
@@ -403,7 +403,7 @@ Expected: PASS
 
 ```bash
 git add src/copaw/app/runtime_center/state_query.py src/copaw/app/routers/runtime_center_routes_core.py src/copaw/app/runtime_service_graph.py tests/app/test_runtime_center_external_runtime_api.py tests/app/test_runtime_center_events_api.py
-git commit -m "feat: expose external donor runtimes in runtime center"
+git commit -m "feat: expose external runtime providers in runtime center"
 ```
 
 ### Task 5: Bootstrap Reconcile, Orphan Detection, And Recovery Paths
@@ -467,7 +467,7 @@ Expected: PASS
 
 ```bash
 git add src/copaw/state/external_runtime_service.py src/copaw/app/runtime_service_graph.py tests/state/test_external_runtime_service.py tests/app/test_runtime_bootstrap_helpers.py
-git commit -m "feat: reconcile external donor runtime instances"
+git commit -m "feat: reconcile external runtime-provider instances"
 ```
 
 ### Task 6: Live Smoke, Regression Sweep, And Docs Sync
@@ -502,7 +502,7 @@ Expected: PASS
 
 - [ ] **Step 4: Run gated live smoke**
 
-Run: `python scripts/channel_live_smoke.py --scenario python-donor-runtime`
+Run: `python scripts/channel_live_smoke.py --scenario <python-external-runtime-smoke-scenario>`
 
 Expected:
 - `psf/black`: discover -> install -> run succeeds
@@ -512,14 +512,14 @@ Expected:
 
 ```markdown
 - install now predicts runtime contract without hidden service start
-- supported Python donors now create scoped runtime instances
+- supported Python runtime providers now create scoped runtime instances
 - Runtime Center exposes runtime contract + runtime instances + lifecycle actions
-- live smoke validated one CLI donor and one service donor
+- live smoke validated one CLI runtime provider and one service runtime provider
 ```
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add TASK_STATUS.md tests/app/test_runtime_center_external_runtime_live_smoke.py
-git commit -m "docs: record python donor runtime closure"
+git commit -m "docs: record python external-runtime closure"
 ```

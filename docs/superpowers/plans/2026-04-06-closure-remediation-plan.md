@@ -146,25 +146,29 @@
 - [ ] Run `npm --prefix console run build`.
 - [ ] Update `46问题文档.md` with final resolved/unresolved status.
 
-### `2026-04-06` Follow-up Closure Update
+### 2026-04-06 Follow-up Closure Update
 
-- `Task 2` ???????
-  - kickoff / auto-resume ??? assignment-native truth?legacy `goal/schedule` ?????? execution-stage admission / result contract
-  - ????? `goal_ids / schedule_ids / active_goal_ids` ??????????? `Task 2` ??? `partial`?? earlier note ??? kickoff seam ???????????
-- `Task 4` ????? `complete`?
-  - acquisition producer ??? kernel dispatcher-backed task store???? `DecisionRequestRecord / TaskRecord` producer fallback
-  - review-gate / runtime-center / producer ???? kernel task identity ?????
-- `Task 5` capability front-door ???
-  - query-time builtin tool delegate ??? child kernel task ??
-  - `react_agent` builtin fallback ??? fail-closed
-  - `system_dispatch` ??????? kernel admission???? turn failure ????
-  - frontend/local runtime truth derivation ??????? `Task 5` ?????????????? `partial`
-- focused verification additions:
-  - `python -m pytest tests/app/test_learning_api.py tests/app/test_runtime_center_api.py -q` -> `122 passed`
-  - `python -m pytest tests/agents/test_react_agent_tool_compat.py tests/kernel/test_query_execution_runtime.py tests/kernel/query_execution_environment_parts/dispatch.py tests/kernel/query_execution_environment_parts/lifecycle.py -q` -> `58 passed`
-- `python -m pytest tests/app/test_capabilities_execution.py -k "system_dispatch_query or external_runtime or runtime_center" -q` -> `3 passed, 48 deselected`
+本节原本记录当日 follow-up 中途核查结果。此前批量文档清理时该段发生错误转码，现收敛为可公开摘要。
 
-### `2026-04-06` Final Closure Update
+核查重点如下：
+
+- Task 2
+  - 重点确认 kickoff / auto-resume 是否已经切到 assignment-native truth，以及 legacy goal/schedule 是否还在影响 execution-stage admission / result contract
+  - 重点确认 goal_ids / schedule_ids / active_goal_ids 一类历史字段是否还会通过 earlier partial 路径重新渗回 kickoff seam
+- Task 4
+  - 重点确认 acquisition producer 是否已经进入 kernel dispatcher-backed task store，而不是继续依赖 free-form DecisionRequestRecord / TaskRecord producer fallback
+  - 重点确认 review-gate / runtime-center / producer 是否已经统一使用 kernel task identity
+- Task 5
+  - 重点确认 query-time builtin tool delegate、eact_agent builtin fallback、system_dispatch 是否都进入正式 capability front-door
+  - 重点确认 kernel admission、turn failure 与 frontend/local runtime truth derivation 是否仍存在 partial seam
+
+focused verification additions:
+
+- python -m pytest tests/app/test_learning_api.py tests/app/test_runtime_center_api.py -q -> 122 passed
+- python -m pytest tests/agents/test_react_agent_tool_compat.py tests/kernel/test_query_execution_runtime.py tests/kernel/query_execution_environment_parts/dispatch.py tests/kernel/query_execution_environment_parts/lifecycle.py -q -> 58 passed
+- python -m pytest tests/app/test_capabilities_execution.py -k "system_dispatch_query or external_runtime or runtime_center" -q -> 3 passed, 48 deselected
+
+### 2026-04-06 Final Closure Update
 
 - `Task 2`: complete
   - kickoff / auto-resume 已切到 assignment/backlog/cycle-native truth。

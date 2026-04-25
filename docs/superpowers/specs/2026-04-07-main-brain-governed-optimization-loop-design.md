@@ -28,7 +28,7 @@ CoPaw should turn the existing pieces into one governed optimization loop:
 
 - main-brain morning/evening review cadence
 - prediction-style discovery and recommendation intake
-- donor / package / candidate / trial / lifecycle truth
+- external-source / package / candidate / trial / lifecycle truth
 - MCP runtime diagnostics
 - Runtime Center governance read-model
 
@@ -63,7 +63,7 @@ The full loop must obey the repository rules:
 - no second truth source
 - no parallel main brain
 - no fourth capability semantics
-- no donor install == formal adoption
+- no external-source install == formal adoption
 - no prompt-only hidden optimization state
 
 The loop must remain under CoPaw's canonical chain:
@@ -109,7 +109,7 @@ The loop then discovers pressures from:
 - operator feedback
 - repeated human intervention
 - recovery friction
-- donor/package drift
+- source/package drift
 - MCP runtime instability
 
 The current "prediction" layer should be treated as this discovery intake layer.
@@ -153,7 +153,7 @@ This trial runtime must cover:
 
 - skill candidates
 - MCP candidates
-- donor-backed packages
+- external-source-backed packages
 - local fallback artifacts
 
 ### 4.5 Evaluator
@@ -201,7 +201,7 @@ The following current pieces are the right building blocks:
 - morning/evening review triggers
 - prediction discovery and recommendation generation
 - prediction-to-main-brain handoff
-- donor / package / candidate truth
+- external-source / package / candidate truth
 - skill trial records
 - lifecycle decision records
 - MCP runtime contract and diagnostics
@@ -297,7 +297,7 @@ That is not enough for the full second tier.
 The loop must also feed long-horizon consequences back into main-brain truth, including:
 
 - which capability families should be preferred less in future planning
-- which donor profiles lost trust
+- which source profiles lost trust
 - which trial patterns became validated local heuristics
 - which replacement or retirement pressures should become recurring planning constraints
 - which review findings should reopen strategy or operating-lane decisions
@@ -312,7 +312,7 @@ The writeback targets should be explicit, not left as vague "learning happened s
 At minimum, review-to-lifecycle closure must be able to write back into:
 
 - main-brain planning constraints for future assignment and capability choice
-- donor trust truth for future provenance-weighted decisions
+- provenance trust truth for future provenance-weighted decisions
 - capability portfolio pressure so repeated weak families stay visible
 - future discovery and review pressure so unresolved patterns re-enter review cadence
 - strategy or operating-lane reopen signals when the finding is large enough to change direction
@@ -329,13 +329,13 @@ The full second-tier loop should be:
 2. discovery layer detects an optimization pressure
 3. the system opens or refreshes an optimization case
 4. the main brain decides whether the case is worth acting on
-5. donor/package/candidate resolution proposes the challenger
+5. external-source/package/candidate resolution proposes the challenger
 6. scoped trial mounts challenger against the current baseline
 7. runtime evidence is collected
 8. evaluator scores baseline vs challenger
 9. lifecycle decision is created
 10. governed apply promotes / rolls back / retires
-11. review results write back into main-brain truth, donor trust, and future planning pressure
+11. review results write back into main-brain truth, provenance trust, and future planning pressure
 12. Runtime Center projects the whole loop
 13. later reviews measure post-activation drift and reopen the case if needed
 
@@ -467,7 +467,7 @@ The Runtime Center end state should expose a single optimization surface with at
 - rollback pressure
 - retirement pressure
 - degraded capability families
-- donor/package provenance
+- source/package provenance
 - MCP runtime health inside the same story
 
 The minimum operator-visible fields for each case should include:
@@ -480,7 +480,7 @@ The minimum operator-visible fields for each case should include:
 - owner
 - evaluator verdict
 - lifecycle decision
-- donor trust impact
+- provenance trust impact
 - planning impact
 - rollback or recovery route
 
@@ -511,7 +511,7 @@ These pieces are required for the loop to exist at all:
 - main-brain morning / evening / cycle review cadence
 - prediction discovery intake
 - reporting / performance metrics
-- skill / donor / candidate / trial / lifecycle chain
+- skill / external-source / candidate / trial / lifecycle chain
 - MCP runtime as a governed challenger source
 - Runtime Center full-loop visibility
 
@@ -531,7 +531,7 @@ Without Batch 1, the system still has pieces, but not a real self-optimization l
 These pieces should enter once Batch 1 is stable because they materially improve optimization quality:
 
 - workflow preview and assignment-gap detection
-- donor trust and capability portfolio pressure
+- provenance trust and capability portfolio pressure
 - knowledge-graph activation and relation traversal
 - strategy / planning constraints as optimization boundaries
 

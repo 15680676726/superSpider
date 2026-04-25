@@ -4,11 +4,11 @@
 
 - Date: `2026-04-06`
 - Scope: implemented common-base adapter assimilation seam with focused regression proof
-- Goal: define the common external-donor intake contract for `MCP -> API/SDK -> runtime`, without adding project-specific special cases
+- Goal: define the common external-external-source intake contract for `MCP -> API/SDK -> runtime`, without adding project-specific special cases
 
 ### Verified Reality
 
-- The common donor adapter base is now implemented across:
+- The common external-source adapter base is now implemented across:
   - protocol-surface classification
   - compiled adapter contracts
   - typed adapter execution (`mcp/http/sdk`)
@@ -23,7 +23,7 @@
   - Candidate/trial/lifecycle/evidence/read-model now preserve adapter attribution
 - The still-honest boundary is:
   - automatic typed callable-surface extraction from arbitrary installed open-source donors is not yet generic live-proven
-  - current compile path is fully live once donor metadata/materialization already provides typed `mcp_tools / api_actions / sdk_actions`
+  - current compile path is fully live once external-source metadata/materialization already provides typed `mcp_tools / api_actions / sdk_actions`
   - this spec therefore closes the common formal assimilation seam, not "all external projects auto-yield callable action schemas with zero extra discovery"
 
 ## 1. Goal
@@ -55,9 +55,9 @@ The correct platform rule is:
 
 Meaning:
 
-- if a donor already exposes a stable native `MCP`, CoPaw should prefer that path
-- if a donor has no usable `MCP` but does expose a stable `HTTP API`, `OpenAPI`, or callable `SDK`, CoPaw should use that instead
-- if a donor has neither `MCP` nor usable `API/SDK`, it may still land as `project-package` or `runtime-component`, but it must not be presented as a formal business adapter
+- if a external-source already exposes a stable native `MCP`, CoPaw should prefer that path
+- if a external-source has no usable `MCP` but does expose a stable `HTTP API`, `OpenAPI`, or callable `SDK`, CoPaw should use that instead
+- if a external-source has neither `MCP` nor usable `API/SDK`, it may still land as `project-package` or `runtime-component`, but it must not be presented as a formal business adapter
 
 This keeps CoPaw aligned with current ecosystem reality:
 
@@ -94,13 +94,13 @@ It must stay on the existing formal spine:
 - `CapabilityMount`
 - `EvidenceRecord`
 
-No donor-local capability manager, no donor-local runtime truth, and no second adoption ledger may be introduced.
+No external-source-local capability manager, no external-source-local runtime truth, and no second adoption ledger may be introduced.
 
 ### 3.3 Does it bypass the unified kernel?
 
 No.
 
-All formal donor actions must still go through CoPaw governed write paths:
+All formal external-source actions must still go through CoPaw governed write paths:
 
 - candidate creation
 - materialization
@@ -138,12 +138,12 @@ It replaces these wrong assumptions:
 
 - install success == usable capability
 - runtime start success == business capability closure
-- raw shell execution == formal donor integration
+- raw shell execution == formal external-source integration
 - per-project custom special cases == external expansion strategy
 
 ## 4. Formal Object Model
 
-This design intentionally reuses the current donor-first base instead of inventing a parallel system.
+This design intentionally reuses the current external-source-first base instead of inventing a parallel system.
 
 ### 4.1 `CapabilitySourceProfileRecord`
 
@@ -154,11 +154,11 @@ Owns source truth such as:
 - mirror/fallback provenance
 - region/source profile
 
-It answers: where did this donor come from?
+It answers: where did this external-source come from?
 
 ### 4.2 `DonorPackageRecord`
 
-Owns normalized donor identity such as:
+Owns normalized external-source identity such as:
 
 - canonical package/project id
 - owner/repo or package coordinates
@@ -171,13 +171,13 @@ It answers: what external project is this?
 
 Owns trial-ready intake truth such as:
 
-- canonical donor/package linkage
+- canonical external-source/package linkage
 - detected protocol surface
 - candidate summary
 - source lineage
 - overlap/equivalence metadata
 
-It answers: is this donor worth trying?
+It answers: is this external-source worth trying?
 
 ### 4.4 `SkillTrialRecord`
 
@@ -185,7 +185,7 @@ Despite the historical name, this remains the common scoped trial record.
 
 It answers:
 
-- where is this donor being tried
+- where is this external-source being tried
 - by which seat/session/work-context
 - with what evidence
 - under which attribution
@@ -228,7 +228,7 @@ Discovery must not:
 
 ### 5.2 Normalize
 
-Normalization merges raw source hits into one donor identity.
+Normalization merges raw source hits into one external-source identity.
 
 This stage must handle:
 
@@ -243,7 +243,7 @@ Hard rule:
 
 ### 5.3 Protocol Classify
 
-Protocol classification determines the donor's best formal intake path.
+Protocol classification determines the external-source's best formal intake path.
 
 Allowed outcomes:
 
@@ -254,21 +254,21 @@ Allowed outcomes:
 
 This stage records intake facts only.
 
-It does not yet decide whether the donor is formally adoptable as a business adapter.
+It does not yet decide whether the external-source is formally adoptable as a business adapter.
 
 ### 5.4 Candidate
 
-Candidate is the first formal persisted system state for an external donor opportunity.
+Candidate is the first formal persisted system state for an external external-source opportunity.
 
-Before candidate state, the donor is just an outside possibility.
+Before candidate state, the external-source is just an outside possibility.
 
 ### 5.5 Materialize
 
-Materialization prepares a bounded runnable or callable donor surface:
+Materialization prepares a bounded runnable or callable external-source surface:
 
 - download or fetch package
 - create isolated environment if needed
-- persist donor/package/runtime contract truth
+- persist external-source/package/runtime contract truth
 
 Install success alone never means formal capability success.
 
@@ -323,11 +323,11 @@ Only after trial evidence may CoPaw decide:
 
 ## 6. Protocol Priority Rule
 
-The donor intake priority must be fixed and generic.
+The external-source intake priority must be fixed and generic.
 
 ### 6.1 Native `MCP` First
 
-If a donor exposes a stable, maintained native `MCP` surface, CoPaw should prefer that path.
+If a external-source exposes a stable, maintained native `MCP` surface, CoPaw should prefer that path.
 
 Reasons:
 
@@ -346,7 +346,7 @@ Reasons:
 
 ### 6.3 `CLI/runtime` Last
 
-If neither `MCP` nor `API/SDK` exists, the donor may still be useful, but only as:
+If neither `MCP` nor `API/SDK` exists, the external-source may still be useful, but only as:
 
 - `project-package`
 - `runtime-component`
@@ -364,8 +364,8 @@ Concretely:
 
 - main brain never calls raw `MCP` method names
 - main brain never calls raw external HTTP endpoints
-- main brain never imports raw donor SDK modules
-- main brain never builds donor shell commands directly
+- main brain never imports raw external-source SDK modules
+- main brain never builds external-source shell commands directly
 
 Instead, the main brain and execution agents only see CoPaw formal capabilities such as:
 
@@ -411,7 +411,7 @@ The system must explicitly block these cases from formal adapter adoption:
 - no stable typed input/output surface
 - no scoped trial evidence
 - direct main-brain exposure to external raw protocol surfaces
-- project-specific special-case logic in the common donor base
+- project-specific special-case logic in the common external-source base
 
 ## 10. No Project-Specific Special Cases
 
@@ -424,9 +424,9 @@ Hard rule:
 - no `OpenSpace`-only config fields
 - no `OpenSpace`-only router branches
 - no `OpenSpace`-only prompt branches
-- no `if donor == X` expansion policy in the common base
+- no `if provider == X` expansion policy in the common base
 
-At most, the system may support generic donor hints contracts, but those hints must be:
+At most, the system may support generic external-source hints contracts, but those hints must be:
 
 - protocol-generic
 - schema-bounded
@@ -434,7 +434,7 @@ At most, the system may support generic donor hints contracts, but those hints m
 
 ## 11. Promotion Standard
 
-A donor may become a formal business adapter only when all of the following are true:
+A external-source may become a formal business adapter only when all of the following are true:
 
 - stable callable intake surface exists: `MCP` or `API/SDK`
 - it compiles into a CoPaw `adapter`
@@ -444,7 +444,7 @@ A donor may become a formal business adapter only when all of the following are 
 - it does not bypass governance
 - it does not create a second truth chain
 
-If these conditions are not met, the donor may still be useful, but it must remain lower in the formal hierarchy.
+If these conditions are not met, the external-source may still be useful, but it must remain lower in the formal hierarchy.
 
 ## 12. Risk And Governance
 
@@ -461,9 +461,9 @@ The system should be permissive at trial time and strict at promotion time.
 
 ## 13. Runtime Center Visibility
 
-Runtime Center must be able to show this donor chain without inventing a second UI truth:
+Runtime Center must be able to show this external-source chain without inventing a second UI truth:
 
-- normalized donor identity
+- normalized external-source identity
 - detected intake protocol
 - compiled capability landing
 - scoped trial state
@@ -473,17 +473,17 @@ Runtime Center must be able to show this donor chain without inventing a second 
 
 The operator must be able to distinguish:
 
-- discovered donor
-- candidate donor
-- trialed donor
-- promoted donor
-- retired donor
+- discovered external-source
+- candidate external-source
+- trialed external-source
+- promoted external-source
+- retired external-source
 
 ## 14. Rollout Direction
 
 The correct rollout order is:
 
-1. keep current donor-first spine
+1. keep current external-source-first spine
 2. add generic protocol classification
 3. add generic adapter compilation rules
 4. keep `MCP-first but not MCP-only`
@@ -500,8 +500,8 @@ This design is successful only if:
 - native `MCP` is preferred when available
 - `API/SDK` remains available when `MCP` is absent
 - the main brain never consumes raw external protocol surfaces
-- every successful donor still lands as CoPaw formal capability truth
-- no single donor receives custom architecture privilege
+- every successful external-source still lands as CoPaw formal capability truth
+- no single external-source receives custom architecture privilege
 
 The final discipline is:
 

@@ -383,7 +383,7 @@ Use the status band below for current truth.
 - **What is happening:**
   - the frontend install actions for:
     - curated skills
-    - project donors
+    - external project packages
     - install templates
     submit install requests without `target_agent_id(s)` by default
   - backend capability assignment is optional and only happens when explicit
@@ -398,7 +398,7 @@ Use the status band below for current truth.
     execution seat", which then makes later execution failures feel
     inconsistent or opaque
 
-### P0-017 Project-donor install accepted state is reported as final success and no job truth is surfaced
+### P0-017 Project-package install accepted state is reported as final success and no job truth is surfaced
 
 - **Status:** confirmed
 - **Severity:** high
@@ -424,7 +424,7 @@ Use the status band below for current truth.
     and refreshes the page
   - no frontend path polls the returned install-job routes
 - **Why it matters:**
-  - a project donor can still be:
+  - a project package install can still be:
     - queued
     - running
     - blocked
@@ -437,9 +437,9 @@ Use the status band below for current truth.
     - install failure
     never becomes the first-class product outcome
 - **Product effect:**
-  - heavy donor installs can fail later while the operator already saw
+  - heavy external project installs can fail later while the operator already saw
     "installed successfully"
-  - project donor onboarding therefore overstates completion and weakens trust in
+  - external project onboarding therefore overstates completion and weakens trust in
     external capability rollout
 
 ### P0-018 Runtime Center environment cockpit can default to "环境已就绪" without real environment truth

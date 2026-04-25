@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build CoPaw's remaining formal short/mid/long-horizon planning stack on top of the existing `StrategyMemory -> OperatingLane -> BacklogItem -> OperatingCycle -> Assignment -> AgentReport -> synthesis/replan` truth chain, while keeping Claude-derived planning shell ideas strictly sidecar.
+**Goal:** Build CoPaw's remaining formal short/mid/long-horizon planning stack on top of the existing `StrategyMemory -> OperatingLane -> BacklogItem -> OperatingCycle -> Assignment -> AgentReport -> synthesis/replan` truth chain, while keeping assignment-local planning-shell ideas strictly sidecar.
 
-**Architecture:** Add a dedicated formal planning compiler slice under `src/copaw/compiler/planning/` instead of continuing to grow planner logic inside `industry/service_lifecycle.py` or `state/main_brain_service.py`. State services remain the truth-owning read/write layer; the new planning slice compiles strategy, backlog, reports, and runtime facts into typed planning decisions that existing lifecycle/services apply. Claude-derived planning shell artifacts are allowed only as assignment-local sidecars and must never become formal planning truth.
+**Architecture:** Add a dedicated formal planning compiler slice under `src/copaw/compiler/planning/` instead of continuing to grow planner logic inside `industry/service_lifecycle.py` or `state/main_brain_service.py`. State services remain the truth-owning read/write layer; the new planning slice compiles strategy, backlog, reports, and runtime facts into typed planning decisions that existing lifecycle/services apply. Assignment-local planning-shell artifacts are allowed only as sidecars and must never become formal planning truth.
 
 **Tech Stack:** Python 3.11, FastAPI, Pydantic, SQLite, pytest, existing CoPaw `state / compiler / industry / predictions / runtime-center` services.
 
@@ -60,11 +60,11 @@ This plan covers only:
 
 This plan does **not** cover:
 
-- replacing CoPaw's formal planning truth with Claude-style session planning
+- replacing CoPaw's formal planning truth with prompt-only session planning
 - redesigning `/runtime-center/chat/run`
 - replacing `MainBrainOrchestrator`
 - redoing truth-first memory
-- reopening already-closed Claude runtime contract hardening work
+- reopening already-closed runtime contract hardening work
 
 ## File Structure
 

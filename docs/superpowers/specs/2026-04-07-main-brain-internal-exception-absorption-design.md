@@ -336,7 +336,7 @@ It is the right cut because it:
 - keeps one main brain at the front
 - keeps multi-agent complexity internal
 - reuses current runtime truth instead of multiplying systems
-- follows a low-entropy, single-path style closer to the desired cc-like discipline
+- follows a low-entropy, single-path style closer to the desired single-loop discipline
 - improves product usability without weakening governance boundaries
 
 Most importantly:

@@ -666,7 +666,7 @@ Hard rules:
 - the system must still converge to a usable first result even if some fields are vague
 - async UI is allowed, but the async path must still compile the same contract object rather than create a second interview flow
 
-This contract compile may borrow from psychology-informed growth coaching or motivation clarification, but must not become:
+This contract compile may draw from psychology-informed growth coaching or motivation clarification, but must not become:
 
 - therapy
 - diagnosis
@@ -746,11 +746,11 @@ This preserves long-term continuity while still allowing real life change.
 
 ---
 
-## 9. Donor Mapping From `cc`
+## 9. Companion Shell Mapping
 
-### 8.1 What To Borrow
+### 8.1 What To Reuse
 
-The following donor elements are worth borrowing from `cc`:
+The following companion-shell elements remain useful as reusable mechanics:
 
 - sprite shell
 - speech bubble shell
@@ -758,14 +758,14 @@ The following donor elements are worth borrowing from `cc`:
 - appearance bone system such as species / rarity / eye / hat / shiny / stats
 - companion visual presence logic
 
-Relevant donor files include:
+Relevant historical shell references include:
 
 - `cc/src/buddy/CompanionSprite.tsx`
 - `cc/src/buddy/types.ts`
 - `cc/src/buddy/companion.ts`
 - `cc/src/buddy/useBuddyNotification.tsx`
 
-### 8.2 What Not To Borrow
+### 8.2 What Not To Reuse
 
 The following must not be copied as-is:
 
@@ -774,12 +774,12 @@ The following must not be copied as-is:
 - `config.companion` as Buddy's primary truth source
 - Buddy as a lightweight decorative plugin detached from main-brain truth
 
-### 8.3 Donor Rule
+### 8.3 Companion Rule
 
-The donor rule should be:
+The rule should be:
 
-- borrow `cc`'s companion shell
-- do not borrow `cc`'s companion product center
+- reuse companion-shell mechanics only
+- do not import any external companion product center
 
 In CoPaw, Buddy must be integrated into the main-brain truth chain from day one.
 
@@ -860,9 +860,9 @@ The evolution system needs a concrete asset strategy.
 
 This must not be left as "we will style it later."
 
-### 11.1 Donor Asset Strategy
+### 11.1 Companion Asset Strategy
 
-The first version should borrow from `cc` at the shell/mechanic level:
+The first version should reuse existing shell/mechanic patterns at the shell level:
 
 - sprite body shell
 - facial expression shell

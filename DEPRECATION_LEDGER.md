@@ -376,13 +376,13 @@
     - `TaskDelegationService` 当前保留为 executor-first child-run facade，而不是本地 actor/delegation runtime
     - 因此 external-executor multi-agent cutover 不再以删除 `delegation_service.py` 文件为完成前提；该文件后续是否继续收敛，属于单独简化任务
 
-### 3.1.5 donor-first 外接项目产品面：`/capability-market/projects/install*`、`project donor` taxonomy、Runtime Center donor 读面
+### 3.1.5 external-source-first 外接项目产品面：`/capability-market/projects/install*`、`project source` taxonomy、Runtime Center external-source 读面
 
 - 当前状态：`frozen`
 - 问题：
-  - 这套产品面仍保留“任意 GitHub 项目 donor / project-package / adapter / runtime-component”心智
+  - 这套产品面仍保留“任意 GitHub 项目 external-source / project-package / adapter / runtime-component”心智
   - 与新方向“只对接受控执行体 runtime provider”冲突
-  - Runtime Center 里 donor 候选供给面和 active executor 读面仍未彻底拆开
+  - Runtime Center 里 external-source 候选供给面和 active executor 读面仍未彻底拆开
 - 目标替代：
   - `ExecutorProvider`
   - `ExecutorRuntimeInstance`
@@ -391,38 +391,38 @@
 - 删除阶段：`external-executor hard-cut`
 - 删除前提：
   - executor provider intake 已有正式入口
-  - donor/state/runtime center 旧读面已标注 compatibility 或完成拆分
+  - external-source/state/runtime center 旧读面已标注 compatibility 或完成拆分
 - 删除方式：
-  - 先给 donor-first 路由、文档、测试补 `compatibility/acquisition-only` 标记
+  - 先给 external-source-first 路由、文档、测试补 `compatibility/acquisition-only` 标记
   - 再把 active execution 语义迁出
-  - 最后删除不再需要的 project-donor 产品壳
+  - 最后删除不再需要的 project-external-source 产品壳
 - `2026-04-20` 落点补充：
-  - 当前 generic executor runtime taxonomy 已开始替代 donor-first active runtime taxonomy。
-  - 但 `/capability-market/projects/install*`、`project-package / adapter / runtime-component`、donor state/trust/trial/retirement、Runtime Center donor 读面仍是 compatibility/acquisition-only 遗留，尚未完成正式拆分。
+  - 当前 generic executor runtime taxonomy 已开始替代 external-source-first active runtime taxonomy。
+  - 但 `/capability-market/projects/install*`、`project-package / adapter / runtime-component`、external-source state/trust/trial/retirement、Runtime Center external-source 读面仍是 compatibility/acquisition-only 遗留，尚未完成正式拆分。
 - `2026-04-21` 状态补充：
-  - 本轮 actor runtime compatibility 收口未继续推进 donor/project intake 边界
+  - 本轮 actor runtime compatibility 收口未继续推进 external-source/project intake 边界
   - 因此本条目状态保持不变：仍是 `compatibility/acquisition-only` 遗留，不得写成 formal executor provider 主链已闭环
-  - 当前工作树已继续补上 donor/project intake 的 surface demotion：
-    - `project_donor_contracts.py` 的 donor contract metadata / projected package metadata 现显式带 `compatibility_mode = compatibility/acquisition-only` 与 `formal_surface = false`
-    - `/capability-market/projects/search`、`/projects/install*` 与 Runtime Center donor/package projection 现都会返回同一 compatibility 标记，避免再被误读成 canonical executor-provider surface
-    - Runtime Center donor/package projection 也已兼容 dict-backed service payload，避免 donor 读面只因 projection 形态不同就静默掉数据
+  - 当前工作树已继续补上 external-source/project intake 的 surface demotion：
+    - `project_donor_contracts.py` 的 external-source contract metadata / projected package metadata 现显式带 `compatibility_mode = compatibility/acquisition-only` 与 `formal_surface = false`
+    - `/capability-market/projects/search`、`/projects/install*` 与 Runtime Center external-source/package projection 现都会返回同一 compatibility 标记，避免再被误读成 canonical executor-provider surface
+    - Runtime Center external-source/package projection 也已兼容 dict-backed service payload，避免 external-source 读面只因 projection 形态不同就静默掉数据
   - 但这仍只是 compatibility 标记收口，不是 formal executor provider intake 完整替代；本条目状态因此继续保持 `frozen`
 - `2026-04-21` 最终收口补充：
   - `src/copaw/app/routers/capability_market.py` 已新增：
     - `GET /capability-market/executor-providers/search`
     - `POST /capability-market/executor-providers/install`
   - `src/copaw/app/runtime_center/state_query.py` / `src/copaw/state/executor_runtime_service.py` / executor runtime repository 现已支持 formal provider inventory read path
-  - 因此 formal `ExecutorProvider / control_surface_kind / default_protocol_kind` intake 已落地，donor/project install 不再是唯一也不再是假装 canonical 的 executor intake 前门
-  - 但 donor/project product shell、donor state/trust/trial/retirement taxonomy 与 compatibility/acquisition-only 路由仍在；本条目因此继续保持 `frozen`，不得误写成“donor-first 产品面已删除”
+  - 因此 formal `ExecutorProvider / control_surface_kind / default_protocol_kind` intake 已落地，external-source/project install 不再是唯一也不再是假装 canonical 的 executor intake 前门
+  - 但 external-source/project product shell、external-source state/trust/trial/retirement taxonomy 与 compatibility/acquisition-only 路由仍在；本条目因此继续保持 `frozen`，不得误写成“external-source-first 产品面已删除”
 - `2026-04-22` 状态补充：
   - `project_donor_contracts.py` 现把 nested `execution_shell` 也统一标记为 `compatibility/acquisition-only`
-  - Capability Market project install result 的 `runtime_contract` 与 Runtime Center donor projection 的 nested `runtime_contract` 现都会显式带：
+  - Capability Market project install result 的 `runtime_contract` 与 Runtime Center external-source projection 的 nested `runtime_contract` 现都会显式带：
     - `compatibility_mode = compatibility/acquisition-only`
     - `formal_surface = false`
-  - donor/project shell 因此不再返回“裸 runtime_contract”误导前台把 acquisition-only surface 当 active execution shell；但 donor-first taxonomy 与路由仍在，本条目继续保持 `frozen`
+  - external-source/project shell 因此不再返回“裸 runtime_contract”误导前台把 acquisition-only surface 当 active execution shell；但 external-source-first taxonomy 与路由仍在，本条目继续保持 `frozen`
   - `2026-04-22` 验收补充：
-    - `/capability-market/executor-providers/search` 与 `/executor-providers/install` 现已通过真实 external-provider smoke，formal provider intake 已不再依赖 donor/project 产品壳做真实性证明
-    - 因此 donor/project compatibility/acquisition-only surface 已不再阻塞 external-executor hard-cut 终态完成；但 donor-first taxonomy、旧产品壳与路由删除仍是单独 follow-up
+    - `/capability-market/executor-providers/search` 与 `/executor-providers/install` 现已通过真实 external-provider smoke，formal provider intake 已不再依赖 external-source/project 产品壳做真实性证明
+    - 因此 external-source/project compatibility/acquisition-only surface 已不再阻塞 external-executor hard-cut 终态完成；但 external-source-first taxonomy、旧产品壳与路由删除仍是单独 follow-up
   - `2026-04-24` 模型治理补充：
     - formal external executor launch 现已统一改为读取 system runtime-provider contract 的 active model
     - `/capability-market/executor-providers/install` 上的 `model_policy_id / default_model_ref` 不再进入 formal binding truth，只保留 compatibility 输入意义
@@ -849,6 +849,3 @@
 - 哪些旧模块已经 `deleted`
 
 如果不更新本文件，就等于默认容许历史遗留继续堆积。
-
-
-

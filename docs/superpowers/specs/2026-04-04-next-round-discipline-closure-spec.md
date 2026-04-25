@@ -6,8 +6,8 @@ This spec defines the next round of runtime/capability discipline work that is m
 
 - single-loop main-brain chat closure
 - governed capability lifecycle landing
-- donor-first external capability assimilation design
-- the current Claude-derived runtime hardening wave
+- external-source-first external capability assimilation design
+- the current runtime hardening wave
 
 This is not a new architecture.
 
@@ -16,7 +16,7 @@ It is a closure spec for the most important remaining discipline gaps so CoPaw k
 - low entropy
 - single-path execution and discovery
 - default autonomy
-- donor-first growth
+- external-source-first growth
 - compact governed portfolios
 
 This spec is intentionally focused on discipline, not on adding more product surfaces.
@@ -31,7 +31,7 @@ The next round should not reopen already-closed top-level directions such as:
 - single-loop chat/orchestrate split
 - formal planning truth
 - old `goal/task/schedule` product mindsets
-- building a parallel donor manager
+- building a parallel external-source manager
 
 The next round should instead close the remaining discipline gaps that still threaten long-term autonomy quality.
 
@@ -39,7 +39,7 @@ If these gaps are not closed, CoPaw can still "work," but it will become:
 
 - noisier
 - more brittle
-- harder to scale across donors and long tasks
+- harder to scale across external sources and long tasks
 - more prone to portfolio sprawl
 - less trustworthy under long-running pressure
 
@@ -51,12 +51,12 @@ The target state is:
 
 - query/runtime stays clean under long turns
 - discovery remains autonomous without turning into crawler entropy
-- external donor intake remains resilient across regions and mirrors
-- duplicate donor hits collapse into one governed truth
+- external-source intake remains resilient across regions and mirrors
+- duplicate external-source hits collapse into one governed truth
 - shared writer work obeys one explicit contract
 - child runs use one cleanup shell
 - MCP/runtime overlays obey lifecycle discipline
-- skill/package metadata becomes trustworthy enough for donor-first growth
+- skill/package metadata becomes trustworthy enough for external-source-first growth
 - portfolios stay compact and replaceable instead of only expanding
 
 These are the highest-value remaining discipline cuts.
@@ -69,13 +69,13 @@ This round exists because the current repo already has the architectural directi
 
 The most important current gap signals are:
 
-- query runtime already has compaction and memory machinery, but not yet one explicit entropy contract for donor/trial-heavy long turns
-- donor-first discovery direction is defined, but source-chain discipline is not yet fully formalized as one-active-source runtime behavior
-- donor/package/source profile truth is starting to land, but multi-source normalization still needs to become the rule before candidate fan-out
+- query runtime already has compaction and memory machinery, but not yet one explicit entropy contract for external-source/trial-heavy long turns
+- external-source-first discovery direction is defined, but source-chain discipline is not yet fully formalized as one-active-source runtime behavior
+- external-source/package/source profile truth is starting to land, but multi-source normalization still needs to become the rule before candidate fan-out
 - shared writer behavior exists in parts of browser/desktop/file flows, but not yet as one repo-wide read-concurrent/write-serialized contract
 - worker/supervisor/delegation flows already do cleanup, but child-run startup and teardown semantics are still too distributed
 - MCP governance has moved forward, but lifecycle meaning is still too easy to blur with simple install/connect state
-- skill/package growth direction has changed to donor-first, but metadata discipline still needs to become strict enough to resist duplication and provenance drift
+- skill/package growth direction has changed to external-source-first, but metadata discipline still needs to become strict enough to resist duplication and provenance drift
 - portfolio governance exists conceptually, but density limits, replacement-first pressure, and hotspot cooling are not yet strong enough to prevent renewed entropy
 
 This means the problem is no longer "what architecture do we want."
@@ -84,11 +84,11 @@ The problem is "which discipline contracts still need to be made explicit so the
 
 ---
 
-## 4. What To Borrow From `cc`
+## 4. What Discipline Still Matters
 
-The point is not to copy `cc` as a product.
+The point is not to mirror any external product.
 
-The point is to continue borrowing the specific disciplines that matter most:
+The point is to keep the specific disciplines that matter most:
 
 - low entropy
 - one active path per action
@@ -107,7 +107,7 @@ What must still remain CoPaw-owned:
 
 So the rule remains:
 
-- borrow runtime discipline from `cc`
+- keep low-entropy runtime discipline in CoPaw's own chain
 - keep CoPaw's own truth and lifecycle center
 
 ---
@@ -130,7 +130,7 @@ The real issue is that long-running turns still lack a sufficiently explicit con
 - microcompact / autocompact triggers
 - carry-forward acceptance
 - operator-visible entropy state
-- bounded metadata carry-forward from donor discovery/trial flows
+- bounded metadata carry-forward from external-source discovery/trial flows
 
 The goal is:
 
@@ -140,7 +140,7 @@ The goal is:
 
 Hard rules:
 
-- donor metadata must not flood long-turn context
+- external-source metadata must not flood long-turn context
 - compaction must remain a runtime/evidence discipline, not a second memory truth source
 - entropy degradation must be operator-visible
 
@@ -151,7 +151,7 @@ Primary landing zones:
 
 ### 5.2 Package B: Discovery Source Chain
 
-This is the first donor-first runtime discipline cut.
+This is the first external-source intake discipline cut.
 
 The platform must support:
 
@@ -181,7 +181,7 @@ This matters especially for:
 
 - mainland-China deployment
 - hybrid onshore/offshore setups
-- offline/private donor operation
+- offline/private external-source operation
 
 ### 5.3 Package C: Multi-Source Deduplication And Donor Normalization
 
@@ -191,13 +191,13 @@ The system must normalize across:
 
 - source-level duplication
 - package identity duplication
-- donor lineage duplication
+- source-lineage duplication
 - capability overlap
 - portfolio compaction
 
 The goal is:
 
-- one donor family should not appear as many fake choices
+- one external-source family should not appear as many fake choices
 - multiple source confirmations should strengthen confidence rather than multiply candidates
 - portfolio counts should track normalized donors, not raw search hits
 
@@ -219,7 +219,7 @@ The current repo already has partial lease and preview discipline, but the next 
 - reads may run concurrently
 - writes must serialize
 - shared writer surfaces must require explicit reservation/lease
-- donor-triggered writer work must obey the same contract as first-party work
+- external-source-triggered writer work must obey the same contract as first-party work
 
 This matters most for:
 
@@ -249,8 +249,8 @@ That shell should own:
 This matters for:
 
 - delegated execution
-- donor scouting
-- donor trial comparison
+- external-source scouting
+- external-source trial comparison
 - scoped runtime experiments
 
 The point is to prevent every new worker-style path from inventing its own cleanup semantics.
@@ -268,9 +268,9 @@ The next round should explicitly tighten:
 - scoped overlays
 - cleanup on shutdown or scope end
 
-Under donor-first architecture, MCP is not special.
+Under the current external-source-first architecture, MCP is not special.
 
-It is another donor class and must obey:
+It is another external-source class and must obey:
 
 - candidate
 - trial
@@ -281,7 +281,7 @@ What must be removed over time is the hidden intuition that "installed and conne
 
 ### 5.7 Package G: Skill / Package Metadata Discipline
 
-This package is the capability-side counterpart of donor normalization.
+This package is the capability-side counterpart of external-source normalization.
 
 The next round should formalize:
 
@@ -292,9 +292,9 @@ The next round should formalize:
 - path-scoped activation
 - package-bound metadata summaries
 
-This is especially important because CoPaw is now explicitly donor-first.
+This is especially important because CoPaw is now explicitly external-source-first.
 
-If metadata discipline stays weak, donor-first architecture will collapse into:
+If metadata discipline stays weak, external-source-first architecture will collapse into:
 
 - prompt folders
 - duplicated skills
@@ -312,9 +312,9 @@ This package closes the strategic discipline loop.
 
 Part one is portfolio governance:
 
-- per-role donor density limits
-- per-seat donor density limits
-- per-environment donor density limits
+- per-role external-source density limits
+- per-seat external-source density limits
+- per-environment external-source density limits
 - trust memory
 - replacement-first logic
 - retirement / forgetting
@@ -324,7 +324,7 @@ Part two is hotspot cooling:
 
 - split orchestration hotspots only where that reduces contract concentration
 - do not count cosmetic file moves as progress
-- keep future donor/runtime discipline from collapsing back into giant files
+- keep future external-source/runtime discipline from collapsing back into giant files
 
 The point is not code style.
 
@@ -365,19 +365,19 @@ Recommended ordering:
 - Package B: Discovery Source Chain
 - Package C: Multi-Source Deduplication And Donor Normalization
 
-These three define whether donor-first autonomy stays clean enough to scale.
+These three define whether external-source-first autonomy stays clean enough to scale.
 
 They must not be treated as an isolated cleanup phase.
 
 Implementation rule:
 
-- `P0` should be built together with the first donor-first external expansion wave
+- `P0` should be built together with the first external-source expansion wave
 - not fully before it
 - and not deferred until after it
 
 In other words:
 
-- the safe minimal donor expansion spine is `external assimilation chain + A/B/C`
+- the safe minimal external-source expansion spine is `external assimilation chain + A/B/C`
 - not `external assimilation chain` alone
 - and not `A/B/C` as a detached internal-only hardening project
 
@@ -388,7 +388,7 @@ In other words:
 - Package F: MCP Lifecycle Discipline
 - Package G: Skill / Package Metadata Discipline
 
-These four define whether execution and donor growth remain governable.
+These four define whether execution and external-source growth remain governable.
 
 ### 7.3 Priority P2
 
@@ -404,13 +404,13 @@ This next round should only be considered properly closed if it produces the fol
 
 1. discovery source failure can no longer break runtime behavior
 2. each discovery action has one active source with clear provenance
-3. donor duplication is normalized before candidate expansion
+3. external-source duplication is normalized before candidate expansion
 4. long-turn entropy is visible, bounded, and contractually handled
 5. shared writer work obeys one clear reservation contract
 6. child-run cleanup no longer splits across multiple hidden shells
 7. MCP donors no longer enjoy install/connect == adoption shortcuts
 8. skill/package identity is provenance-safe and duplicate-resistant
-9. donor portfolios stay compact and replaceable instead of only growing
+9. external-source portfolios stay compact and replaceable instead of only growing
 
 If these outcomes are not met, the round should be treated as partial.
 
@@ -438,7 +438,7 @@ The core standard for this round is:
 - keep CoPaw low-entropy
 - keep actions single-path
 - keep autonomy default-on
-- keep donor growth governed
+- keep external-source growth governed
 - keep the platform compact enough to keep evolving
 
 That is the closure target for the next round.
