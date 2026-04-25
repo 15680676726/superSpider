@@ -66,6 +66,13 @@ Good contributions include:
 
 For larger changes, open or claim an issue first so the direction is explicit before implementation starts.
 
+## Maintainer path
+
+This repository is open to adding more maintainers over time. Sustained,
+high-quality contributors may be invited into a maintainer role after repeated
+merged work, reliable reviews, and consistent follow-through on issues or
+release tasks.
+
 ## Documentation
 
 - Update docs when user-visible behavior changes.

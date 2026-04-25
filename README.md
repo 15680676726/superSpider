@@ -3,12 +3,35 @@
 
   # superSpider
 
-  <p><b>A local execution system for goals, environments, evidence, and long-running work.</b></p>
+  <p><b>A local autonomous execution system for goals, environments, evidence, and long-running multi-agent work.</b></p>
 </div>
 
-superSpider is a local execution system for long-running autonomous work. It brings goals, agents, tasks, environments, evidence, and patches into one Runtime Center so execution, observation, and evolution happen on the same visible surface.
+superSpider is a local-first runtime for long-running autonomous work. It brings goals, agents, tasks, environments, evidence, and patches into one Runtime Center so planning, execution, observation, and recovery happen on the same visible surface.
 
-Its design is centered on four things: main-brain execution over assignment/backlog truth, persistent environments, evidence-first runtime behavior, and one local operating surface instead of scattered control panels.
+It is built around four operational ideas:
+
+- main-brain execution over formal `assignment / backlog` truth
+- managed external executors instead of hidden local worker state
+- persistent environments and evidence-first runtime behavior
+- one local operating surface instead of scattered control panels
+
+## What superSpider does today
+
+- Runs a main-brain driven execution chain over goals, backlog, assignments, runtime state, and evidence.
+- Uses a managed local external executor path for real task execution and writeback.
+- Keeps runtime continuity, evidence, and operator-visible state in one Runtime Center.
+- Exposes a local control surface for execution, observation, governance, and recovery.
+
+## Who it is for
+
+superSpider is for operators and developers who want a local autonomous execution system instead of a chat-only assistant. It is intended for people who need long-running work, governed execution, visible runtime state, and evidence they can inspect after the fact.
+
+## What this repository contains
+
+- `src/copaw/`: runtime kernel, state, capability, execution, evidence, and compatibility layers
+- `console/`: main frontend and Runtime Center
+- `website/`: repository-hosted docs and product pages
+- root planning/status docs: live architecture, migration, and acceptance records
 
 ## Naming
 
@@ -17,6 +40,10 @@ Its design is centered on four things: main-brain execution over assignment/back
 - Current Python package / CLI name: `copaw`
 
 The runtime package and CLI have not been renamed yet, so installation and commands still use `copaw`.
+
+## Current status
+
+The repository is public and open for issues, discussions, and pull requests. The current governance model is maintainer-led, and external contributors should start with an issue or discussion for larger changes.
 
 ## Current entry points
 

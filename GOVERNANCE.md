@@ -18,6 +18,22 @@ The repository owner and listed code owners decide:
   explicit before implementation.
 - Security-sensitive changes should follow [SECURITY.md](SECURITY.md).
 
+## Becoming a maintainer
+
+The project is open to adding more maintainers.
+
+Contributors can be invited into the maintainer group after sustained,
+high-signal work such as:
+
+- repeated merged pull requests across runtime, state, tests, or docs
+- good review quality and low-regression changes
+- reliable follow-through on issues, release prep, or support load
+- alignment with the repository architecture and contribution rules
+
+Maintainer access is granted by the current maintainers. When the maintainer
+group grows, code ownership and merge responsibility should move from a single
+owner model toward a shared maintainer model.
+
 ## Decision rule
 
 The project prefers explicit technical decisions over silent drift. When there
