@@ -598,7 +598,7 @@ CoPaw 必须保持：
 因此，本设计与以下文档互补，而不是替代：
 
 - `docs/superpowers/specs/2026-04-01-knowledge-activation-layer-design.md`
-- `MEMORY_VNEXT_PLAN.md`
+- `docs/architecture/working-plans/MEMORY_VNEXT_PLAN.md`
 - `V7_MAIN_BRAIN_AUTONOMY_PLAN.md`
 
 ---

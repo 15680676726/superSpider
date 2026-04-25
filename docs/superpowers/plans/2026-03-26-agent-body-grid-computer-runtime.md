@@ -72,7 +72,7 @@ Hard boundaries:
 - Modify: `docs/superpowers/plans/2026-03-26-agent-body-grid-computer-runtime.md`
 - Modify: `TASK_STATUS.md`
 - Modify: `DATA_MODEL_DRAFT.md`
-- Modify: `V6_ROUTINE_MUSCLE_MEMORY_PLAN.md`
+- Modify: `docs/architecture/working-plans/V6_ROUTINE_MUSCLE_MEMORY_PLAN.md`
 
 ### Workflow and SOP alignment
 
