@@ -15,19 +15,30 @@ Public-facing product docs should stay in `website/`.
 Internal engineering docs should stay under `docs/architecture/`.
 Retired or historically important but non-active material should move under `docs/archive/`.
 
-## Working plans moved out of root
+## Active working plans
 
-The following files were moved into [`working-plans/`](./working-plans/) to keep the root cleaner:
+The following files remain in [`working-plans/`](./working-plans/) because they are still referenced by current root planning docs, status docs, or active migration records:
 
 - `CHAT_RUNTIME_ALIGNMENT_PLAN.md`
 - `MAIN_BRAIN_CHAT_ORCHESTRATION_SPLIT_PLAN.md`
-- `MEDIA_ANALYSIS_INGEST_PLAN.md`
 - `MEMORY_VNEXT_PLAN.md`
-- `MINIMAL_CONTROL_THREAD_TASK_THREAD_UPGRADE_PLAN.md`
 - `PHASE1_EXECUTION_PLAN.md`
 - `V4_WORKFLOW_CAPABILITY_PLAN.md`
 - `V5_EXECUTION_SURFACE_UPGRADE_PLAN.md`
 - `V6_ROUTINE_MUSCLE_MEMORY_PLAN.md`
+
+## Historical working plans
+
+Working plans that have fallen out of the active reference chain should not stay mixed into the active planning directory.
+
+Those documents should move under:
+
+- [`docs/archive/historical-working-plans/`](../archive/historical-working-plans/)
+
+Current historical plans moved there:
+
+- `MEDIA_ANALYSIS_INGEST_PLAN.md`
+- `MINIMAL_CONTROL_THREAD_TASK_THREAD_UPGRADE_PLAN.md`
 - `WORK_CONTEXT_IMPLEMENTATION_PLAN.md`
 - `WORK_CONTEXT_PURPOSE_AND_IMPLEMENTATION_TARGET.md`
 
