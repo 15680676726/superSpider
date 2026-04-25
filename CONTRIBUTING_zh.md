@@ -70,7 +70,9 @@ docs(readme): update open-source setup guidance
 ## 文档要求
 
 - 只要用户可见行为变了，就同步更新文档
-- 仓库内公开文档在 `website/public/docs/`
+- 公开站点文档入口在 `website/src/pages/Docs.tsx`
+- 内部工程、迁移和架构文档在 `docs/architecture/`
+- 已退役的站点旧 markdown 与历史技术记录统一放在 `docs/archive/`
 - 涉及架构、迁移、状态模型的改动，需要按仓库规范同步更新根目录文档
 
 ## PR 与评审

@@ -59,7 +59,7 @@ npm run dev
 - [Frontend upgrade plan](FRONTEND_UPGRADE_PLAN.md)
 - [Runtime Center UI spec](RUNTIME_CENTER_UI_SPEC.md)
 - [Agent visible model](AGENT_VISIBLE_MODEL.md)
-- [Docs directory](website/public/docs/)
+- [Public website docs surface](website/src/pages/Docs.tsx)
 
 ## コントリビュート
 

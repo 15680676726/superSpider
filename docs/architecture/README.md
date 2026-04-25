@@ -1,6 +1,6 @@
 # Architecture Docs
 
-This directory holds internal architecture records, active working plans, and secondary design notes that do not need to stay in the repository root.
+This directory holds internal architecture records, active working plans, and secondary design notes that do not need to stay in the repository root or in the public website docs surface.
 
 ## Root vs docs/architecture
 
@@ -11,6 +11,10 @@ The repository root now keeps only:
 
 Secondary architecture material belongs here instead of cluttering the root.
 
+Public-facing product docs should stay in `website/`.
+Internal engineering docs should stay under `docs/architecture/`.
+Retired or historically important but non-active material should move under `docs/archive/`.
+
 ## Working plans moved out of root
 
 The following files were moved into [`working-plans/`](./working-plans/) to keep the root cleaner:
@@ -20,7 +24,6 @@ The following files were moved into [`working-plans/`](./working-plans/) to keep
 - `MEDIA_ANALYSIS_INGEST_PLAN.md`
 - `MEMORY_VNEXT_PLAN.md`
 - `MINIMAL_CONTROL_THREAD_TASK_THREAD_UPGRADE_PLAN.md`
-- `N8N_SOP_ADAPTER_WORKFLOW_HUB_PLAN.md`
 - `PHASE1_EXECUTION_PLAN.md`
 - `V4_WORKFLOW_CAPABILITY_PLAN.md`
 - `V5_EXECUTION_SURFACE_UPGRADE_PLAN.md`
@@ -46,3 +49,7 @@ These remain at the repository root because they are heavily used as canonical o
 - `DEPRECATION_LEDGER.md`
 
 If a document is no longer a core operating document, it should be moved under `docs/architecture/` or `docs/archive/` instead of returning to the root.
+
+Retired architecture topics should go one step further and live under `docs/archive/retired-architecture/` instead of active working plans.
+
+Legacy website markdown that is no longer the canonical public docs surface should also be archived instead of remaining under `website/public/`.

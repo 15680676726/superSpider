@@ -76,7 +76,9 @@ release tasks.
 ## Documentation
 
 - Update docs when user-visible behavior changes.
-- Repository docs live under `website/public/docs/`.
+- Public-facing website docs live in `website/src/pages/Docs.tsx`.
+- Internal engineering, migration, and architecture docs live under `docs/architecture/`.
+- Retired public-site markdown and historical technical records live under `docs/archive/`.
 - Architecture / migration work must keep the root planning and status docs in sync when applicable.
 
 ## Pull requests and reviews

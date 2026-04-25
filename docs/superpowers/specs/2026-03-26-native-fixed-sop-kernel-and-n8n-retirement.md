@@ -161,7 +161,7 @@ Frontend:
 
 Historical docs:
 
-- `docs/architecture/working-plans/N8N_SOP_ADAPTER_WORKFLOW_HUB_PLAN.md` remains only as a historical ledger
+- `docs/archive/retired-architecture/N8N_SOP_ADAPTER_WORKFLOW_HUB_PLAN.md` remains only as a historical ledger
 
 ## 8. Target Product Surface
 

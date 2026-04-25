@@ -9,12 +9,11 @@ export interface SiteConfig {
 }
 
 const defaultConfig: SiteConfig = {
-  projectName: "Spider Mesh",
-  projectEnglishName: "Spider Mesh",
-  projectTaglineEn:
-    "A local execution system for goals, environments, evidence, and long-running work.",
-  projectTaglineZh: "面向目标、环境、证据与长期任务的本地执行系统。",
-  repoUrl: "https://github.com/agentscope-ai/CoPaw",
+  projectName: "superSpider",
+  projectEnglishName: "superSpider",
+  projectTaglineEn: "The main brain for local autonomous execution.",
+  projectTaglineZh: "面向本地长期自治执行的主脑系统。",
+  repoUrl: "https://github.com/15680676726/superSpider",
   docsPath: "/docs/",
   consoleUrl: "http://127.0.0.1:8088/",
 };

@@ -55,4 +55,5 @@ The following are generally out of scope:
 Operational guidance and setup details live in:
 
 - [README](README.md)
-- `website/public/docs/`
+- public website docs: `website/src/pages/Docs.tsx`
+- internal architecture docs: `docs/architecture/`

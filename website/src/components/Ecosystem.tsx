@@ -42,10 +42,10 @@ const ITEMS: Array<{
   },
   { key: "qq", icon: MessageSquare, labelZh: "QQ", labelEn: "QQ" },
   {
-    key: "agentscope",
+    key: "codex",
     icon: Puzzle,
-    labelZh: "AgentScope",
-    labelEn: "AgentScope",
+    labelZh: "Codex",
+    labelEn: "Codex",
   },
   { key: "python", icon: Code2, labelZh: "Python", labelEn: "Python" },
   { key: "cron", icon: CalendarClock, labelZh: "Cron", labelEn: "Cron" },

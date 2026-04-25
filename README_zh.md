@@ -197,7 +197,7 @@ npm run dev
 - [前端升级路线](FRONTEND_UPGRADE_PLAN.md)
 - [运行中心 UI 规范](RUNTIME_CENTER_UI_SPEC.md)
 - [Agent 可见模型](AGENT_VISIBLE_MODEL.md)
-- [文档目录](website/public/docs/)
+- [公开站点文档入口](website/src/pages/Docs.tsx)
 
 ## 参与方式
 

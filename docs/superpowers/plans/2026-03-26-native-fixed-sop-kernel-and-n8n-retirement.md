@@ -49,7 +49,7 @@ This plan removes ambiguity; the body-runtime plan then builds on a single autom
 - Modify: `DATA_MODEL_DRAFT.md`
 - Modify: `API_TRANSITION_MAP.md`
 - Modify: `docs/architecture/working-plans/V6_ROUTINE_MUSCLE_MEMORY_PLAN.md`
-- Modify: `docs/architecture/working-plans/N8N_SOP_ADAPTER_WORKFLOW_HUB_PLAN.md`
+- Modify: `docs/archive/retired-architecture/N8N_SOP_ADAPTER_WORKFLOW_HUB_PLAN.md`
 
 ### Backend kernel and runtime wiring
 
@@ -119,7 +119,7 @@ This plan removes ambiguity; the body-runtime plan then builds on a single autom
 - Modify: `DATA_MODEL_DRAFT.md`
 - Modify: `API_TRANSITION_MAP.md`
 - Modify: `docs/architecture/working-plans/V6_ROUTINE_MUSCLE_MEMORY_PLAN.md`
-- Modify: `docs/architecture/working-plans/N8N_SOP_ADAPTER_WORKFLOW_HUB_PLAN.md`
+- Modify: `docs/archive/retired-architecture/N8N_SOP_ADAPTER_WORKFLOW_HUB_PLAN.md`
 
 - [ ] **Step 1: Add a failing documentation expectation check**
 

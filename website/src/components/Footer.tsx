@@ -21,27 +21,7 @@ export function Footer({ lang }: { lang: Lang }) {
         }}
       >
         <div>{t(lang, "footer.note")}</div>
-        <div style={{ fontSize: "0.86rem" }}>
-          {t(lang, "footer.builtOn")}{" "}
-          <a
-            href="https://github.com/agentscope-ai/agentscope-runtime"
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ color: "inherit", textDecoration: "underline" }}
-          >
-            AgentScope Runtime
-          </a>{" "}
-          +{" "}
-          <a
-            href="https://github.com/agentscope-ai/agentscope"
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ color: "inherit", textDecoration: "underline" }}
-          >
-            AgentScope
-          </a>
-          .
-        </div>
+        <div style={{ fontSize: "0.86rem" }}>{t(lang, "footer.surface")}</div>
       </div>
     </footer>
   );

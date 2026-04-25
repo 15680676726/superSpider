@@ -33,13 +33,13 @@ export function Hero({
   docsPath,
   repoUrl,
 }: HeroProps) {
-  const title = lang === "zh" ? "Spider Mesh 系统" : "Spider Mesh System";
+  const title = lang === "zh" ? "superSpider 系统" : "superSpider System";
   const showSecondaryName =
     projectEnglishName.trim().length > 0 && projectEnglishName.trim() !== projectName.trim();
   const summary =
     lang === "zh"
-      ? "把目标、环境、证据与长期执行收敛到同一个本地运行中心，让执行、观察与演进在一处闭环。"
-      : "A local execution system that brings goals, environments, evidence, and long-running work into one Runtime Center.";
+      ? "把主脑、记忆、知识、执行体与证据收敛到同一个本地运行中心，让执行、观察与演进在一处闭环。"
+      : "A local autonomous execution system that brings the main brain, memory, knowledge, executors, and evidence into one Runtime Center.";
 
   return (
     <motion.section

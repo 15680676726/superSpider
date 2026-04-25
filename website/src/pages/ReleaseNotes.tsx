@@ -9,8 +9,8 @@ interface ReleaseNotesProps {
   onLangClick: () => void;
 }
 
-function archiveBase(): string {
-  return (import.meta.env.BASE_URL ?? "/").replace(/\/$/, "");
+function archivedReleaseHref(repoUrl: string, fileName: string): string {
+  return `${repoUrl}/blob/main/docs/archive/public-legacy-release-notes/${fileName}`;
 }
 
 export function ReleaseNotes({
@@ -21,21 +21,24 @@ export function ReleaseNotes({
   const releases = [
     {
       version: "v0.0.5",
-      href: `${archiveBase()}/release-notes/${
-        lang === "zh" ? "v0.0.5.zh.md" : "v0.0.5.md"
-      }`,
+      href: archivedReleaseHref(
+        config.repoUrl,
+        lang === "zh" ? "v0.0.5.zh.md" : "v0.0.5.md",
+      ),
     },
     {
       version: "v0.0.5-beta.3",
-      href: `${archiveBase()}/release-notes/${
-        lang === "zh" ? "v0.0.5-beta.3.zh.md" : "v0.0.5-beta.3.md"
-      }`,
+      href: archivedReleaseHref(
+        config.repoUrl,
+        lang === "zh" ? "v0.0.5-beta.3.zh.md" : "v0.0.5-beta.3.md",
+      ),
     },
     {
       version: "v0.0.4",
-      href: `${archiveBase()}/release-notes/${
-        lang === "zh" ? "v0.0.4.zh.md" : "v0.0.4.md"
-      }`,
+      href: archivedReleaseHref(
+        config.repoUrl,
+        lang === "zh" ? "v0.0.4.zh.md" : "v0.0.4.md",
+      ),
     },
   ];
 
@@ -96,12 +99,12 @@ export function ReleaseNotes({
               {lang === "zh" ? "历史归档" : "Historical archive"}
             </span>
             <h1 style={{ margin: 0, fontSize: "2rem", letterSpacing: "-0.04em" }}>
-              {lang === "zh" ? "Spider Mesh 版本记录" : "Spider Mesh Release Notes"}
+              {lang === "zh" ? "superSpider 版本记录" : "superSpider Release Notes"}
             </h1>
             <p style={{ margin: 0, color: "var(--text-muted)", lineHeight: 1.75 }}>
               {lang === "zh"
-                ? "这里按版本保留 Spider Mesh 的阶段性发布说明。系统方向、当前能力边界与施工进度仍以升级总方案和任务状态为准。"
-                : "This page keeps versioned release notes for Spider Mesh. For current direction, scope, and implementation progress, use the master plan and task status."}
+                ? "这里保留的是 pre-superSpider 阶段的历史发布说明，作为归档参考，不代表当前公开产品面。系统方向、当前能力边界与施工进度仍以升级总方案和任务状态为准。"
+                : "This page keeps historical pre-superSpider release notes as an archive reference. They do not define the current public product surface. For current direction, scope, and implementation progress, use the master plan and task status."}
             </p>
           </div>
         </section>
@@ -131,7 +134,7 @@ export function ReleaseNotes({
                 {release.version}
               </strong>
               <span style={{ color: "var(--text-muted)" }}>
-                {lang === "zh" ? "查看归档版本说明" : "Open archived release note"}
+                {lang === "zh" ? "在仓库归档中查看历史版本说明" : "Open archived release note in the repository"}
               </span>
             </a>
           ))}

@@ -21,17 +21,17 @@ function buildCards(lang: Lang): StoryCard[] {
       {
         title: "以目标驱动持续执行",
         body:
-          "Spider Mesh 不是一次性对话壳，而是围绕目标与任务持续推进的执行系统。计划、执行、观察与反馈属于同一条运行主链。",
+          "superSpider 不是一次性对话壳，而是围绕目标与任务持续推进的执行系统。计划、执行、观察与反馈属于同一条运行主链。",
       },
       {
         title: "环境不会每轮重建",
         body:
-          "浏览器、文件、渠道、工作目录与会话不该靠提示词临时恢复。Spider Mesh 把环境挂在运行现场里，让长期任务真正连起来。",
+          "浏览器、文件、渠道、工作目录与会话不该靠提示词临时恢复。superSpider 把环境挂在运行现场里，让长期任务真正连起来。",
       },
       {
         title: "证据先于结论",
         body:
-          "重要动作应该留下证据、回放与产物。Spider Mesh 强调可归因、可回放、可审计，而不是把关键事实埋进零散日志。",
+          "重要动作应该留下证据、回放与产物。superSpider 强调可归因、可回放、可审计，而不是把关键事实埋进零散日志。",
       },
       {
         title: "运行中心统一可见",
@@ -45,17 +45,17 @@ function buildCards(lang: Lang): StoryCard[] {
     {
       title: "Goal-first execution",
       body:
-        "Spider Mesh is not a disposable chat wrapper. It is an execution system where goals and tasks stay on one runtime chain from planning to observation.",
+        "superSpider is not a disposable chat wrapper. It is an execution system where goals and tasks stay on one runtime chain from planning to observation.",
     },
     {
       title: "Persistent environments",
       body:
-        "Browsers, files, channels, working directories, and sessions should not be rebuilt from scratch every turn. Spider Mesh treats environment as a mounted runtime surface.",
+        "Browsers, files, channels, working directories, and sessions should not be rebuilt from scratch every turn. superSpider treats environment as a mounted runtime surface.",
     },
     {
       title: "Evidence before claims",
       body:
-        "Important actions should leave evidence, replay pointers, and artifacts. Spider Mesh is designed for attribution, replay, and auditability.",
+        "Important actions should leave evidence, replay pointers, and artifacts. superSpider is designed for attribution, replay, and auditability.",
     },
     {
       title: "One visible Runtime Center",
@@ -84,7 +84,7 @@ export function Home({ config, lang, onLangClick }: HomeProps) {
           {
             label: "前端升级路线",
             href: repoFile("FRONTEND_UPGRADE_PLAN.md"),
-            desc: "为什么 Spider Mesh 的前端是一座运行中心",
+            desc: "为什么 superSpider 的前端是一座运行中心",
           },
           {
             label: "运行中心 UI 规范",
@@ -106,7 +106,7 @@ export function Home({ config, lang, onLangClick }: HomeProps) {
           {
             label: "Frontend upgrade plan",
             href: repoFile("FRONTEND_UPGRADE_PLAN.md"),
-            desc: "Why Spider Mesh uses a runtime center instead of a static control panel",
+            desc: "Why superSpider uses a runtime center instead of a static control panel",
           },
           {
             label: "Runtime Center UI spec",
@@ -145,12 +145,12 @@ export function Home({ config, lang, onLangClick }: HomeProps) {
         >
           <div style={{ display: "grid", gap: "0.75rem" }}>
             <h2 style={{ margin: 0, fontSize: "1.75rem", letterSpacing: "-0.03em" }}>
-              {lang === "zh" ? "Spider Mesh 如何工作" : "How Spider Mesh works"}
+              {lang === "zh" ? "superSpider 如何工作" : "How superSpider works"}
             </h2>
             <p style={{ margin: 0, color: "var(--text-muted)", maxWidth: "48rem" }}>
               {lang === "zh"
-                ? "Spider Mesh 面向的是长期任务、持续环境和证据化执行。重点不是做一个更花的聊天入口，而是把真实运行主链收敛到本地。"
-                : "Spider Mesh is built for long-running tasks, persistent environments, and evidence-backed execution. The point is not a flashier chat shell but a tighter local runtime chain."}
+                ? "superSpider 面向的是长期任务、持续环境和证据化执行。重点不是做一个更花的聊天入口，而是把真实运行主链收敛到本地。"
+                : "superSpider is built for long-running tasks, persistent environments, and evidence-backed execution. The point is not a flashier chat shell but a tighter local runtime chain."}
             </p>
           </div>
           <div
@@ -188,12 +188,12 @@ export function Home({ config, lang, onLangClick }: HomeProps) {
           >
             <div style={{ display: "grid", gap: "0.4rem" }}>
               <h3 style={{ margin: 0 }}>
-                {lang === "zh" ? "为什么叫 Spider Mesh" : "Why the name Spider Mesh"}
+                {lang === "zh" ? "为什么叫 superSpider" : "Why the name superSpider"}
               </h3>
               <p style={{ margin: 0, color: "var(--text-muted)", maxWidth: "48rem" }}>
                 {lang === "zh"
-                  ? "Spider Mesh 指的是一个由执行中枢统筹、多 Agent 持续协作，并把记忆、证据与工作流织成网络的运行结构。这个名字服务于系统形态，而不是装饰性的吉祥物。"
-                  : "Spider Mesh describes a runtime structure where one control core coordinates multiple agents and weaves memory, evidence, and workflows into a durable operating mesh. The name reflects the architecture, not mascot copy."}
+                  ? "superSpider 指的是一个由主脑统筹、多执行链持续协作，并把记忆、知识、证据与任务推进织成网络的运行结构。这个名字服务于系统形态，而不是装饰性的吉祥物。"
+                  : "superSpider describes a runtime structure where one main brain coordinates multiple execution lanes and weaves memory, knowledge, evidence, and task progression into a durable operating mesh. The name reflects the architecture, not mascot copy."}
               </p>
             </div>
           </div>
@@ -209,7 +209,7 @@ export function Home({ config, lang, onLangClick }: HomeProps) {
           >
             <div style={{ display: "grid", gap: "0.4rem" }}>
               <h3 style={{ margin: 0 }}>
-                {lang === "zh" ? "从这里进入 Spider Mesh" : "Enter Spider Mesh here"}
+                {lang === "zh" ? "从这里进入 superSpider" : "Enter superSpider here"}
               </h3>
               <p style={{ margin: 0, color: "var(--text-muted)" }}>
                 {lang === "zh"
