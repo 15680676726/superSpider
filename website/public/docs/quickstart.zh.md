@@ -1,13 +1,11 @@
-# 快速开始
+﻿# 快速开始
 
-本节介绍六种方式运行 Spider Mesh：
+本节介绍四种方式运行 Spider Mesh：
 
 - **方式一 — 脚本安装**：无需手动配置 Python，一行命令自动完成安装。
 - **方式二 — pip 安装**：适合自行管理 Python 环境的用户。
 - **方式三 — 桌面应用（Beta）**：下载即用的桌面应用，无需命令行操作，适合不熟悉终端的用户。详见 [桌面应用指南](./desktop)。
-- **方式四 — 魔搭创空间**：一键配置，部署到创空间云端运行，无需本地安装。
-- **方式五 — Docker**：使用官方镜像（Docker Hub；国内可选 ACR），镜像 tag 含 `latest`（稳定版）与 `pre`（PyPI 预发布版）。
-- **方式六 — 阿里云 ECS**：在阿里云上一键部署 Spider Mesh，无需本地安装。
+- **方式四 — Docker**：运行发布好的容器镜像，或基于本仓库自行构建并发布镜像。
 
 > 📖 阅读前请先了解 [项目介绍](./intro)，完成安装与启动后可查看 [控制台](./console)。
 
@@ -24,7 +22,7 @@
 **macOS / Linux：**
 
 ```bash
-curl -fsSL https://copaw.agentscope.io/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/15680676726/superSpider/main/scripts/install.sh | bash
 ```
 
 然后打开新终端（或执行 `source ~/.zshrc` / `source ~/.bashrc`）。
@@ -32,13 +30,13 @@ curl -fsSL https://copaw.agentscope.io/install.sh | bash
 **Windows (CMD):**
 
 ```cmd
-curl -fsSL https://copaw.agentscope.io/install.bat -o install.bat && install.bat
+curl -fsSL https://raw.githubusercontent.com/15680676726/superSpider/main/scripts/install.bat -o install.bat && install.bat
 ```
 
 **Windows（PowerShell）：**
 
 ```powershell
-irm https://copaw.agentscope.io/install.ps1 | iex
+irm https://raw.githubusercontent.com/15680676726/superSpider/main/scripts/install.ps1 | iex
 ```
 
 然后打开新终端（安装脚本会自动将 Spider Mesh 加入 PATH）。
@@ -160,7 +158,7 @@ pip install copaw
 ### 下载与使用
 
 1. **下载安装包**
-   前往 [GitHub Releases](https://github.com/agentscope-ai/CoPaw/releases) 下载对应系统的版本：
+   前往 [GitHub Releases](https://github.com/15680676726/superSpider/releases) 下载对应系统的版本：
 
    - Windows: `Spider-Mesh-Setup-<version>.exe`
    - macOS: `Spider-Mesh-<version>-macOS.zip`
@@ -184,40 +182,19 @@ pip install copaw
 
 ---
 
-## 方式四：魔搭创空间一键配置（无需安装）
+## 方式四：Docker
 
-若不想在本地安装 Python，可通过魔搭创空间将 Spider Mesh 部署到云端运行：
-
-1. 先前往 [魔搭](https://modelscope.cn/register?back=%2Fhome) 注册并登录；
-2. 打开 [Spider Mesh 创空间](https://modelscope.cn/studios/fork?target=AgentScope/CoPaw)，一键配置即可使用。
-
-**重要**：使用创空间请将空间设为 **非公开**，否则你的 Spider Mesh 可能被他人操纵。
-
----
-
-## 方式五：Docker
-
-镜像在 **Docker Hub**（`agentscope/copaw`）。镜像 tag：`latest`（稳定版）；`pre`（PyPI 预发布版）。国内用户也可选用阿里云 ACR：`agentscope-registry.ap-southeast-1.cr.aliyuncs.com/agentscope/copaw`（tag 相同）。
+如果你使用 Docker 交付，建议用你自己的命名空间发布镜像。本仓库的
+release workflow 约定镜像名为 `superspider`。
 
 拉取并运行：
 
 ```bash
-docker pull agentscope/copaw:latest
-docker run -p 127.0.0.1:8088:8088 -v copaw-data:/app/working agentscope/copaw:latest
+docker pull <你的-dockerhub-命名空间>/superspider:latest
+docker run -p 127.0.0.1:8088:8088 -v copaw-data:/app/working <你的-dockerhub-命名空间>/superspider:latest
 ```
 
-然后在浏览器打开 **http://127.0.0.1:8088/** 进入控制台。配置、记忆与 Skills 保存在 `copaw-data` 卷中。传入 API Key 可在 `docker run` 时加 `-e DASHSCOPE_API_KEY=xxx` 或 `--env-file .env`。
-
----
-
-## 方式六：部署到阿里云 ECS
-
-若希望将 Spider Mesh 部署在阿里云上，可使用阿里云 ECS 一键部署：
-
-1. 打开 [Spider Mesh 阿里云 ECS 部署链接](https://computenest.console.aliyun.com/service/instance/create/cn-hangzhou?type=user&ServiceId=service-1ed84201799f40879884)，按页面提示填写部署参数；
-2. 参数配置完成后确认费用并创建实例，部署完成后即可获取访问地址并使用服务。
-
-详细步骤与说明请参考 [阿里云开发者社区：Spider Mesh 3 分钟部署你的 AI 助理](https://developer.aliyun.com/article/1713682)。
+然后在浏览器打开 **http://127.0.0.1:8088/** 进入控制台。配置、记忆与 Skills 保存在 `copaw-data` 卷中。传入 API Key 可在 `docker run` 时加 `-e OPENAI_API_KEY=xxx` 或 `--env-file .env`。
 
 ---
 
@@ -241,4 +218,3 @@ curl -N -X POST "http://localhost:8088/api/agent/process" \
 - **想定时自动跑一套「自检/摘要」** → 看 [心跳](./heartbeat)，编辑 HEARTBEAT.md 并在 config 里设间隔和 target。
 - **想用更多命令** → [CLI](./cli)（交互式 init、定时任务、清空工作目录）、[Skills](./skills)。
 - **想改工作目录或配置文件路径** → [配置与工作目录](./config)。
-

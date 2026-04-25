@@ -1,4 +1,4 @@
-# Console
+﻿# Console
 
 The **Console** is Spider Mesh's built-in web interface. After running `copaw app`,
 open `http://127.0.0.1:8088/` in your browser to enter the Console.
@@ -32,7 +32,7 @@ Optimization**. The sections below walk through each feature in order.
 This is where you talk to Spider Mesh. Open it from the sidebar whenever you want a
 direct conversation surface.
 
-![Chat](https://img.alicdn.com/imgextra/i4/O1CN01iuGyNc1mNwsUU5NQI_!!6000000004943-2-tps-3822-2070.png)
+Chat (screenshot removed)
 
 **Send a message:**
 Type in the input box at the bottom, then press **Enter** or click the send
@@ -57,14 +57,14 @@ Click the **···** button on a session item, then click the **trash** icon.
 Manage channel for DingTalk, Feishu, Discord, QQ,
 iMessage, and Console.
 
-![Channels](https://img.alicdn.com/imgextra/i4/O1CN01tUJBg121ZbBnC5fjx_!!6000000006999-2-tps-3822-2070.png)
+Channels (screenshot removed)
 
 **Enable a channel:**
 
 1. Click the channel card you want to configure.
 2. A settings panel slides out on the right. Turn on **Enable**.
 
-   ![Channel Configuration](https://img.alicdn.com/imgextra/i1/O1CN01dbZiw21S5MUOUFJ06_!!6000000002195-2-tps-3822-2070.png)
+   Channel Configuration (screenshot removed)
 
 3. Fill in required credentials (fields differ by channel):
 
@@ -92,7 +92,7 @@ Open the same panel, turn off **Enable**, then click **Save**.
 
 View, filter, and clean up chat sessions across all channels.
 
-![Sessions](https://img.alicdn.com/imgextra/i2/O1CN0142DXNW1NkyOX07sJ7_!!6000000001609-2-tps-3822-2070.png)
+Sessions (screenshot removed)
 
 **Find sessions:**
 Use the search box to filter by user, or use the dropdown to filter by
@@ -115,11 +115,11 @@ Select rows → click **Batch Delete** → confirm.
 
 Create and manage scheduled jobs that Spider Mesh runs automatically by time.
 
-![Cron Jobs](https://img.alicdn.com/imgextra/i3/O1CN01JET1Aw1C9SAvXuIpk_!!6000000000038-2-tps-3822-2070.png)
+Cron Jobs (screenshot removed)
 
 **Create a new job:**
 
-> If the cron job fails to be created, please refer to the **Troubleshooting Scheduled (Cron) Tasks** section in the [FAQ](https://copaw.agentscope.io/docs/faq) to identify the cause.
+> If the cron job fails to be created, please refer to the **Troubleshooting Scheduled (Cron) Tasks** section in the [FAQ](./faq) to identify the cause.
 
 The **simplest way to create a cron job is to chat directly with Spider Mesh** and let it handle the creation for you. For example, if you want to receive a reminder to drink water on DingTalk, simply message Spider Mesh on DingTalk: "Help me create a cron job to remind me to drink water every 5 minutes." Once created, you can view the new task under **Run → Runtime Center → Automation** in the console.
 
@@ -127,7 +127,7 @@ Alternatively, you can create tasks directly via the Console interface:
 
 1. Click **+ Create Job**.
 
-   ![Create Cron Job](https://img.alicdn.com/imgextra/i2/O1CN01jFAcIZ1wCAqyxDGKX_!!6000000006271-2-tps-3822-2070.png)
+   Create Cron Job (screenshot removed)
 
 2. Fill in each section:
    - **Basic Info** — Job ID (e.g. `job-001`) and job name (e.g. "Daily Summary").
@@ -161,7 +161,7 @@ Click **Delete** → confirm.
 Edit files that define Spider Mesh's persona and behavior, such as `SOUL.md`,
 `AGENTS.md`, and `HEARTBEAT.md`, directly in the browser.
 
-![Workspace](https://img.alicdn.com/imgextra/i3/O1CN01APrwdP1NqT9CKJMFt_!!6000000001621-2-tps-3822-2070.png)
+Workspace (screenshot removed)
 
 **Edit files:**
 
@@ -189,7 +189,7 @@ will be replaced. Useful for migration and backup restore.
 Manage skills that extend Spider Mesh's capabilities (for example: PDF reading,
 Word document creation, news retrieval).
 
-![Skills](https://img.alicdn.com/imgextra/i1/O1CN01ZF4kVc1Yz8PlPdiM6_!!6000000003129-2-tps-3822-2070.png)
+Skills (screenshot removed)
 
 **Enable a skill:**
 Click **Enable** at the bottom of a skill card. It takes effect immediately.
@@ -206,7 +206,7 @@ Click **Disable**. It also takes effect immediately.
 2. Enter a skill URL, then click import.
 3. Wait for import to complete. The skill appears as enabled.
 
-![Import Skill](https://img.alicdn.com/imgextra/i4/O1CN01LLVYzH28gCCjby41K_!!6000000007961-2-tps-3822-2070.png)
+Import Skill (screenshot removed)
 
 **Create a custom skill:**
 
@@ -215,7 +215,7 @@ Click **Disable**. It also takes effect immediately.
    (must include `name` and `description`).
 3. Click **Save**. The new skill appears immediately.
 
-![Create Skill](https://img.alicdn.com/imgextra/i3/O1CN01hW0eLY1go9qeiPrUF_!!6000000004188-2-tps-3822-2070.png)
+Create Skill (screenshot removed)
 
 **Delete a custom skill:**
 Disable the skill first, then click the **🗑** icon on its card and confirm.
@@ -231,7 +231,7 @@ Disable the skill first, then click the **🗑** icon on its card and confirm.
 
 Enable/disable/delete **MCP** clients here, or create new ones.
 
-![MCP](https://img.alicdn.com/imgextra/i4/O1CN01ANXnQQ1IfPVO6bEbY_!!6000000000920-2-tps-3786-1980.png)
+MCP (screenshot removed)
 
 **Create a client**
 Click **Create Client** in the top-right, fill in the required information, then click **Create**. The new MCP client appears in the list.
@@ -242,7 +242,7 @@ Click **Create Client** in the top-right, fill in the required information, then
 
 > Sidebar: **System Settings → Agent Config**
 
-![Runtime Config](https://img.alicdn.com/imgextra/i3/O1CN01mhPcqC1KzgGYJQgkW_!!6000000001235-2-tps-3786-1980.png)
+Runtime Config (screenshot removed)
 
 Adjust **Max iterations** and **Max input length** here; click **Save** after changing.
 
@@ -255,13 +255,13 @@ Adjust **Max iterations** and **Max input length** here; click **Save** after ch
 Configure LLM providers and choose the model Spider Mesh uses. Spider Mesh supports both
 cloud providers (API key required) and local providers (no API key required).
 
-![Models](https://img.alicdn.com/imgextra/i2/O1CN01Kd3lg91HdkS5SaLoF_!!6000000000781-2-tps-3822-2070.png)
+Models (screenshot removed)
 
 ### Cloud providers
 
 **Configure a provider:**
 
-1. Click **Settings** on a provider card (ModelScope, DashScope).
+1. Click **Settings** on a provider card.
 2. Enter your **API Key**.
 3. Click **Save**. Card status becomes "Authorized".
 4. To add a custom provider, click **Add Provider**.
@@ -285,11 +285,11 @@ first (`pip install 'copaw[llamacpp]'` or `pip install 'copaw[mlx]'`).
 2. Click **Download Model**, then fill:
    - **Repo ID** (required) — e.g. `Qwen/Qwen3-4B-GGUF`
    - **Filename** (optional) — leave empty for auto-selection
-   - **Source** — Hugging Face (default) or ModelScope
+   - **Source** — the configured model source
 3. Click **Download** and wait for completion.
 
 **View and delete models:**
-Downloaded models are listed with file size, source badge (**HF** / **MS**),
+Downloaded models are listed with file size, source badge,
 and delete button.
 
 ### Ollama provider
@@ -348,7 +348,7 @@ automatically when models are added/removed via Ollama CLI or Console.
 Manage runtime environment variables needed by Spider Mesh tools and skills
 (for example, `TAVILY_API_KEY`).
 
-![Environments](https://img.alicdn.com/imgextra/i1/O1CN01jNMeBA1nMP9tQdTmU_!!6000000005075-2-tps-3822-2070.png)
+Environments (screenshot removed)
 
 **Add a variable:**
 

@@ -1,4 +1,4 @@
-# Config & Working Directory
+﻿# Config & Working Directory
 
 This page covers:
 
@@ -287,11 +287,9 @@ Spider Mesh needs an LLM provider to work. You can set it up in three ways:
 
 ### Built-in providers
 
-| Provider   | ID           | Default Base URL                                    | API Key Prefix |
-| ---------- | ------------ | --------------------------------------------------- | -------------- |
-| ModelScope | `modelscope` | `https://api-inference.modelscope.cn/v1`            | `ms`           |
-| DashScope  | `dashscope`  | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `sk`           |
-| Custom     | `custom`     | _(you set it)_                                      | _(any)_        |
+| Provider                  | ID       | Default Base URL | API Key Prefix      |
+| ------------------------- | -------- | ---------------- | ------------------- |
+| Custom / OpenAI-compatible | `custom` | _(you set it)_   | _(provider-specific)_ |
 
 For each provider you need to set:
 
@@ -373,7 +371,7 @@ Memory search relies on vector embeddings for semantic retrieval. Configure via 
 | Variable               | Description                       | Default                                             |
 | ---------------------- | --------------------------------- | --------------------------------------------------- |
 | `EMBEDDING_API_KEY`    | API key for the embedding service | _(empty — reuse the active provider when allowed)_  |
-| `EMBEDDING_BASE_URL`   | Embedding service URL             | Active provider base URL, or `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| `EMBEDDING_BASE_URL`   | Embedding service URL             | Active provider base URL, or the built-in OpenAI-compatible default |
 | `EMBEDDING_MODEL_NAME` | Embedding model name              | Provider default when recognizable (`text-embedding-v4` / `text-embedding-3-small`) |
 | `EMBEDDING_FOLLOW_ACTIVE_PROVIDER` | Reuse the current active provider when explicit embedding key/base URL are blank | `true` |
 | `EMBEDDING_DIMENSIONS` | Vector dimensions                 | `1024`                                              |

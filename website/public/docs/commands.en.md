@@ -1,4 +1,4 @@
-# Magic Commands
+﻿# Magic Commands
 
 **Magic commands** are special instructions prefixed with `/` that let you directly control conversation state without waiting for the AI to interpret your intent.
 

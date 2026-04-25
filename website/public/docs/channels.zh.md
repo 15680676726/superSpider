@@ -1,4 +1,4 @@
-# 频道配置
+﻿# 频道配置
 
 **频道** = 你和 Spider Mesh 在「哪里」对话：接钉钉就在钉钉里回，接 QQ 就在 QQ 里回。不熟悉这个词的话可以先看 [项目介绍](./intro)。
 
@@ -32,30 +32,30 @@
 
 2. 进入"应用开发→企业内部应用→钉钉应用→创建 **应用**"
 
-   ![钉钉开发者后台](https://img.alicdn.com/imgextra/i1/O1CN01KLtwvu1rt9weVn8in_!!6000000005688-2-tps-2809-1585.png)
+   钉钉开发者后台 (screenshot removed)
 
 3. 在"应用能力→添加应用能力"中添加 **「机器人」**
 
-   ![添加机器人](https://img.alicdn.com/imgextra/i2/O1CN01AboPsn1XGQ84utCG8_!!6000000002896-2-tps-2814-1581.png)
+   添加机器人 (screenshot removed)
 
 4. 配置机器人基础信息，设置消息接收模式为 **Stream 模式**（流式接收），点击发布
 
-   ![机器人基础信息](https://img.alicdn.com/imgextra/i3/O1CN01KwmNZ61GwhDhKxgSv_!!6000000000687-2-tps-2814-1581.png)
+   机器人基础信息 (screenshot removed)
 
-   ![Stream模式+发布](https://img.alicdn.com/imgextra/i2/O1CN01tk8QW11NqvXYqcoPH_!!6000000001622-2-tps-2809-1590.png)
+   Stream模式+发布 (screenshot removed)
 
 5. 在"应用发布→版本管理与发布"中创建新版本，填写基础信息后保存
 
-   ![创建新版本](https://img.alicdn.com/imgextra/i3/O1CN01lRCPuf1PQwIeFL4AL_!!6000000001836-2-tps-2818-1590.png)
+   创建新版本 (screenshot removed)
 
-   ![保存](https://img.alicdn.com/imgextra/i1/O1CN01vrzbIA1Qey2x8Jbua_!!6000000002002-2-tps-2809-1585.png)
+   保存 (screenshot removed)
 
 6. 在"基础信息→凭证与基础信息"中获取：
 
    - **Client ID**（即 AppKey）
    - **Client Secret**（即 AppSecret）
 
-   ![client](https://img.alicdn.com/imgextra/i3/O1CN01JsRrwx1hJImLfM7O1_!!6000000004256-2-tps-2809-1585.png)
+   client (screenshot removed)
 
 7. （可选） **将服务器 IP 加入白名单** — 调用钉钉开放平台 API（如下载用户发送的图片和文件）时需要此配置。在应用设置中进入 **"安全设置→服务器出口 IP"**，添加运行 Spider Mesh 的机器的公网 IP。可在终端执行 `curl ifconfig.me` 查看公网 IP。若未配置白名单，图片和文件下载将报 `Forbidden.AccessDenied.IpNotInWhiteList` 错误。
 
@@ -67,7 +67,7 @@
 
 从“系统设置 → 频道”找到 **DingTalk**，点击后填入刚刚获取的 **Client ID** 和 **Client Secret**
 
-![console](https://img.alicdn.com/imgextra/i1/O1CN01uXrlyQ25Zpr5eVksk_!!6000000007541-2-tps-3451-1778.png)
+console (screenshot removed)
 
 **方法2**: 修改`~/.copaw/config.json`
 
@@ -97,15 +97,15 @@
 
 1. 点击钉钉【消息】栏的“搜索框”
 
-![机器人名称](https://img.alicdn.com/imgextra/i4/O1CN019tRcAi1IIy630Kttu_!!6000000000871-2-tps-2809-2241.png)
+机器人名称 (screenshot removed)
 
 2. 搜索刚刚创建的 “机器人名称”，在【功能】下找到机器人
 
-![机器人](https://img.alicdn.com/imgextra/i3/O1CN01Ha69lm23sx9kLX8eD_!!6000000007312-2-tps-2809-2236.png)
+机器人 (screenshot removed)
 
 3. 点击后进入对话框
 
-![对话框](https://img.alicdn.com/imgextra/i1/O1CN01zjnc7J23hxeOJGYiO_!!6000000007288-2-tps-2046-1630.png)
+对话框 (screenshot removed)
 
 > 注：可以在钉钉群中通过**群设置→机器人→添加机器人**将机器人添加到群聊。需要注意的是，从与机器人的单聊界面中创建群聊，会无法触发机器人的回复。
 
@@ -119,13 +119,13 @@
 
 1. 打开 [飞书开放平台](https://open.feishu.cn/app)，创建企业自建应用
 
-![飞书](https://img.alicdn.com/imgextra/i1/O1CN01awX3Nc1WjRc43kDSk_!!6000000002824-2-tps-4082-2126.png)
+飞书 (screenshot removed)
 
-![build](https://img.alicdn.com/imgextra/i3/O1CN01OXSFsM1EDh4Xa2aOz_!!6000000000318-2-tps-4082-2126.png)
+build (screenshot removed)
 
 2. 在「凭证与基础信息」中获取 **App ID**、**App Secret**
 
-![id & secret](https://img.alicdn.com/imgextra/i2/O1CN01tWGGEE1PAuR7APQcs_!!6000000001801-2-tps-4082-2126.png)
+id & secret (screenshot removed)
 
 3. 在 `config.json` 中填写上述 **App ID** 和 **App Secret**（见下方「填写 config.json」），保存
 
@@ -133,7 +133,7 @@
 
 5. 回到飞书开放平台，在「能力」中启用 **机器人**
 
-![bot](https://img.alicdn.com/imgextra/i1/O1CN01eFPe0d1wU2IY4Fyvt_!!6000000006310-2-tps-4082-2126.png)
+bot (screenshot removed)
 
 6. 选择「权限管理」中的「批量导入/导出权限」，将以下JSON代码复制进去
 
@@ -159,35 +159,35 @@
 }
 ```
 
-![in/out](https://img.alicdn.com/imgextra/i4/O1CN01CpUMJn1ey7E6FIpOU_!!6000000003939-2-tps-4082-2126.png)
+in/out (screenshot removed)
 
-![json](https://img.alicdn.com/imgextra/i3/O1CN01idxezh1G04WY9SYZR_!!6000000000559-2-tps-4082-2126.png)
+json (screenshot removed)
 
-![confirm](https://img.alicdn.com/imgextra/i3/O1CN017nCNTC1Lj1TVH1OIt_!!6000000001334-2-tps-4082-2126.png)
+confirm (screenshot removed)
 
-![confirm](https://img.alicdn.com/imgextra/i3/O1CN01hwOxur1EV67a7clee_!!6000000000356-2-tps-4082-2126.png)
+confirm (screenshot removed)
 
 7. 在「事件与回调」中，点击「事件配置」，选择订阅方式为**长连接（WebSocket）** 模式（无需公网 IP）
 
 > 注：**操作顺序**为先配置 App ID/Secret → 启动 `copaw app` → 再在开放平台配置长连接，如果此处仍显示错误，尝试先暂停copaw服务并重新启动 `copaw app`。
 
-![websocket](https://img.alicdn.com/imgextra/i2/O1CN01LQwKON1x7QMNP41kC_!!6000000006396-2-tps-4082-2126.png)
+websocket (screenshot removed)
 
 8. 选择「添加事件」，搜索**接收消息**，订阅**接收消息 v2.0**
 
-![reveive](https://img.alicdn.com/imgextra/i3/O1CN01svBdl41HTDLCtKFed_!!6000000000758-2-tps-4082-2126.png)
+reveive (screenshot removed)
 
-![click](https://img.alicdn.com/imgextra/i4/O1CN01Rat93U1sLYV9f5dhe_!!6000000005750-2-tps-4082-2126.png)
+click (screenshot removed)
 
-![result](https://img.alicdn.com/imgextra/i2/O1CN015GPfGr1BsxuoOXbYC_!!6000000000002-2-tps-4082-2126.png)
+result (screenshot removed)
 
 9. 在「应用发布」的「版本管理与发布」中，**创建版本**，填写基础信息，**保存**并**发布**
 
-![create](https://img.alicdn.com/imgextra/i1/O1CN01zOqMGk1lhoREn9Lip_!!6000000004851-2-tps-4082-2126.png)
+create (screenshot removed)
 
-![info](https://img.alicdn.com/imgextra/i1/O1CN01SQg28h1nAUrLKTH1J_!!6000000005049-2-tps-4082-2126.png)
+info (screenshot removed)
 
-![save](https://img.alicdn.com/imgextra/i1/O1CN01ebVPlq1lzDUM1Mwej_!!6000000004889-2-tps-4082-2126.png)
+save (screenshot removed)
 
 ### 填写 config.json
 
@@ -205,7 +205,7 @@
 其他字段（encrypt_key、verification_token、media_dir）可选，WebSocket 模式可不填，有默认值。依赖：`pip install lark-oapi`，然后 `copaw app`。如果你使用 SOCKS 代理联网，还需安装 `python-socks`（例如 `pip install python-socks`），否则可能报错：`python-socks is required to use a SOCKS proxy`。
 
 > 注: **App ID** 和 **App Secret** 信息也可以在Console前端填写，但需重启copaw服务，才能继续配置长链接的操作。
-> ![console](https://img.alicdn.com/imgextra/i2/O1CN01k7UVrP1E2hZBAn0oF_!!6000000000294-2-tps-4082-2126.png)
+> console (screenshot removed)
 
 ### 机器人权限建议
 
@@ -232,17 +232,17 @@
 
 1. 在**工作台**点击**添加常用**
 
-![添加常用](https://img.alicdn.com/imgextra/i2/O1CN01bSKw0t1tCgReoZNRr_!!6000000005866-2-tps-2614-1488.png)
+添加常用 (screenshot removed)
 
 2. 搜索刚刚创建的机器人名称并**添加**
 
-![添加](https://img.alicdn.com/imgextra/i1/O1CN01aNNTI51IZSM4TYqis_!!6000000000907-2-tps-3785-2158.png)
+添加 (screenshot removed)
 
 3. 可以看到机器人已添加到常用中，双击可进入对话界面
 
-![已添加](https://img.alicdn.com/imgextra/i1/O1CN01Kulh7i1Hfa2Dnfpa4_!!6000000000785-2-tps-2614-1488.png)
+已添加 (screenshot removed)
 
-![对话界面](https://img.alicdn.com/imgextra/i4/O1CN01vsnwn71UMQTaEa0XX_!!6000000002503-2-tps-2614-1488.png)
+对话界面 (screenshot removed)
 
 ---
 
@@ -272,13 +272,13 @@
 
 3. 为了使 iMessage 中的信息能被获取，需要 **终端** （或你用来运行 Spider Mesh 的 app） 和 **消息** 有 **完全磁盘访问权限**（系统设置 → 隐私与安全性 → 完全磁盘访问权限）。
 
-   ![权限](https://img.alicdn.com/imgextra/i2/O1CN01gCbMWX1S2c77mcoPo_!!6000000002189-2-tps-958-440.png)
+   权限 (screenshot removed)
 
 4. 填写 iMessage 数据库路径。默认路径为 `~/Library/Messages/chat.db`，若你改过系统路径，请填实际路径。有以下两种填写方案：
 
    - 进入 **控制台 → 系统设置 → 频道**，点击 **iMessage** 卡片，将 **Enable** 开关打开，在 **DB Path** 中填写上面的路径，点击 **保存**。
 
-     ![控制台](https://img.alicdn.com/imgextra/i3/O1CN01ut2ooB1mxDNNtz1Qc_!!6000000005020-2-tps-3814-1954.png)
+     控制台 (screenshot removed)
 
    - 填写 config.json（路径通常为~/.copaw/config.json）：
 
@@ -297,7 +297,7 @@
 
 5. 填写完成后，使用你的手机，给当前电脑登录的 iMessage 账号（与电脑Apple ID一致）发送任意一条消息，可以看到回复。
 
-   ![聊天](https://img.alicdn.com/imgextra/i4/O1CN01beScxi1rBBvSFeIbz_!!6000000005592-2-tps-1206-2622.png)
+   聊天 (screenshot removed)
 
 ---
 
@@ -307,37 +307,37 @@
 
 1. 打开 [Discord 开发者门户](https://discord.com/developers/applications)
 
-![Discord开发者门户](https://img.alicdn.com/imgextra/i2/O1CN01oV68yZ1sb7y3nGoQN_!!6000000005784-2-tps-4066-2118.png)
+Discord开发者门户 (screenshot removed)
 
 2. 新建应用（或选已有应用）
 
-![新建应用](https://img.alicdn.com/imgextra/i2/O1CN01eA9lA71kMukVCWR4y_!!6000000004670-2-tps-3726-1943.png)
+新建应用 (screenshot removed)
 
 3. 左侧进入 **Bot**，新建 Bot，复制 **Token**
 
-![token](https://img.alicdn.com/imgextra/i1/O1CN01iuPiUe1lJzqEiIu23_!!6000000004799-2-tps-2814-1462.png)
+token (screenshot removed)
 
 4. 下滑，给予 Bot “Message Content Intent” 和 “Send Messages” 的权限，并保存
 
-![权限](https://img.alicdn.com/imgextra/i4/O1CN01EXH4w51FSdbxYKLG9_!!6000000000486-2-tps-4066-2118.png)
+权限 (screenshot removed)
 
 5. 在 **OAuth2 → URL 生成器** 里勾选 `bot` 权限，给予 Bot “Send Messages” 的权限，生成邀请链接
 
-![bot](https://img.alicdn.com/imgextra/i2/O1CN01B2oXx71KVS7kjKSEm_!!6000000001169-2-tps-4066-2118.png)
+bot (screenshot removed)
 
-![send messages](https://img.alicdn.com/imgextra/i3/O1CN01DlU9oi1QYYVBPoUIA_!!6000000001988-2-tps-4066-2118.png)
+send messages (screenshot removed)
 
-![link](https://img.alicdn.com/imgextra/i2/O1CN01ljhh1j1OZLxb2mAkO_!!6000000001719-2-tps-4066-2118.png)
+link (screenshot removed)
 
 6. 在浏览器中访问该链接，会自动跳转到discord页面。将 Bot 拉进你的服务器
 
-![服务器](https://img.alicdn.com/imgextra/i1/O1CN01ivgmOA1JuM2i9WNqm_!!6000000001088-2-tps-2806-1824.png)
+服务器 (screenshot removed)
 
-![服务器](https://img.alicdn.com/imgextra/i2/O1CN01ecRCVa1UeHvFUP0XQ_!!6000000002542-2-tps-2806-1824.png)
+服务器 (screenshot removed)
 
 7. 在服务器中可以看到 Bot已被拉入
 
-![博天](https://img.alicdn.com/imgextra/i2/O1CN014HOCCJ1fsuL2RQiB5_!!6000000004063-2-tps-2806-1824.png)
+博天 (screenshot removed)
 
 ### 绑定 Bot
 
@@ -347,7 +347,7 @@
 
 从“系统设置 → 频道”找到 **Discord**，点击后填入刚刚获取的 **Bot Token**
 
-![console](https://img.alicdn.com/imgextra/i2/O1CN01kP657n1XK5IXfPLAv_!!6000000002904-2-tps-4082-2126.png)
+console (screenshot removed)
 
 **方法2**: 修改`~/.copaw/config.json`
 
@@ -376,35 +376,33 @@
 
 1. 打开 [QQ 开放平台](https://q.qq.com/)
 
-![开放平台](https://img.alicdn.com/imgextra/i4/O1CN01OjCvUf1oT6ZDWpEk5_!!6000000005225-2-tps-4082-2126.png)
+开放平台 (screenshot removed)
 
 2. 创建 **机器人应用**，点击进入编辑页面
 
-![bot](https://img.alicdn.com/imgextra/i3/O1CN01xBbXWa1pSTdioYFdg_!!6000000005359-2-tps-4082-2126.png)
+bot (screenshot removed)
 
-![confirm](https://img.alicdn.com/imgextra/i3/O1CN01zt7w0V1Ij4fjcm5MS_!!6000000000928-2-tps-4082-2126.png)
+confirm (screenshot removed)
 
 3. 选择**回调配置**，首先在**单聊事件**中勾选**C2C消息事件**，再在**群事件**中勾选**群消息事件AT事件**，确认配置
 
-![c2c](https://img.alicdn.com/imgextra/i4/O1CN01HDSoX91iOAbTVULZf_!!6000000004402-2-tps-4082-2126.png)
+c2c (screenshot removed)
 
-![at](https://img.alicdn.com/imgextra/i4/O1CN01UJn1AK1UKatKkjMv4_!!6000000002499-2-tps-4082-2126.png)
+at (screenshot removed)
 
 4. 选择**沙箱配置**中的**消息列表配置项**，点击**添加成员**，选择添加**自己**
 
-![1](https://img.alicdn.com/imgextra/i4/O1CN01BSdkXl1ckG0dC7vH9_!!6000000003638-2-tps-4082-2126.png)
+1 (screenshot removed)
 
-![1](https://img.alicdn.com/imgextra/i4/O1CN01LGYUMe1la1hmtcuyY_!!6000000004834-2-tps-4082-2126.png)
+1 (screenshot removed)
 
 5. 在**开发管理**中获取**AppID**和**AppSecret**（即 ClientSecret），填入config，方式见下方填写config.json。在**IP白名单**中添加一个IP。
 
-   > **提示：** 如果使用魔搭创空间部署Spider Mesh，QQ频道的IP白名单应填写：`47.92.200.108`
-
-![1](https://img.alicdn.com/imgextra/i4/O1CN012UQWI21cnvBAUcz54_!!6000000003646-2-tps-4082-2126.png)
+1 (screenshot removed)
 
 6. 在沙箱配置中，使用QQ扫码，将机器人添加到消息列表
 
-![1](https://img.alicdn.com/imgextra/i3/O1CN01r1OvPy1kcwc30w32K_!!6000000004705-2-tps-4082-2126.png)
+1 (screenshot removed)
 
 ### 填写 config.json
 
@@ -423,7 +421,7 @@
 
 或者也可以在console前端填写
 
-![1](https://img.alicdn.com/imgextra/i1/O1CN01kK9tSJ1MHpZmGR2o9_!!6000000001410-2-tps-4082-2126.png)
+1 (screenshot removed)
 
 ---
 
@@ -434,11 +432,11 @@
 1. 打开 Telegram 并搜索 `@BotFather` 添加 Bot（注意需要是官方 @BotFather，有蓝色认证标识）。
 2. 打开与 @BotFather 的聊天，根据对话中的指引创建新机器人
 
-   ![创建机器人](https://img.alicdn.com/imgextra/i1/O1CN01wVVmbY1qkcxBn8Oc0_!!6000000005534-0-tps-817-1279.jpg)
+   创建机器人 (screenshot removed)
 
 3. 在对话框中创建 bot_name，复制 bot_token
 
-   ![复制token](https://img.alicdn.com/imgextra/i3/O1CN01KUMvBW1UnuF599tNX_!!6000000002563-0-tps-1209-1237.jpg)
+   复制token (screenshot removed)
 
 ### 绑定 Bot
 
@@ -448,7 +446,7 @@
 
 从“系统设置 → 频道”找到 **Telegram**，点击后填入刚刚获取的 **Bot Token**
 
-![console](https://img.alicdn.com/imgextra/i4/O1CN01utJvvg1dmNSiFOOJi_!!6000000003778-0-tps-1920-993.jpg)
+console (screenshot removed)
 
 **方法2**: 修改`~/.copaw/config.json`
 
@@ -742,4 +740,3 @@ def build_agent_request_from_native(self, native_payload):
 - [心跳](./heartbeat) — 定时自检/摘要
 - [CLI](./cli) — init、app、cron、clean
 - [配置与工作目录](./config) — config.json 与工作目录
-

@@ -1,4 +1,4 @@
-# Spider Mesh Desktop 桌面应用版使用指南
+﻿# Spider Mesh Desktop 桌面应用版使用指南
 
 > ⚠️ **Beta 版本说明**
 >
@@ -16,7 +16,7 @@
 
 > 桌面打包产物已统一切到 Spider Mesh 名称。如果你本机仍看到旧快捷方式或旧安装器标签，请删除旧构建后使用最新 release 重新安装。
 
-[releases]: https://github.com/agentscope-ai/CoPaw/releases
+[releases]: https://github.com/15680676726/superSpider/releases
 
 ## 特别说明
 
@@ -228,7 +228,7 @@ A:
 
 ## 技术支持
 
-- **GitHub Issues**: [提交问题](https://github.com/agentscope-ai/CoPaw/issues)
+- **GitHub Issues**: [提交问题](https://github.com/15680676726/superSpider/issues)
 - **打包文档**: `scripts/pack/README.md` - 技术细节和本地构建指南
 - **日志位置**:
   - Windows: Debug 模式终端查看，或 `%USERPROFILE%\.copaw\` 目录
@@ -248,4 +248,3 @@ A:
 - **首次安装**: 务必按照"解除安全限制"步骤操作
 - **调试问题**: 使用终端启动方式查看实时日志
 - **权限问题**: 首次启动时请允许文件访问权限
-

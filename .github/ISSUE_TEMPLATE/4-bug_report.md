@@ -28,7 +28,7 @@ assignees: []
 
 ## Environment
 
-- **CoPaw version:** [e.g. 0.x.x or git commit]
+- **superSpider version:** [e.g. 0.x.x or git commit]
 - **OS:** [e.g. macOS 14, Ubuntu 22.04, Windows 11]
 - **Install method:** [pip / one-line install / Docker / from source]
 - **Python version (if applicable):** [e.g. 3.10]

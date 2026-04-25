@@ -1,4 +1,4 @@
-# MCP
+﻿# MCP
 
 **MCP（模型上下文协议，Model Context Protocol）** 允许 Spider Mesh 连接到外部 MCP 服务器并使用它们的工具。你可以通过控制台添加 MCP 客户端来扩展 Spider Mesh 的能力。
 
@@ -106,4 +106,3 @@ Spider Mesh 支持三种 JSON 格式导入 MCP 客户端：
 - **启用 / 禁用** — 快速开关客户端，无需删除
 - **编辑配置** — 点击卡片查看和编辑 JSON 配置
 - **删除客户端** — 删除不再需要的 MCP 客户端
-

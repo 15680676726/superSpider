@@ -1,4 +1,4 @@
-# FAQ 常见问题
+﻿# FAQ 常见问题
 
 本页汇总了社区里的常见问题，点击问题可展开查看答案。
 
@@ -6,19 +6,19 @@
 
 ### Spider Mesh 系统能力概览
 
-请查看 [能力概览](/docs/comparison) 页面了解Spider Mesh当前已经提供的正式能力面。
+请查看 [能力概览](./comparison) 页面了解 Spider Mesh 当前已经提供的正式能力面。
 
 ### Spider Mesh如何安装
 
-Spider Mesh 支持多种安装方式，详情请见文档 [快速开始](https://copaw.agentscope.io/docs/quickstart)：
+Spider Mesh 支持多种安装方式，详情请见文档 [快速开始](./quickstart)：
 
 1. 一键安装，帮你搞定 Python 环境
 
 ```
 # macOS / Linux:
-curl -fsSL https://copaw.agentscope.io/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/15680676726/superSpider/main/scripts/install.sh | bash
 # Windows（PowerShell）:
-irm https://copaw.agentscope.io/install.ps1 | iex
+irm https://raw.githubusercontent.com/15680676726/superSpider/main/scripts/install.ps1 | iex
 # 关注文档更新，请先采用pip方式完成一键安装
 ```
 
@@ -35,8 +35,8 @@ pip install copaw
 如果你已经安装好了Docker，执行以下两条命令后，即可在浏览器打开 http://127.0.0.1:8088/ 进入控制台。
 
 ```
-docker pull agentscope/copaw:latest
-docker run -p 127.0.0.1:8088:8088 -v copaw-data:/app/working agentscope/copaw:latest
+docker pull <你的-dockerhub-命名空间>/superspider:latest
+docker run -p 127.0.0.1:8088:8088 -v copaw-data:/app/working <你的-dockerhub-命名空间>/superspider:latest
 ```
 
 > **⚠️ Windows 企业版 LTSC 用户特别提示**
@@ -81,7 +81,7 @@ pip install --upgrade copaw
 3. 如果你是从源码安装，进入项目目录并拉取最新代码后重新安装：
 
 ```
-cd CoPaw
+cd superSpider
 git pull origin main
 pip install -e .
 ```
@@ -89,8 +89,8 @@ pip install -e .
 4. 如果你使用的是 Docker，拉取最新镜像并重启容器：
 
 ```
-docker pull agentscope/copaw:latest
-docker run -p 127.0.0.1:8088:8088 -v copaw-data:/app/working agentscope/copaw:latest
+docker pull <你的-dockerhub-命名空间>/superspider:latest
+docker run -p 127.0.0.1:8088:8088 -v copaw-data:/app/working <你的-dockerhub-命名空间>/superspider:latest
 ```
 
 升级后重启服务 copaw app。
@@ -109,31 +109,31 @@ copaw init --defaults
 copaw app
 ```
 
-控制台默认地址为 `http://127.0.0.1:8088/`，使用默认配置快速初始化后，可以进入控制台快捷自定义相关内容。详情请见[快速开始](https://copaw.agentscope.io/docs/quickstart)。
+控制台默认地址为 `http://127.0.0.1:8088/`，使用默认配置快速初始化后，可以进入控制台快捷自定义相关内容。详情请见[快速开始](./quickstart)。
 
 ### 开源地址
 
 Spider Mesh 已开源，官方仓库地址：
-`https://github.com/agentscope-ai/CoPaw`
+`https://github.com/15680676726/superSpider`
 
 ### 最新版本升级内容如何查看
 
-具体版本变更可在 Spider Mesh GitHub 仓库 [Releases](https://github.com/agentscope-ai/CoPaw/releases) 中查看。
+具体版本变更可在 Spider Mesh GitHub 仓库 [Releases](https://github.com/15680676726/superSpider/releases) 中查看。
 
 ### 如何配置模型
 
-在控制台进入 **系统设置 → 模型** 中进行配置，详情请见文档 [模型](https://copaw.agentscope.io/docs/models)：
+在控制台进入 **系统设置 → 模型** 中进行配置，详情请见文档 [模型](./models)：
 
-- 云端模型：填写提供商 API Key（如 ModelScope、DashScope 或自定义提供商），再选择活跃模型。
+- 云端模型：填写你选定提供商的 API Key（或自定义 OpenAI 兼容提供商），再选择活跃模型。
 - 本地模型：支持 `llama.cpp`、`MLX` 和 Ollama。下载后可在同页选择活跃模型。
 
-命令行也可使用 `copaw models` 系列命令完成配置、下载和切换，详情请见文档 [CLI → 模型与环境变量 → copaw models](https://copaw.agentscope.io/docs/cli#copaw-models)。
+命令行也可使用 `copaw models` 系列命令完成配置、下载和切换，详情请见文档 [CLI → 模型与环境变量 → copaw models](./cli#copaw-models)。
 
 ### 定时任务错误排查
 
 在控制台进入 **运行 → 运行中心 → 自动化**，在这里可以创建和管理定时任务。
 
-![cron](https://img.alicdn.com/imgextra/i4/O1CN01hNk4od1uuTwGRT2sk_!!6000000006097-2-tps-3802-1968.png)
+cron (screenshot removed)
 
 最方便的定时任务创建方式是，在你想要获取定时任务返回结果的频道，与Spider Mesh对话，让Spider Mesh帮你创建一个定时任务。例如，可以直接与Spider Mesh对话：“帮我创建一个定时任务，每隔五分钟提醒我喝水。”之后可以在控制台中看到状态为已启用的定时任务。
 
@@ -143,35 +143,35 @@ Spider Mesh 已开源，官方仓库地址：
 
 2. 定时任务的 **启用状态** 是否为 **已启动**。
 
-   ![enable](https://img.alicdn.com/imgextra/i1/O1CN01gVVf081o6ClZVBrhD_!!6000000005175-2-tps-3020-754.png)
+   enable (screenshot removed)
 
 3. 定时任务的 **DispatchChannel** 是否被正确地设置为了想要获取返回结果的频道，如 console、dingtalk、feishu、discord、imessage 等。
 
-   ![channel](https://img.alicdn.com/imgextra/i4/O1CN01xUaLG61lVRkO7ZfY4_!!6000000004824-2-tps-3020-754.png)
+   channel (screenshot removed)
 
 4. **DispatchTargetUserID** 和 **DispatchTargetSessionID** 的值是否设置正确。
 
-   ![id](https://img.alicdn.com/imgextra/i1/O1CN014e0BHN1CFPKDS7Kd7_!!6000000000051-2-tps-3020-754.png)
+   id (screenshot removed)
 
    核查方式为，在控制台进入 **对话 → 对话**，找到刚刚创建定时任务的会话。如果想要定时任务返回到这个会话中，需要核查 **UserID** 和 **SessionID** 是否与定时任务的 **DispatchTargetUserID** 和 **DispatchTargetSessionID** 相同。
 
-   ![id](https://img.alicdn.com/imgextra/i3/O1CN01ZmgYTC1wiEZx7rOjK_!!6000000006341-2-tps-3020-928.png)
+   id (screenshot removed)
 
 5. 如果觉得定时任务的触发间隔时间不对，需要确认一下定时任务的 **执行时间（Cron）**是否正确。
 
-   ![cron](https://img.alicdn.com/imgextra/i1/O1CN01WpN8l51kKANPSlK8r_!!6000000004664-2-tps-3020-762.png)
+   cron (screenshot removed)
 
 6. 排查结束后，如果想确认一下定时任务是否创建成功，且能成功触发，可以点击 **立即执行**，若成功创建，则可在对应频道收到回复。或者也可以直接与 Spider Mesh 对话：“帮我触发一下刚刚创建的提醒喝水定时任务”。
 
-   ![exec](https://img.alicdn.com/imgextra/i4/O1CN017tycJh1ZPhO5XMuAu_!!6000000003187-2-tps-3020-762.png)
+   exec (screenshot removed)
 
 ### 如何管理Skill
 
-进入控制台 **运行 → 能力市场 → 技能**，可以启用/禁用技能、创建自定义技能、以及从 Skills Hub 中导入技能。详情请见文档 [Skills](https://copaw.agentscope.io/docs/skills)。
+进入控制台 **运行 → 能力市场 → 技能**，可以启用/禁用技能、创建自定义技能、以及从 Skills Hub 中导入技能。详情请见文档 [Skills](./skills)。
 
 ### 如何配置MCP
 
-进入控制台 **运行 → 能力市场 → MCP**，进行 MCP 客户端的启用/禁用/删除/创建，详情请见文档 [MCP](https://copaw.agentscope.io/docs/mcp)。
+进入控制台 **运行 → 能力市场 → MCP**，进行 MCP 客户端的启用/禁用/删除/创建，详情请见文档 [MCP](./mcp)。
 
 ### 常见报错
 
@@ -185,24 +185,20 @@ Error: Unknown agent error: AuthenticationError: Error code: 401 - {'error': {'m
 
 原因2：配置了 key 但仍报错，通常是配置项填写错误（如 `base_url`、`api key` 或模型名）。
 
-Spider Mesh 支持百炼 Coding Plan 获取的 API key。如果仍报错，请重点检查：
+如果仍报错，请重点检查：
 
 - `base_url` 是否填写正确；
 - API key 是否粘贴完整（无多余空格）；
 - 模型名称是否与平台一致（注意大小写）。
 
-正确获取方式可参考：
-https://help.aliyun.com/zh/model-studio/coding-plan-quickstart#2531c37fd64f9
-
 ---
 
 ### 报错如何获取修复帮助
 
-为了加快修复与排查，共建良好社区生态，建议遇到报错时，首选在 Spider Mesh 的 GitHub 仓库中提 [issue](https://github.com/agentscope-ai/CoPaw/issues)，请附上完整报错信息，并上传错误详情文件。
+为了加快修复与排查，共建良好社区生态，建议遇到报错时，首选在 Spider Mesh 的 GitHub 仓库中提 [issue](https://github.com/15680676726/superSpider/issues)，请附上完整报错信息，并上传错误详情文件。
 
 控制台报错里通常会给出错误文件路径，例如在以下报错中：
 
 Error: Unknown agent error: AuthenticationError: Error code: 401 - {'error': {'message': "You didn't provide an API key. You need to provide your API key in an Authorization header using Bearer auth (i.e. Authorization: Bearer YOUR_KEY). ", 'type': 'invalid_request_error', 'param': None, 'code': None}, 'request_id': 'xxx'}(Details: /var/folders/.../copaw_query_error_qzbx1mv1.json)
 
 请将后面的`/var/folders/.../copaw_query_error_qzbx1mv1.json`文件一并上传，同时提供你当前的模型提供商、模型名和 Spider Mesh 的具体版本。
-

@@ -1,4 +1,4 @@
-# CLI
+﻿# CLI
 
 `copaw` is the command-line tool for Spider Mesh. This page is organized from
 "get-up-and-running" to "advanced management" — read from top to bottom if
@@ -63,7 +63,7 @@ Once `copaw app` is running, open `http://127.0.0.1:8088/` in your browser to
 access the **Console** — a web UI for chat, channels, cron, skills, models,
 and more. See [Console](./console) for a full walkthrough.
 
-If the frontend was not built, the root URL returns a JSON message like `{"message": "CoPaw Web Console is not available."}` but the API still works.
+If the frontend was not built, the root URL returns a JSON message indicating that the web console is unavailable, but the API still works.
 
 **To build the frontend:** in the project's `console/` directory run
 `npm ci && npm run build`, then copy the output to the package directory:
@@ -117,8 +117,6 @@ Manage LLM providers and the active model.
 ```bash
 copaw models list                    # See what's configured
 copaw models config                  # Full interactive setup
-copaw models config-key modelscope   # Just set ModelScope's API key
-copaw models config-key dashscope    # Just set DashScope's API key
 copaw models config-key custom       # Set custom provider (Base URL + key)
 copaw models set-llm                 # Change active model only
 ```
@@ -135,9 +133,6 @@ copaw models download Qwen/Qwen3-4B-GGUF
 
 # Download an MLX model
 copaw models download Qwen/Qwen3-4B --backend mlx
-
-# Download from ModelScope
-copaw models download Qwen/Qwen2-0.5B-Instruct-GGUF --source modelscope
 
 # List downloaded models
 copaw models local

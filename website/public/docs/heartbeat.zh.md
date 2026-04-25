@@ -1,4 +1,4 @@
-# 心跳
+﻿# 心跳
 
 「心跳」在Spider Mesh里指的是：**按固定间隔，用你写好的一段「问题」去问Spider Mesh，并可选择把Spider Mesh的回复发到你上次对话的频道**。适合做「定期自检、每日摘要、定时提醒」——不用你主动发消息，Spider Mesh到点就干活。
 
@@ -99,4 +99,3 @@
 - [频道配置](./channels) — 先接好频道，target=last 才有「上次频道」可发
 - [CLI](./cli) — init 时配置心跳、cron 定时任务
 - [配置与工作目录](./config) — config.json 与工作目录
-

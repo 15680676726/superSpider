@@ -1,20 +1,28 @@
 <div align="center">
-  <img src="console/public/baize-symbol.svg" alt="Spider Mesh logo" width="120" />
+  <img src="console/public/baize-symbol.svg" alt="superSpider logo" width="120" />
 
-  # Spider Mesh
+  # superSpider
 
   <p><b>Goal・Environment・Evidence・長期タスクのためのローカル実行システム。</b></p>
 </div>
 
-Spider Mesh は、長期タスクのためのローカル実行システムです。Goal、Agent、Task、Environment、Evidence、Patch を 1 つの Runtime Center に集約し、実行・観測・進化を同じ可視面で扱います。
+superSpider は、長期的な自律実行のためのローカル実行システムです。Goal、Agent、Task、Environment、Evidence、Patch を 1 つの Runtime Center に集約し、実行・観測・進化を同じ可視面で扱います。
 
-設計の軸は 4 つです。Goal 起点の実行、持続する Environment、evidence-first の実行、そして分散した管理画面ではなく 1 つのローカル Runtime Center です。
+現在の中核は 4 つです。assignment/backlog truth に基づく main-brain execution、持続的な environment mount、evidence-first な実行、そして分散した設定画面ではなく 1 つの local operating surface です。
+
+## 命名
+
+- プロジェクト名: `superSpider`
+- リポジトリ: `https://github.com/15680676726/superSpider`
+- 現在の Python パッケージ / CLI 名: `copaw`
+
+公開名は `superSpider` に統一していますが、インストールと実行コマンドは現時点では `copaw` のままです。
 
 ## 現在の入口
 
-- `console/` が主フロントエンドであり、現在の Runtime Center です。
-- `website/` は Spider Mesh の対外プロダクトサイトです。
-- アーキテクチャと進行状況は [System Architecture](COPAW_CARRIER_UPGRADE_MASTERPLAN.md) と [Task Status](TASK_STATUS.md) を参照してください。
+- `console/` はメインフロントエンドであり Runtime Center です。
+- `website/` はリポジトリ内ドキュメントと公開ページのソースです。
+- 設計と進行状況は [System Architecture](COPAW_CARRIER_UPGRADE_MASTERPLAN.md) と [Task Status](TASK_STATUS.md) を参照してください。
 
 ## クイックスタート
 
@@ -28,7 +36,7 @@ copaw app
 
 ## フロントエンド開発
 
-主フロントエンド:
+メインフロントエンド:
 
 ```bash
 cd console
@@ -36,7 +44,7 @@ npm install
 npm run dev
 ```
 
-プレースホルダー外部サイト:
+ドキュメント / サイト:
 
 ```bash
 cd website
@@ -44,10 +52,18 @@ npm install
 npm run dev
 ```
 
-## 重要ドキュメント
+## 主要ドキュメント
 
 - [Master plan](COPAW_CARRIER_UPGRADE_MASTERPLAN.md)
 - [Task status](TASK_STATUS.md)
 - [Frontend upgrade plan](FRONTEND_UPGRADE_PLAN.md)
 - [Runtime Center UI spec](RUNTIME_CENTER_UI_SPEC.md)
 - [Agent visible model](AGENT_VISIBLE_MODEL.md)
+- [Docs directory](website/public/docs/)
+
+## コントリビュート
+
+- [Contributing guide](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
+- [Issues](https://github.com/15680676726/superSpider/issues)
+- [Discussions](https://github.com/15680676726/superSpider/discussions)

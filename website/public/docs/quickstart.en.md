@@ -1,13 +1,11 @@
-# Quick start
+﻿# Quick start
 
-This section describes six ways to run Spider Mesh:
+This section describes four ways to run Spider Mesh:
 
 - **Option A — Script install**: run on your machine with no Python setup required.
 - **Option B — pip install**: if you prefer managing Python yourself.
 - **Option C — Desktop Application (Beta)**: download and run desktop app with no command-line required, suitable for users unfamiliar with terminals. See [Desktop Application Guide](./desktop).
-- **Option D — ModelScope Studio**: one-click cloud deploy, no local install needed.
-- **Option E — Docker**: use official images from Docker Hub (ACR also available for users in China); tags include `latest` (stable) and `pre` (PyPI pre-release).
-- **Option F — Alibaba Cloud ECS**: one-click deploy on Alibaba Cloud, no local install.
+- **Option D — Docker**: run the published container image or build and publish your own image from this repository.
 
 > 📖 Read [Introduction](./intro) first; after install see [Console](./console).
 
@@ -24,7 +22,7 @@ No Python required — the installer handles everything automatically using [uv]
 **macOS / Linux:**
 
 ```bash
-curl -fsSL https://copaw.agentscope.io/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/15680676726/superSpider/main/scripts/install.sh | bash
 ```
 
 Then open a new terminal (or `source ~/.zshrc` / `source ~/.bashrc`).
@@ -32,13 +30,13 @@ Then open a new terminal (or `source ~/.zshrc` / `source ~/.bashrc`).
 **Windows (CMD):**
 
 ```cmd
-curl -fsSL https://copaw.agentscope.io/install.bat -o install.bat && install.bat
+curl -fsSL https://raw.githubusercontent.com/15680676726/superSpider/main/scripts/install.bat -o install.bat && install.bat
 ```
 
 **Windows (PowerShell):**
 
 ```powershell
-irm https://copaw.agentscope.io/install.ps1 | iex
+irm https://raw.githubusercontent.com/15680676726/superSpider/main/scripts/install.ps1 | iex
 ```
 
 Then open a new terminal (the installer adds Spider Mesh to your PATH automatically).
@@ -166,7 +164,7 @@ If you're not comfortable with command-line tools, you can download and use Spid
 ### Download and Usage
 
 1. **Download the installer**
-   Go to [GitHub Releases](https://github.com/agentscope-ai/CoPaw/releases) to download the version for your system:
+   Go to [GitHub Releases](https://github.com/15680676726/superSpider/releases) to download the version for your system:
 
    - Windows: `Spider-Mesh-Setup-<version>.exe`
    - macOS: `Spider-Mesh-<version>-macOS.zip`
@@ -190,41 +188,20 @@ Desktop applications involve system permissions, security prompts, debug mode, a
 
 ---
 
-## Option D: ModelScope Studio one-click setup (no install)
+## Option D: Docker
 
-If you prefer not to install Python locally, you can deploy Spider Mesh to ModelScope Studio's cloud:
-
-1. First, sign up and log in at [ModelScope](https://modelscope.cn/register?back=%2Fhome);
-2. Open the [Spider Mesh Studio](https://modelscope.cn/studios/fork?target=AgentScope/CoPaw) and complete the one-click setup.
-
-**Important**: Set your Studio to **non-public**, or others may control your
-Spider Mesh.
-
----
-
-## Option E: Docker
-
-Images are on **Docker Hub** (`agentscope/copaw`). Image tags: `latest` (stable); `pre` (PyPI pre-release). Also available on Alibaba Cloud ACR for users in China: `agentscope-registry.ap-southeast-1.cr.aliyuncs.com/agentscope/copaw` (same tags).
+If you publish Docker images for your deployment, use your own namespace. The
+release workflow in this repository is configured around the image name
+`superspider`.
 
 Pull and run:
 
 ```bash
-docker pull agentscope/copaw:latest
-docker run -p 127.0.0.1:8088:8088 -v copaw-data:/app/working agentscope/copaw:latest
+docker pull <your-dockerhub-namespace>/superspider:latest
+docker run -p 127.0.0.1:8088:8088 -v copaw-data:/app/working <your-dockerhub-namespace>/superspider:latest
 ```
 
-Then open **http://127.0.0.1:8088/** in your browser for the Console. Config, memory, and skills are stored in the `copaw-data` volume. To pass API keys, add `-e DASHSCOPE_API_KEY=xxx` or `--env-file .env` to `docker run`.
-
----
-
-## Option F: Deploy on Alibaba Cloud ECS
-
-To run Spider Mesh on Alibaba Cloud, use the ECS one-click deployment:
-
-1. Open the [Spider Mesh on Alibaba Cloud (ECS) deployment link](https://computenest.console.aliyun.com/service/instance/create/cn-hangzhou?type=user&ServiceId=service-1ed84201799f40879884) and fill in the parameters as prompted;
-2. Confirm the cost and create the instance; when deployment finishes, you can get the access URL and start using the service.
-
-For step-by-step instructions, see [Alibaba Cloud Developer: Deploy your AI assistant in 3 minutes](https://developer.aliyun.com/article/1713682).
+Then open **http://127.0.0.1:8088/** in your browser for the Console. Config, memory, and skills are stored in the `copaw-data` volume. To pass API keys, add `-e OPENAI_API_KEY=xxx` or `--env-file .env` to `docker run`.
 
 ---
 

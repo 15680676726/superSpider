@@ -1,4 +1,4 @@
-# CLI
+﻿# CLI
 
 `copaw` 是 Spider Mesh 的命令行工具。本页按「上手 → 配置 → 日常管理」的顺序组织——
 新用户从头读，老用户直接跳到需要的章节。
@@ -57,7 +57,7 @@ copaw app --log-level debug           # 详细日志
 `copaw app` 启动后，在浏览器打开 `http://127.0.0.1:8088/` 即可进入 **控制台** ——
 一个用于对话、频道、定时任务、技能、模型等的 Web 管理界面。详见 [控制台](./console)。
 
-若未构建前端，根路径会返回类似 `{"message": "CoPaw Web Console is not available."}` 的提示信息（实际文案可能调整），API 仍可正常使用。
+若未构建前端，根路径会返回“Web 控制台不可用”一类的 JSON 提示（实际文案可能调整），API 仍可正常使用。
 
 **构建方式：** 在项目 `console/` 目录下执行 `npm ci && npm run build`，
 然后将构建产物复制到包目录：
@@ -108,8 +108,6 @@ copaw daemon logs -n 50
 ```bash
 copaw models list                    # 看当前状态
 copaw models config                  # 完整交互式配置
-copaw models config-key modelscope   # 只配 ModelScope 的 API Key
-copaw models config-key dashscope    # 只配 DashScope 的 API Key
 copaw models config-key custom       # 配置自定义提供商（Base URL + Key）
 copaw models set-llm                 # 只切换模型
 ```
@@ -125,9 +123,6 @@ copaw models download Qwen/Qwen3-4B-GGUF
 
 # 下载 MLX 模型
 copaw models download Qwen/Qwen3-4B --backend mlx
-
-# 从 ModelScope 下载
-copaw models download Qwen/Qwen2-0.5B-Instruct-GGUF --source modelscope
 
 # 查看已下载模型
 copaw models local
@@ -439,4 +434,3 @@ copaw --host 0.0.0.0 --port 9090 cron list
 - [心跳](./heartbeat) —— 定时自检/摘要
 - [技能](./skills) —— 内置技能与自定义技能
 - [配置与工作目录](./config) —— 工作目录与 config.json
-

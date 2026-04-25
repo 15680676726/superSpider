@@ -1,4 +1,4 @@
-# 记忆
+﻿# 记忆
 
 **记忆** 让Spider Mesh拥有跨对话的持久记忆能力：自动管理上下文窗口，并将关键信息写入文件长期保存。
 
@@ -93,8 +93,8 @@ graph LR
 | 环境变量                     | 说明                           | 默认值                                              |
 | ---------------------------- | ------------------------------ | --------------------------------------------------- |
 | `EMBEDDING_API_KEY`          | Embedding 服务的 API Key。留空时会在允许时复用当前激活模型提供方 | （空；允许继承时优先复用当前激活提供方）            |
-| `EMBEDDING_BASE_URL`         | Embedding 服务 URL。留空时优先继承当前激活提供方的 Base URL，否则使用系统内置默认地址 | 当前激活提供方 Base URL，或 `https://dashscope.aliyuncs.com/compatible-mode/v1` |
-| `EMBEDDING_MODEL_NAME`       | Embedding 模型名称。留空时会在可识别的提供方上自动推断默认模型 | DashScope 默认 `text-embedding-v4`，OpenAI 默认 `text-embedding-3-small` |
+| `EMBEDDING_BASE_URL`         | Embedding 服务 URL。留空时优先继承当前激活提供方的 Base URL，否则使用系统内置默认地址 | 当前激活提供方 Base URL，或系统内置的 OpenAI 兼容默认值 |
+| `EMBEDDING_MODEL_NAME`       | Embedding 模型名称。留空时会在可识别的提供方上自动推断默认模型 | 按提供方推断的默认值，常见 OpenAI 兼容接入默认为 `text-embedding-3-small` |
 | `EMBEDDING_FOLLOW_ACTIVE_PROVIDER` | 当 `EMBEDDING_API_KEY` 与 `EMBEDDING_BASE_URL` 都为空时，是否复用当前激活模型提供方 | `true` |
 | `EMBEDDING_DIMENSIONS`       | 向量维度，用于初始化向量数据库 | `1024`                                              |
 | `EMBEDDING_CACHE_ENABLED`    | 是否启用 Embedding 缓存        | `true`                                              |
@@ -102,7 +102,7 @@ graph LR
 | `EMBEDDING_MAX_INPUT_LENGTH` | 单次 Embedding 最大输入长度    | `8192`                                              |
 | `EMBEDDING_MAX_BATCH_SIZE`   | Embedding 批处理最大数量       | `10`                                                |
 
-当 `EMBEDDING_API_KEY` 与 `EMBEDDING_BASE_URL` 都为空，且 `EMBEDDING_FOLLOW_ACTIVE_PROVIDER=true` 时，记忆系统会优先尝试复用当前激活的远程模型提供方。这意味着对于已经配置好的 OpenAI 兼容或 DashScope 兼容提供方，向量记忆通常可以直接工作，不需要再单独补一套 embedding 配置。
+当 `EMBEDDING_API_KEY` 与 `EMBEDDING_BASE_URL` 都为空，且 `EMBEDDING_FOLLOW_ACTIVE_PROVIDER=true` 时，记忆系统会优先尝试复用当前激活的远程模型提供方。这意味着对于已经配置好的 OpenAI 兼容提供方，向量记忆通常可以直接工作，不需要再单独补一套 embedding 配置。
 
 如果当前激活提供方是本地模型、Azure / 自定义接入、Anthropic，或它本身不暴露可复用的 embedding 凭据 / 安全默认模型，系统会安全降级为非向量检索，直到你显式填写 embedding 配置。
 

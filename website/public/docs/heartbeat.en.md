@@ -1,4 +1,4 @@
-# Heartbeat
+﻿# Heartbeat
 
 In Spider Mesh, **heartbeat** means: on a fixed interval, ask Spider Mesh the
 “questions” you wrote in a file, and optionally send the Spider Mesh’s reply to

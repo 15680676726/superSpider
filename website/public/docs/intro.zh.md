@@ -1,4 +1,4 @@
-# 项目介绍
+﻿# 项目介绍
 
 本页说明 Spider Mesh 是什么、能做什么、以及如何按文档一步步上手。
 
@@ -63,4 +63,3 @@ Spider Mesh 由 [AgentScope 团队](https://github.com/agentscope-ai) 基于
    - [CLI](./cli) — 初始化、定时任务、清空工作目录等命令；
    - [Skills](./skills) — 了解与扩展 Spider Mesh 能力；
    - [配置与工作目录](./config) — 工作目录与配置文件说明。
-

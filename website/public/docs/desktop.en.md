@@ -1,4 +1,4 @@
-# Spider Mesh Desktop Application Guide
+﻿# Spider Mesh Desktop Application Guide
 
 > ⚠️ **Beta Version Notice**
 >
@@ -16,7 +16,7 @@ This guide explains how to install and use the Spider Mesh desktop application o
 
 > Desktop packages now use the Spider Mesh product name. If your machine still shows an older shortcut or installer label, remove the old build and reinstall from the latest release artifact.
 
-[releases]: https://github.com/agentscope-ai/CoPaw/releases
+[releases]: https://github.com/15680676726/superSpider/releases
 
 ## Important Notice
 
@@ -228,7 +228,7 @@ Currently using:
 
 ## Technical Support
 
-- **GitHub Issues**: [Submit an issue](https://github.com/agentscope-ai/CoPaw/issues)
+- **GitHub Issues**: [Submit an issue](https://github.com/15680676726/superSpider/issues)
 - **Packaging documentation**: `scripts/pack/README.md` - Technical details and local build guide
 - **Log locations**:
   - Windows: View in Debug mode terminal, or `%USERPROFILE%\.copaw\` directory

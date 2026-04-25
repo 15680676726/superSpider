@@ -1,4 +1,4 @@
-# Introduction
+﻿# Introduction
 
 This page describes what Spider Mesh is, what it can do, and how to get started by
 following the docs.

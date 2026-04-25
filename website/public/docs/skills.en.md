@@ -1,4 +1,4 @@
-# Skills
+﻿# Skills
 
 **Skills**: Several are built-in, and you can add custom skills or import skills from the Skills Hub.
 
@@ -74,29 +74,29 @@ The Console currently imports skills from these SkillHub sources by default:
 
 1. Open the [Console](./console) → **Run → Capability Market → Skills**, click **Import Skills**.
 
-   ![skill](https://img.alicdn.com/imgextra/i2/O1CN01gQN4gv1HCj5HVBeq1_!!6000000000722-2-tps-3410-1978.png)
+   skill (screenshot removed)
 
 2. Paste a skill URL in the pop-up window (see the **URL acquisition example** below for the acquisition method).
 
-   ![url](https://img.alicdn.com/imgextra/i1/O1CN01YSoLHy1dZ5yWnMM3N_!!6000000003749-2-tps-3410-1978.png)
+   url (screenshot removed)
 
 3. Confirm and wait for import to finish.
 
-   ![click](https://img.alicdn.com/imgextra/i4/O1CN013idFsl1CiGHBEIWx2_!!6000000000114-2-tps-3410-1978.png)
+   click (screenshot removed)
 
 4. After a successful import, the newly added skills can be seen in the Skill list.
 
-   ![check](https://img.alicdn.com/imgextra/i1/O1CN014LNdGd1wFNcq6JWbY_!!6000000006278-2-tps-3410-1978.png)
+   check (screenshot removed)
 
 ### URL acquisition examples
 
 1. Open the SkillHub store page and pick the skill you need (for example, `find-skills`).
 
-   ![find](https://img.alicdn.com/imgextra/i4/O1CN015bgbAR1ph8JbtTsIY_!!6000000005391-2-tps-3410-2064.png)
+   find (screenshot removed)
 
 2. Copy the download URL, or use the SkillHub download link exposed by the page.
 
-   ![url](https://img.alicdn.com/imgextra/i2/O1CN01d1l5kO1wgrODXukNV_!!6000000006338-2-tps-3410-2064.png)
+   url (screenshot removed)
 
 ### Notes
 

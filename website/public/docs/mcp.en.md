@@ -1,4 +1,4 @@
-# MCP
+﻿# MCP
 
 **MCP (Model Context Protocol)** allows Spider Mesh to connect to external MCP servers and use their tools. You can add MCP clients through the Console to extend Spider Mesh's capabilities.
 

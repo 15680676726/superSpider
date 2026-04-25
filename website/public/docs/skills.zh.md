@@ -1,4 +1,4 @@
-# Skills
+﻿# Skills
 
 **Skills**：内置多类能力，你还可以添加自定义 Skill，或者直接从社区 Skills Hub 导入 Skills。
 
@@ -69,29 +69,29 @@
 
 1. 打开 [控制台](./console) → **运行 → 能力市场 → 技能**，点击右上角 **导入技能**。
 
-   ![import](https://img.alicdn.com/imgextra/i1/O1CN01bPOPqG1msB1BfyaWH_!!6000000005009-2-tps-3422-1964.png)
+   import (screenshot removed)
 
 2. 在弹窗中粘贴 Skill URL（获取方式见下方 **URL 获取示例**）。
 
-   ![url](https://img.alicdn.com/imgextra/i1/O1CN01tkDSeA23nunikJNbG_!!6000000007301-2-tps-3422-1964.png)
+   url (screenshot removed)
 
 3. 点击导入技能，等待导入完成。
 
-   ![click](https://img.alicdn.com/imgextra/i2/O1CN015ZrEml1oGjsI3SnRZ_!!6000000005198-2-tps-3422-1964.png)
+   click (screenshot removed)
 
 4. 导入成功后，在技能列表中可以看到新加入的 Skill。
 
-   ![new](https://img.alicdn.com/imgextra/i2/O1CN01E5vUus1VdezregzVv_!!6000000002676-2-tps-3422-1964.png)
+   new (screenshot removed)
 
 ### URL 获取示例
 
 1. 进入 SkillHub 商店页面并选择你需要的 Skill（以 `find-skills` 为例）。
 
-   ![find](https://img.alicdn.com/imgextra/i4/O1CN015bgbAR1ph8JbtTsIY_!!6000000005391-2-tps-3410-2064.png)
+   find (screenshot removed)
 
 2. 复制下载地址，或在页面中获取对应的 SkillHub 下载链接。
 
-   ![url](https://img.alicdn.com/imgextra/i2/O1CN01d1l5kO1wgrODXukNV_!!6000000006338-2-tps-3410-2064.png)
+   url (screenshot removed)
 
 ### 说明
 

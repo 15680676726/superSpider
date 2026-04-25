@@ -1,4 +1,4 @@
-# Memory
+﻿# Memory
 
 **Memory** gives Spider Mesh persistent memory across conversations: it automatically manages the context window and writes key information to files for long-term storage.
 
@@ -93,8 +93,8 @@ Configure the Embedding service via the following environment variables for vect
 | Environment Variable         | Description                                                                 | Default                                                                 |
 | ---------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
 | `EMBEDDING_API_KEY`          | API key for the embedding service. Leave blank to reuse the active provider when possible | _(empty; inherited from the active provider when allowed)_              |
-| `EMBEDDING_BASE_URL`         | URL of the embedding service. Leave blank to inherit the active provider base URL or use the built-in default | Active provider base URL, or `https://dashscope.aliyuncs.com/compatible-mode/v1` |
-| `EMBEDDING_MODEL_NAME`       | Embedding model name. Leave blank to let the server infer a provider default when possible | `text-embedding-v4` for DashScope, `text-embedding-3-small` for OpenAI |
+| `EMBEDDING_BASE_URL`         | URL of the embedding service. Leave blank to inherit the active provider base URL or use the built-in default | Active provider base URL, or the built-in OpenAI-compatible default |
+| `EMBEDDING_MODEL_NAME`       | Embedding model name. Leave blank to let the server infer a provider default when possible | Provider-specific default, or `text-embedding-3-small` for common OpenAI-compatible setups |
 | `EMBEDDING_FOLLOW_ACTIVE_PROVIDER` | Reuse the current active provider when `EMBEDDING_API_KEY` and `EMBEDDING_BASE_URL` are both blank | `true` |
 | `EMBEDDING_DIMENSIONS`       | Vector dimensions for initializing the vector database                      | `1024`                                                                  |
 | `EMBEDDING_CACHE_ENABLED`    | Whether to enable Embedding cache                                           | `true`                                                                  |
@@ -102,7 +102,7 @@ Configure the Embedding service via the following environment variables for vect
 | `EMBEDDING_MAX_INPUT_LENGTH` | Maximum input length per Embedding request                                  | `8192`                                                                  |
 | `EMBEDDING_MAX_BATCH_SIZE`   | Maximum batch size for Embedding requests                                   | `10`                                                                    |
 
-If `EMBEDDING_API_KEY` and `EMBEDDING_BASE_URL` are both blank and `EMBEDDING_FOLLOW_ACTIVE_PROVIDER=true`, memory first tries to reuse the current active remote provider. This makes vector memory work automatically for common OpenAI-compatible and DashScope-compatible setups that already have a model provider configured.
+If `EMBEDDING_API_KEY` and `EMBEDDING_BASE_URL` are both blank and `EMBEDDING_FOLLOW_ACTIVE_PROVIDER=true`, memory first tries to reuse the current active remote provider. This makes vector memory work automatically for common OpenAI-compatible setups that already have a model provider configured.
 
 If the active provider is local, Azure/custom, Anthropic, or otherwise does not expose reusable embedding credentials or a safe default embedding model, Spider Mesh safely falls back to non-vector retrieval until you set explicit embedding values.
 

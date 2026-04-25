@@ -5,8 +5,8 @@ blank_issues_enabled: true
 
 contact_links:
   - name: GitHub Discussions
-    url: https://github.com/agentscope-ai/CoPaw/discussions
-    about: Ask questions, share ideas, or discuss CoPaw here.
-  - name: View docs
-    url: https://copaw.agentscope.io/
-    about: CoPaw docs and guides.
+    url: https://github.com/15680676726/superSpider/discussions
+    about: Ask questions, share ideas, or discuss superSpider here.
+  - name: View docs in repository
+    url: https://github.com/15680676726/superSpider/tree/main/website/public/docs
+    about: Repository-hosted docs and guides.

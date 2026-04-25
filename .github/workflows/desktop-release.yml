@@ -1,7 +1,7 @@
-# Build Baize Desktop: Windows (conda-pack + NSIS), macOS (conda-pack -> .app)
+# Build superSpider Desktop: Windows (conda-pack + NSIS), macOS (conda-pack -> .app)
 # Runs automatically on release publish; also manually via Actions tab.
 
-name: Baize Desktop Build
+name: superSpider Desktop Build
 
 on:
   release:
@@ -79,7 +79,7 @@ jobs:
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
-          name: baize-desktop-windows-${{ steps.version.outputs.version }}
+          name: superspider-desktop-windows-${{ steps.version.outputs.version }}
           path: dist/*.exe
 
   build-macos:
@@ -121,7 +121,7 @@ jobs:
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
-          name: baize-desktop-macos-${{ steps.version.outputs.version }}
+          name: superspider-desktop-macos-${{ steps.version.outputs.version }}
           path: dist/*-macOS.zip
 
   upload-release:
@@ -136,8 +136,8 @@ jobs:
 
       - name: Move artifacts to root for upload
         run: |
-          mv baize-desktop-windows-*/*.exe . 2>/dev/null || true
-          mv baize-desktop-macos-*/*-macOS.zip . 2>/dev/null || true
+          mv superspider-desktop-windows-*/*.exe . 2>/dev/null || true
+          mv superspider-desktop-macos-*/*-macOS.zip . 2>/dev/null || true
 
       - name: Upload to Release
         uses: softprops/action-gh-release@v2

@@ -1,4 +1,4 @@
-# Compaction
+﻿# Compaction
 
 ## Background: Why Do We Need Compaction?
 
